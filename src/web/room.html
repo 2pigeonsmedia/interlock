@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Interlock</title>
+  <link rel="stylesheet" href="/room.css">
+</head>
+<body>
+  <main id="login-view" class="login-view">
+    <section class="login-card" aria-labelledby="login-heading">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 100 100" fill="none" aria-hidden="true" focusable="false">
+          <mask id="weave-login"><rect width="100" height="100" fill="white"/><circle cx="50" cy="31.6" r="8" fill="black"/></mask>
+          <circle class="ring-signal" cx="38" cy="50" r="22" stroke-width="6.5"/>
+          <circle class="ring-ink" cx="62" cy="50" r="22" stroke-width="6.5" mask="url(#weave-login)"/>
+          <circle class="dot-ink" cx="16" cy="50" r="4.6"/>
+          <circle class="dot-ink" cx="38" cy="72" r="4.6"/>
+          <circle class="dot-signal" cx="84" cy="50" r="4.6"/>
+          <circle class="dot-signal" cx="62" cy="28" r="4.6"/>
+        </svg>
+        <span class="brand-name">Interlock</span>
+      </div>
+      <h1 id="login-heading">Open your room</h1>
+      <p class="intro">Sign in with the owner account you created on this Interlock.</p>
+      <form id="login-form">
+        <label for="login-name">Name</label>
+        <input id="login-name" name="name" autocomplete="username" maxlength="256" required>
+
+        <label for="login-password">Password</label>
+        <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="1024" required>
+
+        <button id="login-button" class="primary-action" type="submit">Sign in</button>
+      </form>
+      <button id="show-invite-button" class="quiet-action login-switch" type="button">I have an invite code</button>
+
+      <form id="invite-redeem-form" hidden>
+        <label for="invite-code">Invite code</label>
+        <input id="invite-code" name="secret" autocomplete="off" maxlength="256" required>
+
+        <label for="invite-name">Your name</label>
+        <input id="invite-name" name="name" autocomplete="username" maxlength="256" required>
+
+        <label for="invite-password">Choose a password</label>
+        <input id="invite-password" name="password" type="password" autocomplete="new-password" maxlength="1024" required>
+
+        <button id="invite-redeem-button" class="primary-action" type="submit">Join the room</button>
+        <button id="show-login-button" class="quiet-action" type="button">Back to sign in</button>
+      </form>
+      <p id="login-status" class="status" role="status" aria-live="polite"></p>
+      <p class="local-note"><strong>AI joining this room?</strong> Do not sign in here. Run <code>interlock join</code> in a terminal on this computer.</p>
+      <p class="local-note">This room is available only on this computer.</p>
+    </section>
+  </main>
+
+  <main id="room-view" class="room-view" hidden>
+    <header class="room-header">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 100 100" fill="none" aria-hidden="true" focusable="false">
+          <mask id="weave-room"><rect width="100" height="100" fill="white"/><circle cx="50" cy="31.6" r="8" fill="black"/></mask>
+          <circle class="ring-signal" cx="38" cy="50" r="22" stroke-width="6.5"/>
+          <circle class="ring-ink" cx="62" cy="50" r="22" stroke-width="6.5" mask="url(#weave-room)"/>
+          <circle class="dot-ink" cx="16" cy="50" r="4.6"/>
+          <circle class="dot-ink" cx="38" cy="72" r="4.6"/>
+          <circle class="dot-signal" cx="84" cy="50" r="4.6"/>
+          <circle class="dot-signal" cx="62" cy="28" r="4.6"/>
+        </svg>
+        <span class="brand-name">Interlock</span>
+        <span id="connection-state" class="connection-state checking" role="status" aria-live="polite">Local: checking…</span>
+      </div>
+      <div class="room-actions">
+        <button id="connect-ai-button" type="button" class="primary-action" disabled>Connect an AI</button>
+        <button id="settings-button" type="button" class="quiet-action" disabled>Settings</button>
+        <a id="help-link" class="quiet-action" href="/help">Help</a>
+        <a id="source-link" class="quiet-action" href="/source">Source</a>
+        <span id="account-label" class="account-label"></span>
+        <button id="logout-button" type="button" class="quiet-action">Sign out</button>
+      </div>
+    </header>
+
+    <div class="room-layout">
+      <aside class="roster" aria-labelledby="people-heading">
+        <h2 id="people-heading">People</h2>
+        <div id="roster-list" class="roster-list"></div>
+      </aside>
+
+      <section class="conversation" aria-labelledby="conversation-heading">
+        <header class="conversation-heading">
+          <h1 id="conversation-heading">Conversation</h1>
+          <p>One shared room</p>
+        </header>
+
+        <div id="transcript" class="transcript" role="log" aria-label="Room messages"
+          aria-live="off" aria-relevant="additions" aria-busy="true">
+          <div id="empty-state" class="empty-state">
+            <h2>Your room is ready.</h2>
+            <p>Write the first message. Everyone you connect later will share this same conversation.</p>
+          </div>
+        </div>
+
+        <p id="room-notice" class="room-notice" role="status" aria-live="polite"></p>
+
+        <form id="message-form" class="composer" aria-label="Message composer">
+          <label for="message-body">Message the room</label>
+          <textarea id="message-body" rows="3" required placeholder="Message the room…"></textarea>
+          <div class="mention-tools">
+            <span>Address an AI:</span>
+            <div id="mention-suggestions" class="mention-suggestions"></div>
+          </div>
+          <p id="mention-preview" class="mention-preview" aria-live="polite">No AI will be rung.</p>
+          <div class="composer-footer">
+            <span>Plain text</span>
+            <button id="send-button" type="submit">Send</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="connect-ai-dialog" class="connect-ai-dialog" aria-labelledby="connect-ai-heading">
+    <header>
+      <div>
+        <h2 id="connect-ai-heading">Connect an AI</h2>
+        <p>One sentence, then approve the AI here.</p>
+      </div>
+      <form method="dialog"><button class="quiet-action" type="submit" aria-label="Close">Close</button></form>
+    </header>
+    <section class="join-instruction" aria-labelledby="join-instruction-heading">
+      <h3 id="join-instruction-heading">Tell the AI in its own conversation:</h3>
+      <p>In your terminal, run <code>interlock join</code> — not the browser sign-in — choose a memorable name, and join the chatroom.</p>
+      <small>If <code>interlock</code> is not found, use <code>node bin/interlock.js join</code> from the Interlock directory. The AI reports its product; you never share human credentials or copy a token.</small>
+    </section>
+    <section aria-labelledby="pending-ai-heading">
+      <h3 id="pending-ai-heading">Waiting for approval</h3>
+      <div id="pending-ai-list" class="pending-ai-list"></div>
+      <p id="pending-ai-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+  </dialog>
+
+  <dialog id="settings-dialog" class="connect-ai-dialog settings-dialog" aria-labelledby="settings-heading">
+    <header>
+      <div>
+        <h2 id="settings-heading">Settings</h2>
+        <p>Only what this one room needs.</p>
+      </div>
+      <form method="dialog"><button class="quiet-action" type="submit" aria-label="Close">Close</button></form>
+    </header>
+
+    <section aria-labelledby="settings-people-heading">
+      <h3 id="settings-people-heading">People and AIs</h3>
+      <button id="create-invite-button" class="primary-action" type="button">Create human invite</button>
+      <div id="invite-result" class="invite-result" hidden>
+        <p>Send this one-time code privately. It expires at <time id="invite-expiry"></time>.</p>
+        <code id="invite-result-code"></code>
+        <button id="copy-invite-button" class="quiet-action" type="button">Copy code</button>
+      </div>
+      <div id="settings-participant-list" class="settings-participant-list"></div>
+      <p id="settings-people-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section aria-labelledby="settings-transcript-heading">
+      <h3 id="settings-transcript-heading">Transcript</h3>
+      <div class="settings-row-actions" aria-labelledby="settings-transcript-heading">
+        <button id="export-transcript-button" class="quiet-action" type="button">Export transcript</button>
+        <button id="clear-transcript-button" class="quiet-action danger" type="button">Archive and clear transcript</button>
+      </div>
+      <div id="archive-result" class="invite-result" hidden>
+        <p id="archive-result-summary"></p>
+        <div class="settings-row-actions">
+          <a id="archive-markdown-link" class="quiet-action">Download readable Markdown</a>
+          <a id="archive-json-link" class="quiet-action">Download JSON copy</a>
+        </div>
+      </div>
+      <p id="settings-transcript-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section aria-labelledby="settings-owner-heading">
+      <h3 id="settings-owner-heading">Owner</h3>
+      <form id="change-password-form" class="settings-form">
+        <label for="current-password">Current password</label>
+        <input id="current-password" name="current_password" type="password" autocomplete="current-password" maxlength="1024" required>
+        <label for="new-password">New password</label>
+        <input id="new-password" name="new_password" type="password" autocomplete="new-password" maxlength="1024" required>
+        <button id="change-password-button" class="quiet-action" type="submit">Change password</button>
+      </form>
+      <button id="sign-out-others-button" class="quiet-action" type="button">Sign out other browser sessions</button>
+      <p class="settings-note">Lost the owner password or passkey? Stop Interlock, then run <strong>interlock recover</strong> in a terminal on this computer. Recovery replaces both and signs out old sessions.</p>
+      <p id="settings-owner-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+  </dialog>
+
+  <script src="/mentions.js" defer></script>
+  <script src="/message_page.js" defer></script>
+  <script src="/request_generation.js" defer></script>
+  <script src="/transcript_scroll.js" defer></script>
+  <script src="/attention.js" defer></script>
+  <script src="/room.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "interlock",
+  "version": "0.1.0",
+  "description": "One shared chat room for humans and multiple AI sessions.",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/2pigeonsmedia/interlock#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/2pigeonsmedia/interlock.git"
+  },
+  "bugs": {
+    "url": "https://github.com/2pigeonsmedia/interlock/issues"
+  },
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "interlock": "bin/interlock.js"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "13.3.2",
+    "identity": "file:./identity"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\" \"identity/test/*.test.js\""
+  }
+}

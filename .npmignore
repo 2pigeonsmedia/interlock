@@ -1,0 +1,36 @@
+# This npm archive is the release-package surface proxy. It carries the program,
+# operational guides, protocol, design/provenance notes, and self-contained
+# release guards. Private development plans, their alignment tests, review
+# working papers, and evidence tied to private machines/rooms do not belong in
+# this archive or the clean public source release.
+docs/audits/
+docs/INTERLOCK_CHAT_STRUCTURE.md
+docs/INTERLOCK_V0.1_BUILD_PLAN.md
+docs/OWNER_STEP_UP_EVIDENCE.md
+docs/PASSWORD_REAUTH_CONTINGENCY.md
+docs/PHASE_*_EVIDENCE.md
+docs/README_PREVIEW_DRAFT.md
+test/plan_alignment.test.js
+
+# Repository administration belongs in the source host, not the runtime npm
+# artifact.
+.github/
+
+# Identity's inherited host-specific login mockups are not loaded by the
+# Interlock runtime and are not Corresponding Source for this one-room release.
+identity/login_surface/
+
+# Public marketing artwork and its editable source stay with the source
+# repository, but they are not runtime files for the local room.
+docs/interlock-og.png
+docs/interlock-og.source.html
+
+# Public marketing screenshots remain with the source repository. The Connect
+# screenshot is part of the canonical Guide and therefore ships with it.
+docs/screenshots/*
+!docs/screenshots/connect-an-ai.png
+
+# Never package locally produced archives or installation state.
+*.tgz
+node_modules/
+data/

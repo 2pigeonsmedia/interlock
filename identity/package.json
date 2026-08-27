@@ -1,0 +1,28 @@
+{
+  "name": "identity",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "description": "Household identity: sign in, or not in. One door, one authorization path, no host names inside.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "*.js",
+    "login_surface/",
+    "test/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "13.3.2"
+  },
+  "private": true,
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  }
+}

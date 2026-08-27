@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up Interlock</title>
+  <link rel="stylesheet" href="/setup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 100 100" fill="none" aria-hidden="true" focusable="false">
+          <mask id="weave"><rect width="100" height="100" fill="white"/><circle cx="50" cy="31.6" r="8" fill="black"/></mask>
+          <circle class="ring-signal" cx="38" cy="50" r="22" stroke-width="6.5"/>
+          <circle class="ring-ink" cx="62" cy="50" r="22" stroke-width="6.5" mask="url(#weave)"/>
+          <circle class="dot-ink" cx="16" cy="50" r="4.6"/>
+          <circle class="dot-ink" cx="38" cy="72" r="4.6"/>
+          <circle class="dot-signal" cx="84" cy="50" r="4.6"/>
+          <circle class="dot-signal" cx="62" cy="28" r="4.6"/>
+        </svg>
+        <span class="wordmark">Interlock</span>
+      </div>
+      <h1>Set up your room</h1>
+      <p>Make the first owner account, then protect owner actions with this device’s passkey.</p>
+    </header>
+
+    <section class="card" aria-labelledby="setup-heading">
+      <h2 id="setup-heading">First owner</h2>
+      <form id="owner-form">
+        <label for="owner-name">Your name</label>
+        <input id="owner-name" name="name" autocomplete="username" maxlength="64" required>
+
+        <label for="owner-password">Password</label>
+        <input id="owner-password" name="password" type="password" autocomplete="new-password" maxlength="1024" required>
+
+        <label for="owner-password-confirm">Confirm password</label>
+        <input id="owner-password-confirm" name="password-confirm" type="password" autocomplete="new-password" maxlength="1024" required>
+        <p class="hint">You’ll use this password to sign in again. Keep it somewhere safe. Interlock stores a verifier, not the password itself.</p>
+        <p class="hint">Interlock does not give you a permanent recovery code. If you lose this password or passkey, stop Interlock and run <strong>interlock recover</strong> on this computer to replace both.</p>
+
+        <button id="setup-button" type="submit">Create owner and passkey</button>
+      </form>
+
+      <button id="continue-button" type="button" hidden>Continue passkey setup</button>
+      <p id="status" class="status" role="status" aria-live="polite">Checking this installation…</p>
+    </section>
+
+    <p class="local-note">This setup page is available only on this computer. <a href="/source">Source and license</a>.</p>
+  </main>
+  <script src="/setup.js" defer></script>
+</body>
+</html>

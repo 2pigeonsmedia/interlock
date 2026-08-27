@@ -1,0 +1,30 @@
+# Dependencies and test output
+node_modules/
+coverage/
+dist/
+tmp/
+*.log
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.token
+
+# Interlock runtime data and exports
+data/
+state/
+.interlock/
+backups/
+exports/
+*.transcript.json
+*.transcript.md
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

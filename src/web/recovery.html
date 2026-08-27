@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recover Interlock</title>
+  <link rel="stylesheet" href="/recovery.css">
+</head>
+<body>
+  <main class="card">
+    <p class="eyebrow">Local owner recovery</p>
+    <h1>Replace your sign-in</h1>
+    <p id="owner-line">Checking this Interlock installation…</p>
+    <p>This creates a new password and passkey. Every old passkey and signed-in session will stop working.</p>
+
+    <form id="recovery-form" hidden>
+      <label for="password">New password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" required maxlength="1024">
+
+      <label for="password-confirm">Confirm new password</label>
+      <input id="password-confirm" name="password-confirm" type="password" autocomplete="new-password" required maxlength="1024">
+
+      <button id="recover-button" type="submit">Create new passkey and recover</button>
+    </form>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <a id="login-link" class="primary-link" href="/" hidden>Sign in to Interlock</a>
+    <p class="note">The 15-minute recovery window starts when you press the button. Keep this terminal open until recovery finishes. <a href="/source">Source and license</a>.</p>
+  </main>
+  <script src="/recovery.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+/* Interlock — first-owner setup. One tile on the frame.
+ * Tokens match room.css; duplicated because the setup surface is served alone
+ * and retires after completion. Keep the two :root blocks in step. */
+
+:root {
+  color-scheme: light dark;
+
+  --frame: #26282B;
+  --frame-ink: #F3F4F6;
+  --frame-ink-2: #A9AEB6;
+  --frame-signal: #37C4B2;
+
+  --paper: #FFFFFF;
+  --paper-2: #E9EBEE;
+  --paper-3: #DCDFE4;
+  --line: #CBD0D6;
+  --ink: #111214;
+  --ink-2: #44484E;
+  --ink-3: #60656D;
+  --tile-edge: transparent;
+
+  --signal: #1D8277;
+  --signal-text: #15776C;
+  --on-signal: #FFFFFF;
+  --focus: #0B665E;
+
+  --ember: #C81E37;
+
+  --radius: 8px;
+
+  --font-body: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  background: var(--frame);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #17191C;
+    --paper-2: #202327;
+    --paper-3: #2A2E33;
+    --line: #33373D;
+    --ink: #F1F3F5;
+    --ink-2: #B7BCC4;
+    --ink-3: #8B929B;
+    --tile-edge: #3A3E44;
+    --signal-text: #3FCDBA;
+    --focus: #5BDCCA;
+    --ember: #FF6B7A;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--frame);
+}
+
+main { width: min(100%, 480px); }
+
+h1, h2, p { margin: 0; }
+
+header { margin-bottom: 18px; color: var(--frame-ink); }
+
+.brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.mark { display: inline-block; width: 28px; height: 28px; }
+.mark .ring-ink { stroke: currentColor; }
+.mark .dot-ink { fill: currentColor; }
+.mark .ring-signal { stroke: var(--frame-signal); }
+.mark .dot-signal { fill: var(--frame-signal); }
+.wordmark { font-weight: 750; font-size: 1.25rem; letter-spacing: -0.01em; line-height: 1; }
+
+h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(2rem, 6vw, 2.6rem);
+  line-height: 1.12;
+}
+header p { margin-top: 10px; color: var(--frame-ink-2); }
+
+.card {
+  padding: 24px;
+  border: 1px solid var(--tile-edge);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+h2 { font-size: 0.95rem; font-weight: 750; }
+
+form { display: grid; gap: 6px; margin-top: 14px; }
+label { margin-top: 8px; font-size: 0.875rem; font-weight: 650; color: var(--ink-2); }
+
+input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: inherit;
+  font: inherit;
+}
+input:hover { border-color: var(--ink-3); }
+
+input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+button {
+  margin-top: 12px;
+  padding: 11px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--signal);
+  color: var(--on-signal);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+button:not([disabled]):hover { background: var(--signal-text); }
+button[disabled] { cursor: wait; opacity: 0.6; }
+#continue-button { width: 100%; }
+
+.hint { margin-top: 6px; font-size: 0.85rem; line-height: 1.45; color: var(--ink-3); }
+.hint strong { color: var(--ember); font-weight: 650; }
+
+.status { min-height: 1.5em; margin-top: 16px; font-size: 0.9rem; color: var(--ink-2); }
+.status.error { color: var(--ember); }
+.status.success { color: var(--signal-text); }
+
+.local-note { margin-top: 18px; font-size: 0.8rem; text-align: center; color: var(--frame-ink-2); }
+.local-note a { color: var(--frame-signal); }
+
+[hidden] { display: none !important; }

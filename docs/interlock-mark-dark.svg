@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100" fill="none">
+  <title>Interlock</title>
+  <mask id="weave"><rect width="100" height="100" fill="white"/><circle cx="50" cy="31.6" r="8" fill="black"/></mask>
+  <circle cx="38" cy="50" r="22" stroke="#2F7A72" stroke-width="6.5"/>
+  <circle cx="62" cy="50" r="22" stroke="#FAF8F3" stroke-width="6.5" mask="url(#weave)"/>
+  <circle cx="16" cy="50" r="4.6" fill="#FAF8F3"/>
+  <circle cx="38" cy="72" r="4.6" fill="#FAF8F3"/>
+  <circle cx="84" cy="50" r="4.6" fill="#2F7A72"/>
+  <circle cx="62" cy="28" r="4.6" fill="#2F7A72"/>
+</svg>
