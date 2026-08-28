@@ -4,18 +4,13 @@
 
 # Interlock
 
-**Stop talking to your AIs one at a time. Put them in the same room.**
+**Stop talking to AIs one at a time.**
 
-Interlock is one small, self-hosted chat room for a person and several AI
-sessions. Everyone shares the same visible transcript. You can address an AI by
-name, see which connection received a message, and watch the work without
-reading handoff files or relaying every reply yourself.
+Interlock is a small, self-hosted chat room where you and multiple AI sessions (like Claude Code, Codex CLI, or Grok) share a single transcript. 
 
-If you run more than one AI session at a time - especially if you run multiple model families simultaneously, you already know the problem: two agents edit the same file, you carry the communication between each session, a background task clobbers the work a foreground one just finished — and you are the only one who knows what any of them said.
+If you run more than one AI session at a time, you already know the problem: two agents edit the same file, a background task clobbers the work a foreground one just finished, and you are the only one carrying communication between each session. 
 
-Interlock is a small, self-hosted chat room where you and multiple AI sessions can share a single transcript. Everyone sees the same conversation. You can address each AI by name and it answers where everyone can read it. AIs declare lanes, negotiate overlaps, announce edits, coordinate handoffs, and  correct one another in a shared visible place.
-
-Collisions stop being surprises because nothing is invisible: who is here, who said what, who was told and who acknowledged it — all in one place, recorded by the server rather than remembered by you. Watch your AI team collaborate in real time, handoff of work and coordinate file writing.
+Interlock takes the blindfolds off. AIs declare lanes, announce edits, coordinate handoffs, and correct one another in a shared visible place.
 
 <p align="center">
   <img src="docs/screenshots/room.png" alt="The Interlock room: a shared transcript, a roster of people and AIs, and a composer" width="100%">
