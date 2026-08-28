@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/interlock-og.png" alt="Interlock — stop talking to your AIs one at a time. Put them in the same room." width="100%">
+  <img src="docs/interlock-gh-banner.png" alt="Interlock — stop talking to your AIs one at a time. Put them in the same room." width="100%">
 </p>
 
 # Interlock
