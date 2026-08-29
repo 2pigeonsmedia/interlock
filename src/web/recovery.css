@@ -1,13 +1,34 @@
+/* Interlock — owner recovery. "Signal Box" palette (v0.1.1), system faces
+ * only: this emergency surface serves no font files, and a rescue page should
+ * not depend on any. */
+
 :root {
-  color-scheme: light;
-  --paper: #f6f2e9;
-  --card: #fffdf8;
-  --ink: #27241f;
-  --muted: #6e675d;
-  --line: #d8d0c3;
-  --action: #235347;
-  --error: #a33a2b;
-  --success: #246244;
+  color-scheme: dark light;
+  --paper: #07090B;
+  --card: #0B1014;
+  --ink: #E5EBF0;
+  --muted: #77848F;
+  --line: #1E262E;
+  --signal: #2CE5CB;
+  --action: #E8EDF1;
+  --on-action: #0A0D10;
+  --error: #FF6B7A;
+  --success: #2CE5CB;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --paper: #C6CCD2;
+    --card: #F4F6F8;
+    --ink: #14181C;
+    --muted: #5A626B;
+    --line: #B4BAC1;
+    --signal: #0E7365;
+    --action: #14181C;
+    --on-action: #F4F6F8;
+    --error: #C81E37;
+    --success: #246244;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -20,28 +41,29 @@ body {
   padding: 24px;
   background: var(--paper);
   color: var(--ink);
-  font: 16px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 16px/1.5 "IBM Plex Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .card {
   width: min(100%, 520px);
   padding: 32px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 6px;
   background: var(--card);
-  box-shadow: 0 12px 36px rgb(39 36 31 / 10%);
+  box-shadow: 0 14px 44px rgb(0 0 0 / 40%);
 }
 
 .eyebrow {
   margin: 0 0 8px;
-  color: var(--action);
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  color: var(--signal);
+  font-family: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-h1 { margin: 0 0 16px; line-height: 1.15; }
+h1 { margin: 0 0 16px; line-height: 1.15; letter-spacing: -0.01em; }
 form { margin-top: 24px; }
 label { display: block; margin: 14px 0 6px; font-weight: 650; }
 
@@ -49,17 +71,17 @@ input,
 button {
   width: 100%;
   min-height: 44px;
-  border-radius: 8px;
+  border-radius: 4px;
   font: inherit;
 }
 
-input { padding: 9px 11px; border: 1px solid var(--line); background: white; }
-button { margin-top: 20px; border: 0; background: var(--action); color: white; font-weight: 700; cursor: pointer; }
+input { padding: 9px 11px; border: 1px solid var(--line); background: var(--paper); color: inherit; }
+button { margin-top: 20px; border: 0; background: var(--action); color: var(--on-action); font-weight: 700; cursor: pointer; }
 button:disabled { cursor: wait; opacity: 0.65; }
 input:focus-visible,
 button:focus-visible,
 a:focus-visible {
-  outline: 3px solid var(--action);
+  outline: 3px solid var(--signal);
   outline-offset: 3px;
 }
 .primary-link {
@@ -67,9 +89,9 @@ a:focus-visible {
   min-height: 44px;
   margin-top: 18px;
   padding: 10px 16px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--action);
-  color: white;
+  color: var(--on-action);
   font-weight: 700;
   text-align: center;
   text-decoration: none;
@@ -78,5 +100,5 @@ a:focus-visible {
 .status.error { color: var(--error); }
 .status.success { color: var(--success); font-weight: 650; }
 .note { margin: 20px 0 0; color: var(--muted); font-size: 0.88rem; }
-.note a { color: var(--action); }
+.note a { color: var(--signal); }
 [hidden] { display: none !important; }

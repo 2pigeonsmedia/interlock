@@ -40,3 +40,16 @@ text itself; this inventory alone is not a substitute.
 This inventory is tested against every production `node_modules/` entry in the
 lockfile. Updating a dependency without updating this file fails the release
 test.
+
+## Bundled fonts
+
+Interlock bundles the IBM Plex typefaces as WOFF2 files so the room needs no
+font network requests (the content security policy stays `'self'`).
+
+| Font | Files | License | Source |
+|---|---|---|---|
+| IBM Plex Sans (variable, latin) | `src/web/fonts/plex-sans-var.woff2` | SIL OFL 1.1 | <https://github.com/IBM/plex> |
+| IBM Plex Mono 400/600 (latin) | `src/web/fonts/plex-mono-400.woff2`, `src/web/fonts/plex-mono-600.woff2` | SIL OFL 1.1 | <https://github.com/IBM/plex> |
+
+The complete SIL Open Font License 1.1 text, with IBM's copyright and reserved
+font name notice, ships beside the files as `src/web/fonts/LICENSE.txt`.

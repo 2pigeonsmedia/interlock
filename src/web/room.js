@@ -18,6 +18,7 @@ const inviteRedeemForm = document.querySelector('#invite-redeem-form');
 const inviteRedeemButton = document.querySelector('#invite-redeem-button');
 const accountLabel = document.querySelector('#account-label');
 const rosterList = document.querySelector('#roster-list');
+const blockStrip = document.querySelector('#block-strip');
 const roomNotice = document.querySelector('#room-notice');
 const logoutButton = document.querySelector('#logout-button');
 const connectAiButton = document.querySelector('#connect-ai-button');
@@ -218,6 +219,7 @@ function showLogin(message = '') {
   rosterSeats = [];
   rosterKnown = false;
   rosterList.replaceChildren();
+  if (blockStrip) blockStrip.replaceChildren();
   roomView.hidden = true;
   loginView.hidden = false;
   inviteRedeemForm.hidden = true;
@@ -647,6 +649,42 @@ function participantFact(text, className = '') {
   return fact;
 }
 
+/* The lamp and the block strip repeat roster facts as light. The words in the
+ * roster carry the meaning, so both are aria-hidden; the states come only
+ * from server-authored participant facts, never from message text. */
+function presenceLampState(participant) {
+  if (participant.kind === 'person') {
+    const owner = currentUser && participant.name === currentUser.name &&
+      Array.isArray(currentUser.roles) && currentUser.roles.includes('owner');
+    return owner ? 'owner' : 'person';
+  }
+  return participant.outstanding > 0 ? 'waiting' : 'heard';
+}
+
+function presenceLamp(state) {
+  const lamp = document.createElement('i');
+  lamp.className = 'presence-lamp';
+  lamp.dataset.state = state;
+  lamp.setAttribute('aria-hidden', 'true');
+  return lamp;
+}
+
+function renderBlockStrip(participants) {
+  if (!blockStrip) return;
+  blockStrip.replaceChildren();
+  const track = () => {
+    const segment = document.createElement('i');
+    segment.className = 'segment track';
+    return segment;
+  };
+  blockStrip.append(track());
+  for (const seat of participants.filter(row => row.kind === 'seat' && row.present)) {
+    const segment = document.createElement('i');
+    segment.className = 'segment ' + (seat.outstanding > 0 ? 'waiting' : 'heard');
+    blockStrip.append(segment, track());
+  }
+}
+
 function renderRoster(participants) {
   rosterList.replaceChildren();
   rosterParticipants = participants.slice();
@@ -656,6 +694,7 @@ function renderRoster(participants) {
     const card = document.createElement('div');
     card.className = 'person-card';
     card.dataset.kind = participant.kind;
+    card.append(presenceLamp(presenceLampState(participant)));
     const name = document.createElement('strong');
     name.textContent = participant.name;
     card.append(name);
@@ -687,6 +726,7 @@ function renderRoster(participants) {
     }
     rosterList.append(card);
   }
+  renderBlockStrip(participants);
   renderMentionSuggestions();
   updateMentionPreview();
   refreshPendingDeliveryPresence();
@@ -1166,7 +1206,7 @@ messageForm.addEventListener('submit', async event => {
   sendButton.disabled = true;
   forceFollowAfterSend = true;
   forceFollowMessageId = null;
-  setRoomNotice('Saving message…');
+  setRoomNotice('Saving message…', 'progress');
   let saved = false;
   try {
     const response = await fetch('/api/messages', {
@@ -1229,7 +1269,7 @@ logoutButton.addEventListener('click', async () => {
     return;
   }
   logoutButton.disabled = true;
-  setRoomNotice('Signing out…');
+  setRoomNotice('Signing out…', 'progress');
   try {
     const response = await fetch('/api/logout', {
       method: 'POST',

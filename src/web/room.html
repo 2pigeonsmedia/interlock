@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Interlock</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/room.css">
 </head>
 <body>
@@ -77,6 +78,11 @@
         <button id="logout-button" type="button" class="quiet-action">Sign out</button>
       </div>
     </header>
+
+    <!-- The block strip repeats the roster's presence facts as light; the
+         roster carries the words, so this instrument is decorative to
+         assistive technology. Rendered by room.js from /api/participants. -->
+    <div id="block-strip" class="block-strip" aria-hidden="true"></div>
 
     <div class="room-layout">
       <aside class="roster" aria-labelledby="people-heading">

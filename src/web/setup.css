@@ -1,35 +1,61 @@
-/* Interlock — first-owner setup. One tile on the frame.
+/* Interlock — first-owner setup. One tile on the frame, "Signal Box" (v0.1.1).
  * Tokens match room.css; duplicated because the setup surface is served alone
  * and retires after completion. Keep the two :root blocks in step. */
 
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/plex-sans-var.woff2") format("woff2");
+  font-weight: 100 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/plex-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/plex-mono-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  color-scheme: light dark;
+  color-scheme: dark light;
 
-  --frame: #26282B;
-  --frame-ink: #F3F4F6;
-  --frame-ink-2: #A9AEB6;
-  --frame-signal: #37C4B2;
+  --frame: #07090B;
+  --frame-grid: rgb(255 255 255 / 0.012);
+  --frame-ink: #E8EDF1;
+  --frame-ink-2: #7C8892;
 
-  --paper: #FFFFFF;
-  --paper-2: #E9EBEE;
-  --paper-3: #DCDFE4;
-  --line: #CBD0D6;
-  --ink: #111214;
-  --ink-2: #44484E;
-  --ink-3: #60656D;
-  --tile-edge: transparent;
+  --paper: #0B1014;
+  --paper-2: #090D10;
+  --paper-3: #10161B;
+  --line: #151C23;
+  --ink: #E5EBF0;
+  --ink-2: #C4CDD4;
+  --ink-3: #77848F;
+  --tile-edge: #1E262E;
 
   --signal: #1D8277;
-  --signal-text: #15776C;
-  --on-signal: #FFFFFF;
-  --focus: #0B665E;
+  --signal-bright: #2CE5CB;
 
-  --ember: #C81E37;
+  --action: #E8EDF1;
+  --on-action: #0A0D10;
 
-  --radius: 8px;
+  --focus: #5BDCCA;
 
-  --font-body: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+  --ember: #FF6B7A;
+
+  --radius: 4px;
+
+  --font-body: "IBM Plex Sans", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "IBM Plex Sans", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-ai: "IBM Plex Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   font-family: var(--font-body);
   font-size: 15px;
@@ -39,19 +65,30 @@
   -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --paper: #17191C;
-    --paper-2: #202327;
-    --paper-3: #2A2E33;
-    --line: #33373D;
-    --ink: #F1F3F5;
-    --ink-2: #B7BCC4;
-    --ink-3: #8B929B;
-    --tile-edge: #3A3E44;
-    --signal-text: #3FCDBA;
-    --focus: #5BDCCA;
-    --ember: #FF6B7A;
+    --frame: #C6CCD2;
+    --frame-grid: rgb(0 0 0 / 0.02);
+    --frame-ink: #14181C;
+    --frame-ink-2: #4A525A;
+
+    --paper: #F4F6F8;
+    --paper-2: #EAEDF1;
+    --paper-3: #DFE3E8;
+    --line: #D3D8DE;
+    --ink: #14181C;
+    --ink-2: #3A4149;
+    --ink-3: #5A626B;
+    --tile-edge: #B4BAC1;
+
+    --signal-bright: #0E7365;
+
+    --action: #14181C;
+    --on-action: #F4F6F8;
+
+    --focus: #0B665E;
+
+    --ember: #C81E37;
   }
 }
 
@@ -63,7 +100,10 @@ body {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: var(--frame);
+  background-color: var(--frame);
+  background-image:
+    repeating-linear-gradient(0deg, var(--frame-grid) 0, var(--frame-grid) 1px, transparent 1px, transparent 28px),
+    repeating-linear-gradient(90deg, var(--frame-grid) 0, var(--frame-grid) 1px, transparent 1px, transparent 28px);
 }
 
 main { width: min(100%, 480px); }
@@ -72,41 +112,58 @@ h1, h2, p { margin: 0; }
 
 header { margin-bottom: 18px; color: var(--frame-ink); }
 
-.brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.brand { display: flex; align-items: center; gap: 11px; margin-bottom: 18px; }
 .mark { display: inline-block; width: 28px; height: 28px; }
 .mark .ring-ink { stroke: currentColor; }
 .mark .dot-ink { fill: currentColor; }
-.mark .ring-signal { stroke: var(--frame-signal); }
-.mark .dot-signal { fill: var(--frame-signal); }
-.wordmark { font-weight: 750; font-size: 1.25rem; letter-spacing: -0.01em; line-height: 1; }
+.mark .ring-signal { stroke: var(--signal-bright); }
+.mark .dot-signal { fill: var(--signal-bright); }
+.wordmark {
+  font-family: var(--font-ai);
+  font-weight: 600;
+  font-size: 1.2rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 1;
+}
 
 h1 {
   font-family: var(--font-display);
-  font-weight: 400;
-  font-size: clamp(2rem, 6vw, 2.6rem);
-  line-height: 1.12;
+  font-weight: 600;
+  font-size: clamp(1.7rem, 5vw, 2.2rem);
+  letter-spacing: -0.01em;
+  line-height: 1.15;
 }
 header p { margin-top: 10px; color: var(--frame-ink-2); }
 
 .card {
   padding: 24px;
   border: 1px solid var(--tile-edge);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--paper);
   color: var(--ink);
+  box-shadow: 0 14px 44px rgb(0 0 0 / 0.4);
 }
 
-h2 { font-size: 0.95rem; font-weight: 750; }
+h2 { font-size: 0.95rem; font-weight: 700; }
 
 form { display: grid; gap: 6px; margin-top: 14px; }
-label { margin-top: 8px; font-size: 0.875rem; font-weight: 650; color: var(--ink-2); }
+label {
+  margin-top: 8px;
+  font-family: var(--font-ai);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
 
 input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--tile-edge);
   border-radius: var(--radius);
-  background: var(--paper);
+  background: var(--paper-2);
   color: inherit;
   font: inherit;
 }
@@ -117,26 +174,26 @@ input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid 
 button {
   margin-top: 12px;
   padding: 11px 14px;
-  border: 1px solid transparent;
+  border: 1px solid var(--action);
   border-radius: var(--radius);
-  background: var(--signal);
-  color: var(--on-signal);
+  background: var(--action);
+  color: var(--on-action);
   font: inherit;
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
 }
-button:not([disabled]):hover { background: var(--signal-text); }
+button:not([disabled]):hover { background: var(--ink-2); border-color: var(--ink-2); }
 button[disabled] { cursor: wait; opacity: 0.6; }
 #continue-button { width: 100%; }
 
 .hint { margin-top: 6px; font-size: 0.85rem; line-height: 1.45; color: var(--ink-3); }
-.hint strong { color: var(--ember); font-weight: 650; }
+.hint strong { color: var(--ember); font-weight: 600; }
 
 .status { min-height: 1.5em; margin-top: 16px; font-size: 0.9rem; color: var(--ink-2); }
 .status.error { color: var(--ember); }
-.status.success { color: var(--signal-text); }
+.status.success { color: var(--signal-bright); }
 
 .local-note { margin-top: 18px; font-size: 0.8rem; text-align: center; color: var(--frame-ink-2); }
-.local-note a { color: var(--frame-signal); }
+.local-note a { color: var(--signal-bright); }
 
 [hidden] { display: none !important; }
