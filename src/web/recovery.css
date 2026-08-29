@@ -3,7 +3,7 @@
  * not depend on any. */
 
 :root {
-  color-scheme: dark light;
+  color-scheme: dark;
   --paper: #07090B;
   --card: #0B1014;
   --ink: #E5EBF0;
@@ -16,19 +16,17 @@
   --success: #2CE5CB;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --paper: #C6CCD2;
-    --card: #F4F6F8;
-    --ink: #14181C;
-    --muted: #5A626B;
-    --line: #B4BAC1;
-    --signal: #0E7365;
-    --action: #14181C;
-    --on-action: #F4F6F8;
-    --error: #C81E37;
-    --success: #246244;
-  }
+:root[data-theme="light"] {
+  --paper: #C6CCD2;
+  --card: #F4F6F8;
+  --ink: #14181C;
+  --muted: #5A626B;
+  --line: #B4BAC1;
+  --signal: #0E7365;
+  --action: #14181C;
+  --on-action: #F4F6F8;
+  --error: #C81E37;
+  --success: #246244;
 }
 
 * { box-sizing: border-box; }

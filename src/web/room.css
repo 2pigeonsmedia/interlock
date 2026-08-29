@@ -38,7 +38,7 @@
 }
 
 :root {
-  color-scheme: dark light;
+  color-scheme: dark;
 
   /* the ground — the box at night */
   --frame: #07090B;
@@ -105,49 +105,50 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Daylight box: same instruments, same hue jobs, lights out. */
-@media (prefers-color-scheme: light) {
-  :root {
-    --frame: #C6CCD2;
-    --frame-2: #B8BFC6;
-    --frame-line: #A7AEB6;
-    --frame-grid: rgb(0 0 0 / 0.02);
-    --frame-ink: #14181C;
-    --frame-ink-2: #4A525A;
+/* Daylight box: same instruments, same hue jobs, lights out. PARKED —
+ * the room is dark by design; no v0.1.1 UI sets this attribute, and the OS
+ * preference deliberately does not either. A future explicit lights-on
+ * toggle can reach it; until then it is testable via devtools only. */
+:root[data-theme="light"] {
+  --frame: #C6CCD2;
+  --frame-2: #B8BFC6;
+  --frame-line: #A7AEB6;
+  --frame-grid: rgb(0 0 0 / 0.02);
+  --frame-ink: #14181C;
+  --frame-ink-2: #4A525A;
 
-    --paper: #F4F6F8;
-    --paper-2: #EAEDF1;
-    --paper-3: #DFE3E8;
-    --line: #D3D8DE;
-    --line-2: #CCD2D8;
-    --tile-edge: #B4BAC1;
-    --ink: #14181C;
-    --ink-2: #3A4149;
-    --ink-3: #5A626B;
-    --ink-4: #646C75;
-    --ink-5: #798089;
+  --paper: #F4F6F8;
+  --paper-2: #EAEDF1;
+  --paper-3: #DFE3E8;
+  --line: #D3D8DE;
+  --line-2: #CCD2D8;
+  --tile-edge: #B4BAC1;
+  --ink: #14181C;
+  --ink-2: #3A4149;
+  --ink-3: #5A626B;
+  --ink-4: #646C75;
+  --ink-5: #798089;
 
-    --signal-bright: #0E7365;
-    --signal-wash: rgb(14 115 101 / 0.07);
-    --signal-border: #9CC4BC;
+  --signal-bright: #0E7365;
+  --signal-wash: rgb(14 115 101 / 0.07);
+  --signal-border: #9CC4BC;
 
-    --wait: #9A5B00;
-    --wait-text: #8A5500;
+  --wait: #9A5B00;
+  --wait-text: #8A5500;
 
-    --ai: #275E93;
-    --ai-soft: rgb(39 94 147 / 0.08);
+  --ai: #275E93;
+  --ai-soft: rgb(39 94 147 / 0.08);
 
-    --owner: #493A9B;
+  --owner: #493A9B;
 
-    --action: #14181C;
-    --on-action: #F4F6F8;
+  --action: #14181C;
+  --on-action: #F4F6F8;
 
-    --focus: #0B665E;
+  --focus: #0B665E;
 
-    --ember: #C81E37;
-    --ember-soft: rgb(200 30 55 / 0.09);
-    --ember-line: rgb(200 30 55 / 0.25);
-  }
+  --ember: #C81E37;
+  --ember-soft: rgb(200 30 55 / 0.09);
+  --ember-line: rgb(200 30 55 / 0.25);
 }
 
 * { box-sizing: border-box; }

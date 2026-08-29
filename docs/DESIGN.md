@@ -12,9 +12,12 @@ grey-frame contract.
 instrument tiles on it, and colored light only where a color has a job. The
 name Interlock comes from railway interlocking — the machinery that makes
 conflicting movements impossible — and the room wears that honestly: presence
-lamps, a block strip, plates, and mono discipline. The browser's light
-preference turns the same room into a daylight box: identical instruments and
-hue jobs on grey-and-paper instead of black.
+lamps, a block strip, plates, and mono discipline. **The room is dark by
+design, for everyone** — the OS light preference deliberately does not
+restyle it, because a tool with one face never surprises its owner. A full
+daylight token set (identical instruments and hue jobs on grey-and-paper)
+ships parked behind `:root[data-theme="light"]`; nothing in v0.1.1 sets that
+attribute — it waits for a future explicit lights-on toggle.
 
 **One hue, one meaning.** Every color on the screen answers one question, so
 any pixel can be interrogated with "what does this color mean?" and produce
@@ -56,8 +59,10 @@ lie in instrument's clothing.
 ## Colour
 
 Tokens live in `src/web/room.css` (`setup.css` and `recovery.css` carry
-matching subsets; keep them in step). Dark is the default; the light scheme
-remaps under `prefers-color-scheme: light`.
+matching subsets; keep them in step). Dark is the room's one automatic look;
+the light column below is the parked `data-theme="light"` set, measured and
+maintained so a future toggle inherits a proven scheme rather than a stale
+one.
 
 | Token | Dark | Light | Job |
 |---|---|---|---|
