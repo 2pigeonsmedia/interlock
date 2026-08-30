@@ -872,6 +872,20 @@ async function runLeave(args, io, dependencies = {}) {
     line(io.stderr, 'interlock: usage: interlock leave --connection NAME [--json]');
     return EXIT_USAGE;
   }
+  const policyMod = dependencies.codexPolicy || require('./codex_policy.js');
+  try {
+    policyMod.removePolicy({
+      connection: parsed.connection,
+      env: dependencies.env || process.env,
+      homedir: dependencies.homedir || os.homedir(),
+      fs: dependencies.fs || fs,
+      codexHome: dependencies.codexHome,
+    });
+  } catch (error) {
+    if (!error || error.code !== 'not-installed') {
+      return reportCodexPolicyError(io.stderr, error);
+    }
+  }
   let selected;
   try { selected = selectedConnection(parsed.connection, dependencies); }
   catch (error) {
@@ -1717,12 +1731,12 @@ function printPolicyReceipt(stdout, receipt) {
   if (receipt.replacedConnection) {
     line(stdout, `Replaced Interlock policy for ${receipt.replacedConnection}. Only one connection is trusted at a time.`);
   }
-  line(stdout, `Argv: ${receipt.historyArgv}`);
-  if (receipt.sayArgv) line(stdout, `Argv: ${receipt.sayArgv}`);
+  line(stdout, `Argv: ${JSON.stringify(receipt.historyArgv)}`);
+  if (receipt.sayArgv) line(stdout, `Argv: ${JSON.stringify(receipt.sayArgv)}`);
   line(stdout, 'Syntax check only. Codex loads every rules layer and the most restrictive match wins; this does not prove the command will run without review.');
   line(stdout, 'Restart Codex Desktop. Activation stays unknown until you observe an unreviewed canonical command after that restart.');
-  line(stdout, `Check with: ${receipt.checkCommand}`);
-  line(stdout, `Remove with: ${receipt.removeCommand}`);
+  line(stdout, `Check argv: ${JSON.stringify(receipt.checkCommand)}`);
+  line(stdout, `Remove argv: ${JSON.stringify(receipt.removeCommand)}`);
 }
 
 async function runCodexPolicy(args, io, dependencies = {}) {
@@ -1766,7 +1780,15 @@ async function runCodexPolicy(args, io, dependencies = {}) {
     checkerPath: parsed.checkerPath || dependencies.codexCheckerPath,
     spawnSync: dependencies.spawnSync,
     checkExecpolicy: dependencies.checkExecpolicy,
+    executionHost: dependencies.executionHost,
+    requestId: null,
+    subjectId: null,
   };
+  if (parsed.action === 'install') {
+    const selected = selectedConnection(parsed.connection, dependencies);
+    shared.requestId = selected.profile.request_id;
+    shared.subjectId = selected.profile.subject_id;
+  }
   try {
     if (parsed.action === 'install') {
       const receipt = policy.installPolicy(shared);
