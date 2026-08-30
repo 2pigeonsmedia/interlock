@@ -182,6 +182,11 @@ function classifyRecord(value, schemaMigrated) {
 function migrateInspectedRecord(row, house, at) {
   const inspected = house.inspectAiAdmission(candidateFrom(row), at);
   if (!validInspectedReuse(inspected)) return null;
+  if (row.previously_used === true &&
+      (inspected.reuse_session === null ||
+        (inspected.reuse !== 'held' && inspected.reuse !== 'ended'))) {
+    return null;
+  }
   return freezeRecord(Object.assign({}, row, {
     previously_used: inspected.previously_used,
     last_ended_at: inspected.last_ended_at,

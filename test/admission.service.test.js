@@ -329,6 +329,89 @@ test('a prior-format ended pending row without an inspectable ordinal is refused
   service.close();
 });
 
+test('a parent-format previously-used pending row cannot be rewritten as fresh', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-admission-prior-fresh-'));
+  const root = path.join(dataDir, 'admissions');
+  fs.mkdirSync(root, { recursive: true });
+  const body = candidate(1, 'Reused');
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify({
+    schema: 2,
+    records: [Object.assign({}, body, {
+      previously_used: true,
+      last_ended_at: 900,
+      created_at: 1_000,
+      expires_at: 1_100,
+      state: 'pending',
+      ended_at: null,
+      cooldown_until: null,
+      enrollment: null,
+    })],
+  }) + '\n');
+
+  const house = fakeHouse();
+  house.inspectAiAdmission = (candidateBody) => Object.assign({
+    ok: true,
+    previously_used: false,
+    last_ended_at: null,
+    reuse: 'fresh',
+    reuse_session: null,
+  }, candidateBody);
+  const service = openAdmissionService({
+    dataDir,
+    house,
+    clock: () => 1_050,
+    pendingTtlMs: 100,
+    cooldownMs: 50,
+  });
+  assert.deepEqual(service.list(), [],
+    'a row that already proves previous use must not surface as an unused name');
+  const migrated = JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8'));
+  assert.deepEqual(migrated.records, []);
+  service.close();
+});
+
+test('a 2e9de6d ended/null-session pending row cannot be rewritten as fresh', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-admission-null-fresh-'));
+  const root = path.join(dataDir, 'admissions');
+  fs.mkdirSync(root, { recursive: true });
+  const body = candidate(1, 'Reused');
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify({
+    schema: 2,
+    records: [Object.assign({}, body, {
+      previously_used: true,
+      last_ended_at: 900,
+      reuse: 'ended',
+      reuse_session: null,
+      created_at: 1_000,
+      expires_at: 1_100,
+      state: 'pending',
+      ended_at: null,
+      cooldown_until: null,
+      enrollment: null,
+    })],
+  }) + '\n');
+
+  const house = fakeHouse();
+  house.inspectAiAdmission = (candidateBody) => Object.assign({
+    ok: true,
+    previously_used: false,
+    last_ended_at: null,
+    reuse: 'fresh',
+    reuse_session: null,
+  }, candidateBody);
+  const service = openAdmissionService({
+    dataDir,
+    house,
+    clock: () => 1_050,
+    pendingTtlMs: 100,
+    cooldownMs: 50,
+  });
+  assert.deepEqual(service.list(), []);
+  const migrated = JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8'));
+  assert.deepEqual(migrated.records, []);
+  service.close();
+});
+
 test('decline and expiry consume pending rows and enforce the same name-product cooldown', async () => {
   const world = fixture();
   const waiting = world.service.knock(candidate(1), { timeoutMs: 100 });
