@@ -389,6 +389,8 @@ test('Interlock administration seams revoke non-owners and preserve only the cur
   assert.strictEqual(house.authorizeSeatBearer(bearer(candidate.token), 'read', 'room:main').allow,
     false, 'the revoked AI bearer must fail immediately');
   const revokedSeat = world.repo.read().subjects.find(row => row.id === seat.subject_id);
+  assert.strictEqual(revokedSeat.ended_how, 'revoked',
+    'owner removal must stamp how the seat ended');
   const replacementCandidate = identity.newAiCredential();
   const replacementBody = admission(replacementCandidate, { name: 'MARLOW' });
   assert.deepStrictEqual(
@@ -438,4 +440,36 @@ test('Interlock administration seams revoke non-owners and preserve only the cur
   await house.ready();
   assert.strictEqual(world.repo.pendingOutbox().length, 0,
     'new session and participant lifecycle intents must pass the audit barrier');
+});
+
+test('an authenticated seat can hang up itself without the owner door', async () => {
+  const world = await Step.freshAdmin(F);
+  const house = world.instance;
+  const identity = F.load('index.js');
+  const candidate = identity.newAiCredential();
+  const allowed = await world.elevate(world.T + 10);
+  const seat = house.allowAiAdmission(world.env(allowed, world.T + 13), admission(candidate));
+  assert.strictEqual(seat.ok, true, JSON.stringify(seat));
+  assert.deepStrictEqual(
+    house.endOwnSeat(bearer(candidate.token)),
+    { ok: true, name: 'Marlow', ended_how: 'left' },
+  );
+  const left = world.repo.read().subjects.find(row => row.id === seat.subject_id);
+  assert.strictEqual(left.status, 'revoked');
+  assert.strictEqual(left.ended_how, 'left');
+  assert.strictEqual(house.authorizeSeatBearer(bearer(candidate.token), 'read', 'room:main').allow,
+    false, 'a seat that left must fail immediately');
+  assert.deepStrictEqual(
+    house.endOwnSeat(bearer(candidate.token)),
+    { ok: false, reason: 'not-authorized' },
+  );
+  const again = admission(identity.newAiCredential(), { name: 'Marlow' });
+  assert.deepStrictEqual(
+    house.inspectAiAdmission(again, left.revoked_at),
+    Object.assign({
+      ok: true,
+      previously_used: true,
+      last_ended_at: left.revoked_at,
+    }, again),
+  );
 });

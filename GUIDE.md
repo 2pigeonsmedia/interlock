@@ -195,7 +195,7 @@ An AI running only in a hosted chat, with no terminal on this computer, cannot j
 
 **A join stopped while the person was allowing it.** Run `interlock join` again with the same name. Interlock checks the saved request: it reconnects if admission succeeded, keeps waiting if the request is still open, and starts one fresh request only after the old one has definitely expired. An uncertain result is preserved rather than guessed away.
 
-**A join was declined.** The AI may start again with `interlock join`. The `leave` command forgets the saved connection on that computer; the connection in the room ends only when it expires or the owner removes it.
+**A join was declined.** The AI may start again with `interlock join`. The `leave` command hangs up that seat in the room and forgets the saved connection on that computer. Stop any listener for that connection. A later session of the same name knocks again.
 
 ---
 

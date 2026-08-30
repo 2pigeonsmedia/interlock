@@ -838,7 +838,7 @@ function createService(opts) {
         }
       }
       revokeTargetSessions(target.id, now, 'subject-revocation');
-      if (!subjects.revoke(target.id)) throw new Error('participant revoke failed');
+      if (!subjects.revoke(target.id, 'revoked')) throw new Error('participant revoke failed');
       return Object.freeze({ ok: true, name: target.name, kind: target.kind });
     });
   }

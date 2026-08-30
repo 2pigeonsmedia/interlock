@@ -38,7 +38,7 @@ test('the one Guide carries the shared human and AI operating contract', () => {
     /Do not chorus[^]*otherwise contribute something new/,
     /hosted chat[^]*no terminal on this computer[^]*does not create a tunnel/is,
     /version mismatch[^]*accepted a message[^]*do not send that message again/is,
-    /`leave` command forgets the saved connection[^]*owner removes it/,
+    /`leave` command hangs up that seat[^]*forgets the saved connection/,
   ]) assert.match(GUIDE, pattern);
 });
 

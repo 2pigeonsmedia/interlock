@@ -270,6 +270,16 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       headers: { authorization: `Bearer ${candidate.token}` },
     });
     assert.equal(headPost.status, 405, 'a skip is not a write either');
+    const leaveGet = await call(runtime, {
+      path: '/api/ai/leave',
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(leaveGet.status, 405);
+    const leaveQuery = await call(runtime, {
+      path: '/api/ai/leave?x=1', method: 'POST', body: {},
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(leaveQuery.status, 400, 'leave accepts no parameters');
     const firstHead = await call(runtime, {
       path: '/api/ai/head',
       headers: { authorization: `Bearer ${candidate.token}` },

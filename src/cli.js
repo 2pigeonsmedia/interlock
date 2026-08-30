@@ -763,7 +763,7 @@ async function runSay(args, io, dependencies = {}) {
   return EXIT_OK;
 }
 
-function runLeave(args, io, dependencies = {}) {
+async function runLeave(args, io, dependencies = {}) {
   const parsed = commandOptions('leave', args);
   if (!parsed) {
     line(io.stderr, 'interlock: usage: interlock leave --connection NAME [--json]');
@@ -775,15 +775,33 @@ function runLeave(args, io, dependencies = {}) {
     reportConnectionError(io.stderr, error, parsed.connection);
     return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
   }
-  try { selected.profiles.forgetAdmitted(selected.profile.name); }
+  const { profile, profiles } = selected;
+  const fetcher = dependencies.fetch || globalThis.fetch;
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/leave', {
+      method: 'POST', body: {}, timeoutMs: COMMAND_FETCH_TIMEOUT_MS,
+    });
+    if (!exactObject(result, ['ok', 'name', 'ended_how']) || result.ok !== true ||
+        result.name !== profile.name || result.ended_how !== 'left') {
+      throw incompatibleResponse();
+    }
+  } catch (error) {
+    if (!(error && error.status === 401 && error.exact)) {
+      reportRequestError(io.stderr, error, profile);
+      line(io.stderr, 'The local profile was kept; run leave again after Interlock is reachable.');
+      return EXIT_RUNTIME;
+    }
+  }
+  try { profiles.forgetAdmitted(profile.name); }
   catch (_) {
     line(io.stderr, 'interlock: the selected local connection could not be forgotten safely.');
     return EXIT_RUNTIME;
   }
-  if (parsed.json) line(io.stdout, JSON.stringify({ ok: true, connection: selected.profile.name }));
-  else {
-    line(io.stdout, `Forgot local connection ${selected.profile.name}.`);
-    line(io.stdout, 'The owner can revoke that seat in Settings to end its server-side access.');
+  if (parsed.json) {
+    line(io.stdout, JSON.stringify({ ok: true, connection: profile.name, ended_how: 'left' }));
+  } else {
+    line(io.stdout, `Left the room as ${profile.name}. The name is free for a later knock.`);
+    line(io.stdout, 'Stop any listener for this connection.');
   }
   return EXIT_OK;
 }

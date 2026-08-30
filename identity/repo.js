@@ -1516,7 +1516,7 @@ function assertRelationalDeltas(prev, next) {
   // both prev and next, the field-level delta must be exactly one of:
   //
   //   ∅                          no change
-  //   T1  {status, revoked_at}   revocation      (C2)
+  //   T1  {ended_how, status, revoked_at}  revocation (C2)
   //   T2  {expires_at}           seat binding    (C3)
   //   T3  {name, name_fold, name_history} display rename; returning to an
   //                                already-reserved fold omits name_history
@@ -1535,7 +1535,7 @@ function assertRelationalDeltas(prev, next) {
   //
   // The diff is taken over the UNION of both key sets, so an ADDED or REMOVED
   // key is itself a difference rather than something the comparison skips.
-  const T1_KEYS = 'revoked_at,status';        // sorted, joined — the comparison key
+  const T1_KEYS = 'ended_how,revoked_at,status'; // sorted, joined — the comparison key
   const T2_KEYS = 'expires_at';
   const T3_KEYS = 'name,name_fold,name_history';
   const T3_REUSE_KEYS = 'name,name_fold';
@@ -1565,9 +1565,10 @@ function assertRelationalDeltas(prev, next) {
       const noPriorRevocation = a.revoked_at === null || a.revoked_at === 0;
       const nowRevoked = b.status === 'revoked';
       const stamped = typeof b.revoked_at === 'number' && Number.isFinite(b.revoked_at) && b.revoked_at > 0;
-      if (wasLive && noPriorRevocation && nowRevoked && stamped) continue;   // legal T1
+      const how = b.ended_how === 'left' || b.ended_how === 'revoked';
+      if (wasLive && noPriorRevocation && nowRevoked && stamped && how) continue;   // legal T1
       throw bad('subject "' + a.id + '": the only legal status/revoked_at transition is active -> revoked with a ' +
-        'positive timestamp, set together and exactly once — revival and re-stamping are refused (I-R2.5-3a/4)');
+        'positive timestamp and ended_how left|revoked, set together and exactly once — revival and re-stamping are refused (I-R2.5-3a/4)');
     }
 
     if (shape === T2_KEYS) {

@@ -723,6 +723,23 @@ function create(config) {
     return subjects.aiSessionDiscriminator(tenant, subjectId);
   }
 
+  function endOwnSeat(meta) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('endOwnSeat(meta) requires the trusted metadata object');
+    }
+    const authorized = authorizeSeatBearer(meta, 'write', 'room:main');
+    if (!authorized || authorized.allow !== true) {
+      return Object.freeze({ ok: false, reason: 'not-authorized' });
+    }
+    const subject = subjects.get(authorized.subject_id);
+    if (!subject || subject.kind !== 'seat') {
+      return Object.freeze({ ok: false, reason: 'not-authorized' });
+    }
+    const ok = subjects.revoke(authorized.subject_id, 'left');
+    if (!ok) return Object.freeze({ ok: false, reason: 'already-ended' });
+    return Object.freeze({ ok: true, name: subject.name, ended_how: 'left' });
+  }
+
   function revokeParticipant(meta, body) {
     if (meta === null || typeof meta !== 'object') {
       reject('revokeParticipant(meta, …) requires the trusted metadata object');
@@ -851,6 +868,7 @@ function create(config) {
     inspectAiAdmission,
     aiSessionDiscriminator,
     listParticipants,
+    endOwnSeat,
     revokeParticipant,
     signOutOtherSessions,
     confirmTranscriptClear,

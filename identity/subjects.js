@@ -411,9 +411,15 @@ function list(tenant) {
 //     wrong cleanup unimplementable, not merely unchosen).
 // Two transactions here would be F-06's resurrection bug: a crash between them
 // leaves live keys hanging off a dead subject.
-function revoke(id) {
+const ENDED_HOW = Object.freeze(['left', 'revoked']);
+
+function revoke(id, endedHow) {
   // Readiness composes through repo.read() (I3): this refuses pre-init and
   // FATAL before any no-op answer could mask them.
+  const how = endedHow === undefined ? 'revoked' : endedHow;
+  if (!ENDED_HOW.includes(how)) {
+    throw new Error('subjects.revoke: ended_how must be left or revoked');
+  }
   const target = get(id);
   if (!target || target.status !== 'active') return false; // I14: the no-op path never opens a transaction
   return repo.transact(state => {
@@ -432,7 +438,11 @@ function revoke(id) {
       }
     }
     const ids = new Set(closure.map(x => x.id));
-    for (const x of closure) { x.status = 'revoked'; x.revoked_at = now; }
+    for (const x of closure) {
+      x.status = 'revoked';
+      x.revoked_at = now;
+      x.ended_how = x.id === s.id ? how : 'revoked';
+    }
     // Grants for the closure GO — keyed by subject_id alone: a dead subject
     // must leave no live keys anywhere, whatever tenant a grant row claims.
     const removedGrants = new Map();
@@ -466,6 +476,7 @@ function revoke(id) {
 }
 
 module.exports = {
+  ENDED_HOW,
   create, createPersonInDraft, createSeatInDraft, createAiSeatInDraft,
   get, byName, rename, list, revoke, fold, KINDS, validDisplayName, DISPLAY_NAME_RE,
   normalizeAiName, normalizeAiProduct, validAiProductProvenance,

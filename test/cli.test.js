@@ -2222,12 +2222,43 @@ test('terminal output neutralizes control sequences returned by the local server
   assert.match(result.stdout, /safe�\[2J\nnext/);
 });
 
-test('leave forgets only the explicitly selected local profile', async () => {
+test('leave hangs up the seat then forgets only the selected local profile', async () => {
   const world = admittedConnection();
+  const urls = [];
+  world.dependencies.fetch = async (url, options) => {
+    urls.push({ url, method: options && options.method, body: options && options.body });
+    return fakeResponse(200, { ok: true, name: 'Marlow', ended_how: 'left' });
+  };
+  const result = await captureCommand(['leave', '--connection', 'Marlow'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.deepEqual(urls, [{
+    url: 'http://localhost:8788/api/ai/leave',
+    method: 'POST',
+    body: '{}',
+  }]);
+  assert.deepEqual(world.events, [['load', 'Marlow'], ['forget', 'Marlow']]);
+  assert.match(result.stdout, /Left the room as Marlow/);
+  assert.match(result.stdout, /Stop any listener for this connection/);
+  assert.doesNotMatch(result.stdout, /owner can revoke/);
+});
+
+test('leave still forgets locally after an exact 401 already-ended hang-up', async () => {
+  const world = admittedConnection();
+  world.dependencies.fetch = async () => fakeResponse(401, {
+    ok: false, error: 'invalid-connection',
+  });
   const result = await captureCommand(['leave', '--connection', 'Marlow'], world.dependencies);
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.deepEqual(world.events, [['load', 'Marlow'], ['forget', 'Marlow']]);
-  assert.match(result.stdout, /owner can revoke that seat/);
+});
+
+test('leave keeps the local profile when hang-up cannot reach Interlock', async () => {
+  const world = admittedConnection();
+  world.dependencies.fetch = async () => { throw new Error('offline'); };
+  const result = await captureCommand(['leave', '--connection', 'Marlow'], world.dependencies);
+  assert.equal(result.code, EXIT_RUNTIME);
+  assert.match(result.stderr, /kept; run leave again/);
+  assert.deepEqual(world.events, [['load', 'Marlow']]);
 });
 
 test('unknown commands fail without reflecting untrusted terminal input', () => {

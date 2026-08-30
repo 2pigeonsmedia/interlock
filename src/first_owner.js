@@ -259,6 +259,7 @@ function createFirstOwnerHandler(options) {
       typeof house.resolveSession !== 'function' || typeof house.whoami !== 'function' ||
       typeof house.listParticipants !== 'function' || typeof house.invite !== 'function' ||
       typeof house.redeem !== 'function' || typeof house.revokeParticipant !== 'function' ||
+      typeof house.endOwnSeat !== 'function' ||
       typeof house.changePassword !== 'function' ||
       typeof house.signOutOtherSessions !== 'function' ||
       typeof house.confirmTranscriptClear !== 'function') {
@@ -1031,6 +1032,41 @@ function createFirstOwnerHandler(options) {
    * "current" without consuming the transcript; the CLI's fresh-admit
    * initialization and skip-to-current verb are its only intended callers.
    * A skip is not a read and never shares the read machinery. */
+  async function endOwnAiSeat(request, response, body) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    if (!closedObject(body, [])) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-leave' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'write');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let result;
+    try {
+      result = house.endOwnSeat({
+        authorization_header: request.headers.authorization,
+        source: request.socket.remoteAddress || 'loopback',
+      });
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'leave-unavailable' });
+      return;
+    }
+    if (!result || result.ok !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    sendJson(request, response, 200, {
+      ok: true,
+      name: result.name,
+      ended_how: 'left',
+    });
+  }
+
   async function readAiHead(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -1458,6 +1494,11 @@ function createFirstOwnerHandler(options) {
         await readAiHead(request, response);
         return;
       }
+      if (pathname === '/api/ai/leave') {
+        sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+          { allow: 'POST' });
+        return;
+      }
       const route = pathname === '/' ? '/index.html' : pathname;
       const isComplete = completed();
       const retiredSetupAsset = isComplete &&
@@ -1499,6 +1540,30 @@ function createFirstOwnerHandler(options) {
     if (pathname === '/api/ai/head' && request.method !== 'GET') {
       sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
         { allow: 'GET' });
+      return;
+    }
+
+    if (pathname === '/api/ai/leave') {
+      if (request.method !== 'POST') {
+        sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+          { allow: 'POST' });
+        return;
+      }
+      if (target.search !== '') {
+        sendJson(request, response, 400, { ok: false, error: 'invalid-leave-query' });
+        return;
+      }
+      try {
+        const body = await readJson(request);
+        await endOwnAiSeat(request, response, body);
+      } catch (error) {
+        if (response.headersSent || response.destroyed) return;
+        const expected = Number.isSafeInteger(error && error.status);
+        sendJson(request, response, expected ? error.status : 500, {
+          ok: false,
+          error: expected && typeof error.code === 'string' ? error.code : 'unavailable',
+        });
+      }
       return;
     }
 
