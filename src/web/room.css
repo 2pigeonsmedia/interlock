@@ -765,9 +765,9 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
 
 .help-page { min-height: 100vh; }
 .help-tile {
-  max-width: 80ch;
+  max-width: 100ch;
   margin: 28px auto;
-  padding: 40px 48px 48px;
+  padding: 40px 56px 48px;
   border: 1px solid var(--tile-edge);
   border-radius: 5px;
   background: var(--paper);
