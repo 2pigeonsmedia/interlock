@@ -134,7 +134,7 @@ test('install writes atomically, refuses a modified owned file, and remove is ex
     fs,
   };
   const installed = policy.installPolicy(spec);
-  assert.equal(installed.active, false);
+  assert.equal(installed.active, 'unknown');
   assert.equal(installed.restartRequired, true);
   assert.equal(fs.existsSync(path.join(tree.rulesDir, policy.OWNED_NAME)), true);
   assert.equal(fs.existsSync(path.join(tree.rulesDir, 'default.rules')), true);
@@ -203,7 +203,8 @@ test('CLI install receive, check, and remove round-trip without leaking a token'
     '--codex-home', tree.codexHome,
   ], dependencies);
   assert.equal(installed.code, EXIT_OK, installed.stderr);
-  assert.match(installed.stdout, /not active/);
+  assert.match(installed.stdout, /Syntax check only/);
+  assert.match(installed.stdout, /unknown/);
   assert.match(installed.stdout, /history --connection Marlow --drain --json/);
   assert.doesNotMatch(installed.stdout, /say/);
   assert.doesNotMatch(installed.stdout + installed.stderr, new RegExp(admitted.token.replace(/[.*]/g, '\\$&')));
@@ -214,7 +215,8 @@ test('CLI install receive, check, and remove round-trip without leaking a token'
   assert.equal(checked.code, EXIT_OK, checked.stderr);
   const payload = JSON.parse(checked.stdout);
   assert.equal(payload.ok, true);
-  assert.equal(payload.active, false);
+  assert.equal(payload.active, 'unknown');
+  assert.equal(payload.syntax_only, true);
   assert.equal(payload.restart_required, true);
   assert.doesNotMatch(checked.stdout, /token|bearer/i);
 
@@ -279,5 +281,41 @@ test('CLI check fails closed when execpolicy is unavailable', async () => {
     checkExecpolicy: () => null,
   });
   assert.equal(result.code, EXIT_RUNTIME);
-  assert.match(result.stderr, /not active/);
+  assert.match(result.stderr, /not active|unavailable|unsupported/);
+});
+
+test('Windows native paths also emit WSL argv aliases', () => {
+  const text = policy.generatePolicy({
+    connection: 'Marlow',
+    mode: 'receive',
+    nodePath: 'C:\\Users\\x\\AppData\\Local\\OpenAI\\Codex\\bin\\node.exe',
+    scriptPath: 'C:\\Users\\x\\npm\\node_modules\\interlock\\bin\\interlock.js',
+  });
+  assert.match(text, /C:\\\\Users\\\\x\\\\AppData\\\\Local\\\\OpenAI\\\\Codex\\\\bin\\\\node\.exe/);
+  assert.match(text, /\/mnt\/c\/Users\/x\/AppData\/Local\/OpenAI\/Codex\/bin\/node\.exe/);
+  assert.match(text, /\/mnt\/c\/Users\/x\/npm\/node_modules\/interlock\/bin\/interlock\.js/);
+  const patterns = [...text.matchAll(/pattern = \[\n([\s\S]*?)\n    \],/g)].map(block =>
+    block[1].trim().split('\n').map(line => JSON.parse(line.trim().replace(/,$/, ''))));
+  assert.ok(patterns.length >= 2);
+  assert.ok(patterns.some(pattern => pattern[0].startsWith('/mnt/c/')));
+  assert.ok(patterns.some(pattern => pattern[0].startsWith('C:\\')));
+});
+
+test('unpinned missing checker is unavailable not rejected', () => {
+  const tree = makeTree();
+  fs.writeFileSync(path.join(tree.root, 'codex'), 'checker');
+  assert.throws(() => policy.installPolicy({
+    connection: 'Marlow',
+    mode: 'receive',
+    nodePath: tree.nodePath,
+    scriptPath: tree.scriptPath,
+    codexHome: tree.codexHome,
+    spawnSync() {
+      const error = new Error('spawn ENOENT');
+      error.code = 'ENOENT';
+      return { error, status: null, signal: null, stdout: '', stderr: '' };
+    },
+    fs,
+  }), /execpolicy-unavailable/);
+  assert.equal(fs.existsSync(path.join(tree.rulesDir, policy.OWNED_NAME)), false);
 });

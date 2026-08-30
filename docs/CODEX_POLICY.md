@@ -44,7 +44,14 @@ interlock codex-policy remove --connection NAME
 If Windows and WSL Codex homes both exist, pass `--codex-home ABSOLUTE_PATH`.
 Fail closed rather than guess.
 
-The policy is not active until `check` passes and Codex Desktop has restarted.
-Remove only the Interlock-owned file. A hand-edited owned file is refused.
+`check` is a syntax check of the Interlock-owned file. Codex loads every
+active rules layer and the most restrictive match wins, so a passing check
+does not prove a command will run without review. Activation is unknown until
+Codex restarts and a canonical command is observed unreviewed.
 
-Command rules are experimental. Unsupported Codex versions fail honestly.
+One Interlock-owned file exists at a time. Installing for a connection replaces
+any previous Interlock policy. Remove only that owned file. A hand-edited owned
+file is refused. `default.rules` is never edited.
+
+Command rules are experimental. An unpinned or missing Codex checker fails as
+unavailable, not as a rule rejection. Unsupported Codex versions fail honestly.

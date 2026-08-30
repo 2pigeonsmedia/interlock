@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline/promises');
 
@@ -1638,18 +1639,6 @@ function parseCodexPolicyArgs(args) {
   return Object.freeze(options);
 }
 
-function defaultCheckExecpolicy(rulesPath, command) {
-  const childProcess = require('node:child_process');
-  const result = childProcess.spawnSync(
-    'codex',
-    ['execpolicy', 'check', '--rules', rulesPath, '--', ...command],
-    { encoding: 'utf8', timeout: 20_000 },
-  );
-  const text = String(result.stdout || '').trim();
-  if (!text.startsWith('{')) return null;
-  try { return JSON.parse(text); } catch (_) { return null; }
-}
-
 async function confirmParticipate(name, io, dependencies) {
   if (typeof dependencies.confirmParticipate === 'function') {
     return dependencies.confirmParticipate(name);
@@ -1711,9 +1700,13 @@ function printPolicyReceipt(stdout, receipt) {
   line(stdout, `Policy file: ${receipt.path}`);
   line(stdout, `Mode: ${receipt.mode}`);
   line(stdout, `Connection: ${receipt.connection}`);
+  if (receipt.replacedConnection) {
+    line(stdout, `Replaced Interlock policy for ${receipt.replacedConnection}. Only one connection is trusted at a time.`);
+  }
   line(stdout, `Argv: ${receipt.historyArgv.join(' ')}`);
   if (receipt.sayArgv) line(stdout, `Argv: ${receipt.sayArgv.join(' ')}`);
-  line(stdout, 'Restart Codex Desktop. The policy is not active until check passes after that restart.');
+  line(stdout, 'Syntax check only. Codex loads every rules layer and the most restrictive match wins; this does not prove the command will run without review.');
+  line(stdout, 'Restart Codex Desktop. Activation stays unknown until you observe an unreviewed canonical command after that restart.');
   line(stdout, `Remove with: ${receipt.removeCommand}`);
 }
 
@@ -1743,12 +1736,14 @@ async function runCodexPolicy(args, io, dependencies = {}) {
     codexHome: parsed.codexHome,
     env: dependencies.env || process.env,
     platform: dependencies.platform || process.platform,
-    homedir: dependencies.homedir,
+    homedir: dependencies.homedir || os.homedir(),
     execPath: dependencies.execPath || process.execPath,
     fs: dependencies.fs || fs,
     nodePath: dependencies.codexNodePath,
     scriptPath: dependencies.interlockScriptPath,
-    checkExecpolicy: dependencies.checkExecpolicy || defaultCheckExecpolicy,
+    checkerPath: dependencies.codexCheckerPath,
+    spawnSync: dependencies.spawnSync,
+    checkExecpolicy: dependencies.checkExecpolicy,
   };
   try {
     if (parsed.action === 'install') {
@@ -1765,13 +1760,14 @@ async function runCodexPolicy(args, io, dependencies = {}) {
           mode: receipt.mode,
           connection: receipt.connection,
           restart_required: true,
-          active: false,
+          active: 'unknown',
+          syntax_only: true,
         }));
         return EXIT_OK;
       }
       line(io.stdout, `Policy file: ${receipt.path}`);
       line(io.stdout, `Mode: ${receipt.mode}`);
-      line(io.stdout, 'Restart Codex Desktop. The policy is not active until Codex has restarted and this check still passes.');
+      line(io.stdout, 'Syntax check only. Activation is unknown until Codex restarts and a canonical command runs without review.');
       return EXIT_OK;
     }
     const removed = policy.removePolicy(shared);
