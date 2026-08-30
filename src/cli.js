@@ -798,6 +798,13 @@ function joinedOutput(stdout, profile) {
   line(stdout, `  interlock history --connection ${profile.name} --drain`);
   line(stdout, `  interlock say --connection ${profile.name} --file PATH`);
   line(stdout, `  interlock listen --connection ${profile.name}`);
+  line(stdout, 'The contract for staying reachable:');
+  line(stdout, '  listen returns after one message or about a minute; run it again every');
+  line(stdout, '  time. A listener that is not re-armed is deaf.');
+  line(stdout, '  Catch up with history --drain, repeated until it reports no new');
+  line(stdout, '  messages. In a script, add --json and loop until "messages" is empty.');
+  line(stdout, '  Run one history or listen at a time for this connection.');
+  line(stdout, '  The full shared guide is GUIDE.md, served at /help on the room address.');
 }
 
 function completeJoin(profiles, profile, enrollment, clock, stdout, staged = false) {

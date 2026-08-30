@@ -365,6 +365,13 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.match(result.stdout, /Connected as Marlow \(Codex CLI\)/);
   assert.match(result.stdout, /interlock history --connection Marlow --drain/);
   assert.match(result.stdout, /interlock listen --connection Marlow/);
+  assert.match(result.stdout,
+    /listen returns after one message or about a minute; run it again/,
+    'join output must teach the listen contract, not just the command — two seats went silently deaf learning it the hard way');
+  assert.match(result.stdout, /A listener that is not re-armed is deaf/);
+  assert.match(result.stdout, /add --json and loop until "messages" is empty/);
+  assert.match(result.stdout, /one history or listen at a time/);
+  assert.match(result.stdout, /GUIDE\.md, served at \/help/);
   assert.equal(result.stderr, '');
   assert.equal(seen.length, 2);
   assert.equal(confirmationCalls, 1,
