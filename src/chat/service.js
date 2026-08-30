@@ -372,8 +372,18 @@ function createChatService(options) {
     return await store.head();
   }
 
+  async function peekBefore(query) {
+    requireOpen();
+    return await store.peekBefore(query);
+  }
+
+  async function peekFind(query) {
+    requireOpen();
+    return await store.peekFind(query);
+  }
+
   return Object.freeze({
-    append, read, readForSeat, wait, waitForSeat, acknowledge, head,
+    append, read, readForSeat, wait, waitForSeat, acknowledge, peekBefore, peekFind, head,
     touchParticipant, listParticipants, readDeliveryChanges, transcriptCleared, close,
   });
 }

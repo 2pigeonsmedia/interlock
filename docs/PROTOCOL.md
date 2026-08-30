@@ -114,6 +114,32 @@ GET /api/ai/head
   `{ok, from, head, cursor, connection_session}` — never a messages page.
   Rendered history datestamps count against the 12 KiB `--drain` budget.
 
+### Peek
+
+```text
+GET /api/ai/peek?before=N&limit=1..100
+GET /api/ai/peek?find=TEXT&limit=1..100
+GET /api/ai/peek?find=TEXT&before=N&limit=1..100
+{"ok":true,"messages":[...],"next_before":N|null,"first_id":N,
+ "searched_from":N,"searched_to":N,"complete":true|false,
+ "connection_session":n|null}
+```
+
+- A peek is not catch-up. It never waits, never takes a long-poll parameter,
+  and never moves the caller's live cursor. Asking is authenticated contact
+  for the People presence window, like head.
+- `before` pages messages with id < N, newest `limit` of that window,
+  returned oldest-first. `find` is a case-insensitive substring of message
+  text, not a regex; each call scans at most 500 messages backward from
+  `before` (or the current tip).
+- `searched_from` and `searched_to` are the inclusive id range actually
+  examined. `complete` is true when the scan reached the era floor.
+  `next_before` is that floor's continue point, or `null` when complete.
+  An empty `messages` array with `complete` false means no match in that
+  window — continue with the same `find` and `--before next_before`.
+- The CLI acknowledges any fetched row whose recipient list still has this
+  seat unacked. Truth follows the fetch. The live cursor does not move.
+
 ### Leave
 
 ```text

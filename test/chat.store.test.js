@@ -532,3 +532,37 @@ test('M1 — cursors beyond the high-water mark refuse, including on an empty st
   assert.equal(recovered.messages.length, 1);
   await again.close();
 });
+
+test('peekBefore pages newest messages below before, oldest-first, with coverage', async () => {
+  const store = openStore({ dataDir: freshDir() });
+  for (const text of ['a', 'b', 'c', 'd', 'e']) await store.append({ text }, ACTOR);
+  const page = await store.peekBefore({ before: 4, limit: 2 });
+  assert.deepEqual(page.messages.map(row => row.id), [2, 3]);
+  assert.equal(page.next_before, 2);
+  assert.equal(page.searched_from, 2);
+  assert.equal(page.searched_to, 3);
+  assert.equal(page.complete, false);
+  const rest = await store.peekBefore({ before: 2, limit: 10 });
+  assert.deepEqual(rest.messages.map(row => row.id), [1]);
+  assert.equal(rest.complete, true);
+  assert.equal(rest.next_before, null);
+  await store.close();
+});
+
+test('peekFind reports the scanned window so empty is not a silent miss', async () => {
+  const store = openStore({ dataDir: freshDir() });
+  await store.append({ text: 'alpha' }, ACTOR);
+  await store.append({ text: 'beta' }, ACTOR);
+  await store.append({ text: 'ALPHA two' }, ACTOR);
+  await store.append({ text: 'gamma' }, ACTOR);
+  const hits = await store.peekFind({ find: 'alpha', limit: 10, before: 5 });
+  assert.deepEqual(hits.messages.map(row => row.id), [1, 3]);
+  assert.equal(hits.complete, true);
+  const miss = await store.peekFind({ find: 'delta', limit: 10, before: 5 });
+  assert.equal(miss.messages.length, 0);
+  assert.equal(miss.complete, true);
+  assert.equal(miss.searched_from, 1);
+  assert.equal(miss.searched_to, 4);
+  assert.equal(miss.next_before, null);
+  await store.close();
+});

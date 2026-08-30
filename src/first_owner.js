@@ -234,6 +234,32 @@ function messageQuery(target) {
   return Object.freeze({ after, limit, wait: waitRaw === '1' });
 }
 
+function peekQuery(target) {
+  const entries = [...target.searchParams.entries()];
+  const names = entries.map(([key]) => key).sort();
+  const limitRaw = target.searchParams.get('limit');
+  if (!/^[1-9][0-9]*$/.test(limitRaw || '')) return null;
+  const limit = Number(limitRaw);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > CHAT_READ_LIMIT) return null;
+  const find = target.searchParams.get('find');
+  const beforeRaw = target.searchParams.get('before');
+  if (find !== null) {
+    if (find.length < 1 || find.length > 200 || find.includes('\0')) return null;
+    if (beforeRaw === null) {
+      if (names.join(',') !== 'find,limit') return null;
+      return Object.freeze({ find, before: null, limit });
+    }
+    if (names.join(',') !== 'before,find,limit' || !/^[1-9][0-9]*$/.test(beforeRaw)) return null;
+    const before = Number(beforeRaw);
+    if (!Number.isSafeInteger(before) || before < 1) return null;
+    return Object.freeze({ find, before, limit });
+  }
+  if (names.join(',') !== 'before,limit' || !/^[1-9][0-9]*$/.test(beforeRaw || '')) return null;
+  const before = Number(beforeRaw);
+  if (!Number.isSafeInteger(before) || before < 1) return null;
+  return Object.freeze({ find: null, before, limit });
+}
+
 function deliveryQuery(target) {
   const entries = [...target.searchParams.entries()];
   if (entries.length !== 2 || ['after', 'limit'].some(key =>
@@ -278,7 +304,8 @@ function createFirstOwnerHandler(options) {
       typeof chat.readForSeat !== 'function' || typeof chat.wait !== 'function' ||
       typeof chat.waitForSeat !== 'function' || typeof chat.acknowledge !== 'function' ||
       typeof chat.touchParticipant !== 'function' || typeof chat.listParticipants !== 'function' ||
-      typeof chat.readDeliveryChanges !== 'function' || typeof chat.transcriptCleared !== 'function') {
+      typeof chat.readDeliveryChanges !== 'function' || typeof chat.transcriptCleared !== 'function' ||
+      typeof chat.peekBefore !== 'function' || typeof chat.peekFind !== 'function') {
     throw new TypeError('first owner transport: a complete chat service is required');
   }
   if (!admission || typeof admission.knock !== 'function' ||
@@ -1027,6 +1054,60 @@ function createFirstOwnerHandler(options) {
     });
   }
 
+  async function readAiPeek(request, response, target) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const query = peekQuery(target);
+    if (!query) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-peek-query' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let connectionSession;
+    let page;
+    try {
+      const discriminator = house.aiSessionDiscriminator(authorized.subject_id);
+      if (!closedObject(discriminator, ['session']) ||
+          !(discriminator.session === null ||
+            (Number.isSafeInteger(discriminator.session) && discriminator.session > 0))) {
+        throw new Error('invalid session discriminator');
+      }
+      connectionSession = discriminator.session;
+      await chat.touchParticipant(authorized.subject_id, Date.now());
+      if (query.find !== null) {
+        let before = query.before;
+        if (before === null) {
+          const mark = await chat.head();
+          before = Math.max(1, mark.head + 1);
+        }
+        page = await chat.peekFind({
+          find: query.find, before, limit: query.limit,
+        });
+      } else {
+        page = await chat.peekBefore({ before: query.before, limit: query.limit });
+      }
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    sendJson(request, response, 200, {
+      ok: true,
+      messages: page.messages,
+      next_before: page.next_before,
+      first_id: page.first_id,
+      searched_from: page.searched_from,
+      searched_to: page.searched_to,
+      complete: page.complete,
+      connection_session: connectionSession,
+    });
+  }
+
   /* The durable high-water mark for an authenticated seat: zero messages,
    * zero receipts, no wait, no cursor effect. Exists so a seat can learn
    * "current" without consuming the transcript; the CLI's fresh-admit
@@ -1481,6 +1562,15 @@ function createFirstOwnerHandler(options) {
         await readAiMessages(request, response, target);
         return;
       }
+      if (pathname === '/api/ai/peek') {
+        if (request.method !== 'GET') {
+          sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+            { allow: 'GET' });
+          return;
+        }
+        await readAiPeek(request, response, target);
+        return;
+      }
       if (pathname === '/api/ai/head') {
         if (request.method !== 'GET') {
           sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
@@ -1537,7 +1627,8 @@ function createFirstOwnerHandler(options) {
       return;
     }
 
-    if (pathname === '/api/ai/head' && request.method !== 'GET') {
+    if ((pathname === '/api/ai/head' || pathname === '/api/ai/peek') &&
+        request.method !== 'GET') {
       sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
         { allow: 'GET' });
       return;

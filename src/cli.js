@@ -24,6 +24,7 @@ const LISTEN_FETCH_TIMEOUT_MS = 60_000;
 const HISTORY_LIMIT = 1;
 const HISTORY_DRAIN_BYTES = 12 * 1024;
 const HISTORY_DRAIN_MESSAGES = 100;
+const HISTORY_PEEK_LIMIT = 100;
 
 const HELP = `Interlock ${packageJson.version}
 
@@ -37,7 +38,7 @@ Usage:
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
   interlock join
-  interlock history --connection NAME [--drain | --skip-to-current] [--json]
+  interlock history --connection NAME [--drain | --skip-to-current | --before N | --find TEXT] [--json]
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
   interlock listen --connection NAME [--json]
@@ -62,7 +63,8 @@ function refuseSay(stderr) {
 
 function commandOptions(command, args) {
   const options = {
-    connection: null, drain: false, skipToCurrent: false, json: false, source: null,
+    connection: null, drain: false, skipToCurrent: false, before: null, find: null,
+    json: false, source: null,
   };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
@@ -74,15 +76,38 @@ function commandOptions(command, args) {
       continue;
     }
     if (command === 'history' && flag === '--drain') {
-      if (seen.has(flag) || options.skipToCurrent) return null;
+      if (seen.has(flag) || options.skipToCurrent || options.before !== null ||
+          options.find !== null) return null;
       seen.add(flag);
       options.drain = true;
       continue;
     }
     if (command === 'history' && flag === '--skip-to-current') {
-      if (seen.has(flag) || options.drain) return null;
+      if (seen.has(flag) || options.drain || options.before !== null ||
+          options.find !== null) return null;
       seen.add(flag);
       options.skipToCurrent = true;
+      continue;
+    }
+    if (command === 'history' && flag === '--before') {
+      if (seen.has(flag) || options.drain || options.skipToCurrent ||
+          typeof args[index + 1] !== 'string' || !/^[1-9][0-9]*$/.test(args[index + 1])) {
+        return null;
+      }
+      seen.add(flag);
+      options.before = Number(args[index + 1]);
+      index += 1;
+      continue;
+    }
+    if (command === 'history' && flag === '--find') {
+      if (seen.has(flag) || options.drain || options.skipToCurrent ||
+          typeof args[index + 1] !== 'string' || args[index + 1].length < 1 ||
+          args[index + 1].length > 200 || args[index + 1].startsWith('-')) {
+        return null;
+      }
+      seen.add(flag);
+      options.find = args[index + 1];
+      index += 1;
       continue;
     }
     if (flag === '--connection') {
@@ -668,10 +693,82 @@ async function executeSkipToCurrent(parsed, profile, profiles, io, dependencies)
   return EXIT_OK;
 }
 
+function validPeek(result) {
+  const page = exactObject(result, [
+    'ok', 'messages', 'next_before', 'first_id', 'searched_from', 'searched_to',
+    'complete', 'connection_session',
+  ]);
+  if (!page || page.ok !== true || !Array.isArray(page.messages) ||
+      page.messages.length > HISTORY_PEEK_LIMIT ||
+      !Number.isSafeInteger(page.first_id) || page.first_id < 1 ||
+      !Number.isSafeInteger(page.searched_from) ||
+      !Number.isSafeInteger(page.searched_to) ||
+      typeof page.complete !== 'boolean' ||
+      !(page.next_before === null ||
+        (Number.isSafeInteger(page.next_before) && page.next_before >= 1)) ||
+      page.complete !== (page.next_before === null) ||
+      !(page.connection_session === null ||
+        (Number.isSafeInteger(page.connection_session) && page.connection_session > 0)) ||
+      !page.messages.every(validPublicMessage)) return false;
+  return true;
+}
+
+function peekPath(parsed) {
+  const params = [];
+  if (parsed.find !== null) params.push('find=' + encodeURIComponent(parsed.find));
+  if (parsed.before !== null) params.push('before=' + parsed.before);
+  params.push('limit=' + HISTORY_PEEK_LIMIT);
+  return '/api/ai/peek?' + params.join('&');
+}
+
+async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
+  const fetcher = dependencies.fetch || globalThis.fetch;
+  let page;
+  try {
+    page = await localRequest(fetcher, profile, peekPath(parsed), {
+      timeoutMs: COMMAND_FETCH_TIMEOUT_MS,
+    });
+    if (!validPeek(page)) throw incompatibleResponse();
+  } catch (error) {
+    reportRequestError(io.stderr, error, profile);
+    return EXIT_RUNTIME;
+  }
+
+  const receiptIds = page.messages.filter(message => message.delivery.some(delivery =>
+    delivery.name === profile.name && delivery.session === page.connection_session &&
+    delivery.acknowledged_at === null)).map(message => message.id);
+  if (receiptIds.length > 0) {
+    try {
+      const receipt = await localRequest(fetcher, profile, '/api/ai/receipts', {
+        method: 'POST', body: { message_ids: receiptIds }, timeoutMs: COMMAND_FETCH_TIMEOUT_MS,
+      });
+      if (!exactObject(receipt, ['ok', 'acknowledged', 'added']) ||
+          receipt.acknowledged !== receiptIds.length || !Number.isSafeInteger(receipt.added)) {
+        throw new Error('malformed receipt');
+      }
+    } catch (_) {
+      if (parsed.json) line(io.stdout, JSON.stringify(page));
+      else renderMessages(io.stdout, page.messages);
+      line(io.stderr, 'interlock: messages were received, but delivery could not be confirmed; run the command again.');
+      return EXIT_RUNTIME;
+    }
+  }
+
+  if (parsed.json) {
+    line(io.stdout, JSON.stringify(page));
+    return EXIT_OK;
+  }
+  if (page.messages.length > 0) renderMessages(io.stdout, page.messages);
+  const range = `Searched #${page.searched_from}–#${page.searched_to}.`;
+  if (page.complete) line(io.stdout, `${range} Complete.`);
+  else line(io.stdout, `${range} Continue with --before ${page.next_before}.`);
+  return EXIT_OK;
+}
+
 async function runReadCommand(command, args, io, dependencies = {}) {
   const parsed = commandOptions(command, args);
   if (!parsed) {
-    line(io.stderr, `interlock: usage: interlock ${command} --connection NAME${command === 'history' ? ' [--drain | --skip-to-current]' : ''} [--json]`);
+    line(io.stderr, `interlock: usage: interlock ${command} --connection NAME${command === 'history' ? ' [--drain | --skip-to-current | --before N | --find TEXT]' : ''} [--json]`);
     return EXIT_USAGE;
   }
   let selected;
@@ -704,7 +801,9 @@ async function runReadCommand(command, args, io, dependencies = {}) {
       ? await executeSkipToCurrent(parsed, profile, profiles, io, dependencies)
       : command === 'history' && parsed.drain
         ? await executeDrainHistory(parsed, profile, profiles, io, dependencies)
-        : await executeReadCommand(command, parsed, profile, profiles, io, dependencies);
+        : command === 'history' && (parsed.before !== null || parsed.find !== null)
+          ? await executePeekHistory(parsed, profile, profiles, io, dependencies)
+          : await executeReadCommand(command, parsed, profile, profiles, io, dependencies);
   } finally {
     try { readLease.release(); }
     catch (_) {

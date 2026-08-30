@@ -270,6 +270,11 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       headers: { authorization: `Bearer ${candidate.token}` },
     });
     assert.equal(headPost.status, 405, 'a skip is not a write either');
+    const peekWait = await call(runtime, {
+      path: '/api/ai/peek?before=1&limit=1&wait=1',
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(peekWait.status, 400, 'peek never waits');
     const leaveGet = await call(runtime, {
       path: '/api/ai/leave',
       headers: { authorization: `Bearer ${candidate.token}` },

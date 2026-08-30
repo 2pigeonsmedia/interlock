@@ -1879,6 +1879,8 @@ test('history --drain emits one JSON batch and refuses the flag on other command
     ['history', '--connection', 'Marlow', '--drain', '--drain'],
     ['history', '--connection', 'Marlow', '--drain', '--skip-to-current'],
     ['listen', '--connection', 'Marlow', '--skip-to-current'],
+    ['history', '--connection', 'Marlow', '--drain', '--before', '3'],
+    ['history', '--connection', 'Marlow', '--skip-to-current', '--find', 'alpha'],
   ]) {
     const refused = await captureCommand(argv, world.dependencies);
     assert.equal(refused.code, EXIT_USAGE);
@@ -1927,6 +1929,63 @@ test('history --skip-to-current JSON names the gap and never shares the messages
     ['load', 'Marlow'],
     ['cursor', 'Marlow', world.profile.request_id, 800],
   ]);
+});
+
+function peekEnvelope(overrides = {}) {
+  return Object.assign({
+    ok: true,
+    messages: [publicMessage({ id: 2, text: 'older', delivery: [] })],
+    next_before: 2,
+    first_id: 1,
+    searched_from: 2,
+    searched_to: 5,
+    complete: false,
+    connection_session: null,
+  }, overrides);
+}
+
+test('history --before peeks without moving the live cursor', async () => {
+  const world = admittedConnection({ cursor: 40 });
+  const urls = [];
+  world.dependencies.fetch = async (url, options) => {
+    urls.push({ url, method: options && options.method, body: options && options.body });
+    return fakeResponse(200, peekEnvelope());
+  };
+  const result = await captureCommand(
+    ['history', '--connection', 'Marlow', '--before', '6'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /\[2\] Ana/);
+  assert.match(result.stdout, /Searched #2–#5\. Continue with --before 2/);
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0].url, 'http://localhost:8788/api/ai/peek?before=6&limit=100');
+  assert.deepEqual(world.events, [['load', 'Marlow']]);
+});
+
+test('history --find acks fetched addressed rows and reports coverage', async () => {
+  const world = admittedConnection({ cursor: 40 });
+  const urls = [];
+  world.dependencies.fetch = async (url, options) => {
+    urls.push({ url, body: options && options.body });
+    if (String(url).includes('/api/ai/receipts')) {
+      return fakeResponse(200, { ok: true, acknowledged: 1, added: 1 });
+    }
+    return fakeResponse(200, peekEnvelope({
+      messages: [publicMessage({ id: 3, text: 'needle here' })],
+      searched_from: 1,
+      searched_to: 9,
+      next_before: null,
+      complete: true,
+    }));
+  };
+  const result = await captureCommand(
+    ['history', '--connection', 'Marlow', '--find', 'needle'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /needle here/);
+  assert.match(result.stdout, /Searched #1–#9\. Complete/);
+  assert.equal(urls[0].url, 'http://localhost:8788/api/ai/peek?find=needle&limit=100');
+  assert.equal(urls[1].url, 'http://localhost:8788/api/ai/receipts');
+  assert.deepEqual(JSON.parse(urls[1].body), { message_ids: [3] });
+  assert.deepEqual(world.events, [['load', 'Marlow']]);
 });
 
 test('history --skip-to-current does not move backward when the tip is behind the cursor', async () => {

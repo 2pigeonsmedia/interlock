@@ -30,6 +30,8 @@ const LEGACY_SCHEMA = 1;
 const MAX_TEXT_BYTES = 32 * 1024;
 const MAX_BYLINE_BYTES = 256;
 const MAX_READ_LIMIT = 100;
+const PEEK_SCAN_LIMIT = 500;
+const PEEK_FIND_MAX = 200;
 const KINDS = Object.freeze(['person', 'seat']);
 const META_KEYS = Object.freeze(['schema', 'first_id', 'next_id']);
 const LEGACY_MESSAGE_KEYS = Object.freeze(['id', 'ts', 'subject_id', 'byline', 'kind', 'text']);
@@ -595,6 +597,86 @@ function openStore(opts) {
     });
   }
 
+  function peekResult(newestFirst, searchedFrom, searchedTo, complete) {
+    const oldestFirst = newestFirst.slice().reverse();
+    return Object.freeze({
+      messages: Object.freeze(oldestFirst),
+      next_before: complete ? null : searchedFrom,
+      first_id: meta.first_id,
+      searched_from: searchedFrom,
+      searched_to: searchedTo,
+      complete,
+    });
+  }
+
+  /* Bounded look-back: newest `limit` messages with id < before, returned
+   * oldest-first. Does not advance any client cursor. */
+  function peekBefore(query) {
+    return exclusive(() => {
+      requireOpen();
+      assertLiveLog();
+      assertLiveReceipts();
+      assertLiveActivity();
+      const q = closedObject(query, ['before', 'limit']);
+      if (!q || !Number.isSafeInteger(q.before) || q.before < 1 ||
+          !Number.isSafeInteger(q.limit) || q.limit < 1 || q.limit > MAX_READ_LIMIT) {
+        fail('invalid-read');
+      }
+      const high = Math.min(q.before - 1, highWater());
+      if (high < meta.first_id) {
+        return peekResult([], meta.first_id, high, true);
+      }
+      const selected = [];
+      let index = messages.length - 1;
+      while (index >= 0 && messages[index].id > high) index -= 1;
+      while (index >= 0 && selected.length < q.limit) {
+        selected.push(publicMessage(messages[index], receipts, aiSessionDiscriminator));
+        index -= 1;
+      }
+      const complete = index < 0;
+      const searchedFrom = selected.length > 0 ? selected[selected.length - 1].id : meta.first_id;
+      return peekResult(selected, searchedFrom, high, complete);
+    });
+  }
+
+  function peekFind(query) {
+    return exclusive(() => {
+      requireOpen();
+      assertLiveLog();
+      assertLiveReceipts();
+      assertLiveActivity();
+      const q = closedObject(query, ['find', 'limit', 'before']);
+      if (!q || typeof q.find !== 'string' || q.find.length < 1 ||
+          q.find.length > PEEK_FIND_MAX || q.find.includes('\0') ||
+          !Number.isSafeInteger(q.limit) || q.limit < 1 || q.limit > MAX_READ_LIMIT ||
+          !Number.isSafeInteger(q.before) || q.before < 1) {
+        fail('invalid-read');
+      }
+      const high = Math.min(q.before - 1, highWater());
+      if (high < meta.first_id) {
+        return peekResult([], meta.first_id, high, true);
+      }
+      const needle = q.find.toLowerCase();
+      const selected = [];
+      let scanned = 0;
+      let index = messages.length - 1;
+      while (index >= 0 && messages[index].id > high) index -= 1;
+      let searchedFrom = high;
+      while (index >= 0 && scanned < PEEK_SCAN_LIMIT) {
+        const message = messages[index];
+        searchedFrom = message.id;
+        scanned += 1;
+        if (String(message.text).toLowerCase().includes(needle) &&
+            selected.length < q.limit) {
+          selected.push(publicMessage(message, receipts, aiSessionDiscriminator));
+        }
+        index -= 1;
+      }
+      const complete = index < 0;
+      return peekResult(selected, searchedFrom, high, complete);
+    });
+  }
+
   function read(query) {
     return exclusive(() => {
       requireOpen();
@@ -830,7 +912,7 @@ function openStore(opts) {
   }
 
   return Object.freeze({
-    append, read, head, snapshot, clear, acknowledge, touch, participantState, deliveryChanges, close,
+    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch, participantState, deliveryChanges, close,
   });
 }
 
@@ -839,5 +921,7 @@ module.exports = Object.freeze({
   SCHEMA,
   MAX_TEXT_BYTES,
   MAX_READ_LIMIT,
+  PEEK_SCAN_LIMIT,
+  PEEK_FIND_MAX,
   DIRECTORY_SYNC_SUPPORTED,
 });
