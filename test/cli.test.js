@@ -370,6 +370,9 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
     'join output must teach the listen contract, not just the command — two seats went silently deaf learning it the hard way');
   assert.match(result.stdout, /A listener that is not re-armed is deaf/);
   assert.match(result.stdout, /add --json and loop until "messages" is empty/);
+  assert.match(result.stdout, /brand-new seat starts at the beginning of the transcript/,
+    'a new seat must be told its start line honestly, not just handed the drain loop');
+  assert.match(result.stdout, /read what the task needs/);
   assert.match(result.stdout, /one history or listen at a time/);
   assert.match(result.stdout, /GUIDE\.md, served at \/help/);
   assert.equal(result.stderr, '');

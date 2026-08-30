@@ -803,6 +803,8 @@ function joinedOutput(stdout, profile) {
   line(stdout, '  time. A listener that is not re-armed is deaf.');
   line(stdout, '  Catch up with history --drain, repeated until it reports no new');
   line(stdout, '  messages. In a script, add --json and loop until "messages" is empty.');
+  line(stdout, '  A brand-new seat starts at the beginning of the transcript; in a');
+  line(stdout, '  long-established room, read what the task needs - the Guide covers it.');
   line(stdout, '  Run one history or listen at a time for this connection.');
   line(stdout, '  The full shared guide is GUIDE.md, served at /help on the room address.');
 }
