@@ -65,6 +65,7 @@ function createChatService(options) {
   const input = closedObject(options, OPTION_KEYS);
   const store = input && input.store;
   if (!store || typeof store.append !== 'function' || typeof store.read !== 'function' ||
+      typeof store.head !== 'function' ||
       typeof store.acknowledge !== 'function' || typeof store.close !== 'function' ||
       typeof store.touch !== 'function' || typeof store.participantState !== 'function' ||
       typeof store.deliveryChanges !== 'function' ||
@@ -364,8 +365,15 @@ function createChatService(options) {
     await store.close();
   }
 
+  /* The durable high-water mark: zero messages, zero receipts, no wait, no
+   * cursor effect. A skip is not a read; this is the only surface it uses. */
+  async function head() {
+    requireOpen();
+    return await store.head();
+  }
+
   return Object.freeze({
-    append, read, readForSeat, wait, waitForSeat, acknowledge,
+    append, read, readForSeat, wait, waitForSeat, acknowledge, head,
     touchParticipant, listParticipants, readDeliveryChanges, transcriptCleared, close,
   });
 }

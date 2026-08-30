@@ -581,6 +581,20 @@ function openStore(opts) {
     });
   }
 
+  /* The durable high-water mark, served without messages, receipts, waits, or
+   * any cursor effect. Exists so a seat can learn "current" without consuming
+   * the transcript (the skip-to-current contract): a skip is not a read and
+   * must never share a read's machinery. */
+  function head() {
+    return exclusive(() => {
+      requireOpen();
+      assertLiveLog();
+      assertLiveReceipts();
+      assertLiveActivity();
+      return Object.freeze({ head: highWater(), first_id: meta.first_id });
+    });
+  }
+
   function read(query) {
     return exclusive(() => {
       requireOpen();
@@ -816,7 +830,7 @@ function openStore(opts) {
   }
 
   return Object.freeze({
-    append, read, snapshot, clear, acknowledge, touch, participantState, deliveryChanges, close,
+    append, read, head, snapshot, clear, acknowledge, touch, participantState, deliveryChanges, close,
   });
 }
 

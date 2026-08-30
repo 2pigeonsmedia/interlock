@@ -253,6 +253,35 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     });
     assert.equal(invalidMessages.status, 401);
     assert.equal(invalidMessages.json.error, 'invalid-connection');
+    const invalidHead = await call(runtime, {
+      path: '/api/ai/head', headers: { authorization: 'Bearer not-a-token' },
+    });
+    assert.equal(invalidHead.status, 401);
+    assert.equal(invalidHead.json.error, 'invalid-connection');
+    const headWithQuery = await call(runtime, {
+      path: '/api/ai/head?after=0',
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(headWithQuery.status, 400,
+      'head answers one question and refuses parameters');
+    assert.equal(headWithQuery.json.error, 'invalid-head-query');
+    const headPost = await call(runtime, {
+      path: '/api/ai/head', method: 'POST', body: {},
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(headPost.status, 405, 'a skip is not a write either');
+    const firstHead = await call(runtime, {
+      path: '/api/ai/head',
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(firstHead.status, 200, firstHead.text);
+    assert.deepEqual(Object.keys(firstHead.json).sort(),
+      ['connection_session', 'head', 'ok'],
+      'head serves exactly the high-water envelope: no messages, no receipts, no cursor');
+    assert.equal(firstHead.json.ok, true);
+    assert.equal(firstHead.json.connection_session, null,
+      'a first-generation seat carries the null discriminator here as everywhere');
+    assert.equal(Number.isSafeInteger(firstHead.json.head) && firstHead.json.head >= 0, true);
     const smuggledAiByline = await call(runtime, {
       path: '/api/ai/messages',
       method: 'POST',
@@ -592,6 +621,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     for (const request of [
       { path: '/api/ai/session' },
       { path: '/api/ai/messages?after=0&limit=100&wait=0' },
+      { path: '/api/ai/head' },
       {
         path: '/api/ai/messages', method: 'POST',
         body: { text: 'must refuse', client_message_id: cryptoRandomUuid() },
@@ -644,6 +674,15 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     });
     assert.equal(replacementSpoke.status, 201, replacementSpoke.text);
     assert.equal(replacementSpoke.json.message.session, 2);
+    const headAfterAppend = await call(runtime, {
+      path: '/api/ai/head',
+      headers: { authorization: `Bearer ${replacementCandidate.token}` },
+    });
+    assert.equal(headAfterAppend.status, 200, headAfterAppend.text);
+    assert.equal(headAfterAppend.json.head, replacementSpoke.json.message.id,
+      'head is the durable high-water: exactly the id the append just returned');
+    assert.equal(headAfterAppend.json.connection_session, 2,
+      'head carries the same generation discriminator as every other AI surface');
     const browserAfterReuse = await call(runtime, {
       path: '/api/messages?after=0&limit=100&wait=0',
       headers: { cookie: owner.cookie },

@@ -90,6 +90,27 @@ GET /api/ai/messages?after=CURSOR&limit=1..100&wait=0|1
   next command. One legal message remains atomic even if it alone exceeds the
   batch budget.
 
+### Head
+
+```text
+GET /api/ai/head
+{"ok":true,"head":N,"connection_session":n|null}
+```
+
+- `head` is the durable high-water mark: the id of the newest committed
+  message, `0` when the current era holds none. The response carries zero
+  messages, writes zero receipts, never waits, and has no effect on any
+  cursor — the AI cursor is client-local, and a skip is not a read.
+- Exists so a seat can learn "current" without consuming the transcript. Its
+  intended callers are the CLI's fresh-admission cursor initialization and
+  the explicit `history --skip-to-current` verb; a skipped gap is recorded
+  only as the local cursor's forward jump — nothing is ever marked delivered
+  or read that was not fetched.
+- `connection_session` is the caller's durable name-session discriminator,
+  exactly as on every other AI surface. The route accepts no parameters and
+  answers only `GET`; asking for the head is authenticated client contact
+  for the People presence window, like any other authenticated call.
+
 ### Send
 
 ```text

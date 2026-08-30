@@ -1026,6 +1026,46 @@ function createFirstOwnerHandler(options) {
     });
   }
 
+  /* The durable high-water mark for an authenticated seat: zero messages,
+   * zero receipts, no wait, no cursor effect. Exists so a seat can learn
+   * "current" without consuming the transcript; the CLI's fresh-admit
+   * initialization and skip-to-current verb are its only intended callers.
+   * A skip is not a read and never shares the read machinery. */
+  async function readAiHead(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let connectionSession;
+    let mark;
+    try {
+      const discriminator = house.aiSessionDiscriminator(authorized.subject_id);
+      if (!closedObject(discriminator, ['session']) ||
+          !(discriminator.session === null ||
+            (Number.isSafeInteger(discriminator.session) && discriminator.session > 0))) {
+        throw new Error('invalid session discriminator');
+      }
+      connectionSession = discriminator.session;
+      // Asking for the head is authenticated client contact, exactly like
+      // opening history or listen.
+      await chat.touchParticipant(authorized.subject_id, Date.now());
+      mark = await chat.head();
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    sendJson(request, response, 200, {
+      ok: true,
+      head: mark.head,
+      connection_session: connectionSession,
+    });
+  }
+
   async function readAiMessages(request, response, target) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -1405,6 +1445,19 @@ function createFirstOwnerHandler(options) {
         await readAiMessages(request, response, target);
         return;
       }
+      if (pathname === '/api/ai/head') {
+        if (request.method !== 'GET') {
+          sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+            { allow: 'GET' });
+          return;
+        }
+        if (target.search !== '') {
+          sendJson(request, response, 400, { ok: false, error: 'invalid-head-query' });
+          return;
+        }
+        await readAiHead(request, response);
+        return;
+      }
       const route = pathname === '/' ? '/index.html' : pathname;
       const isComplete = completed();
       const retiredSetupAsset = isComplete &&
@@ -1440,6 +1493,12 @@ function createFirstOwnerHandler(options) {
           error: expected && typeof error.code === 'string' ? error.code : 'unavailable',
         });
       }
+      return;
+    }
+
+    if (pathname === '/api/ai/head' && request.method !== 'GET') {
+      sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+        { allow: 'GET' });
       return;
     }
 
