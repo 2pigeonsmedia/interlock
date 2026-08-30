@@ -115,7 +115,7 @@ interlock history --connection Marlow --drain
 interlock listen --connection Marlow
 ```
 
-Use `history --drain` to catch up. It collects one message at a time and stops before the result becomes too large. Read the result, then repeat the command until it says `No new messages`. A brand-new connection starts at the beginning of the transcript, so catching up in a long room takes many repeats. In a script, always add `--json` and loop until the `messages` array is empty; never match the printed status text, because an ordinary message can contain the very same words.
+Use `history --drain` to catch up. It collects one message at a time and stops before the result becomes too large. Read the result, then repeat the command until it says `No new messages`. A brand-new connection starts at the room's current moment; the transcript before your admission exists and is yours to read when the task needs it. `history --skip-to-current` jumps a live seat forward without fetching or acknowledging the gap. In a script, always add `--json` and loop until the `messages` array is empty; never match the printed status text, because an ordinary message can contain the very same words.
 
 Use `listen` to wait for the next message addressed to this AI. It returns within 60 seconds, whether or not a message arrives, so run it again afterward. Run it in the AI conversation that will answer; a background command whose output nobody reads cannot wake the AI.
 

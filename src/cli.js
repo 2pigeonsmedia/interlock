@@ -37,7 +37,7 @@ Usage:
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
   interlock join
-  interlock history --connection NAME [--drain] [--json]
+  interlock history --connection NAME [--drain | --skip-to-current] [--json]
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
   interlock listen --connection NAME [--json]
@@ -61,7 +61,9 @@ function refuseSay(stderr) {
 }
 
 function commandOptions(command, args) {
-  const options = { connection: null, drain: false, json: false, source: null };
+  const options = {
+    connection: null, drain: false, skipToCurrent: false, json: false, source: null,
+  };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
@@ -72,9 +74,15 @@ function commandOptions(command, args) {
       continue;
     }
     if (command === 'history' && flag === '--drain') {
-      if (seen.has(flag)) return null;
+      if (seen.has(flag) || options.skipToCurrent) return null;
       seen.add(flag);
       options.drain = true;
+      continue;
+    }
+    if (command === 'history' && flag === '--skip-to-current') {
+      if (seen.has(flag) || options.drain) return null;
+      seen.add(flag);
+      options.skipToCurrent = true;
       continue;
     }
     if (flag === '--connection') {
@@ -343,6 +351,13 @@ function renderMessages(stdout, messages) {
   stdout.write(renderedMessages(messages));
 }
 
+function formatMessageTime(ts) {
+  if (!Number.isSafeInteger(ts) || ts < 0) return '';
+  const iso = new Date(ts).toISOString();
+  if (!iso.endsWith('Z')) return '';
+  return iso.slice(0, 19).replace('T', ' ') + ' UTC';
+}
+
 function renderedMessages(messages) {
   let output = '';
   for (const message of messages) {
@@ -352,10 +367,18 @@ function renderedMessages(messages) {
     }
     if (message.session !== null) metadata.push(`Session ${message.session}`);
     const suffix = metadata.length > 0 ? ` (${metadata.join(' · ')})` : '';
-    output += `[${message.id}] ${terminalSafe(message.byline)}${suffix}:\n`;
+    const when = formatMessageTime(message.ts);
+    output += `[${message.id}] ${terminalSafe(message.byline)}${suffix}:${when ? ` ${when}` : ''}\n`;
     output += `${terminalSafe(message.text, true)}\n`;
   }
   return output;
+}
+
+function validHead(result) {
+  const page = exactObject(result, ['ok', 'head', 'connection_session']);
+  return page && page.ok === true && Number.isSafeInteger(page.head) && page.head >= 0 &&
+    (page.connection_session === null ||
+      (Number.isSafeInteger(page.connection_session) && page.connection_session > 0));
 }
 
 function readOutput(parsed, page) {
@@ -597,10 +620,58 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
   return EXIT_OK;
 }
 
+async function executeSkipToCurrent(parsed, profile, profiles, io, dependencies) {
+  const fetcher = dependencies.fetch || globalThis.fetch;
+  const from = profile.cursor;
+  let result;
+  try {
+    result = await localRequest(fetcher, profile, '/api/ai/head', {
+      timeoutMs: COMMAND_FETCH_TIMEOUT_MS,
+    });
+    if (!validHead(result)) throw incompatibleResponse();
+  } catch (error) {
+    reportRequestError(io.stderr, error, profile);
+    return EXIT_RUNTIME;
+  }
+
+  let cursor = from;
+  if (result.head > from) {
+    try {
+      profiles.updateCursor(profile.name, profile.request_id, result.head);
+      cursor = result.head;
+    } catch (_) {
+      line(io.stderr, 'interlock: the current tip was read, but the local cursor could not be saved; run the command again.');
+      return EXIT_RUNTIME;
+    }
+  }
+
+  const page = Object.freeze({
+    ok: true,
+    from,
+    head: result.head,
+    cursor,
+    connection_session: result.connection_session,
+  });
+  if (parsed.json) {
+    line(io.stdout, JSON.stringify(page));
+    return EXIT_OK;
+  }
+  if (result.head < from) {
+    line(io.stdout,
+      `Current tip is ${result.head}; local cursor ${from} is ahead. Skip does not move backward.`);
+  } else if (cursor === from) {
+    line(io.stdout, `Already at current (cursor ${from}).`);
+  } else {
+    line(io.stdout,
+      `Skipped to current (cursor ${from} → ${cursor}). The gap was not fetched and was not marked delivered.`);
+  }
+  return EXIT_OK;
+}
+
 async function runReadCommand(command, args, io, dependencies = {}) {
   const parsed = commandOptions(command, args);
   if (!parsed) {
-    line(io.stderr, `interlock: usage: interlock ${command} --connection NAME${command === 'history' ? ' [--drain]' : ''} [--json]`);
+    line(io.stderr, `interlock: usage: interlock ${command} --connection NAME${command === 'history' ? ' [--drain | --skip-to-current]' : ''} [--json]`);
     return EXIT_USAGE;
   }
   let selected;
@@ -629,9 +700,11 @@ async function runReadCommand(command, args, io, dependencies = {}) {
 
   let result;
   try {
-    result = command === 'history' && parsed.drain
-      ? await executeDrainHistory(parsed, profile, profiles, io, dependencies)
-      : await executeReadCommand(command, parsed, profile, profiles, io, dependencies);
+    result = command === 'history' && parsed.skipToCurrent
+      ? await executeSkipToCurrent(parsed, profile, profiles, io, dependencies)
+      : command === 'history' && parsed.drain
+        ? await executeDrainHistory(parsed, profile, profiles, io, dependencies)
+        : await executeReadCommand(command, parsed, profile, profiles, io, dependencies);
   } finally {
     try { readLease.release(); }
     catch (_) {
@@ -792,10 +865,11 @@ function admissionBody(profile) {
   };
 }
 
-function joinedOutput(stdout, profile) {
+function joinedOutput(stdout, profile, start = 'tip') {
   line(stdout, `Connected as ${profile.name} (${profile.product}).`);
   line(stdout, 'Use this exact connection name for every command in this conversation:');
   line(stdout, `  interlock history --connection ${profile.name} --drain`);
+  line(stdout, `  interlock history --connection ${profile.name} --skip-to-current`);
   line(stdout, `  interlock say --connection ${profile.name} --file PATH`);
   line(stdout, `  interlock listen --connection ${profile.name}`);
   line(stdout, 'The contract for staying reachable:');
@@ -803,19 +877,43 @@ function joinedOutput(stdout, profile) {
   line(stdout, '  time. A listener that is not re-armed is deaf.');
   line(stdout, '  Catch up with history --drain, repeated until it reports no new');
   line(stdout, '  messages. In a script, add --json and loop until "messages" is empty.');
-  line(stdout, '  A brand-new seat starts at the beginning of the transcript; in a');
-  line(stdout, '  long-established room, read what the task needs - the Guide covers it.');
+  if (start === 'beginning') {
+    line(stdout, '  Could not read the current tip; this seat starts at the beginning of');
+    line(stdout, '  the transcript. Catch up with history --drain, or skip later.');
+  } else {
+    line(stdout, '  Your seat starts at the room\'s current moment. Earlier history exists;');
+    line(stdout, '  read what the task needs - the Guide covers it.');
+    line(stdout, '  Skip with history --skip-to-current; that is not a read and does not');
+    line(stdout, '  mark the gap delivered.');
+  }
   line(stdout, '  Run one history or listen at a time for this connection.');
   line(stdout, '  The full shared guide is GUIDE.md, served at /help on the room address.');
 }
 
-function completeJoin(profiles, profile, enrollment, clock, stdout, staged = false) {
+async function applyAdmissionHead(fetcher, profile, profiles) {
+  if (typeof fetcher !== 'function') return 'beginning';
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/head', {
+      timeoutMs: JOIN_CONFIRM_TIMEOUT_MS,
+    });
+    if (!validHead(result)) return 'beginning';
+    if (result.head > profile.cursor) {
+      profiles.updateCursor(profile.name, profile.request_id, result.head);
+    }
+    return 'tip';
+  } catch (_) {
+    return 'beginning';
+  }
+}
+
+async function completeJoin(profiles, profile, enrollment, clock, stdout, staged, fetcher) {
   const admit = staged ? profiles.markStagedAdmitted : profiles.markAdmitted;
   const admitted = admit(profile.name, Object.assign(
     { request_id: profile.request_id, admitted_at: clock() },
     enrollment,
   ));
-  joinedOutput(stdout, admitted);
+  const start = await applyAdmissionHead(fetcher, admitted, profiles);
+  joinedOutput(stdout, start === 'tip' ? profiles.load(profile.name) : admitted, start);
 }
 
 function completedJoinDecision(code) {
@@ -833,7 +931,7 @@ async function reconnectStaged(profiles, profile, product, serverUrl, fetcher, c
   }
   const confirmation = await candidateConfirmation(fetcher, serverUrl, profile);
   if (confirmation.connected) {
-    completeJoin(profiles, profile, confirmation.connected, clock, io.stdout, true);
+    await completeJoin(profiles, profile, confirmation.connected, clock, io.stdout, true, fetcher);
     return completedJoinDecision(EXIT_OK);
   }
   if (!confirmation.exactInvalid) {
@@ -855,7 +953,7 @@ async function reconnectExisting(profiles, profile, product, serverUrl, fetcher,
   if (profile.state !== 'admitted') {
     const confirmation = await candidateConfirmation(fetcher, serverUrl, profile);
     if (confirmation.connected) {
-      completeJoin(profiles, profile, confirmation.connected, clock, io.stdout);
+      await completeJoin(profiles, profile, confirmation.connected, clock, io.stdout, false, fetcher);
       return completedJoinDecision(EXIT_OK);
     }
     if (confirmation.exactInvalid) {
@@ -1040,7 +1138,7 @@ async function runJoin(args, io, dependencies = {}) {
             }
             const connected = await confirmCandidate(fetcher, parsed.url, profile);
             if (connected) {
-              completeJoin(profiles, profile, connected, clock, stdout, staged);
+              await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher);
               return EXIT_OK;
             }
             if (!statedWaiting) {
@@ -1050,7 +1148,7 @@ async function runJoin(args, io, dependencies = {}) {
             continue;
           }
           if (result.state === 'allowed' && validConnection(result.enrollment, profile)) {
-            completeJoin(profiles, profile, result.enrollment, clock, stdout, staged);
+            await completeJoin(profiles, profile, result.enrollment, clock, stdout, staged, fetcher);
             return EXIT_OK;
           }
           if (result.state === 'declined' || result.state === 'expired') {
@@ -1104,7 +1202,7 @@ async function runJoin(args, io, dependencies = {}) {
           // that exact credential before waiting or knocking again.
           const connected = await confirmCandidate(fetcher, parsed.url, profile);
           if (connected) {
-            completeJoin(profiles, profile, connected, clock, stdout, staged);
+            await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher);
             return EXIT_OK;
           }
           if (!statedWaiting) {
@@ -1119,7 +1217,7 @@ async function runJoin(args, io, dependencies = {}) {
       if (lastNetworkFailure) {
         const connected = await confirmCandidate(fetcher, parsed.url, profile);
         if (connected) {
-          completeJoin(profiles, profile, connected, clock, stdout, staged);
+          await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher);
           return EXIT_OK;
         }
         line(stderr, 'interlock: the join result could not be confirmed. The unadmitted candidate was kept for diagnosis, not adopted by another join.');

@@ -333,6 +333,9 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
         confirmationCalls += 1;
         return fakeResponse(401, { ok: false, error: 'invalid-connection' });
       }
+      if (url.endsWith('/api/ai/head')) {
+        return fakeResponse(200, { ok: true, head: 12, connection_session: null });
+      }
       assert.equal(url, 'http://localhost:8788/api/ai/admissions');
       const body = JSON.parse(options.body);
       seen.push(body);
@@ -364,15 +367,18 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.match(result.stdout, /Waiting for the owner to allow Marlow/);
   assert.match(result.stdout, /Connected as Marlow \(Codex CLI\)/);
   assert.match(result.stdout, /interlock history --connection Marlow --drain/);
+  assert.match(result.stdout, /interlock history --connection Marlow --skip-to-current/);
   assert.match(result.stdout, /interlock listen --connection Marlow/);
   assert.match(result.stdout,
     /listen returns after one message or about a minute; run it again/,
     'join output must teach the listen contract, not just the command — two seats went silently deaf learning it the hard way');
   assert.match(result.stdout, /A listener that is not re-armed is deaf/);
   assert.match(result.stdout, /add --json and loop until "messages" is empty/);
-  assert.match(result.stdout, /brand-new seat starts at the beginning of the transcript/,
-    'a new seat must be told its start line honestly, not just handed the drain loop');
-  assert.match(result.stdout, /read what the task needs/);
+  assert.match(result.stdout, /Your seat starts at the room's current moment/,
+    'a new seat must start at current, not consume the transcript');
+  assert.doesNotMatch(result.stdout, /starts at the beginning of the transcript/);
+  assert.match(result.stdout, /read what the task needs/i);
+  assert.match(result.stdout, /skip-to-current[^]*not a read/i);
   assert.match(result.stdout, /one history or listen at a time/);
   assert.match(result.stdout, /GUIDE\.md, served at \/help/);
   assert.equal(result.stderr, '');
@@ -382,6 +388,7 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.deepEqual(seen[1], seen[0], 'every retained wait resubmits the exact stable digest-only knock');
   const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'marlow.json'), 'utf8'));
   assert.equal(profile.state, 'admitted');
+  assert.equal(profile.cursor, 12, 'fresh admit initializes the local cursor at the head, not 0');
   assert.equal(typeof profile.token, 'string');
   assert.equal(result.stdout.includes(profile.token), false);
   assert.equal(result.stderr.includes(profile.token), false);
@@ -416,6 +423,8 @@ test('join confirms and reuses the exact admitted local seat without a knock', a
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.equal(requests.length, 1);
   assert.doesNotMatch(requests[0].url, /admissions/);
+  assert.doesNotMatch(requests[0].url, /\/api\/ai\/head/,
+    'reconnect of an admitted seat must not skip unread mail via the head route');
   assert.match(result.stdout, /Connected as Marlow \(Codex CLI\)/);
   assert.match(result.stdout, /interlock listen --connection Marlow/);
   assert.doesNotMatch(result.stdout, /Waiting for the owner/);
@@ -434,6 +443,9 @@ test('join deliberately finishes its exact interrupted candidate without knockin
     ask: async () => { throw new Error('exact reconnect must not prompt'); },
     async fetch(url, options) {
       requests.push({ url, options });
+      if (url.endsWith('/api/ai/head')) {
+        return fakeResponse(200, { ok: true, head: 0, connection_session: null });
+      }
       assert.equal(url, 'http://localhost:8788/api/ai/session');
       assert.equal(options.headers.authorization, 'Bearer ' + world.profile.token);
       return fakeResponse(200, {
@@ -449,7 +461,7 @@ test('join deliberately finishes its exact interrupted candidate without knockin
     },
   });
   assert.equal(result.code, EXIT_OK, result.stderr);
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2);
   assert.equal(requests.some(request => request.url.includes('/admissions')), false);
   const admitted = JSON.parse(fs.readFileSync(world.file, 'utf8'));
   assert.equal(admitted.state, 'admitted');
@@ -723,6 +735,9 @@ test('a still-waiting unfinished candidate resumes only its exact knock', async 
     clock: () => 3_000,
     identity: { newAiCredential() { throw new Error('resume must not mint'); } },
     async fetch(url, options) {
+      if (url.endsWith('/api/ai/head')) {
+        return fakeResponse(200, { ok: true, head: 0, connection_session: null });
+      }
       if (url.endsWith('/api/ai/session')) {
         sessionChecks += 1;
         assert.equal(options.headers.authorization, 'Bearer ' + world.profile.token);
@@ -907,6 +922,9 @@ test('an ambiguous replacement preserves both credentials and deliberate join re
     identity: { newAiCredential() { throw new Error('resume must not mint'); } },
     async fetch(url, options) {
       resumedRequests.push({ url, options });
+      if (url.endsWith('/api/ai/head')) {
+        return fakeResponse(200, { ok: true, head: 0, connection_session: null });
+      }
       assert.equal(url, 'http://localhost:8788/api/ai/session');
       assert.equal(options.headers.authorization, 'Bearer ' + staged.token);
       return fakeResponse(200, {
@@ -922,7 +940,7 @@ test('an ambiguous replacement preserves both credentials and deliberate join re
     },
   });
   assert.equal(resumed.code, EXIT_OK, resumed.stderr);
-  assert.equal(resumedRequests.length, 1);
+  assert.equal(resumedRequests.length, 2);
   assert.equal(resumedRequests.some(request => request.url.includes('/admissions')), false);
   const admitted = JSON.parse(fs.readFileSync(world.file, 'utf8'));
   assert.equal(admitted.subject_id, 'seat-resumed');
@@ -1510,7 +1528,7 @@ test('history receives, acknowledges, renders, and durably advances one explicit
   };
   const result = await captureCommand(['history', '--connection', 'Marlow'], world.dependencies);
   assert.equal(result.code, EXIT_OK, result.stderr);
-  assert.match(result.stdout, /\[2\] Ana:/);
+  assert.match(result.stdout, /\[2\] Ana/);
   assert.match(result.stdout, /hello @Marlow/);
   assert.deepEqual(world.events, [
     ['load', 'Marlow'],
@@ -1592,7 +1610,7 @@ test('history renders a fetched page but refuses to advance a replaced local sea
 
   const result = await captureCommand(['history', '--connection', 'Marlow'], world.dependencies);
   assert.equal(result.code, EXIT_RUNTIME);
-  assert.match(result.stdout, /\[2\] Ana:/);
+  assert.match(result.stdout, /\[2\] Ana/);
   assert.match(result.stderr, /local cursor could not be saved/);
 });
 
@@ -1704,9 +1722,9 @@ test('history --drain repeats exact one-message transactions inside one reader l
   const result = await captureCommand(
     ['history', '--connection', 'Marlow', '--drain'], world.dependencies);
   assert.equal(result.code, EXIT_OK, result.stderr);
-  assert.match(result.stdout, /\[1\] Ana:[^]*drained message 1/);
-  assert.match(result.stdout, /\[2\] Ana:[^]*drained message 2/);
-  assert.match(result.stdout, /\[3\] Ana:[^]*drained message 3/);
+  assert.match(result.stdout, /\[1\] Ana[^]*drained message 1/);
+  assert.match(result.stdout, /\[2\] Ana[^]*drained message 2/);
+  assert.match(result.stdout, /\[3\] Ana[^]*drained message 3/);
   assert.deepEqual(getUrls, [0, 1, 2, 3].map(after =>
     `http://localhost:8788/api/ai/messages?after=${after}&limit=1&wait=0`));
   assert.deepEqual(receiptBodies, [1, 2, 3].map(id => ({ message_ids: [id] })));
@@ -1826,12 +1844,136 @@ test('history --drain emits one JSON batch and refuses the flag on other command
   for (const argv of [
     ['listen', '--connection', 'Marlow', '--drain'],
     ['history', '--connection', 'Marlow', '--drain', '--drain'],
+    ['history', '--connection', 'Marlow', '--drain', '--skip-to-current'],
+    ['listen', '--connection', 'Marlow', '--skip-to-current'],
   ]) {
     const refused = await captureCommand(argv, world.dependencies);
     assert.equal(refused.code, EXIT_USAGE);
     assert.match(refused.stderr, /usage/);
   }
   assert.equal(fetchCalls, 3, 'invalid option shapes must refuse before fetching');
+});
+
+test('history --skip-to-current jumps the local cursor without fetching or acknowledging', async () => {
+  const world = admittedConnection({ cursor: 4 });
+  const urls = [];
+  world.dependencies.fetch = async (url, options) => {
+    urls.push({ url, method: options && options.method, body: options && options.body });
+    return fakeResponse(200, { ok: true, head: 12, connection_session: 3 });
+  };
+  const result = await captureCommand(
+    ['history', '--connection', 'Marlow', '--skip-to-current'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.match(result.stdout, /Skipped to current \(cursor 4 → 12\)/);
+  assert.match(result.stdout, /not fetched and was not marked delivered/);
+  assert.deepEqual(urls, [{
+    url: 'http://localhost:8788/api/ai/head',
+    method: 'GET',
+    body: undefined,
+  }]);
+  assert.deepEqual(world.events, [
+    ['load', 'Marlow'],
+    ['cursor', 'Marlow', world.profile.request_id, 12],
+  ]);
+});
+
+test('history --skip-to-current JSON names the gap and never shares the messages route', async () => {
+  const world = admittedConnection({ cursor: 0 });
+  world.dependencies.fetch = async url => {
+    assert.equal(url, 'http://localhost:8788/api/ai/head');
+    return fakeResponse(200, { ok: true, head: 800, connection_session: null });
+  };
+  const result = await captureCommand(
+    ['history', '--connection', 'Marlow', '--skip-to-current', '--json'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ok: true, from: 0, head: 800, cursor: 800, connection_session: null,
+  });
+  assert.deepEqual(world.events, [
+    ['load', 'Marlow'],
+    ['cursor', 'Marlow', world.profile.request_id, 800],
+  ]);
+});
+
+test('history --skip-to-current does not move backward when the tip is behind the cursor', async () => {
+  const world = admittedConnection({ cursor: 800 });
+  world.dependencies.fetch = async () => fakeResponse(200, {
+    ok: true, head: 0, connection_session: null,
+  });
+  const result = await captureCommand(
+    ['history', '--connection', 'Marlow', '--skip-to-current'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /Current tip is 0; local cursor 800 is ahead/);
+  assert.deepEqual(world.events, [['load', 'Marlow']]);
+});
+
+test('history --skip-to-current refuses a malformed head envelope without moving the cursor', async () => {
+  const world = admittedConnection({ cursor: 4 });
+  world.dependencies.fetch = async () => fakeResponse(200, {
+    ok: true, head: 12, connection_session: '3',
+  });
+  const result = await captureCommand(
+    ['history', '--connection', 'Marlow', '--skip-to-current'], world.dependencies);
+  assert.equal(result.code, EXIT_RUNTIME);
+  assert.match(result.stderr, /does not match this CLI version/);
+  assert.deepEqual(world.events, [['load', 'Marlow']]);
+});
+
+test('fresh join fail-open keeps cursor 0 when the head GET hiccups after Allow', async () => {
+  const connectionDir = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-join-failopen-')), 'profiles',
+  );
+  let time = 1_000;
+  const result = await captureJoin(['--product', 'Codex CLI', '--name', 'Marlow'], {
+    config: { resolveConnectionDir: () => connectionDir },
+    clock: () => ++time,
+    ask: async () => { throw new Error('valid adapter hints must not prompt'); },
+    async fetch(url, options) {
+      if (url.endsWith('/api/ai/head')) {
+        return fakeResponse(503, { ok: false, error: 'chat-unavailable' });
+      }
+      const body = JSON.parse(options.body);
+      return fakeResponse(200, {
+        ok: true,
+        state: 'allowed',
+        request_id: body.request_id,
+        name: body.name,
+        product: body.product,
+        product_provenance: body.product_provenance,
+        expires_at: 50_000,
+        enrollment: {
+          subject_id: 'seat-1',
+          name: body.name,
+          product: body.product,
+          product_provenance: body.product_provenance,
+          expires_at: 50_000,
+        },
+      });
+    },
+  });
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /Connected as Marlow/);
+  assert.match(result.stdout, /Could not read the current tip; this seat starts at the beginning/);
+  assert.doesNotMatch(result.stdout, /starts at the current tip/);
+  const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'marlow.json'), 'utf8'));
+  assert.equal(profile.state, 'admitted');
+  assert.equal(profile.cursor, 0);
+});
+
+test('history renders a visible UTC datestamp on every message', async () => {
+  const world = admittedConnection();
+  world.dependencies.fetch = async () => fakeResponse(200, {
+    ok: true,
+    messages: [publicMessage({ id: 1, ts: Date.UTC(2026, 7, 23, 19, 47, 0), delivery: [] })],
+    cursor: 1,
+    timed_out: false,
+    connection_session: null,
+  });
+  const result = await captureCommand(['history', '--connection', 'Marlow'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /2026-08-23 19:47:00 UTC/);
+  assert.match(result.stdout, /\[1\] Ana/);
 });
 
 test('history --drain has an independent message-count ceiling', async () => {
@@ -1853,7 +1995,7 @@ test('history --drain has an independent message-count ceiling', async () => {
     ['history', '--connection', 'Marlow', '--drain'], world.dependencies);
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.equal(getCalls, HISTORY_DRAIN_MESSAGES);
-  assert.match(result.stdout, new RegExp(`\\[${HISTORY_DRAIN_MESSAGES}\\] Ana:`));
+  assert.match(result.stdout, new RegExp(`\\[${HISTORY_DRAIN_MESSAGES}\\] Ana`));
   assert.deepEqual(world.events.at(-1), [
     'cursor', 'Marlow', world.profile.request_id, HISTORY_DRAIN_MESSAGES,
   ]);
