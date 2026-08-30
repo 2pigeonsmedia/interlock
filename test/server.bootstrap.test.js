@@ -347,8 +347,14 @@ test('the loopback browser transport completes first-owner setup through the pub
       'the host-state label must come from a live process probe');
     assert.match(roomScript.text, /setInterval\(checkConnection, CONNECTION_CHECK_INTERVAL_MS\)/,
       'an open tab must eventually retract running after the process dies');
-    assert.match(roomScript.text, /text\.textContent = message\.text/,
-      'untrusted message text must reach the page only as DOM text');
+    assert.match(roomScript.text, /function renderMessageText\(element, message\)/,
+      'untrusted message text must reach the page only through the text renderer');
+    assert.match(roomScript.text,
+      /element\.append\(document\.createTextNode\(message\.text\.slice\(cursor\)\)\)/,
+      'the text renderer must write plain runs as DOM text nodes');
+    assert.match(roomScript.text,
+      /mention\.textContent = message\.text\.slice\(token\.start, token\.end\)/,
+      'a highlighted mention must be written as DOM text, never as markup');
     assert.match(roomScript.text, /fetch\('\/api\/messages'/,
       'the human composer must post through the authenticated message route');
     assert.doesNotMatch(roomScript.text,

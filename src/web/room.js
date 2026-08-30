@@ -935,6 +935,31 @@ async function loadDeliveryChanges() {
   }
 }
 
+/* Message text is never interpreted as HTML. To colour mentions, the string
+ * is split on the shared mention grammar and every piece — plain runs and
+ * mention spans alike — is written with textContent. A token is styled only
+ * when THIS message's server-recorded delivery shows it actually rang that
+ * name (lowercase @all only when the broadcast reached someone): the colour
+ * repeats a recorded fact, it never promises one. */
+function renderMessageText(element, message) {
+  element.textContent = '';
+  const rang = new Set(message.delivery.map(recipient => recipient.name.toLowerCase()));
+  let cursor = 0;
+  for (const token of InterlockMentions.tokens(message.text)) {
+    const delivered = token.handle === 'all'
+      ? message.delivery.length > 0
+      : rang.has(token.handle.toLowerCase());
+    if (!delivered) continue;
+    element.append(document.createTextNode(message.text.slice(cursor, token.start)));
+    const mention = document.createElement('span');
+    mention.className = 'mention';
+    mention.textContent = message.text.slice(token.start, token.end);
+    element.append(mention);
+    cursor = token.end;
+  }
+  element.append(document.createTextNode(message.text.slice(cursor)));
+}
+
 function renderMessage(message) {
   if (!validMessage(message) || seenMessageIds.has(message.id)) return false;
   const time = formatTime(message.ts);
@@ -970,7 +995,7 @@ function renderMessage(message) {
 
   const text = document.createElement('p');
   text.className = 'message-text';
-  text.textContent = message.text;
+  renderMessageText(text, message);
   article.append(meta, text);
   if (message.delivery.length > 0) {
     const delivery = document.createElement('div');

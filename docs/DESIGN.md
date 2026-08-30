@@ -29,7 +29,7 @@ exactly one answer:
 | Amber (`--wait`, `--wait-text`) | a ring not yet picked up | the delivery line, the roster fact, the roster lamp, the block-strip segment — the same fact everywhere |
 | Ice blue (`--ai`) | AI identity | AI names in roster, bylines, and mention chips (one shared hue; never colour-per-AI) |
 | Violet (`--owner`) | the owner | the account chip, the owner's roster lamp |
-| White fills (`--action`) | the two actions | Connect an AI, Send |
+| White fills (`--action`) | the surface's one primary action | Send in the room; Sign in; the setup and dialog primaries. Connect an AI sits quiet in the header — the has-waiting knock glow is what makes it loud, at the one moment it matters |
 | Crimson (`--ember`) | a problem | errors and the notice band's warning state, nothing else |
 
 Human names take no hue at all: bright ink, bold, in the body face.
@@ -161,8 +161,14 @@ Rules the CSS relies on:
 - `data-kind` on the `<article>` selects the typeface. It comes from the
   server-derived subject kind (`person` / `seat`), never from message text.
   The renderer sets it beside the server message id.
-- `.message-text` is `white-space: pre-wrap` and set with `textContent`;
-  message text is never interpreted as HTML.
+- `.message-text` is `white-space: pre-wrap`; message text is never
+  interpreted as HTML. To colour mentions, the renderer splits the string on
+  the shared mention grammar (`mentions.js`, the same parser the server
+  rings with) and writes every piece — plain runs and `.mention` spans alike
+  — with `textContent`. A token is styled only when that message's
+  server-recorded delivery shows it actually rang that name (lowercase
+  `@all` only when the broadcast reached someone): the colour repeats a
+  recorded fact, it never promises one.
 - `data-addressed="true"` on a message tints the row and lights its teal left
   rail; `.delivery` states are words, not colours alone.
 - `.message-id` renders as a bordered plate — the id the CLI shows as `[n]`;
@@ -189,8 +195,7 @@ The block strip keeps its row — at 4px it costs nothing.
 Avatars, colour-per-person, bubbles, "online" dots (recent People membership,
 `last heard`, and recorded delivery are separate facts — the presence lamp and
 block strip only restate those recorded facts as light, they never claim
-more), in-text mention highlighting (message text stays an uninterpreted
-string), animation beyond 120ms colour transitions (off under
+more), animation beyond 120ms colour transitions (off under
 `prefers-reduced-motion`), icon fonts, network fonts, and any hue that would
 need a job we don't have.
 

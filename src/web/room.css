@@ -323,6 +323,11 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 
 .room-header .quiet-action { border-color: var(--frame-line); color: var(--frame-ink); background: transparent; }
 .room-header .quiet-action:not([disabled]):hover { background: var(--frame-line); }
+/* Connect an AI sits quiet in the header — white fill belongs to the room's
+ * everyday action (Send). The has-waiting knock glow below is what makes this
+ * button loud at the one moment it matters. */
+.room-header .primary-action { background: transparent; border-color: var(--frame-line); color: var(--frame-ink); }
+.room-header .primary-action:not([disabled]):hover { background: var(--frame-line); border-color: var(--frame-line); }
 .room-header button:focus-visible, .room-header a:focus-visible { outline-color: var(--focus); }
 .room-header #connect-ai-button.has-waiting {
   border-color: var(--signal-bright);
