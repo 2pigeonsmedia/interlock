@@ -56,18 +56,22 @@ test('the upgrade path backs up first and never teaches an in-place downgrade', 
 });
 
 test('the tested-on list names exact runtimes without turning WSL into native Ubuntu', () => {
-  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*308\/308/);
-  assert.match(README, /Node 24\.13\.0[^\n]*Native Windows[^\n]*308\/308/);
-  assert.match(README, /Node 26\.7\.0[^\n]*WSL\/Linux[^\n]*308\/308/);
-  assert.match(README, /fresh source trees passed 308\/308 tests/);
+  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*310\/310/);
+  assert.match(README, /Node 24\.13\.0[^\n]*Native Windows[^\n]*310\/310/);
+  assert.match(README, /clean source archive, fresh native install/,
+    'the Windows result must state its clean-tree provenance — a mixed WSL/Windows tree produced false failures');
+  assert.match(README, /fresh\s+source trees passed 308\/308 tests/,
+    'the v0.1.0 tag proofs stay described as that tag\'s, never re-claimed');
   assert.match(README, /automated runtime compatibility/);
   assert.match(README,
-    /source-archive[^]*installed-package proofs were repeated on this committed candidate/);
-  assert.match(README, /Package archives are not claimed[^]*payload files matched byte for byte/);
+    /v0\.1\.0 tag's deeper proofs[^]*were\s+not re-run for v0\.1\.1 beyond the suites named above/,
+    'unrepeated proofs must say so');
+  assert.match(README, /Known limit, first in\s+line for v0\.1\.2/,
+    'the late-join catch-up limit ships stated, not discovered');
   assert.match(README, /native(?: Ubuntu)?\s+browser\/passkey journey/i);
   assert.match(README, /no native macOS journey was run/i);
   assert.match(README, /post-v0\.1\s+evidence goals, not claims made by this tested-on table/i);
-  assert.match(README, /cold-newcomer journey\s+is the first v0\.1\.1 acceptance test/i);
+  assert.match(README, /cold-newcomer journey[^]*remains an open evidence goal deferred at the owner's\s+discretion/i);
   assert.doesNotMatch(README, /journeys remain open[^]*not yet a public release/i,
     'the tested-on boundary must not silently reopen gates moved to post-v0.1');
   assert.match(README, /After its seat ends[^]*fresh session[^]*Session 1[^]*Session 2/);

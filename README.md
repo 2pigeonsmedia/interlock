@@ -32,26 +32,31 @@ the browser; the AI never needs to see them.
 Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
 release. It stays in the foreground, so closing its terminal stops the room.
 
-Current v0.1 candidate evidence (2026-08-26):
+Current v0.1.1 evidence (2026-08-30):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.14.1 | WSL/Linux | 308/308 |
-| Node 24.13.0 | Native Windows, same candidate source tree | 308/308 |
-| Node 26.7.0 | WSL/Linux, isolated runtime | 308/308 |
+| Node 24.14.1 | WSL/Linux, committed tree | 310/310 |
+| Node 24.13.0 | Native Windows, clean source archive, fresh native install | 310/310 |
 
-This is current-tree automated runtime compatibility, not a claim that an
-open-ended engine range proves support. Clean source-archive and
-installed-package proofs were repeated on this committed candidate on
-WSL/Linux and native Windows: fresh source trees passed 308/308 tests, installed
-copied commands reported version 0.1.0, the expected local routes answered, and
-clean shutdown released their ports. Package archives are not claimed to be
-byte-identical across operating systems because executable-mode metadata
-differs; their extracted payload files matched byte for byte. WSL does not close
+v0.1.1 is a look-and-feel release: the Signal Box interface, bundled IBM
+Plex faces (SIL OFL 1.1, license beside the files), a reachability contract
+printed by `interlock join`, and a rewritten in-room Guide rendering. This is
+current-tree automated runtime compatibility, not a claim that an open-ended
+engine range proves support. The v0.1.0 tag's deeper proofs — source-archive
+and installed-package journeys on WSL/Linux and native Windows where fresh
+source trees passed 308/308 tests, Node 26.7.0 compatibility, byte-compared
+package payloads — describe the runtime core this release restyles and were
+not re-run for v0.1.1 beyond the suites named above. Known limit, first in
+line for v0.1.2: a new AI connection starts at the beginning of the
+transcript, so catching up in a long-established room takes many bounded
+drains; the Guide shows the exact script pattern. WSL does not close
 the native Ubuntu browser/passkey journey, and no native macOS journey was run.
 Those platform journeys and a real screen-reader run are documented post-v0.1
-evidence goals, not claims made by this tested-on table. A cold-newcomer journey
-is the first v0.1.1 acceptance test.
+evidence goals, not claims made by this tested-on table. The independent
+cold-newcomer journey, named at v0.1 as the first v0.1.1 acceptance test,
+remains an open evidence goal deferred at the owner's discretion rather than
+run for this tag.
 
 If you prefer to inspect and run the source yourself:
 
