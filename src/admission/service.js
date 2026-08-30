@@ -20,11 +20,14 @@ const CANDIDATE_KEYS = Object.freeze([
 ]);
 const RECORD_KEYS = Object.freeze([
   ...CANDIDATE_KEYS,
-  'previously_used', 'last_ended_at',
+  'previously_used', 'last_ended_at', 'reuse', 'reuse_session',
   'created_at', 'expires_at', 'state', 'ended_at', 'cooldown_until', 'enrollment',
 ]);
-const LEGACY_RECORD_KEYS = Object.freeze(RECORD_KEYS.filter(key =>
+const PRIOR_RECORD_KEYS = Object.freeze(RECORD_KEYS.filter(key =>
+  key !== 'reuse' && key !== 'reuse_session'));
+const LEGACY_RECORD_KEYS = Object.freeze(PRIOR_RECORD_KEYS.filter(key =>
   key !== 'previously_used' && key !== 'last_ended_at'));
+const REUSE = Object.freeze(['fresh', 'held', 'ended']);
 const ENROLLMENT_KEYS = Object.freeze([
   'subject_id', 'name', 'product', 'product_provenance', 'expires_at',
 ]);
@@ -76,7 +79,16 @@ function validEnrollment(value) {
 }
 
 function parseRecord(value) {
-  const row = closedObject(value, RECORD_KEYS, true);
+  let row = closedObject(value, RECORD_KEYS, true);
+  if (!row) {
+    const prior = closedObject(value, PRIOR_RECORD_KEYS, true);
+    if (prior) {
+      row = Object.assign({}, prior, {
+        reuse: prior.previously_used ? 'ended' : 'fresh',
+        reuse_session: null,
+      });
+    }
+  }
   const productLength = row && typeof row.product === 'string' ? Array.from(row.product).length : 0;
   if (!row || !UUID_V4.test(row.request_id) ||
       typeof row.name !== 'string' || row.name.length < 2 || row.name.length > 24 ||
@@ -88,6 +100,12 @@ function parseRecord(value) {
       typeof row.previously_used !== 'boolean' ||
       !(row.last_ended_at === null || finiteTime(row.last_ended_at)) ||
       (row.previously_used !== (row.last_ended_at !== null)) ||
+      !REUSE.includes(row.reuse) ||
+      !(row.reuse_session === null ||
+        (Number.isSafeInteger(row.reuse_session) && row.reuse_session > 0)) ||
+      (row.reuse === 'fresh' && (row.previously_used || row.reuse_session !== null)) ||
+      (row.reuse === 'held' && (row.previously_used || row.reuse_session === null)) ||
+      (row.reuse === 'ended' && !row.previously_used) ||
       !finiteTime(row.created_at) || !finiteTime(row.expires_at) ||
       row.expires_at <= row.created_at || !STATES.includes(row.state) ||
       !(row.ended_at === null || finiteTime(row.ended_at)) ||
@@ -381,7 +399,15 @@ function openAdmissionService(optionsIn) {
     }
     if (typeof inspected.previously_used !== 'boolean' ||
         !(inspected.last_ended_at === null || finiteTime(inspected.last_ended_at)) ||
-        inspected.previously_used !== (inspected.last_ended_at !== null)) {
+        inspected.previously_used !== (inspected.last_ended_at !== null) ||
+        !REUSE.includes(inspected.reuse) ||
+        !(inspected.reuse_session === null ||
+          (Number.isSafeInteger(inspected.reuse_session) && inspected.reuse_session > 0)) ||
+        (inspected.reuse === 'fresh' &&
+          (inspected.previously_used || inspected.reuse_session !== null)) ||
+        (inspected.reuse === 'held' &&
+          (inspected.previously_used || inspected.reuse_session === null)) ||
+        (inspected.reuse === 'ended' && !inspected.previously_used)) {
       return Promise.resolve(Object.freeze({ ok: false, reason: 'invalid-request' }));
     }
     const normalized = {};
@@ -406,6 +432,8 @@ function openAdmissionService(optionsIn) {
     const pending = Object.freeze(Object.assign({}, normalized, {
       previously_used: inspected.previously_used,
       last_ended_at: inspected.last_ended_at,
+      reuse: inspected.reuse,
+      reuse_session: inspected.reuse_session,
       created_at: at,
       expires_at: at + pendingTtlMs,
       state: 'pending',
@@ -428,6 +456,8 @@ function openAdmissionService(optionsIn) {
         product_provenance: record.product_provenance,
         previously_used: record.previously_used,
         last_ended_at: record.last_ended_at,
+        reuse: record.reuse,
+        reuse_session: record.reuse_session,
         created_at: record.created_at,
         expires_at: record.expires_at,
         connected: (waiters.get(record.request_id) || new Set()).size > 0,

@@ -41,6 +41,8 @@ function fakeHouse() {
         ok: true,
         previously_used: previouslyUsed,
         last_ended_at: previouslyUsed ? 900 : null,
+        reuse: previouslyUsed ? 'ended' : 'fresh',
+        reuse_session: previouslyUsed ? 1 : null,
       }, body);
     },
     allowAiAdmission(meta, body) {
@@ -91,6 +93,8 @@ test('a live digest-only knock is atomically allowed and wakes its exact waiter'
     product_provenance: 'client-reported',
     previously_used: false,
     last_ended_at: null,
+    reuse: 'fresh',
+    reuse_session: null,
     created_at: 1_000,
     expires_at: 1_100,
     connected: true,

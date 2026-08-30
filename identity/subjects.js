@@ -113,19 +113,45 @@ function aiNameStatusIn(subjects, tenant, input, now) {
     if (subject.name_fold !== nameFold) continue;
     if (subject.kind === 'seat') {
       const endedAt = endedSeatAt(subject, now);
-      if (endedAt === null) return Object.freeze({ ok: false, reason: 'name-taken' });
-      ended.push(endedAt);
+      if (endedAt === null) {
+        const ordinal = Object.prototype.hasOwnProperty.call(subject, 'session_ordinal')
+          ? subject.session_ordinal : 1;
+        return Object.freeze({
+          ok: true,
+          name,
+          previously_used: false,
+          last_ended_at: null,
+          reuse: 'held',
+          reuse_session: Number.isSafeInteger(ordinal) && ordinal > 0 ? ordinal : 1,
+        });
+      }
+      ended.push({ at: endedAt, ordinal: Object.prototype.hasOwnProperty.call(subject, 'session_ordinal')
+        ? subject.session_ordinal : 1 });
       continue;
     }
     if (subject.status === 'active') {
       return Object.freeze({ ok: false, reason: 'name-taken' });
     }
   }
+  if (ended.length === 0) {
+    return Object.freeze({
+      ok: true,
+      name,
+      previously_used: false,
+      last_ended_at: null,
+      reuse: 'fresh',
+      reuse_session: null,
+    });
+  }
+  const last = ended.reduce((winner, row) => row.at >= winner.at ? row : winner);
+  const ordinal = Number.isSafeInteger(last.ordinal) && last.ordinal > 0 ? last.ordinal : 1;
   return Object.freeze({
     ok: true,
     name,
-    previously_used: ended.length > 0,
-    last_ended_at: ended.length > 0 ? Math.max(...ended) : null,
+    previously_used: true,
+    last_ended_at: last.at,
+    reuse: 'ended',
+    reuse_session: ordinal,
   });
 }
 
@@ -319,7 +345,7 @@ function createAiSeatInDraft(draft, opts) {
   }
   const nameFold = fold(name);
   const status = aiNameStatusIn(draft.subjects, tenant, name, now);
-  if (!status.ok) {
+  if (!status.ok || status.reuse === 'held') {
     throw new Error('subjects.createAiSeatInDraft: name is live or historically person-reserved');
   }
   const priorGenerations = draft.subjects.filter(subject =>
@@ -413,6 +439,55 @@ function list(tenant) {
 // leaves live keys hanging off a dead subject.
 const ENDED_HOW = Object.freeze(['left', 'revoked']);
 
+function revokeInDraft(draft, id, endedHow, now) {
+  const how = endedHow === undefined ? 'revoked' : endedHow;
+  if (!ENDED_HOW.includes(how)) {
+    throw new Error('subjects.revoke: ended_how must be left or revoked');
+  }
+  if (typeof now !== 'number' || !Number.isFinite(now)) {
+    throw new Error('subjects.revoke: now must be a finite number');
+  }
+  const s = draft.subjects.find(x => x && x.id === id);
+  if (!s || s.status !== 'active') return false;
+  const closure = [s];
+  if (s.kind === 'person') {
+    for (const d of draft.subjects) {
+      if (d.kind === 'seat' && d.status === 'active' && d.tenant === s.tenant && d.principal === s.id) {
+        closure.push(d);
+      }
+    }
+  }
+  const ids = new Set(closure.map(x => x.id));
+  for (const x of closure) {
+    x.status = 'revoked';
+    x.revoked_at = now;
+    x.ended_how = x.id === s.id ? how : 'revoked';
+  }
+  const removedGrants = new Map();
+  draft.grants = draft.grants.filter(g => {
+    if (!ids.has(g.subject_id)) return true;
+    removedGrants.set(g.subject_id, (removedGrants.get(g.subject_id) || 0) + 1);
+    return false;
+  });
+  const markedCreds = new Map();
+  for (const c of draft.credentials) {
+    if (ids.has(c.subject_id) && !c.revoked) {
+      c.revoked = true;
+      markedCreds.set(c.subject_id, (markedCreds.get(c.subject_id) || 0) + 1);
+    }
+  }
+  for (const x of closure) {
+    draft.outbox.push({
+      id: crypto.randomUUID(), ts: now, kind: 'subject.revoke',
+      tenant: x.tenant, subject_id: x.id, subject_name: x.name, subject_kind: x.kind,
+      cascade_of: x.id === s.id ? null : s.id,
+      grants_removed: removedGrants.get(x.id) || 0,
+      credentials_revoked: markedCreds.get(x.id) || 0,
+    });
+  }
+  return true;
+}
+
 function revoke(id, endedHow) {
   // Readiness composes through repo.read() (I3): this refuses pre-init and
   // FATAL before any no-op answer could mask them.
@@ -424,52 +499,9 @@ function revoke(id, endedHow) {
   if (!target || target.status !== 'active') return false; // I14: the no-op path never opens a transaction
   return repo.transact(state => {
     const s = state.subjects.find(x => x.id === id);
-    // The pre-check ran against the SAME installed state (transact is
-    // synchronous and single-threaded); a miss here means the world moved
-    // underneath us, and aborting the transaction is the only honest answer.
     if (!s || s.status !== 'active') throw new Error('subjects.revoke: target changed between read and transaction');
-    const now = Date.now();
-    const closure = [s];
-    if (s.kind === 'person') {
-      for (const d of state.subjects) {
-        if (d.kind === 'seat' && d.status === 'active' && d.tenant === s.tenant && d.principal === s.id) {
-          closure.push(d); // I15: active same-tenant delegates only — already-revoked seats are not re-stamped (I14)
-        }
-      }
-    }
-    const ids = new Set(closure.map(x => x.id));
-    for (const x of closure) {
-      x.status = 'revoked';
-      x.revoked_at = now;
-      x.ended_how = x.id === s.id ? how : 'revoked';
-    }
-    // Grants for the closure GO — keyed by subject_id alone: a dead subject
-    // must leave no live keys anywhere, whatever tenant a grant row claims.
-    const removedGrants = new Map();
-    state.grants = state.grants.filter(g => {
-      if (!ids.has(g.subject_id)) return true;
-      removedGrants.set(g.subject_id, (removedGrants.get(g.subject_id) || 0) + 1);
-      return false;
-    });
-    // Credentials are marked IN PLACE — the only cleanup the repo's pinned
-    // selector positions permit (I16).
-    const markedCreds = new Map();
-    for (const c of state.credentials) {
-      if (ids.has(c.subject_id) && !c.revoked) {
-        c.revoked = true;
-        markedCreds.set(c.subject_id, (markedCreds.get(c.subject_id) || 0) + 1);
-      }
-    }
-    // One audit intent per revoked subject (D4), cascade provenance included —
-    // the later audit reader should never have to infer WHY a seat died.
-    for (const x of closure) {
-      state.outbox.push({
-        id: crypto.randomUUID(), ts: now, kind: 'subject.revoke',
-        tenant: x.tenant, subject_id: x.id, subject_name: x.name, subject_kind: x.kind,
-        cascade_of: x.id === s.id ? null : s.id,
-        grants_removed: removedGrants.get(x.id) || 0,
-        credentials_revoked: markedCreds.get(x.id) || 0,
-      });
+    if (!revokeInDraft(state, id, how, Date.now())) {
+      throw new Error('subjects.revoke: target changed between read and transaction');
     }
     return true;
   });
@@ -478,7 +510,7 @@ function revoke(id, endedHow) {
 module.exports = {
   ENDED_HOW,
   create, createPersonInDraft, createSeatInDraft, createAiSeatInDraft,
-  get, byName, rename, list, revoke, fold, KINDS, validDisplayName, DISPLAY_NAME_RE,
+  get, byName, rename, list, revoke, revokeInDraft, fold, KINDS, validDisplayName, DISPLAY_NAME_RE,
   normalizeAiName, normalizeAiProduct, validAiProductProvenance,
   nameHistory, historicallyHeld, aiNameStatus, aiSessionDiscriminator,
   AI_NAME_RE, AI_PRODUCT_PROVENANCE, MAX_NAME_HISTORY,

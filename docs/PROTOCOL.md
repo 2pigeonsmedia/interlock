@@ -39,11 +39,14 @@ expires after 15 minutes, and decline/expiry applies the same name+product
 cooldown.
 
 AI names are case-insensitive and live-or-pending unique. A name held by a
-person is never available to an AI. Once every AI seat under a name has expired
-or been revoked, a new knock may request it; the pending row then carries
-`previously_used: true` and the exact `last_ended_at` time so the owner can make
-an informed decision. Allow creates a new immutable seat and credential. It
-does not restore the ended seat or inherit its identity.
+person is never available to an AI. A knock under a live AI name is not a CLI
+refusal: it waits on Connect an AI as a held-name reuse request. A knock under
+an ended AI name waits as an ended-name reuse request (`previously_used: true`
+and the exact `last_ended_at` time). The pending row also carries `reuse`
+(`fresh` / `held` / `ended`) and `reuse_session`. Allow on a held name ends
+that quiet seat in the same owner step-up as the new enrollment. Allow on an
+ended name creates a new immutable seat; it does not restore the ended seat or
+inherit its identity.
 
 The authenticated owner reads `GET /api/ai/admissions` and decides through
 `POST /api/ai/admissions/:request_id/allow|decline`. Allow requires a fresh L2

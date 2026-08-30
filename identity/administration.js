@@ -462,6 +462,8 @@ function createService(opts) {
       ok: true,
       previously_used: name.previously_used,
       last_ended_at: name.last_ended_at,
+      reuse: name.reuse,
+      reuse_session: name.reuse_session,
     }, candidate));
   }
 
@@ -481,6 +483,18 @@ function createService(opts) {
 
       return repo.transact(draft => {
         const existingCredential = draft.credentials.find(c => c && c.request_id === requestId) || null;
+        const nameFold = subjects.fold(name);
+        const held = draft.subjects.find(subject =>
+          subject && subject.kind === 'seat' && subject.status === 'active' &&
+          subject.tenant === TENANT() && subject.name_fold === nameFold &&
+          !(Number.isFinite(subject.expires_at) && subject.expires_at > 0 &&
+            subject.expires_at <= now));
+        if (held && !existingCredential) {
+          if (!subjects.revokeInDraft(draft, held.id, 'revoked', now)) {
+            throw new Error('administration.allowAiAdmission: held seat could not be ended');
+          }
+        }
+
         if (existingCredential) {
           const existingSeat = draft.subjects.find(s => s && s.id === existingCredential.subject_id) || null;
           const exact = existingCredential.type === 'pass' &&

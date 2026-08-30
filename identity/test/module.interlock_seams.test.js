@@ -66,6 +66,8 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
     ok: true,
     previously_used: false,
     last_ended_at: null,
+    reuse: 'fresh',
+    reuse_session: null,
   }, body),
     'the host preflight must reuse the module admission grammar and normalization');
   assert.deepStrictEqual(
@@ -129,8 +131,14 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
   assert.strictEqual(joined.product_provenance, 'client-reported');
   assert.strictEqual(joined.expires_at - (world.T + 23), 14 * DAY_MS,
     'an admitted Interlock AI seat must receive the ruled fixed 14-day default');
-  assert.deepStrictEqual(house.inspectAiAdmission(body), { ok: false, reason: 'name-taken' },
-    'the preflight must see the newly enrolled seat as live and reserved');
+  assert.deepStrictEqual(house.inspectAiAdmission(body), Object.assign({
+    ok: true,
+    previously_used: false,
+    last_ended_at: null,
+    reuse: 'held',
+    reuse_session: 1,
+  }, body),
+    'a live seat must surface as a held-name reuse request, not a silent CLI refusal');
   assert.deepStrictEqual(house.listParticipants({ now: world.T + 24 }).map(row => ({
     name: row.name, kind: row.kind, session: row.session, product: row.product,
     product_provenance: row.product_provenance,
@@ -270,6 +278,8 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
     ok: true,
     previously_used: true,
     last_ended_at: seat.expires_at,
+    reuse: 'ended',
+    reuse_session: 1,
   }, endedBody),
   'at exact expiry the name must reach the informed previously-used path');
 
@@ -309,9 +319,15 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
     });
   }), /missing or out-of-order durable session ordinal/i,
   'a direct repository transaction cannot forge or skip the durable ordinal');
-  assert.deepStrictEqual(house.inspectAiAdmission(endedBody, seat.expires_at + 14), {
-    ok: false, reason: 'name-taken',
-  }, 'the new live generation must reserve the folded name again');
+  assert.deepStrictEqual(house.inspectAiAdmission(endedBody, seat.expires_at + 14),
+    Object.assign({
+      ok: true,
+      previously_used: false,
+      last_ended_at: null,
+      reuse: 'held',
+      reuse_session: 2,
+    }, endedBody),
+    'the new live generation must surface as held, not a CLI name-taken refusal');
 
   const humanCollisionStep = await world.elevate(world.T + 60);
   const humanCollisionCandidate = identity.newAiCredential();
@@ -399,6 +415,8 @@ test('Interlock administration seams revoke non-owners and preserve only the cur
       ok: true,
       previously_used: true,
       last_ended_at: revokedSeat.revoked_at,
+      reuse: 'ended',
+      reuse_session: 1,
     }, replacementBody),
     'revocation must end the seat and expose the same informed name-reuse path');
 
@@ -470,6 +488,51 @@ test('an authenticated seat can hang up itself without the owner door', async ()
       ok: true,
       previously_used: true,
       last_ended_at: left.revoked_at,
+      reuse: 'ended',
+      reuse_session: 1,
     }, again),
   );
+});
+
+test('Allow on a held name ends the quiet seat and admits the new one', async () => {
+  const world = await Step.freshAdmin(F);
+  const house = world.instance;
+  const identity = F.load('index.js');
+  const first = identity.newAiCredential();
+  const allowed = await world.elevate(world.T + 10);
+  const seat = house.allowAiAdmission(world.env(allowed, world.T + 13), admission(first));
+  assert.strictEqual(seat.ok, true, JSON.stringify(seat));
+  const second = identity.newAiCredential();
+  const body = admission(second, { name: 'Marlow' });
+  assert.deepStrictEqual(house.inspectAiAdmission(body, world.T + 20), Object.assign({
+    ok: true,
+    previously_used: false,
+    last_ended_at: null,
+    reuse: 'held',
+    reuse_session: 1,
+  }, body));
+  const liveSeat = world.repo.read().subjects.find(row => row.id === seat.subject_id);
+  const subjects = F.load('subjects.js');
+  assert.throws(() => world.repo.transact(draft => {
+    subjects.createAiSeatInDraft(draft, {
+      tenant: liveSeat.tenant,
+      name: 'Marlow',
+      principal: liveSeat.principal,
+      now: world.T + 21,
+      product: 'Claude Code',
+      product_provenance: 'client-reported',
+    });
+  }), /name is live or historically person-reserved/i,
+  'createAiSeatInDraft must still refuse a live name; Allow-to-replace revokes first');
+  const replace = await world.elevate(world.T + 30);
+  const next = house.allowAiAdmission(world.env(replace, world.T + 33), body);
+  assert.strictEqual(next.ok, true, JSON.stringify(next));
+  assert.notStrictEqual(next.subject_id, seat.subject_id);
+  const old = world.repo.read().subjects.find(row => row.id === seat.subject_id);
+  assert.strictEqual(old.status, 'revoked');
+  assert.strictEqual(old.ended_how, 'revoked');
+  assert.strictEqual(house.authorizeSeatBearer(bearer(first.token), 'read', 'room:main').allow, false);
+  assert.strictEqual(house.authorizeSeatBearer(bearer(second.token), 'read', 'room:main').allow, true);
+  const live = world.repo.read().subjects.find(row => row.id === next.subject_id);
+  assert.strictEqual(live.session_ordinal, 2);
 });

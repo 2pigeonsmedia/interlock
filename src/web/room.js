@@ -356,9 +356,10 @@ async function freshOwnerStepUp() {
 function validPendingAi(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 9 || ![
+  if (keys.length !== 11 || ![
     'request_id', 'name', 'product', 'product_provenance',
-    'previously_used', 'last_ended_at', 'created_at', 'expires_at', 'connected',
+    'previously_used', 'last_ended_at', 'reuse', 'reuse_session',
+    'created_at', 'expires_at', 'connected',
   ].every(key => keys.includes(key))) return false;
   return typeof value.request_id === 'string' && typeof value.name === 'string' &&
     typeof value.product === 'string' &&
@@ -368,6 +369,12 @@ function validPendingAi(value) {
     (value.last_ended_at === null ||
       (Number.isSafeInteger(value.last_ended_at) && value.last_ended_at >= 0)) &&
     value.previously_used === (value.last_ended_at !== null) &&
+    (value.reuse === 'fresh' || value.reuse === 'held' || value.reuse === 'ended') &&
+    (value.reuse_session === null ||
+      (Number.isSafeInteger(value.reuse_session) && value.reuse_session > 0)) &&
+    ((value.reuse === 'fresh' && !value.previously_used && value.reuse_session === null) ||
+      (value.reuse === 'held' && !value.previously_used && value.reuse_session !== null) ||
+      (value.reuse === 'ended' && value.previously_used)) &&
     Number.isSafeInteger(value.created_at) && Number.isSafeInteger(value.expires_at) &&
     typeof value.connected === 'boolean';
 }
@@ -402,17 +409,24 @@ function renderPendingAis(rows) {
       ? 'reported by adapter' : 'reported by client';
     product.textContent = `${row.product} · ${provenance}`;
     const priorUse = document.createElement('small');
-    if (row.previously_used) {
-      priorUse.textContent = `This name was used before. The previous connection ended ${
-        new Date(row.last_ended_at).toLocaleString()
-      }. Allow creates a new AI session; it does not restore the old one.`;
+    if (row.reuse === 'held') {
+      priorUse.textContent = `Held by a quiet seat · Session ${row.reuse_session}. Allow ends the old session and admits this one.`;
+    } else if (row.reuse === 'ended' || row.previously_used) {
+      const session = row.reuse_session ? ` · Session ${row.reuse_session}` : '';
+      const ended = row.last_ended_at
+        ? ` Previous connection ended ${new Date(row.last_ended_at).toLocaleString()}.`
+        : '';
+      priorUse.textContent =
+        `Used before${session}. Allow admits a new session.${ended}`;
     }
     const connection = document.createElement('small');
     connection.textContent = row.connected
       ? 'Waiting now · expires in a few minutes'
       : 'The waiting connection is gone; Allow is unavailable.';
     facts.append(name, product);
-    if (row.previously_used) facts.append(priorUse);
+    if (row.reuse === 'held' || row.reuse === 'ended' || row.previously_used) {
+      facts.append(priorUse);
+    }
     facts.append(connection);
 
     const actions = document.createElement('div');
