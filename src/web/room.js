@@ -937,19 +937,15 @@ async function loadDeliveryChanges() {
 
 /* Message text is never interpreted as HTML. To colour mentions, the string
  * is split on the shared mention grammar and every piece — plain runs and
- * mention spans alike — is written with textContent. A token is styled only
- * when THIS message's server-recorded delivery shows it actually rang that
- * name (lowercase @all only when the broadcast reached someone): the colour
- * repeats a recorded fact, it never promises one. */
+ * mention spans alike — is written with textContent. The colour marks mention
+ * SYNTAX, the way code formatting marks code: whether anyone was actually
+ * rung is stated in words by the delivery record, never by the colour. (An
+ * earlier delivery-gated version left an @all that rang nobody plain — which
+ * read as broken, not as information.) */
 function renderMessageText(element, message) {
   element.textContent = '';
-  const rang = new Set(message.delivery.map(recipient => recipient.name.toLowerCase()));
   let cursor = 0;
   for (const token of InterlockMentions.tokens(message.text)) {
-    const delivered = token.handle === 'all'
-      ? message.delivery.length > 0
-      : rang.has(token.handle.toLowerCase());
-    if (!delivered) continue;
     element.append(document.createTextNode(message.text.slice(cursor, token.start)));
     const mention = document.createElement('span');
     mention.className = 'mention';

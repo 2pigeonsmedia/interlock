@@ -165,10 +165,12 @@ Rules the CSS relies on:
   interpreted as HTML. To colour mentions, the renderer splits the string on
   the shared mention grammar (`mentions.js`, the same parser the server
   rings with) and writes every piece — plain runs and `.mention` spans alike
-  — with `textContent`. A token is styled only when that message's
-  server-recorded delivery shows it actually rang that name (lowercase
-  `@all` only when the broadcast reached someone): the colour repeats a
-  recorded fact, it never promises one.
+  — with `textContent`. The colour marks mention **syntax**, the way code
+  formatting marks code; whether anyone was actually rung is stated in
+  words by the delivery record and the composer preview, never by the
+  colour. (A delivery-gated variant was tried and rejected: an `@all` that
+  rang nobody rendered plain, which read as broken rather than as
+  information.)
 - `data-addressed="true"` on a message tints the row and lights its teal left
   rail; `.delivery` states are words, not colours alone.
 - `.message-id` renders as a bordered plate — the id the CLI shows as `[n]`;
