@@ -45,7 +45,10 @@ If Windows and WSL Codex homes both exist, pass `--codex-home ABSOLUTE_PATH`.
 `CODEX_HOME` is honored even when that directory does not exist yet; it is
 never replaced by a guessed home. If several Codex engines are installed,
 pass `--codex-checker ABSOLUTE_PATH` for the active one. Fail closed rather
-than guess. Printed check/remove commands include `--codex-home`.
+than guess. Printed check/remove commands include `--codex-home` and, when a
+checker was selected, `--codex-checker`. Check and remove do not require a
+saved Interlock connection; install does. A prior Interlock-owned policy
+format can be removed or upgraded if its digest still verifies.
 
 `check` is a syntax check of the Interlock-owned file. Codex loads every
 active rules layer and the most restrictive match wins, so a passing check

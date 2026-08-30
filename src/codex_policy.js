@@ -6,7 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const OWNED_NAME = 'interlock-codex-policy.rules';
-const MARKER = 'INTERLOCK-CODEX-POLICY 1';
+const MARKER_V1 = 'INTERLOCK-CODEX-POLICY 1';
+const MARKER = 'INTERLOCK-CODEX-POLICY 2';
 const MODES = Object.freeze(['receive', 'participate']);
 const AI_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
 
@@ -156,24 +157,31 @@ function generatePolicy(options) {
 }
 
 function parseOwned(text) {
-  if (typeof text !== 'string' || !text.startsWith(`# ${MARKER}\n`)) return null;
+  if (typeof text !== 'string' ||
+      (!text.startsWith(`# ${MARKER}\n`) && !text.startsWith(`# ${MARKER_V1}\n`))) {
+    return null;
+  }
   const connection = text.match(/^# connection=([A-Za-z0-9-]+)$/m);
   const mode = text.match(/^# mode=(receive|participate)$/m);
   const node = text.match(/^# node=(.+)$/m);
   const script = text.match(/^# script=(.+)$/m);
   const digest = text.match(/^# sha256=([0-9a-f]{64})$/m);
   if (!connection || !mode || !node || !script || !digest) return null;
+  const body = text.replace(`# sha256=${digest[1]}\n`, '');
+  const computed = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+  if (computed !== digest[1]) return null;
   return {
     connection: connection[1],
     mode: mode[1],
     nodePath: node[1],
     scriptPath: script[1],
     sha256: digest[1],
+    version: text.startsWith(`# ${MARKER}\n`) ? 2 : 1,
   };
 }
 
-function isOwnedExact(text, options) {
-  return text === generatePolicy(options);
+function isOwnedValid(text) {
+  return parseOwned(text) !== null;
 }
 
 function policyPaths(rulesDir) {
@@ -215,10 +223,25 @@ function ensureRulesDir(home, ioFs) {
   return requireDirectory(rules, ioFs, 'invalid-codex-home');
 }
 
-function resolveRulesDir(options, ioFs) {
-  if (options.codexHome) return ensureRulesDir(options.codexHome, ioFs);
+function resolveRulesDir(options, ioFs, create) {
+  function open(home) {
+    if (create) return ensureRulesDir(home, ioFs);
+    const rules = path.join(home, 'rules');
+    if (!ioFs.existsSync(home) || !ioFs.existsSync(rules)) throw failure('not-installed');
+    return requireDirectory(rules, ioFs, 'not-installed');
+  }
+  if (options.codexHome) return open(options.codexHome);
   const envHome = explicitEnvHome(options);
-  if (envHome) return ensureRulesDir(envHome, ioFs);
+  if (envHome) return open(envHome);
+  if (!create) {
+    const existing = [];
+    for (const home of fallbackHomes(options)) {
+      try { existing.push(requireDirectory(path.join(home, 'rules'), ioFs, 'not-installed')); } catch (_) { /* skip */ }
+    }
+    const unique = [...new Set(existing)];
+    if (unique.length === 1) return unique[0];
+    throw failure(unique.length > 1 ? 'ambiguous-codex-home' : 'not-installed');
+  }
   const existing = [];
   for (const home of fallbackHomes(options)) {
     try { existing.push(requireDirectory(home, ioFs, 'invalid-codex-home')); } catch (_) { /* skip */ }
@@ -242,8 +265,20 @@ function shellQuote(value) {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
-function policyHandoff(action, connection, codexHome) {
-  return `interlock codex-policy ${action} --connection ${connection} --codex-home ${shellQuote(codexHome)}`;
+function policyHandoff(action, connection, codexHome, checkerPath) {
+  let command = `interlock codex-policy ${action} --connection ${connection} --codex-home ${shellQuote(codexHome)}`;
+  if (checkerPath) command += ` --codex-checker ${shellQuote(checkerPath)}`;
+  return command;
+}
+
+function quotedArgv(parts) {
+  return parts.map(shellQuote).join(' ');
+}
+
+function displayHistoryArgv(nodePath, scriptPath, connection) {
+  const node = invocationAliases(nodePath).find(value => value.startsWith('/mnt/')) || nodePath;
+  const script = invocationAliases(scriptPath).find(value => /^[A-Za-z]:[\\/]/.test(value)) || scriptPath;
+  return quotedArgv(historyPattern(node, script, connection));
 }
 
 function resolveCodexNode(options, ioFs) {
@@ -320,7 +355,7 @@ function resolveCodexChecker(options, ioFsIn) {
     }
   }
   const homes = [];
-  try { homes.push(resolvedCodexHome(resolveRulesDir(options, ioFs))); } catch (_) { /* no home yet */ }
+  try { homes.push(resolvedCodexHome(resolveRulesDir(options, ioFs, false))); } catch (_) { /* no home yet */ }
   for (const home of homes) {
     selected.push(...scanVersionedCheckers(path.join(home, 'bin', 'wsl'), ioFs));
     selected.push(...scanVersionedCheckers(path.join(home, 'bin'), ioFs));
@@ -342,47 +377,82 @@ function readOwned(rulesDir, ioFs) {
   return ioFs.readFileSync(owned, 'utf8');
 }
 
-function pidAlive(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+function lockOwnerState(record) {
+  if (!record || !Number.isSafeInteger(record.pid) || record.pid < 1 ||
+      typeof record.platform !== 'string' || typeof record.hostname !== 'string' ||
+      !Number.isSafeInteger(record.started_at) || typeof record.instance_id !== 'string') {
+    return 'unverifiable';
+  }
+  if (record.platform !== process.platform ||
+      record.hostname.toLowerCase() !== os.hostname().toLowerCase()) {
+    return 'unverifiable';
+  }
   try {
-    process.kill(pid, 0);
-    return true;
+    process.kill(record.pid, 0);
+    return 'active';
   } catch (error) {
-    if (error && error.code === 'ESRCH') return false;
-    return true;
+    if (error && error.code === 'ESRCH') return 'stale';
+    if (error && error.code === 'EPERM') return 'active';
+    return 'unverifiable';
   }
 }
 
 function withOwnedLock(rulesDir, ioFs, fn) {
   const lockPath = path.join(rulesDir, `${OWNED_NAME}.lock`);
-  function take() {
-    const fd = ioFs.openSync(lockPath, 'wx');
-    const payload = `${JSON.stringify({
-      pid: process.pid,
-      started: Date.now(),
-      nonce: crypto.randomBytes(8).toString('hex'),
-    })}\n`;
-    ioFs.writeFileSync(fd, payload);
-    return fd;
-  }
-  let fd;
-  try {
-    fd = take();
-  } catch (_) {
-    let stale = false;
+  const record = {
+    pid: process.pid,
+    platform: process.platform,
+    hostname: os.hostname(),
+    started_at: Date.now(),
+    instance_id: crypto.randomUUID(),
+  };
+  const encoded = JSON.stringify(record) + '\n';
+  let fd = null;
+  for (let attempt = 0; attempt < 16; attempt += 1) {
     try {
-      const parsed = JSON.parse(ioFs.readFileSync(lockPath, 'utf8'));
-      stale = !pidAlive(parsed && parsed.pid);
-    } catch (_) {
-      stale = false;
+      fd = ioFs.openSync(lockPath, 'wx');
+      ioFs.writeFileSync(fd, encoded);
+      break;
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') throw error;
     }
-    if (!stale) throw failure('owned-file-unsafe');
-    try { ioFs.unlinkSync(lockPath); } catch (_) { throw failure('owned-file-unsafe'); }
-    fd = take();
+    let raw;
+    try { raw = ioFs.readFileSync(lockPath, 'utf8'); } catch (error) {
+      if (error && error.code === 'ENOENT') continue;
+      throw failure('owned-file-unsafe');
+    }
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (_) { throw failure('owned-file-unsafe'); }
+    const state = lockOwnerState(parsed);
+    if (state === 'active') throw failure('owned-file-unsafe');
+    if (state !== 'stale') throw failure('owned-file-unsafe');
+    let confirmed;
+    try { confirmed = ioFs.readFileSync(lockPath, 'utf8'); } catch (error) {
+      if (error && error.code === 'ENOENT') continue;
+      throw failure('owned-file-unsafe');
+    }
+    if (confirmed !== raw) continue;
+    const claimPath = lockPath + '.stale-' + crypto.randomUUID();
+    try { ioFs.renameSync(lockPath, claimPath); } catch (error) {
+      if (error && error.code === 'ENOENT') continue;
+      throw error;
+    }
+    try {
+      if (ioFs.readFileSync(claimPath, 'utf8') !== raw) {
+        try { ioFs.linkSync(claimPath, lockPath); } catch (_) { /* keep evidence */ }
+        throw failure('owned-file-unsafe');
+      }
+    } finally {
+      try { ioFs.unlinkSync(claimPath); } catch (_) { /* claimed stale lock */ }
+    }
   }
+  if (fd === null) throw failure('owned-file-unsafe');
   try { return fn(); } finally {
+    try {
+      const current = ioFs.readFileSync(lockPath, 'utf8');
+      if (current === encoded) ioFs.unlinkSync(lockPath);
+    } catch (_) { /* ownership already gone */ }
     try { ioFs.closeSync(fd); } catch (_) { /* ignore */ }
-    try { ioFs.unlinkSync(lockPath); } catch (_) { /* ignore */ }
   }
 }
 
@@ -402,6 +472,12 @@ function decideExecpolicy(result) {
   return 'unsupported';
 }
 
+function negativeConnection(name) {
+  const candidate = name === 'OtherName' ? 'OtherSeat' : 'OtherName';
+  if (candidate.toLowerCase() === String(name).toLowerCase()) return 'AltSeat';
+  return candidate;
+}
+
 function expectedChecks(spec) {
   const { nodePath, scriptPath, connection, mode } = spec;
   const pairs = invocationPairs(nodePath, scriptPath);
@@ -416,7 +492,7 @@ function expectedChecks(spec) {
   const negatives = [
     ['node', script, 'history', '--connection', connection, '--drain', '--json'],
     [node, 'bin/interlock.js', 'history', '--connection', connection, '--drain', '--json'],
-    [node, script, 'history', '--connection', 'OtherName', '--drain', '--json'],
+    [node, script, 'history', '--connection', negativeConnection(connection), '--drain', '--json'],
     [node, script, 'leave', '--connection', connection],
     [node, script, 'say', '--connection', connection, '--stdin'],
     [node, script, 'join'],
@@ -455,7 +531,7 @@ function installPolicy(options) {
   const mode = options.mode;
   if (!validConnectionName(connection)) throw failure('invalid-connection');
   if (!MODES.includes(mode)) throw failure('invalid-mode');
-  const rulesDir = resolveRulesDir(options, ioFs);
+  const rulesDir = resolveRulesDir(options, ioFs, true);
   const nodePath = resolveCodexNode(options, ioFs);
   const scriptPath = resolveInterlockScript(options, ioFs);
   const spec = { connection, mode, nodePath, scriptPath };
@@ -465,7 +541,7 @@ function installPolicy(options) {
     let replaced = null;
     if (existing !== null) {
       const parsed = parseOwned(existing);
-      if (!parsed || !isOwnedExact(existing, parsed)) throw failure('owned-file-modified');
+      if (!parsed) throw failure('owned-file-modified');
       replaced = parsed.connection;
     }
     const tmpPath = writeTmp(rulesDir, contents, ioFs);
@@ -488,6 +564,10 @@ function installPolicy(options) {
       throw error;
     }
     const codexHome = resolvedCodexHome(rulesDir);
+    let checkerPath = options.checkerPath || null;
+    if (!checkerPath) {
+      try { checkerPath = resolveCodexChecker(options, ioFs); } catch (_) { checkerPath = null; }
+    }
     return Object.freeze({
       path: policyPaths(rulesDir).owned,
       mode,
@@ -495,13 +575,20 @@ function installPolicy(options) {
       nodePath,
       scriptPath,
       codexHome,
-      historyArgv: historyPattern(nodePath, scriptPath, connection),
-      sayArgv: mode === 'participate' ? sayPattern(nodePath, scriptPath, connection) : null,
+      checkerPath,
+      historyArgv: displayHistoryArgv(nodePath, scriptPath, connection),
+      sayArgv: mode === 'participate'
+        ? quotedArgv(sayPattern(
+          invocationAliases(nodePath).find(value => value.startsWith('/mnt/')) || nodePath,
+          invocationAliases(scriptPath).find(value => /^[A-Za-z]:[\\/]/.test(value)) || scriptPath,
+          connection,
+        ))
+        : null,
       restartRequired: true,
       active: 'unknown',
       replacedConnection: replaced && replaced !== connection ? replaced : null,
-      checkCommand: policyHandoff('check', connection, codexHome),
-      removeCommand: policyHandoff('remove', connection, codexHome),
+      checkCommand: policyHandoff('check', connection, codexHome, checkerPath),
+      removeCommand: policyHandoff('remove', connection, codexHome, checkerPath),
     });
   });
 }
@@ -510,11 +597,11 @@ function checkPolicy(options) {
   const ioFs = options.fs || fs;
   const connection = options.connection;
   if (!validConnectionName(connection)) throw failure('invalid-connection');
-  const rulesDir = resolveRulesDir(options, ioFs);
+  const rulesDir = resolveRulesDir(options, ioFs, false);
   const existing = readOwned(rulesDir, ioFs);
   if (existing === null) throw failure('not-installed');
   const parsed = parseOwned(existing);
-  if (!parsed || !isOwnedExact(existing, parsed)) throw failure('owned-file-modified');
+  if (!parsed) throw failure('owned-file-modified');
   if (parsed.connection !== connection) throw failure('connection-mismatch');
   const checks = expectedChecks(parsed);
   const checkerOptions = Object.assign({}, options, { nodePath: parsed.nodePath });
@@ -530,6 +617,10 @@ function checkPolicy(options) {
     if (decision === 'unsupported') throw failure('execpolicy-unavailable');
   }
   const codexHome = resolvedCodexHome(rulesDir);
+  let checkerPath = options.checkerPath || null;
+  if (!checkerPath) {
+    try { checkerPath = resolveCodexChecker(options, ioFs); } catch (_) { checkerPath = null; }
+  }
   return Object.freeze({
     path: owned,
     mode: parsed.mode,
@@ -537,11 +628,12 @@ function checkPolicy(options) {
     nodePath: parsed.nodePath,
     scriptPath: parsed.scriptPath,
     codexHome,
-    restartRequired: true,
+    checkerPath,
+    restartRequired: null,
     active: 'unknown',
     syntaxOnly: true,
-    checkCommand: policyHandoff('check', connection, codexHome),
-    removeCommand: policyHandoff('remove', connection, codexHome),
+    checkCommand: policyHandoff('check', connection, codexHome, checkerPath),
+    removeCommand: policyHandoff('remove', connection, codexHome, checkerPath),
   });
 }
 
@@ -549,12 +641,12 @@ function removePolicy(options) {
   const ioFs = options.fs || fs;
   const connection = options.connection;
   if (!validConnectionName(connection)) throw failure('invalid-connection');
-  const rulesDir = resolveRulesDir(options, ioFs);
+  const rulesDir = resolveRulesDir(options, ioFs, false);
   return withOwnedLock(rulesDir, ioFs, () => {
     const existing = readOwned(rulesDir, ioFs);
     if (existing === null) throw failure('not-installed');
     const parsed = parseOwned(existing);
-    if (!parsed || !isOwnedExact(existing, parsed)) throw failure('owned-file-modified');
+    if (!parsed) throw failure('owned-file-modified');
     if (parsed.connection !== connection) throw failure('connection-mismatch');
     ioFs.unlinkSync(policyPaths(rulesDir).owned);
     const codexHome = resolvedCodexHome(rulesDir);
@@ -569,6 +661,9 @@ function removePolicy(options) {
 module.exports = {
   OWNED_NAME,
   MARKER,
+  MARKER_V1,
+  parseOwned,
+  negativeConnection,
   generatePolicy,
   parseOwned,
   expectedChecks,

@@ -1706,6 +1706,7 @@ function reportCodexPolicyError(stderr, error) {
     return EXIT_USAGE;
   }
   line(stderr, 'interlock: Codex policy could not be applied safely.');
+  if (error && error.code) line(stderr, `interlock: ${error.code}`);
   return EXIT_RUNTIME;
 }
 
@@ -1716,8 +1717,8 @@ function printPolicyReceipt(stdout, receipt) {
   if (receipt.replacedConnection) {
     line(stdout, `Replaced Interlock policy for ${receipt.replacedConnection}. Only one connection is trusted at a time.`);
   }
-  line(stdout, `Argv: ${receipt.historyArgv.join(' ')}`);
-  if (receipt.sayArgv) line(stdout, `Argv: ${receipt.sayArgv.join(' ')}`);
+  line(stdout, `Argv: ${receipt.historyArgv}`);
+  if (receipt.sayArgv) line(stdout, `Argv: ${receipt.sayArgv}`);
   line(stdout, 'Syntax check only. Codex loads every rules layer and the most restrictive match wins; this does not prove the command will run without review.');
   line(stdout, 'Restart Codex Desktop. Activation stays unknown until you observe an unreviewed canonical command after that restart.');
   line(stdout, `Check with: ${receipt.checkCommand}`);
@@ -1732,9 +1733,16 @@ async function runCodexPolicy(args, io, dependencies = {}) {
     line(io.stderr, '       interlock codex-policy remove --connection NAME');
     return EXIT_USAGE;
   }
-  try { selectedConnection(parsed.connection, dependencies); } catch (error) {
-    reportConnectionError(io.stderr, error, parsed.connection);
-    return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+  if (parsed.action === 'install') {
+    try { selectedConnection(parsed.connection, dependencies); } catch (error) {
+      reportConnectionError(io.stderr, error, parsed.connection);
+      return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+    }
+  } else if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(parsed.connection) ||
+      parsed.connection.length < 2 || parsed.connection.length > 24 ||
+      parsed.connection.toLowerCase() === 'all') {
+    line(io.stderr, 'interlock: usage: interlock codex-policy check --connection NAME [--json]');
+    return EXIT_USAGE;
   }
   if (parsed.action === 'install' && parsed.mode === 'participate') {
     const confirmed = await confirmParticipate(parsed.connection, io, dependencies);
@@ -1773,7 +1781,7 @@ async function runCodexPolicy(args, io, dependencies = {}) {
           path: receipt.path,
           mode: receipt.mode,
           connection: receipt.connection,
-          restart_required: true,
+          restart_required: receipt.restartRequired,
           active: 'unknown',
           syntax_only: true,
           codex_home: receipt.codexHome,
