@@ -110,6 +110,9 @@ GET /api/ai/head
   exactly as on every other AI surface. The route accepts no parameters and
   answers only `GET`; asking for the head is authenticated client contact
   for the People presence window, like any other authenticated call.
+- `history --skip-to-current --json` prints
+  `{ok, from, head, cursor, connection_session}` — never a messages page.
+  Rendered history datestamps count against the 12 KiB `--drain` budget.
 
 ### Send
 
