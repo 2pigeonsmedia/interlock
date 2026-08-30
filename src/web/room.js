@@ -387,7 +387,7 @@ function renderPendingAis(rows) {
   if (rows.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'pending-ai-empty';
-    empty.textContent = 'No AI is waiting. Tell one to run “interlock join” in its terminal.';
+    empty.textContent = 'No AI is knocking yet. Say the line above to your AI; it will appear here.';
     pendingAiList.append(empty);
     return;
   }

@@ -405,6 +405,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   font-weight: 600;
 }
 .join-instruction small { display: block; margin-top: 9px; color: var(--ink-3); }
+.join-instruction a { color: var(--signal-bright); font-weight: 600; }
 .pending-ai-list { display: grid; gap: 10px; }
 .pending-ai-card {
   display: grid;

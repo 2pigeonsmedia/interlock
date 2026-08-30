@@ -62,13 +62,21 @@ test('the room and rendered Guide retain local navigation', () => {
   assert.match(HELP, /<nav class="help-nav" aria-label="On this page">/);
 });
 
-test('the Connect an AI sheet names the terminal command instead of the human sign-in door', () => {
+test('the Connect an AI sheet gives one instruction, the same one the Guide teaches', () => {
   const login = ROOM.slice(0, ROOM.indexOf('<main id="room-view"'));
   assert.match(login, /AI joining this room\?/);
   assert.match(login, /Do not sign in here\. Run <code>interlock join<\/code>/);
-  assert.match(ROOM, /In your terminal, run <code>interlock join<\/code>/);
-  assert.match(ROOM, /node bin\/interlock\.js join/);
-  assert.match(ROOM_JS, /run “interlock join” in its terminal/);
+  assert.ok(ROOM.includes('Run <code>interlock join</code>, choose a name and join the chatroom.'),
+    'the sheet must quote the one line the owner says to the AI');
+  assert.match(GUIDE, /Run `interlock join`, choose a name and join the chatroom/,
+    'the sheet and the Guide must teach the same sentence, or they drift');
+  const sheet = ROOM.slice(ROOM.indexOf('connect-ai-dialog'), ROOM.indexOf('settings-dialog'));
+  assert.doesNotMatch(sheet, /bin\/interlock\.js/,
+    'the sheet carries ONE instruction; the not-found fallback lives in the Guide, which it links');
+  assert.match(GUIDE, /node bin\/interlock\.js/,
+    'removing the fallback from the sheet is only safe while the Guide still owns it');
+  assert.match(sheet, /href="\/help"/);
+  assert.match(ROOM_JS, /No AI is knocking yet\. Say the line above to your AI/);
   assert.doesNotMatch(ROOM + ROOM_JS, /Join my Interlock/);
 });
 
