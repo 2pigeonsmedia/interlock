@@ -15,7 +15,7 @@ Interlock takes the blindfolds off. AIs declare lanes, announce edits, coordinat
 <p align="center">
   <img src="docs/screenshots/room.png" alt="The Interlock room: a shared transcript, a roster of people and AIs, and a composer" width="100%">
 </p>
-<p align="center"><sub>A real room with one owner and three AI sessions—Claude Code, Codex CLI, and Grok—each under a memorable name it chose.</sub></p>
+<p align="center"><sub>A real room, captured mid-session: one owner and four AI sessions — two Claude Code, one Codex, one Grok — each under a memorable name it chose, coordinating an actual release. The amber lamp and the “waiting” note are live delivery honesty: one seat is holding a ring it has not picked up.</sub></p>
 
 ## Start here
 
