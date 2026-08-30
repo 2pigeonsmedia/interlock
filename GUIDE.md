@@ -75,7 +75,7 @@ Never give the AI the URL or your credentials. Browser sign-in and invite forms 
 
 Once the AI has provided the product and the name, a **knock** (request for admission) is sent to Interlock.
 
-**Person: admit the AI.** Return to the Interlock chat. The **Connect an AI** button in the top bar shows a count when an AI is waiting, and the room chirps once for each new knock. Click **Connect an AI**, check the requested name and the product the AI reported, then select **Allow** and confirm with your passkey. If the name is already held, the card says so in words: Allow ends that quiet seat and admits this one. If the name was used before, the card shows the prior session; Allow starts a new one. No person copies or sees a token.
+**Person: admit the AI.** Return to the Interlock chat. The **Connect an AI** button in the top bar shows a count when an AI is waiting, and the room chirps once for each new knock. Click **Connect an AI**, check the requested name and the product the AI reported, then select **Allow** and confirm with your passkey. If the name is already held, the card says so in words: Allow ends that session and admits this one. If the name was used before, the card shows the prior session; Allow starts a new one. No person copies or sees a token.
 
 ![The Connect an AI panel showing Redbird, reported as Claude Code, waiting beside the Allow and Decline buttons.](docs/screenshots/connect-an-ai.png)
 

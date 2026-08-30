@@ -78,17 +78,16 @@ function validEnrollment(value) {
       row.product_provenance === 'adapter-reported') && finiteTime(row.expires_at);
 }
 
-function parseRecord(value) {
-  let row = closedObject(value, RECORD_KEYS, true);
-  if (!row) {
-    const prior = closedObject(value, PRIOR_RECORD_KEYS, true);
-    if (prior) {
-      row = Object.assign({}, prior, {
-        reuse: prior.previously_used ? 'ended' : 'fresh',
-        reuse_session: null,
-      });
-    }
-  }
+function validReuseShape(row) {
+  return REUSE.includes(row.reuse) &&
+    (row.reuse_session === null ||
+      (Number.isSafeInteger(row.reuse_session) && row.reuse_session > 0)) &&
+    ((row.reuse === 'fresh' && !row.previously_used && row.reuse_session === null) ||
+      (row.reuse === 'held' && !row.previously_used && row.reuse_session !== null) ||
+      (row.reuse === 'ended' && row.previously_used && row.reuse_session !== null));
+}
+
+function validRecordCore(row) {
   const productLength = row && typeof row.product === 'string' ? Array.from(row.product).length : 0;
   if (!row || !UUID_V4.test(row.request_id) ||
       typeof row.name !== 'string' || row.name.length < 2 || row.name.length > 24 ||
@@ -100,33 +99,94 @@ function parseRecord(value) {
       typeof row.previously_used !== 'boolean' ||
       !(row.last_ended_at === null || finiteTime(row.last_ended_at)) ||
       (row.previously_used !== (row.last_ended_at !== null)) ||
-      !REUSE.includes(row.reuse) ||
-      !(row.reuse_session === null ||
-        (Number.isSafeInteger(row.reuse_session) && row.reuse_session > 0)) ||
-      (row.reuse === 'fresh' && (row.previously_used || row.reuse_session !== null)) ||
-      (row.reuse === 'held' && (row.previously_used || row.reuse_session === null)) ||
-      (row.reuse === 'ended' && !row.previously_used) ||
       !finiteTime(row.created_at) || !finiteTime(row.expires_at) ||
       row.expires_at <= row.created_at || !STATES.includes(row.state) ||
       !(row.ended_at === null || finiteTime(row.ended_at)) ||
       !(row.cooldown_until === null || finiteTime(row.cooldown_until)) ||
       !(row.enrollment === null || validEnrollment(row.enrollment))) {
-    throw failure('corrupt-state');
+    return false;
   }
   if (row.state === 'pending' &&
       (row.ended_at !== null || row.cooldown_until !== null || row.enrollment !== null)) {
-    throw failure('corrupt-state');
+    return false;
   }
   if (row.state === 'allowed' &&
       (row.ended_at === null || row.cooldown_until !== null || !row.enrollment)) {
-    throw failure('corrupt-state');
+    return false;
   }
   if ((row.state === 'declined' || row.state === 'expired') &&
       (row.ended_at === null || row.cooldown_until === null || row.enrollment !== null)) {
-    throw failure('corrupt-state');
+    return false;
   }
+  return true;
+}
+
+function freezeRecord(row) {
   return Object.freeze(Object.assign({}, row, {
     enrollment: row.enrollment === null ? null : Object.freeze(Object.assign({}, row.enrollment)),
+  }));
+}
+
+function parseCurrentRecord(value) {
+  const row = closedObject(value, RECORD_KEYS, true);
+  if (!row || !validRecordCore(row) || !validReuseShape(row)) throw failure('corrupt-state');
+  return freezeRecord(row);
+}
+
+function parsePriorRecord(value) {
+  const row = closedObject(value, PRIOR_RECORD_KEYS, true);
+  if (!row || !validRecordCore(row)) throw failure('corrupt-state');
+  return Object.freeze(Object.assign({}, row));
+}
+
+function candidateFrom(row) {
+  const candidate = {};
+  for (const key of CANDIDATE_KEYS) candidate[key] = row[key];
+  return candidate;
+}
+
+function validInspectedReuse(inspected) {
+  return !!(inspected && inspected.ok === true &&
+    typeof inspected.previously_used === 'boolean' &&
+    (inspected.last_ended_at === null || finiteTime(inspected.last_ended_at)) &&
+    inspected.previously_used === (inspected.last_ended_at !== null) &&
+    validReuseShape(inspected));
+}
+
+function needsReuseInspect(row) {
+  return row.reuse === 'ended' && row.previously_used === true && row.reuse_session === null;
+}
+
+function classifyRecord(value, schemaMigrated) {
+  if (schemaMigrated) {
+    const legacy = closedObject(value, LEGACY_RECORD_KEYS, true);
+    if (!legacy) throw failure('corrupt-state');
+    return {
+      kind: 'prior',
+      record: parsePriorRecord(Object.assign({}, legacy, {
+        previously_used: false,
+        last_ended_at: null,
+      })),
+    };
+  }
+  const current = closedObject(value, RECORD_KEYS, true);
+  if (current && needsReuseInspect(current) && validRecordCore(current)) {
+    return { kind: 'inspect', record: Object.freeze(Object.assign({}, current)) };
+  }
+  if (current) return { kind: 'current', record: parseCurrentRecord(value) };
+  const prior = closedObject(value, PRIOR_RECORD_KEYS, true);
+  if (prior) return { kind: 'prior', record: parsePriorRecord(value) };
+  throw failure('corrupt-state');
+}
+
+function migrateInspectedRecord(row, house, at) {
+  const inspected = house.inspectAiAdmission(candidateFrom(row), at);
+  if (!validInspectedReuse(inspected)) return null;
+  return freezeRecord(Object.assign({}, row, {
+    previously_used: inspected.previously_used,
+    last_ended_at: inspected.last_ended_at,
+    reuse: inspected.reuse,
+    reuse_session: inspected.reuse_session,
   }));
 }
 
@@ -138,22 +198,14 @@ function parseState(raw) {
       !Array.isArray(state.records)) {
     throw failure('corrupt-state');
   }
-  const migrated = state.schema === LEGACY_SCHEMA;
-  const records = state.records.map(value => {
-    if (!migrated) return parseRecord(value);
-    const legacy = closedObject(value, LEGACY_RECORD_KEYS, true);
-    if (!legacy) throw failure('corrupt-state');
-    return parseRecord(Object.assign({}, legacy, {
-      previously_used: false,
-      last_ended_at: null,
-    }));
-  });
+  const schemaMigrated = state.schema === LEGACY_SCHEMA;
+  const classified = state.records.map(value => classifyRecord(value, schemaMigrated));
   const ids = new Set();
-  for (const record of records) {
-    if (ids.has(record.request_id)) throw failure('corrupt-state');
-    ids.add(record.request_id);
+  for (const item of classified) {
+    if (ids.has(item.record.request_id)) throw failure('corrupt-state');
+    ids.add(item.record.request_id);
   }
-  return Object.freeze({ records, migrated });
+  return Object.freeze({ classified, schemaMigrated });
 }
 
 function fsyncFile(filePath) {
@@ -234,8 +286,20 @@ function openAdmissionService(optionsIn) {
   let records;
   if (fs.existsSync(statePath)) {
     const loaded = parseState(fs.readFileSync(statePath, 'utf8'));
-    records = loaded.records;
-    if (loaded.migrated) persist(records);
+    const at = clock();
+    if (!finiteTime(at)) throw failure('invalid-clock');
+    let upgraded = loaded.schemaMigrated;
+    records = [];
+    for (const item of loaded.classified) {
+      if (item.kind === 'current') {
+        records.push(item.record);
+        continue;
+      }
+      upgraded = true;
+      const migrated = migrateInspectedRecord(item.record, options.house, at);
+      if (migrated) records.push(migrated);
+    }
+    if (upgraded) persist(records);
   } else {
     persist([], true);
     records = [];
@@ -397,17 +461,7 @@ function openAdmissionService(optionsIn) {
         inspected.reason === 'invalid-name') ? inspected.reason : 'invalid-request';
       return Promise.resolve(Object.freeze({ ok: false, reason }));
     }
-    if (typeof inspected.previously_used !== 'boolean' ||
-        !(inspected.last_ended_at === null || finiteTime(inspected.last_ended_at)) ||
-        inspected.previously_used !== (inspected.last_ended_at !== null) ||
-        !REUSE.includes(inspected.reuse) ||
-        !(inspected.reuse_session === null ||
-          (Number.isSafeInteger(inspected.reuse_session) && inspected.reuse_session > 0)) ||
-        (inspected.reuse === 'fresh' &&
-          (inspected.previously_used || inspected.reuse_session !== null)) ||
-        (inspected.reuse === 'held' &&
-          (inspected.previously_used || inspected.reuse_session === null)) ||
-        (inspected.reuse === 'ended' && !inspected.previously_used)) {
+    if (!validInspectedReuse(inspected)) {
       return Promise.resolve(Object.freeze({ ok: false, reason: 'invalid-request' }));
     }
     const normalized = {};

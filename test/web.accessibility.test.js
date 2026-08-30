@@ -54,11 +54,11 @@ test('dynamic decisions have specific names and narrow layouts wrap', () => {
   assert.match(ROOM_JS, /Allow \$\{row\.name\} to join/);
   assert.match(ROOM_JS, /Decline \$\{row\.name\}/);
   assert.match(ROOM_JS,
-    /if \(row\.reuse === 'held'\) \{[\s\S]*Held by a quiet seat · Session \$\{row\.reuse_session\}\. Allow ends the old session and admits this one\./,
-    'a held-name Allow must say the quiet seat ends and this knock is admitted');
+    /if \(row\.reuse === 'held'\) \{[\s\S]*Held by another session · Session \$\{row\.reuse_session\}\. Allow ends the old session and admits this one\./,
+    'a held-name Allow must say another session holds the name and this knock replaces it');
   assert.match(ROOM_JS,
-    /\} else if \(row\.reuse === 'ended' \|\| row\.previously_used\) \{[\s\S]*Used before\$\{session\}\. Allow admits a new session\./,
-    'an ended-name Allow must say the name was used before and this Allow starts a new session');
+    /\} else if \(row\.reuse === 'ended'\) \{[\s\S]*Used before · Session \$\{row\.reuse_session\}\. Allow admits a new session\./,
+    'an ended-name Allow must say the name was used before and show Session n');
   assert.match(ROOM_JS, /Remove \$\{identifiedName\(participant\)\} from Interlock/);
   assert.match(ROOM_JS,
     /byline\.textContent = message\.byline;[\s\S]*session\.className = 'message-session';[\s\S]*`Session \$\{message\.session\}`/,

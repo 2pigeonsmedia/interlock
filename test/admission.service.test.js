@@ -200,6 +200,132 @@ test('schema-1 admission rows migrate once with an honest unused-name marker', (
   assert.equal(migrated.schema, 2);
   assert.equal(migrated.records[0].previously_used, false);
   assert.equal(migrated.records[0].last_ended_at, null);
+  assert.equal(migrated.records[0].reuse, 'fresh');
+  assert.equal(migrated.records[0].reuse_session, null);
+  service.close();
+});
+
+test('a parent-format schema-2 ended pending row re-inspects the exact ordinal', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-admission-prior-ended-'));
+  const root = path.join(dataDir, 'admissions');
+  fs.mkdirSync(root, { recursive: true });
+  const body = candidate(1, 'Reused');
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify({
+    schema: 2,
+    records: [Object.assign({}, body, {
+      previously_used: true,
+      last_ended_at: 900,
+      created_at: 1_000,
+      expires_at: 1_100,
+      state: 'pending',
+      ended_at: null,
+      cooldown_until: null,
+      enrollment: null,
+    })],
+  }) + '\n');
+
+  const house = fakeHouse();
+  house.inspectAiAdmission = (candidateBody, now) => {
+    assert.equal(Number.isSafeInteger(now), true);
+    return Object.assign({
+      ok: true,
+      previously_used: true,
+      last_ended_at: 900,
+      reuse: 'ended',
+      reuse_session: 3,
+    }, candidateBody);
+  };
+  const service = openAdmissionService({
+    dataDir,
+    house,
+    clock: () => 1_050,
+    pendingTtlMs: 100,
+    cooldownMs: 50,
+  });
+  const row = service.list()[0];
+  assert.equal(row.reuse, 'ended');
+  assert.equal(row.reuse_session, 3,
+    'upgrade must re-inspect the exact ordinal, never invent session 1');
+  assert.equal(row.previously_used, true);
+  const migrated = JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8'));
+  assert.equal(migrated.records[0].reuse, 'ended');
+  assert.equal(migrated.records[0].reuse_session, 3);
+  assert.ok(Object.prototype.hasOwnProperty.call(migrated.records[0], 'reuse_session'));
+  service.close();
+});
+
+test('a 2e9de6d ended pending row with a null session re-inspects instead of rendering without Session n', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-admission-null-session-'));
+  const root = path.join(dataDir, 'admissions');
+  fs.mkdirSync(root, { recursive: true });
+  const body = candidate(1, 'Reused');
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify({
+    schema: 2,
+    records: [Object.assign({}, body, {
+      previously_used: true,
+      last_ended_at: 900,
+      reuse: 'ended',
+      reuse_session: null,
+      created_at: 1_000,
+      expires_at: 1_100,
+      state: 'pending',
+      ended_at: null,
+      cooldown_until: null,
+      enrollment: null,
+    })],
+  }) + '\n');
+
+  const house = fakeHouse();
+  house.inspectAiAdmission = (candidateBody) => Object.assign({
+    ok: true,
+    previously_used: true,
+    last_ended_at: 900,
+    reuse: 'ended',
+    reuse_session: 2,
+  }, candidateBody);
+  const service = openAdmissionService({
+    dataDir,
+    house,
+    clock: () => 1_050,
+    pendingTtlMs: 100,
+    cooldownMs: 50,
+  });
+  assert.equal(service.list()[0].reuse_session, 2);
+  service.close();
+});
+
+test('a prior-format ended pending row without an inspectable ordinal is refused', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-admission-prior-drop-'));
+  const root = path.join(dataDir, 'admissions');
+  fs.mkdirSync(root, { recursive: true });
+  const body = candidate(1, 'Reused');
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify({
+    schema: 2,
+    records: [Object.assign({}, body, {
+      previously_used: true,
+      last_ended_at: 900,
+      created_at: 1_000,
+      expires_at: 1_100,
+      state: 'pending',
+      ended_at: null,
+      cooldown_until: null,
+      enrollment: null,
+    })],
+  }) + '\n');
+
+  const house = fakeHouse();
+  house.inspectAiAdmission = () => ({ ok: false, reason: 'invalid-request' });
+  const service = openAdmissionService({
+    dataDir,
+    house,
+    clock: () => 1_050,
+    pendingTtlMs: 100,
+    cooldownMs: 50,
+  });
+  assert.deepEqual(service.list(), [],
+    'a stale ended pending row must not surface without Session n');
+  const migrated = JSON.parse(fs.readFileSync(path.join(root, 'state.json'), 'utf8'));
+  assert.deepEqual(migrated.records, []);
   service.close();
 });
 

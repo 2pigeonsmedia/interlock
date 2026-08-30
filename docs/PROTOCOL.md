@@ -44,7 +44,7 @@ refusal: it waits on Connect an AI as a held-name reuse request. A knock under
 an ended AI name waits as an ended-name reuse request (`previously_used: true`
 and the exact `last_ended_at` time). The pending row also carries `reuse`
 (`fresh` / `held` / `ended`) and `reuse_session`. Allow on a held name ends
-that quiet seat in the same owner step-up as the new enrollment. Allow on an
+that other session in the same owner step-up as the new enrollment. Allow on an
 ended name creates a new immutable seat; it does not restore the ended seat or
 inherit its identity.
 

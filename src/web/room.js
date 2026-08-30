@@ -374,7 +374,7 @@ function validPendingAi(value) {
       (Number.isSafeInteger(value.reuse_session) && value.reuse_session > 0)) &&
     ((value.reuse === 'fresh' && !value.previously_used && value.reuse_session === null) ||
       (value.reuse === 'held' && !value.previously_used && value.reuse_session !== null) ||
-      (value.reuse === 'ended' && value.previously_used)) &&
+      (value.reuse === 'ended' && value.previously_used && value.reuse_session !== null)) &&
     Number.isSafeInteger(value.created_at) && Number.isSafeInteger(value.expires_at) &&
     typeof value.connected === 'boolean';
 }
@@ -410,21 +410,20 @@ function renderPendingAis(rows) {
     product.textContent = `${row.product} · ${provenance}`;
     const priorUse = document.createElement('small');
     if (row.reuse === 'held') {
-      priorUse.textContent = `Held by a quiet seat · Session ${row.reuse_session}. Allow ends the old session and admits this one.`;
-    } else if (row.reuse === 'ended' || row.previously_used) {
-      const session = row.reuse_session ? ` · Session ${row.reuse_session}` : '';
+      priorUse.textContent = `Held by another session · Session ${row.reuse_session}. Allow ends the old session and admits this one.`;
+    } else if (row.reuse === 'ended') {
       const ended = row.last_ended_at
         ? ` Previous connection ended ${new Date(row.last_ended_at).toLocaleString()}.`
         : '';
       priorUse.textContent =
-        `Used before${session}. Allow admits a new session.${ended}`;
+        `Used before · Session ${row.reuse_session}. Allow admits a new session.${ended}`;
     }
     const connection = document.createElement('small');
     connection.textContent = row.connected
       ? 'Waiting now · expires in a few minutes'
       : 'The waiting connection is gone; Allow is unavailable.';
     facts.append(name, product);
-    if (row.reuse === 'held' || row.reuse === 'ended' || row.previously_used) {
+    if (row.reuse === 'held' || row.reuse === 'ended') {
       facts.append(priorUse);
     }
     facts.append(connection);
