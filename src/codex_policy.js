@@ -185,13 +185,15 @@ function uniqueTmpPath(rulesDir) {
     `${OWNED_NAME}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`);
 }
 
-function candidateHomes(options) {
-  if (options.codexHome) return [options.codexHome];
-  const homes = [];
+function explicitEnvHome(options) {
   const envHome = options.env && options.env.CODEX_HOME;
-  if (typeof envHome === 'string' && envHome.length > 0 && isAbs(envHome) && !hasDotDot(envHome)) {
-    homes.push(envHome);
-  }
+  if (typeof envHome !== 'string' || envHome.length === 0) return null;
+  if (!isAbs(envHome) || hasDotDot(envHome)) throw failure('invalid-codex-home');
+  return envHome;
+}
+
+function fallbackHomes(options) {
+  const homes = [];
   const homedir = options.homedir || os.homedir();
   if (typeof homedir === 'string' && homedir.length > 0) {
     homes.push(path.join(homedir, '.codex'));
@@ -205,15 +207,20 @@ function candidateHomes(options) {
   return [...new Set(homes)];
 }
 
+function ensureRulesDir(home, ioFs) {
+  if (!ioFs.existsSync(home)) ioFs.mkdirSync(home, { recursive: true, mode: 0o700 });
+  const root = requireDirectory(home, ioFs, 'invalid-codex-home');
+  const rules = path.join(root, 'rules');
+  if (!ioFs.existsSync(rules)) ioFs.mkdirSync(rules, { recursive: true, mode: 0o700 });
+  return requireDirectory(rules, ioFs, 'invalid-codex-home');
+}
+
 function resolveRulesDir(options, ioFs) {
-  if (options.codexHome) {
-    const home = requireDirectory(options.codexHome, ioFs, 'invalid-codex-home');
-    const rules = path.join(home, 'rules');
-    if (!ioFs.existsSync(rules)) ioFs.mkdirSync(rules, { recursive: true, mode: 0o700 });
-    return requireDirectory(rules, ioFs, 'invalid-codex-home');
-  }
+  if (options.codexHome) return ensureRulesDir(options.codexHome, ioFs);
+  const envHome = explicitEnvHome(options);
+  if (envHome) return ensureRulesDir(envHome, ioFs);
   const existing = [];
-  for (const home of candidateHomes(options)) {
+  for (const home of fallbackHomes(options)) {
     try { existing.push(requireDirectory(home, ioFs, 'invalid-codex-home')); } catch (_) { /* skip */ }
   }
   const unique = [...new Set(existing)];
@@ -222,10 +229,21 @@ function resolveRulesDir(options, ioFs) {
     ? path.join(options.homedir || os.homedir(), '.codex')
     : null);
   if (!home) throw failure('ambiguous-codex-home');
-  if (!ioFs.existsSync(home)) ioFs.mkdirSync(home, { recursive: true, mode: 0o700 });
-  const rules = path.join(requireDirectory(home, ioFs, 'invalid-codex-home'), 'rules');
-  if (!ioFs.existsSync(rules)) ioFs.mkdirSync(rules, { recursive: true, mode: 0o700 });
-  return requireDirectory(rules, ioFs, 'invalid-codex-home');
+  return ensureRulesDir(home, ioFs);
+}
+
+function resolvedCodexHome(rulesDir) {
+  return path.basename(rulesDir) === 'rules' ? path.dirname(rulesDir) : rulesDir;
+}
+
+function shellQuote(value) {
+  if (typeof value !== 'string') return '';
+  if (/^[A-Za-z0-9:._\\/-]+$/.test(value)) return value;
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function policyHandoff(action, connection, codexHome) {
+  return `interlock codex-policy ${action} --connection ${connection} --codex-home ${shellQuote(codexHome)}`;
 }
 
 function resolveCodexNode(options, ioFs) {
@@ -259,21 +277,61 @@ function resolveInterlockScript(options, ioFs) {
   return resolved;
 }
 
-function resolveCodexChecker(options, ioFs) {
-  if (options.checkerPath) return requireRegularFile(options.checkerPath, ioFs, 'execpolicy-unavailable');
-  const nodePath = options.nodePath || resolveCodexNode(options, ioFs);
-  const dir = path.win32.isAbsolute(nodePath) && !path.posix.isAbsolute(nodePath)
-    ? nodePath.replace(/[\\/][^\\/]+$/, '')
-    : path.dirname(nodePath);
-  const exe = /\.exe$/i.test(nodePath);
-  const names = exe ? ['codex.exe', 'codex'] : ['codex', 'codex.exe'];
-  for (const name of names) {
-    const candidate = exe && path.win32.isAbsolute(nodePath)
-      ? `${dir}\\${name}`
-      : path.join(dir, name);
-    try { return requireRegularFile(candidate, ioFs, 'execpolicy-unavailable'); } catch (_) { /* try next */ }
+function versionedCheckerDir(filePath) {
+  const posix = String(filePath).replace(/\\/g, '/');
+  const wsl = /\/bin\/wsl\/([0-9a-f]{8,})(?:\/|$)/i.exec(posix);
+  if (wsl) return { kind: 'wsl', id: wsl[1] };
+  const win = /\/OpenAI\/Codex\/bin\/([0-9a-f]{8,})(?:\/|$)/i.exec(posix);
+  if (win) return { kind: 'win', id: win[1] };
+  return null;
+}
+
+function checkerInDir(dir, ioFs) {
+  for (const name of ['codex', 'codex.exe']) {
+    const candidate = path.join(dir, name);
+    try { return requireRegularFile(candidate, ioFs, 'execpolicy-unavailable'); } catch (_) { /* next */ }
   }
-  throw failure('execpolicy-unavailable');
+  return null;
+}
+
+function scanVersionedCheckers(root, ioFs) {
+  const found = [];
+  if (!root || !ioFs.existsSync(root)) return found;
+  let entries;
+  try { entries = ioFs.readdirSync(root, { withFileTypes: true }); } catch (_) { return found; }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^[0-9a-f]{8,}$/i.test(entry.name)) continue;
+    const checker = checkerInDir(path.join(root, entry.name), ioFs);
+    if (checker) found.push(checker);
+  }
+  return found;
+}
+
+function resolveCodexChecker(options, ioFsIn) {
+  const ioFs = ioFsIn || options.fs || fs;
+  if (options.checkerPath) return requireRegularFile(options.checkerPath, ioFs, 'execpolicy-unavailable');
+  const selected = [];
+  const execPath = options.execPath;
+  if (typeof execPath === 'string' && execPath.length > 0) {
+    const versioned = versionedCheckerDir(execPath);
+    if (versioned) {
+      const checker = checkerInDir(path.dirname(execPath), ioFs);
+      if (checker) selected.push(checker);
+    }
+  }
+  const homes = [];
+  try { homes.push(resolvedCodexHome(resolveRulesDir(options, ioFs))); } catch (_) { /* no home yet */ }
+  for (const home of homes) {
+    selected.push(...scanVersionedCheckers(path.join(home, 'bin', 'wsl'), ioFs));
+    selected.push(...scanVersionedCheckers(path.join(home, 'bin'), ioFs));
+  }
+  const localAppData = options.env && options.env.LOCALAPPDATA;
+  if (typeof localAppData === 'string' && localAppData.length > 0) {
+    selected.push(...scanVersionedCheckers(path.join(localAppData, 'OpenAI', 'Codex', 'bin'), ioFs));
+  }
+  const unique = [...new Set(selected)];
+  if (unique.length === 1) return unique[0];
+  throw failure(unique.length > 1 ? 'ambiguous-codex-checker' : 'execpolicy-unavailable');
 }
 
 function readOwned(rulesDir, ioFs) {
@@ -284,10 +342,44 @@ function readOwned(rulesDir, ioFs) {
   return ioFs.readFileSync(owned, 'utf8');
 }
 
+function pidAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error && error.code === 'ESRCH') return false;
+    return true;
+  }
+}
+
 function withOwnedLock(rulesDir, ioFs, fn) {
   const lockPath = path.join(rulesDir, `${OWNED_NAME}.lock`);
+  function take() {
+    const fd = ioFs.openSync(lockPath, 'wx');
+    const payload = `${JSON.stringify({
+      pid: process.pid,
+      started: Date.now(),
+      nonce: crypto.randomBytes(8).toString('hex'),
+    })}\n`;
+    ioFs.writeFileSync(fd, payload);
+    return fd;
+  }
   let fd;
-  try { fd = ioFs.openSync(lockPath, 'wx'); } catch (_) { throw failure('owned-file-unsafe'); }
+  try {
+    fd = take();
+  } catch (_) {
+    let stale = false;
+    try {
+      const parsed = JSON.parse(ioFs.readFileSync(lockPath, 'utf8'));
+      stale = !pidAlive(parsed && parsed.pid);
+    } catch (_) {
+      stale = false;
+    }
+    if (!stale) throw failure('owned-file-unsafe');
+    try { ioFs.unlinkSync(lockPath); } catch (_) { throw failure('owned-file-unsafe'); }
+    fd = take();
+  }
   try { return fn(); } finally {
     try { ioFs.closeSync(fd); } catch (_) { /* ignore */ }
     try { ioFs.unlinkSync(lockPath); } catch (_) { /* ignore */ }
@@ -336,7 +428,7 @@ function expectedChecks(spec) {
   return { positives, negatives };
 }
 
-function decideChecker(options, rulesPath, command, requireZero) {
+function decideChecker(options, rulesPath, command) {
   if (typeof options.checkExecpolicy === 'function') {
     return decideExecpolicy(options.checkExecpolicy(rulesPath, command));
   }
@@ -349,11 +441,11 @@ function decideChecker(options, rulesPath, command, requireZero) {
   });
   if (result.error) throw failure('execpolicy-unavailable');
   if (result.signal) throw failure('execpolicy-unavailable');
+  if (result.status !== 0) throw failure('execpolicy-rejected');
   const text = String(result.stdout || '').trim();
   if (!text.startsWith('{')) throw failure('execpolicy-unavailable');
   let parsed;
   try { parsed = JSON.parse(text); } catch (_) { throw failure('execpolicy-unavailable'); }
-  if (requireZero && result.status !== 0) throw failure('execpolicy-rejected');
   return decideExecpolicy(parsed);
 }
 
@@ -381,12 +473,12 @@ function installPolicy(options) {
       const checks = expectedChecks(spec);
       const checkerOptions = Object.assign({}, options, { nodePath });
       for (const command of checks.positives) {
-        if (decideChecker(checkerOptions, tmpPath, command, true) !== 'allow') {
+        if (decideChecker(checkerOptions, tmpPath, command) !== 'allow') {
           throw failure('execpolicy-rejected', command.join(' '));
         }
       }
       for (const command of checks.negatives) {
-        const decision = decideChecker(checkerOptions, tmpPath, command, false);
+        const decision = decideChecker(checkerOptions, tmpPath, command);
         if (decision === 'allow') throw failure('execpolicy-too-broad');
         if (decision === 'unsupported') throw failure('execpolicy-unavailable');
       }
@@ -395,18 +487,21 @@ function installPolicy(options) {
       try { ioFs.unlinkSync(tmpPath); } catch (_) { /* leftover tmp is inactive */ }
       throw error;
     }
+    const codexHome = resolvedCodexHome(rulesDir);
     return Object.freeze({
       path: policyPaths(rulesDir).owned,
       mode,
       connection,
       nodePath,
       scriptPath,
+      codexHome,
       historyArgv: historyPattern(nodePath, scriptPath, connection),
       sayArgv: mode === 'participate' ? sayPattern(nodePath, scriptPath, connection) : null,
       restartRequired: true,
       active: 'unknown',
       replacedConnection: replaced && replaced !== connection ? replaced : null,
-      removeCommand: `interlock codex-policy remove --connection ${connection}`,
+      checkCommand: policyHandoff('check', connection, codexHome),
+      removeCommand: policyHandoff('remove', connection, codexHome),
     });
   });
 }
@@ -425,24 +520,28 @@ function checkPolicy(options) {
   const checkerOptions = Object.assign({}, options, { nodePath: parsed.nodePath });
   const owned = policyPaths(rulesDir).owned;
   for (const command of checks.positives) {
-    if (decideChecker(checkerOptions, owned, command, true) !== 'allow') {
+    if (decideChecker(checkerOptions, owned, command) !== 'allow') {
       throw failure('execpolicy-rejected');
     }
   }
   for (const command of checks.negatives) {
-    const decision = decideChecker(checkerOptions, owned, command, false);
+    const decision = decideChecker(checkerOptions, owned, command);
     if (decision === 'allow') throw failure('execpolicy-too-broad');
     if (decision === 'unsupported') throw failure('execpolicy-unavailable');
   }
+  const codexHome = resolvedCodexHome(rulesDir);
   return Object.freeze({
     path: owned,
     mode: parsed.mode,
     connection: parsed.connection,
     nodePath: parsed.nodePath,
     scriptPath: parsed.scriptPath,
+    codexHome,
     restartRequired: true,
     active: 'unknown',
     syntaxOnly: true,
+    checkCommand: policyHandoff('check', connection, codexHome),
+    removeCommand: policyHandoff('remove', connection, codexHome),
   });
 }
 
@@ -457,13 +556,13 @@ function removePolicy(options) {
     const parsed = parseOwned(existing);
     if (!parsed || !isOwnedExact(existing, parsed)) throw failure('owned-file-modified');
     if (parsed.connection !== connection) throw failure('connection-mismatch');
-    const defaultRules = path.join(rulesDir, 'default.rules');
-    if (ioFs.existsSync(defaultRules)) {
-      const defaultStat = ioFs.lstatSync(defaultRules);
-      if (defaultStat.isSymbolicLink()) throw failure('owned-file-unsafe');
-    }
     ioFs.unlinkSync(policyPaths(rulesDir).owned);
-    return Object.freeze({ removed: policyPaths(rulesDir).owned, connection });
+    const codexHome = resolvedCodexHome(rulesDir);
+    return Object.freeze({
+      removed: policyPaths(rulesDir).owned,
+      connection,
+      codexHome,
+    });
   });
 }
 

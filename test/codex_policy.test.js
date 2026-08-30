@@ -303,12 +303,14 @@ test('Windows native paths also emit WSL argv aliases', () => {
 
 test('unpinned missing checker is unavailable not rejected', () => {
   const tree = makeTree();
-  fs.writeFileSync(path.join(tree.root, 'codex'), 'checker');
+  const checkerPath = path.join(tree.root, 'codex');
+  fs.writeFileSync(checkerPath, 'checker');
   assert.throws(() => policy.installPolicy({
     connection: 'Marlow',
     mode: 'receive',
     nodePath: tree.nodePath,
     scriptPath: tree.scriptPath,
+    checkerPath,
     codexHome: tree.codexHome,
     spawnSync() {
       const error = new Error('spawn ENOENT');
@@ -318,4 +320,71 @@ test('unpinned missing checker is unavailable not rejected', () => {
     fs,
   }), /execpolicy-unavailable/);
   assert.equal(fs.existsSync(path.join(tree.rulesDir, policy.OWNED_NAME)), false);
+});
+
+test('versioned active checker wins over a stale unversioned sibling', () => {
+  const tree = makeTree();
+  const versionDir = path.join(tree.codexHome, 'bin', 'wsl', '4f759bc6b64517c4');
+  fs.mkdirSync(versionDir, { recursive: true });
+  const active = path.join(versionDir, 'codex');
+  const stale = path.join(path.dirname(tree.nodePath), 'codex.exe');
+  fs.writeFileSync(active, 'active');
+  fs.writeFileSync(stale, 'stale');
+  assert.equal(policy.resolveCodexChecker({
+    execPath: active,
+    codexHome: tree.codexHome,
+    fs,
+  }), active);
+  const second = path.join(tree.codexHome, 'bin', 'wsl', 'aaaaaaaaaaaaaaaa');
+  fs.mkdirSync(second, { recursive: true });
+  fs.writeFileSync(path.join(second, 'codex'), 'other');
+  assert.throws(() => policy.resolveCodexChecker({
+    codexHome: tree.codexHome,
+    fs,
+  }), /ambiguous-codex-checker/);
+});
+
+test('a crash-residue lock does not permanently block revoke', () => {
+  const tree = makeTree();
+  const spec = {
+    connection: 'Marlow',
+    mode: 'participate',
+    nodePath: tree.nodePath,
+    scriptPath: tree.scriptPath,
+    codexHome: tree.codexHome,
+    checkExecpolicy: checker,
+    fs,
+  };
+  policy.installPolicy(spec);
+  fs.writeFileSync(path.join(tree.rulesDir, `${policy.OWNED_NAME}.lock`),
+    `${JSON.stringify({ pid: 99999999, started: 1, nonce: 'dead' })}\n`);
+  const defaultRules = path.join(tree.rulesDir, 'default.rules');
+  const defaultBackup = path.join(tree.rulesDir, 'default.backup');
+  fs.renameSync(defaultRules, defaultBackup);
+  fs.symlinkSync(defaultBackup, defaultRules);
+  const removed = policy.removePolicy(spec);
+  assert.equal(fs.existsSync(removed.removed), false);
+  assert.match(removed.codexHome, /codex-home/);
+});
+
+test('absolute CODEX_HOME is honored even when it does not exist yet', () => {
+  const tree = makeTree();
+  const explicit = path.join(tree.root, 'explicit-home');
+  const spec = {
+    connection: 'Marlow',
+    mode: 'receive',
+    nodePath: tree.nodePath,
+    scriptPath: tree.scriptPath,
+    homedir: tree.root,
+    env: { CODEX_HOME: explicit },
+    checkExecpolicy: checker,
+    fs,
+  };
+  const installed = policy.installPolicy(spec);
+  assert.equal(installed.codexHome, explicit);
+  assert.equal(installed.path, path.join(explicit, 'rules', policy.OWNED_NAME));
+  assert.equal(fs.existsSync(path.join(tree.codexHome, 'rules', policy.OWNED_NAME)), false);
+  assert.match(installed.removeCommand, /--codex-home/);
+  assert.match(installed.removeCommand, /explicit-home/);
+  assert.match(installed.checkCommand, /--codex-home/);
 });

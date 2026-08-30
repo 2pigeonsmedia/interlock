@@ -42,7 +42,10 @@ interlock codex-policy remove --connection NAME
 ```
 
 If Windows and WSL Codex homes both exist, pass `--codex-home ABSOLUTE_PATH`.
-Fail closed rather than guess.
+`CODEX_HOME` is honored even when that directory does not exist yet; it is
+never replaced by a guessed home. If several Codex engines are installed,
+pass `--codex-checker ABSOLUTE_PATH` for the active one. Fail closed rather
+than guess. Printed check/remove commands include `--codex-home`.
 
 `check` is a syntax check of the Interlock-owned file. Codex loads every
 active rules layer and the most restrictive match wins, so a passing check

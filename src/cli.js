@@ -1595,7 +1595,7 @@ function parseCodexPolicyArgs(args) {
   if (args.length === 0) return null;
   const action = args[0];
   if (action !== 'install' && action !== 'check' && action !== 'remove') return null;
-  const options = { action, connection: null, mode: null, json: false, codexHome: null };
+  const options = { action, connection: null, mode: null, json: false, codexHome: null, checkerPath: null };
   const seen = new Set();
   for (let index = 1; index < args.length; index += 1) {
     const flag = args[index];
@@ -1632,6 +1632,15 @@ function parseCodexPolicyArgs(args) {
       index += 1;
       continue;
     }
+    if (flag === '--codex-checker') {
+      if (seen.has(flag) || typeof args[index + 1] !== 'string' ||
+          args[index + 1].length === 0 || args[index + 1].startsWith('-') ||
+          !path.isAbsolute(args[index + 1])) return null;
+      seen.add(flag);
+      options.checkerPath = args[index + 1];
+      index += 1;
+      continue;
+    }
     return null;
   }
   if (options.connection === null) return null;
@@ -1661,6 +1670,10 @@ function reportCodexPolicyError(stderr, error) {
   const code = error && error.code;
   if (code === 'ambiguous-codex-home' || code === 'invalid-codex-home') {
     line(stderr, 'interlock: Codex home is not certain; pass --codex-home ABSOLUTE_PATH on the same OS as Codex Desktop.');
+    return EXIT_USAGE;
+  }
+  if (code === 'ambiguous-codex-checker') {
+    line(stderr, 'interlock: multiple Codex checkers found; pass --codex-checker ABSOLUTE_PATH for the active engine.');
     return EXIT_USAGE;
   }
   if (code === 'ambiguous-codex-node' || code === 'invalid-node' || code === 'invalid-script') {
@@ -1707,6 +1720,7 @@ function printPolicyReceipt(stdout, receipt) {
   if (receipt.sayArgv) line(stdout, `Argv: ${receipt.sayArgv.join(' ')}`);
   line(stdout, 'Syntax check only. Codex loads every rules layer and the most restrictive match wins; this does not prove the command will run without review.');
   line(stdout, 'Restart Codex Desktop. Activation stays unknown until you observe an unreviewed canonical command after that restart.');
+  line(stdout, `Check with: ${receipt.checkCommand}`);
   line(stdout, `Remove with: ${receipt.removeCommand}`);
 }
 
@@ -1741,7 +1755,7 @@ async function runCodexPolicy(args, io, dependencies = {}) {
     fs: dependencies.fs || fs,
     nodePath: dependencies.codexNodePath,
     scriptPath: dependencies.interlockScriptPath,
-    checkerPath: dependencies.codexCheckerPath,
+    checkerPath: parsed.checkerPath || dependencies.codexCheckerPath,
     spawnSync: dependencies.spawnSync,
     checkExecpolicy: dependencies.checkExecpolicy,
   };
@@ -1762,6 +1776,9 @@ async function runCodexPolicy(args, io, dependencies = {}) {
           restart_required: true,
           active: 'unknown',
           syntax_only: true,
+          codex_home: receipt.codexHome,
+          check_command: receipt.checkCommand,
+          remove_command: receipt.removeCommand,
         }));
         return EXIT_OK;
       }
