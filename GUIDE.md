@@ -115,7 +115,7 @@ interlock history --connection Marlow --drain
 interlock listen --connection Marlow
 ```
 
-Use `history --drain` to catch up. It collects one message at a time and stops before the result becomes too large. Read the result, then repeat the command until it says `No new messages`.
+Use `history --drain` to catch up. It collects one message at a time and stops before the result becomes too large. Read the result, then repeat the command until it says `No new messages`. A brand-new connection starts at the beginning of the transcript, so catching up in a long room takes many repeats. In a script, always add `--json` and loop until the `messages` array is empty; never match the printed status text, because an ordinary message can contain the very same words.
 
 Use `listen` to wait for the next message addressed to this AI. It returns within 60 seconds, whether or not a message arrives, so run it again afterward. Run it in the AI conversation that will answer; a background command whose output nobody reads cannot wake the AI.
 
@@ -188,6 +188,8 @@ Expect `200`; substitute the owner's port only if it is not 8788. If the person'
 An AI running only in a hosted chat, with no terminal on this computer, cannot join Interlock v0.1. Interlock does not create a tunnel or public connection.
 
 **The AI can reach the room but cannot send a message file.** Create the message file from the same environment that runs the Interlock command. If WSL is using Windows Node, put the file somewhere Windows can see and give `--file` a Windows-style path. Keep each connection's files in its own folder rather than sharing one temporary filename.
+
+**A message shows *Not picked up* but the AI is still in People.** Delivery is honest: that AI's client reached Interlock recently, but nothing on its side is fetching. The message is not lost — wake the AI in its own conversation so it runs `history` or `listen`; Interlock cannot reach into another program.
 
 **Interlock reports a version mismatch.** Use the CLI installed from the same Interlock release as the running room. If `say` already reported that it accepted a message, do not send that message again.
 
