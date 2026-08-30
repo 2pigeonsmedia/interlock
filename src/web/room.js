@@ -18,8 +18,7 @@ const inviteRedeemForm = document.querySelector('#invite-redeem-form');
 const inviteRedeemButton = document.querySelector('#invite-redeem-button');
 const accountLabel = document.querySelector('#account-label');
 const rosterList = document.querySelector('#roster-list');
-const blockStrip = document.querySelector('#block-strip');
-const stripWaiting = document.querySelector('#strip-waiting');
+const waitingNote = document.querySelector('#waiting-note');
 const roomNotice = document.querySelector('#room-notice');
 const logoutButton = document.querySelector('#logout-button');
 const connectAiButton = document.querySelector('#connect-ai-button');
@@ -220,8 +219,7 @@ function showLogin(message = '') {
   rosterSeats = [];
   rosterKnown = false;
   rosterList.replaceChildren();
-  if (blockStrip) blockStrip.replaceChildren();
-  if (stripWaiting) stripWaiting.textContent = '';
+  if (waitingNote) waitingNote.textContent = '';
   roomView.hidden = true;
   loginView.hidden = false;
   inviteRedeemForm.hidden = true;
@@ -651,7 +649,7 @@ function participantFact(text, className = '') {
   return fact;
 }
 
-/* The lamp and the block strip repeat roster facts as light. The words in the
+/* The presence lamp repeats roster facts as light. The words in the
  * roster carry the meaning, so both are aria-hidden; the states come only
  * from server-authored participant facts, never from message text. */
 function presenceLampState(participant) {
@@ -671,33 +669,16 @@ function presenceLamp(state) {
   return lamp;
 }
 
-function renderBlockStrip(participants) {
-  if (!blockStrip) return;
-  blockStrip.replaceChildren();
-  const track = () => {
-    const segment = document.createElement('i');
-    segment.className = 'segment track';
-    return segment;
-  };
-  blockStrip.append(track());
-  const waitingNames = [];
-  for (const seat of participants.filter(row => row.kind === 'seat' && row.present)) {
-    const segment = document.createElement('i');
-    const waiting = seat.outstanding > 0;
-    segment.className = 'segment ' + (waiting ? 'waiting' : 'heard');
-    segment.title = waiting
-      ? `${seat.name} — ${seat.outstanding} ${seat.outstanding === 1 ? 'message' : 'messages'} not picked up`
-      : `${seat.name} — heard recently`;
-    if (waiting) waitingNames.push(seat.name);
-    blockStrip.append(segment, track());
-  }
-  /* The amber state is the one that asks something of the owner, so it gets
-   * words in the header; teal stays wordless — heard-and-quiet is the
-   * unremarkable state. Colour repeats these words, never replaces them. */
-  if (stripWaiting) {
-    stripWaiting.textContent = waitingNames.length === 0
-      ? '' : `waiting: ${waitingNames.join(', ')}`;
-  }
+/* The amber state is the one that asks something of the owner, so it gets
+ * words in the header ("waiting: Marlow"); heard-and-quiet is the
+ * unremarkable state and stays silent. Derived from the same server
+ * participant facts as the roster, never from message text. */
+function renderWaitingNote(participants) {
+  if (!waitingNote) return;
+  const names = participants
+    .filter(row => row.kind === 'seat' && row.present && row.outstanding > 0)
+    .map(row => row.name);
+  waitingNote.textContent = names.length === 0 ? '' : `waiting: ${names.join(', ')}`;
 }
 
 function renderRoster(participants) {
@@ -741,7 +722,7 @@ function renderRoster(participants) {
     }
     rosterList.append(card);
   }
-  renderBlockStrip(participants);
+  renderWaitingNote(participants);
   renderMentionSuggestions();
   updateMentionPreview();
   refreshPendingDeliveryPresence();

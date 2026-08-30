@@ -274,7 +274,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   height: 100vh;
   height: 100dvh;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto 1fr;
   background: transparent;
 }
 
@@ -335,44 +335,16 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }
 .account-label { font-family: var(--font-ai); font-size: 0.78rem; color: var(--owner); }
 
-/* The words for the strip's amber state — who is holding an unanswered ring.
- * Empty (and hidden) whenever nothing is waiting. */
-.strip-waiting {
+/* The amber words — who is holding an unanswered ring. Empty (and hidden)
+ * whenever nothing is waiting. */
+.waiting-note {
   margin-left: 6px;
   font-family: var(--font-ai);
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   color: var(--wait-text);
 }
-.strip-waiting:empty { display: none; }
-
-/* ---------- the block strip ----------
- * The signature instrument: an interlocking block diagram under the header.
- * One lit segment per AI connection in People, rendered by room.js from the
- * same /api/participants facts as the roster — never static copy:
- *   teal  = the client was heard recently and nothing is waiting
- *   amber = at least one ring is not yet picked up (the roster says it in
- *           words; this is the same fact as light)
- * Decorative duplicate of roster text, so aria-hidden in the markup. */
-
-.block-strip {
-  display: flex;
-  height: 4px;
-  background: var(--paper);
-  border-bottom: 1px solid var(--frame-line);
-}
-.block-strip .segment { height: 100%; }
-.block-strip .segment.track { flex: 1 1 auto; background: transparent; }
-.block-strip .segment.heard {
-  flex: 0 0 9%;
-  background: var(--signal-bright);
-  box-shadow: 0 0 10px rgb(44 229 203 / 0.7);
-}
-.block-strip .segment.waiting {
-  flex: 0 0 9%;
-  background: var(--wait);
-  box-shadow: 0 0 10px rgb(245 168 60 / 0.7);
-}
+.waiting-note:empty { display: none; }
 
 /* ---------- Connect an AI ---------- */
 
@@ -660,7 +632,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }
 
 /* Delivery is a record, not a promise. Waiting is amber — the same fact as
- * the roster line and the block strip; words carry it, color repeats it. */
+ * the roster line and the header waiting-note; words carry it, color repeats it. */
 .delivery {
   grid-column: 2;
   display: flex;

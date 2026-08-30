@@ -12,7 +12,7 @@ grey-frame contract.
 instrument tiles on it, and colored light only where a color has a job. The
 name Interlock comes from railway interlocking — the machinery that makes
 conflicting movements impossible — and the room wears that honestly: presence
-lamps, a block strip, plates, and mono discipline. **The room is dark by
+lamps, plates, honest state words, and mono discipline. **The room is dark by
 design, for everyone** — the OS light preference deliberately does not
 restyle it, because a tool with one face never surprises its owner. A full
 daylight token set (identical instruments and hue jobs on grey-and-paper)
@@ -26,7 +26,7 @@ exactly one answer:
 | Hue | The one meaning | Where it appears |
 |---|---|---|
 | Teal (`--signal-bright`) | the signal path | the running lamp, the addressed-row rail and wash, keyboard focus |
-| Amber (`--wait`, `--wait-text`) | a ring not yet picked up | the delivery line, the roster fact, the roster lamp, the block-strip segment — the same fact everywhere |
+| Amber (`--wait`, `--wait-text`) | a ring not yet picked up | the delivery line, the roster fact, the roster lamp, the header waiting note — the same fact everywhere |
 | Ice blue (`--ai`) | AI identity | AI names everywhere a name appears: roster, bylines, composer chips, and `@mentions` inside message text (one shared hue; never colour-per-AI) |
 | Violet (`--owner`) | the owner | the account chip, the owner's roster lamp |
 | White fills (`--action`) | the surface's one primary action | Send in the room; Sign in; the setup and dialog primaries. Connect an AI sits quiet in the header — the has-waiting knock glow is what makes it loud, at the one moment it matters |
@@ -41,27 +41,20 @@ text appended to the chosen name. The transcript is a **ledger, not a bubble
 thread**: byline column, text column, left-aligned for everyone. Nobody's
 messages sit on the right, because nobody owns the room.
 
-## The block strip
+## The waiting note (and the strip that died)
 
-The signature instrument: a 4px interlocking block diagram directly under the
-header, rendered by `room.js` from the same `/api/participants` facts as the
-roster — never static copy. One lit segment per AI connection in People:
+Whenever any AI seat holds a ring not yet picked up, the header states it in
+words: `#waiting-note`, a polite live region — "waiting: Marlow" — derived by
+`room.js` from the same `/api/participants` facts as the roster, never from
+message text. Empty and hidden when nothing waits. Heard-and-quiet is the
+unremarkable state and gets no header words.
 
-- **teal** — the client was heard recently and nothing is waiting
-- **amber** — at least one ring is not yet picked up
-
-The strip repeats what the roster says in words ("1 message not picked up"),
-so it is `aria-hidden`; the words are the record, the light is the glance.
-A strip with no lit segments means no AI connection is in People. The strip
-must never show a state the server did not report — a decorative segment is a
-lie in instrument's clothing.
-
-Anonymous colour failed its first live owner ("it doesn't tell me who or what
-it means" — the v0.1.1 working session), so the strip carries its words:
-every segment has a `title` naming its seat and state, and whenever any
-segment is amber the header states it in text (`#strip-waiting`, a polite
-live region: "waiting: Marlow"). Teal gets no header words on purpose —
-heard-and-quiet is the unremarkable state and does not nag.
+For the record: v0.1.1's development built a 4px "block strip" of anonymous
+teal/amber segments under the header as the brand signature. Its first live
+owner could not read it ("it doesn't tell me who or what it means"), words
+were added, and the owner killed it the same day — the roster's presence
+lamps and this waiting note carry everything it claimed to. The lesson stays:
+an instrument whose meaning needs a legend is decoration.
 
 ## Colour
 
@@ -135,10 +128,8 @@ tracking.
 <span id="connection-state" class="connection-state running" role="status" aria-live="polite">Local: running</span>
 <!-- class: checking | running | unavailable -->
 
-<!-- the block strip: segments rendered from /api/participants -->
-<div id="block-strip" class="block-strip" aria-hidden="true">
-  <i class="segment track"></i><i class="segment heard"></i><i class="segment track"></i>
-</div>
+<!-- the waiting note: filled by room.js from /api/participants -->
+<span id="waiting-note" class="waiting-note" role="status" aria-live="polite">waiting: Marlow</span>
 
 <!-- one message, as room.js builds it -->
 <article class="message" data-kind="seat" data-addressed="true" data-message-id="42">
@@ -197,7 +188,7 @@ Rules the CSS relies on:
 
 One column, tiles stacked; the account label takes its own line in the header;
 message metadata wraps inline above the text without widening the viewport.
-The block strip keeps its row — at 4px it costs nothing.
+The waiting note wraps with the brand cluster.
 
 ## Deliberately left out
 
