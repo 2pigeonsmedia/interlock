@@ -1,21 +1,41 @@
 <!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&family=Libre+Caslon+Text:ital@0;1&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
 <style>
-html,body{margin:0;width:1280px;height:640px;overflow:hidden}
-body{background:#26282B;color:#F3F4F6;font-family:system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
-.card{position:relative;width:1280px;height:640px;display:grid;grid-template-columns:470px 1fr;align-items:center}
-.mark{width:240px;height:240px;margin-left:130px}
-.text{padding-right:110px}
-.eyebrow{font-size:15px;font-weight:600;letter-spacing:.18em;color:#A9AEB6;margin:0 0 14px}
-h1{margin:0;font-family:"Libre Caslon Display","Iowan Old Style","Palatino Linotype",Georgia,serif;font-weight:400;font-size:118px;line-height:1;letter-spacing:-.01em}
-.tag{margin:26px 0 0;font-size:33px;line-height:1.3;font-weight:400;color:#F3F4F6}
-.tag em{font-family:"Libre Caslon Text","Iowan Old Style","Palatino Linotype",Georgia,serif;font-style:italic;color:#37C4B2}
-.foot{margin:30px 0 0;font-size:17px;color:#A9AEB6}
+/* Build-time marketing artwork only — never served by the product, so the
+ * font CDN link is fine here. Render at 1280x640 for interlock-og.png and
+ * 1446x700 for interlock-gh-banner.png; the ground stretches, the card
+ * stays centered. Palette = the product's own (docs/DESIGN.md). */
+html,body{margin:0;width:100%;height:100%;overflow:hidden}
+body{
+  display:grid;place-items:center;
+  background-color:#07090B;
+  background-image:
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.015) 0, rgb(255 255 255 / 0.015) 1px, transparent 1px, transparent 28px),
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.015) 0, rgb(255 255 255 / 0.015) 1px, transparent 1px, transparent 28px);
+  color:#E8EDF1;
+  font-family:"IBM Plex Sans",system-ui,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.card{display:grid;grid-template-columns:auto auto;align-items:center;gap:76px}
+.mark{width:218px;height:218px}
+.eyebrow{margin:0 0 18px;font-family:"IBM Plex Mono",Consolas,monospace;font-size:15px;font-weight:500;letter-spacing:.24em;color:#73808B}
+h1{margin:0;font-family:"IBM Plex Mono",Consolas,monospace;font-weight:600;font-size:88px;line-height:1;letter-spacing:.16em}
+.strip{display:flex;width:520px;height:6px;margin:26px 0 30px;background:#10161B;border-radius:1px}
+.strip i{height:100%}
+.strip .t{flex:0 0 12%}
+.strip .heard{flex:0 0 11%;background:#2CE5CB;box-shadow:0 0 14px rgb(44 229 203 / .8)}
+.strip .wait{flex:0 0 8%;background:#F5A83C;box-shadow:0 0 14px rgb(245 168 60 / .8)}
+.strip .rest{flex:1 1 auto}
+.names{margin:0;font-family:"IBM Plex Mono",Consolas,monospace;font-size:37px;font-weight:600;color:#9CC7E8}
+.tag{margin:10px 0 0;font-size:37px;line-height:1.25;font-weight:600;color:#E8EDF1}
+.foot{margin:34px 0 0;font-family:"IBM Plex Mono",Consolas,monospace;font-size:16px;letter-spacing:.04em;color:#73808B}
 </style></head><body><div class="card">
-<svg class="mark" viewBox="0 0 100 100" fill="none"><mask id="w"><rect width="100" height="100" fill="white"/><circle cx="50" cy="31.6" r="8" fill="black"/></mask><circle cx="38" cy="50" r="22" stroke="#37C4B2" stroke-width="6.5"/><circle cx="62" cy="50" r="22" stroke="#F3F4F6" stroke-width="6.5" mask="url(#w)"/><circle cx="16" cy="50" r="4.6" fill="#F3F4F6"/><circle cx="38" cy="72" r="4.6" fill="#F3F4F6"/><circle cx="84" cy="50" r="4.6" fill="#37C4B2"/><circle cx="62" cy="28" r="4.6" fill="#37C4B2"/></svg>
+<svg class="mark" viewBox="0 0 100 100" fill="none"><mask id="w"><rect width="100" height="100" fill="white"/><circle cx="50" cy="31.6" r="8" fill="black"/></mask><circle cx="38" cy="50" r="22" stroke="#2CE5CB" stroke-width="6.5"/><circle cx="62" cy="50" r="22" stroke="#E8EDF1" stroke-width="6.5" mask="url(#w)"/><circle cx="16" cy="50" r="4.6" fill="#E8EDF1"/><circle cx="38" cy="72" r="4.6" fill="#E8EDF1"/><circle cx="84" cy="50" r="4.6" fill="#2CE5CB"/><circle cx="62" cy="28" r="4.6" fill="#2CE5CB"/></svg>
 <div class="text">
 <p class="eyebrow">TWO PIGEONS MEDIA · OPEN SOURCE</p>
-<h1>Interlock</h1>
-<p class="tag">Stop talking to your AIs one at a time.<br><em>Put them in the same room.</em></p>
+<h1>INTERLOCK</h1>
+<div class="strip"><i class="t"></i><i class="heard"></i><i class="t"></i><i class="heard"></i><i class="t"></i><i class="wait"></i><i class="rest"></i></div>
+<p class="names">Claude, Codex, Grok.</p>
+<p class="tag">Talking to each other, collision-free.</p>
 <p class="foot">AGPL-3.0 · github.com/2pigeonsmedia/interlock</p>
 </div></div></body></html>

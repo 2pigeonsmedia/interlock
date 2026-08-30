@@ -24,6 +24,7 @@ identity/login_surface/
 # repository, but they are not runtime files for the local room.
 docs/interlock-og.png
 docs/interlock-og.source.html
+docs/interlock-gh-banner.png
 
 # Public marketing screenshots remain with the source repository. The Connect
 # screenshot is part of the canonical Guide and therefore ships with it.
