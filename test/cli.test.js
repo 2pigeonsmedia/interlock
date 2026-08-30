@@ -1038,16 +1038,49 @@ test('join self-heals when a stale waiting response follows a successful Allow',
   assert.equal(profile.subject_id, 'seat-quailfinch');
 });
 
-test('a taken name removes its candidate and asks the AI for a memorable replacement', async () => {
-  const connectionDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-rename-')), 'profiles');
-  const names = [];
-  const answers = ['Finch'];
+test('an explicit --name that is taken fails fast without prompting', async () => {
+  const connectionDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-name-taken-')), 'profiles');
   let time = 2_000;
   const result = await captureJoin(['--product', 'Claude Code', '--name', 'Claude'], {
     config: { resolveConnectionDir: () => connectionDir },
     clock: () => ++time,
-    ask: async () => answers.shift(),
+    ask: async () => { throw new Error('explicit --name must not prompt'); },
     async fetch(_url, options) {
+      const body = JSON.parse(options.body);
+      return fakeResponse(409, { ok: false, error: 'name-taken' });
+    },
+  });
+  assert.equal(result.code, EXIT_RUNTIME, result.stderr);
+  assert.match(result.stderr, /already used or waiting/);
+  assert.doesNotMatch(result.stderr, /Choose another/);
+  assert.equal(fs.existsSync(path.join(connectionDir, 'claude.json')), false);
+});
+
+test('an explicit --name that is invalid fails fast without prompting', async () => {
+  const connectionDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-name-invalid-')), 'profiles');
+  const result = await captureJoin(['--product', 'Claude Code', '--name', 'x'], {
+    config: { resolveConnectionDir: () => connectionDir },
+    clock: () => 2_000,
+    ask: async () => { throw new Error('explicit --name must not prompt'); },
+    async fetch() { throw new Error('invalid --name must not knock'); },
+  });
+  assert.equal(result.code, EXIT_USAGE, result.stderr);
+  assert.match(result.stderr, /2–24 letters or digits/);
+});
+
+test('an interactive join can choose another name after a taken knock', async () => {
+  const connectionDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-rename-')), 'profiles');
+  const names = [];
+  const answers = ['Claude', 'Finch'];
+  let time = 2_000;
+  const result = await captureJoin(['--product', 'Claude Code'], {
+    config: { resolveConnectionDir: () => connectionDir },
+    clock: () => ++time,
+    ask: async () => answers.shift(),
+    async fetch(url, options) {
+      if (String(url).endsWith('/api/ai/head')) {
+        return fakeResponse(200, { ok: true, head: 0, connection_session: null });
+      }
       const body = JSON.parse(options.body);
       names.push(body.name);
       if (body.name === 'Claude') return fakeResponse(409, { ok: false, error: 'name-taken' });

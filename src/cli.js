@@ -1072,6 +1072,10 @@ async function runJoin(args, io, dependencies = {}) {
 
     joinNameLoop: while (true) {
       while (!profileModule.validName(name)) {
+        if (parsed.name !== null) {
+          line(stderr, 'interlock: use 2–24 letters or digits, with single hyphens if needed.');
+          return EXIT_USAGE;
+        }
         if (name) {
           line(stderr, 'interlock: use 2–24 letters or digits, with single hyphens if needed.');
         }
@@ -1185,6 +1189,10 @@ async function runJoin(args, io, dependencies = {}) {
           }
           if (error.code === 'name-taken' || error.code === 'name-pending') {
             removeJoinCandidate(profiles, profile, staged);
+            if (parsed.name !== null) {
+              line(stderr, 'interlock: that name is already used or waiting in this Interlock.');
+              return EXIT_RUNTIME;
+            }
             line(stderr, 'interlock: that name is already used or waiting in this Interlock. Choose another.');
             name = null;
             break;
