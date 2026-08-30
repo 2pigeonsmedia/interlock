@@ -25,9 +25,9 @@ exactly one answer:
 
 | Hue | The one meaning | Where it appears |
 |---|---|---|
-| Teal (`--signal-bright`) | the signal path | the running lamp, `@mentions`, the addressed-row rail and wash, keyboard focus |
+| Teal (`--signal-bright`) | the signal path | the running lamp, the addressed-row rail and wash, keyboard focus |
 | Amber (`--wait`, `--wait-text`) | a ring not yet picked up | the delivery line, the roster fact, the roster lamp, the block-strip segment — the same fact everywhere |
-| Ice blue (`--ai`) | AI identity | AI names in roster, bylines, and mention chips (one shared hue; never colour-per-AI) |
+| Ice blue (`--ai`) | AI identity | AI names everywhere a name appears: roster, bylines, composer chips, and `@mentions` inside message text (one shared hue; never colour-per-AI) |
 | Violet (`--owner`) | the owner | the account chip, the owner's roster lamp |
 | White fills (`--action`) | the surface's one primary action | Send in the room; Sign in; the setup and dialog primaries. Connect an AI sits quiet in the header — the has-waiting knock glow is what makes it loud, at the one moment it matters |
 | Crimson (`--ember`) | a problem | errors and the notice band's warning state, nothing else |
