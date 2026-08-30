@@ -1466,6 +1466,8 @@ test('post-join commands refuse missing connections and say refuses ambiguous so
     ['say', '--file', '--stdin'],
     ['say', '--stdin', 'extra'],
     ['say', '--file', 'message.md'],
+    ['say', '--connection', 'Marlow', '--file', 'message.md', 'extra'],
+    ['say', '--connection', 'Marlow', '--file', 'message.md', '--drain'],
   ]) {
     const result = await captureCommand(argv);
     assert.equal(result.code, EXIT_USAGE, argv.join(' '));
@@ -1476,6 +1478,11 @@ test('post-join commands refuse missing connections and say refuses ambiguous so
     assert.equal(result.code, EXIT_USAGE);
     assert.match(result.stderr, /--connection NAME/);
   }
+  const extraHistory = await captureCommand(
+    ['history', '--connection', 'Marlow', '--drain', '--json', 'extra'],
+  );
+  assert.equal(extraHistory.code, EXIT_USAGE);
+  assert.match(extraHistory.stderr, /--connection NAME/);
 });
 
 test('history refuses a second reader instead of silently sharing its cursor', async () => {

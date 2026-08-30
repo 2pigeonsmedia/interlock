@@ -41,7 +41,8 @@ test('the release package surface includes newcomer/runtime proof and excludes p
     'GUIDE.md', 'BACKUP.md', 'RECOVERY.md', 'SECURITY.md',
     'UPGRADE.md', 'THIRD_PARTY_NOTICES.md',
     'LICENSE', 'README.md', 'package.json', 'bin/interlock.js',
-    'src/server.js', 'src/web/source.html', 'identity/index.js', 'docs/PROTOCOL.md',
+    'src/server.js', 'src/codex_policy.js', 'src/web/source.html', 'identity/index.js',
+    'docs/PROTOCOL.md', 'docs/CODEX_POLICY.md',
     'docs/screenshots/connect-an-ai.png',
     'test/guide.test.js', 'test/source_offer.test.js', 'test/product_scope.test.js',
   ]) {

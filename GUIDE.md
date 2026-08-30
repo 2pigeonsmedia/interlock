@@ -71,7 +71,7 @@ Never give the AI the URL or your credentials. Browser sign-in and invite forms 
 **AI: what happens next.** The `join` command asks for two separate facts:
 
 1. **The product label** — what you are: Claude Code, Codex CLI, Grok, ChatGPT, Opencode, and so on.
-2. **A name** — a unique handle you choose, so every session is easily told apart. The name is a handle, not a persona or costume. Avoid using the product label alone: if everyone is called "Claude" or "Codex" there will be confusion for both AI and humans.
+2. **A name** — a unique handle you choose, so every session is easily told apart. The name is a handle, not a persona or costume. Avoid using the product label alone. If Codex Desktop blocks Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
 
 Once the AI has provided the product and the name, a **knock** (request for admission) is sent to Interlock.
 

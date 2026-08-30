@@ -43,6 +43,9 @@ Usage:
   interlock say --connection NAME --stdin [--json]
   interlock listen --connection NAME [--json]
   interlock leave --connection NAME [--json]
+  interlock codex-policy install --connection NAME --mode receive|participate
+  interlock codex-policy check --connection NAME [--json]
+  interlock codex-policy remove --connection NAME
 
 The owner uses the browser room. An AI runs "interlock join" in its own
 conversation, chooses a name, and waits for the owner's Allow.
@@ -1587,6 +1590,199 @@ async function runRecover(args, io, dependencies = {}) {
   return EXIT_OK;
 }
 
+function parseCodexPolicyArgs(args) {
+  if (args.length === 0) return null;
+  const action = args[0];
+  if (action !== 'install' && action !== 'check' && action !== 'remove') return null;
+  const options = { action, connection: null, mode: null, json: false, codexHome: null };
+  const seen = new Set();
+  for (let index = 1; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag === '--json') {
+      if (action !== 'check' || seen.has(flag)) return null;
+      seen.add(flag);
+      options.json = true;
+      continue;
+    }
+    if (flag === '--connection') {
+      if (seen.has(flag) || typeof args[index + 1] !== 'string' ||
+          args[index + 1].length === 0 || args[index + 1].startsWith('-')) return null;
+      seen.add(flag);
+      options.connection = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (flag === '--mode') {
+      if (action !== 'install' || seen.has(flag) ||
+          (args[index + 1] !== 'receive' && args[index + 1] !== 'participate')) {
+        return null;
+      }
+      seen.add(flag);
+      options.mode = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (flag === '--codex-home') {
+      if (seen.has(flag) || typeof args[index + 1] !== 'string' ||
+          args[index + 1].length === 0 || args[index + 1].startsWith('-') ||
+          !path.isAbsolute(args[index + 1])) return null;
+      seen.add(flag);
+      options.codexHome = args[index + 1];
+      index += 1;
+      continue;
+    }
+    return null;
+  }
+  if (options.connection === null) return null;
+  if (action === 'install' && options.mode === null) return null;
+  return Object.freeze(options);
+}
+
+function defaultCheckExecpolicy(rulesPath, command) {
+  const childProcess = require('node:child_process');
+  const result = childProcess.spawnSync(
+    'codex',
+    ['execpolicy', 'check', '--rules', rulesPath, '--', ...command],
+    { encoding: 'utf8', timeout: 20_000 },
+  );
+  const text = String(result.stdout || '').trim();
+  if (!text.startsWith('{')) return null;
+  try { return JSON.parse(text); } catch (_) { return null; }
+}
+
+async function confirmParticipate(name, io, dependencies) {
+  if (typeof dependencies.confirmParticipate === 'function') {
+    return dependencies.confirmParticipate(name);
+  }
+  line(io.stdout, `This lets Codex send any readable file through ${terminalSafe(name)} without per-message Auto-review, with no payload inspection, classification, redaction, or restriction.`);
+  line(io.stdout, 'Type PARTICIPATE to confirm.');
+  const rl = readline.createInterface({
+    input: io.stdin || process.stdin,
+    output: io.stdout,
+  });
+  try {
+    const answer = String(await rl.question('> ')).trim();
+    return answer === 'PARTICIPATE';
+  } finally {
+    rl.close();
+  }
+}
+
+function reportCodexPolicyError(stderr, error) {
+  const code = error && error.code;
+  if (code === 'ambiguous-codex-home' || code === 'invalid-codex-home') {
+    line(stderr, 'interlock: Codex home is not certain; pass --codex-home ABSOLUTE_PATH on the same OS as Codex Desktop.');
+    return EXIT_USAGE;
+  }
+  if (code === 'ambiguous-codex-node' || code === 'invalid-node' || code === 'invalid-script') {
+    line(stderr, 'interlock: cannot pin the Codex Node executable and Interlock script as absolute files.');
+    return EXIT_RUNTIME;
+  }
+  if (code === 'owned-file-modified') {
+    line(stderr, 'interlock: the Interlock-owned Codex policy file was edited; refusing to overwrite or remove it.');
+    return EXIT_RUNTIME;
+  }
+  if (code === 'execpolicy-unavailable') {
+    line(stderr, 'interlock: Codex execpolicy is unavailable or unsupported. The policy is not active.');
+    line(stderr, 'Install a Codex release that provides `codex execpolicy check`, then rerun. Until then, add the printed rules by hand only as a last resort.');
+    return EXIT_RUNTIME;
+  }
+  if (code === 'execpolicy-rejected' || code === 'execpolicy-too-broad') {
+    line(stderr, 'interlock: Codex execpolicy did not accept the generated rules. The policy is not active.');
+    return EXIT_RUNTIME;
+  }
+  if (code === 'not-installed') {
+    line(stderr, 'interlock: no Interlock-owned Codex policy is installed.');
+    return EXIT_RUNTIME;
+  }
+  if (code === 'connection-mismatch') {
+    line(stderr, 'interlock: the installed policy is for a different connection name.');
+    return EXIT_RUNTIME;
+  }
+  if (code === 'invalid-connection' || code === 'invalid-mode') {
+    line(stderr, 'interlock: usage: interlock codex-policy install --connection NAME --mode receive|participate');
+    return EXIT_USAGE;
+  }
+  line(stderr, 'interlock: Codex policy could not be applied safely.');
+  return EXIT_RUNTIME;
+}
+
+function printPolicyReceipt(stdout, receipt) {
+  line(stdout, `Policy file: ${receipt.path}`);
+  line(stdout, `Mode: ${receipt.mode}`);
+  line(stdout, `Connection: ${receipt.connection}`);
+  line(stdout, `Argv: ${receipt.historyArgv.join(' ')}`);
+  if (receipt.sayArgv) line(stdout, `Argv: ${receipt.sayArgv.join(' ')}`);
+  line(stdout, 'Restart Codex Desktop. The policy is not active until check passes after that restart.');
+  line(stdout, `Remove with: ${receipt.removeCommand}`);
+}
+
+async function runCodexPolicy(args, io, dependencies = {}) {
+  const parsed = parseCodexPolicyArgs(args);
+  if (!parsed) {
+    line(io.stderr, 'interlock: usage: interlock codex-policy install --connection NAME --mode receive|participate');
+    line(io.stderr, '       interlock codex-policy check --connection NAME [--json]');
+    line(io.stderr, '       interlock codex-policy remove --connection NAME');
+    return EXIT_USAGE;
+  }
+  try { selectedConnection(parsed.connection, dependencies); } catch (error) {
+    reportConnectionError(io.stderr, error, parsed.connection);
+    return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+  }
+  if (parsed.action === 'install' && parsed.mode === 'participate') {
+    const confirmed = await confirmParticipate(parsed.connection, io, dependencies);
+    if (!confirmed) {
+      line(io.stderr, 'interlock: participate mode was not confirmed; no policy was written.');
+      return EXIT_USAGE;
+    }
+  }
+  const policy = dependencies.codexPolicy || require('./codex_policy.js');
+  const shared = {
+    connection: parsed.connection,
+    mode: parsed.mode,
+    codexHome: parsed.codexHome,
+    env: dependencies.env || process.env,
+    platform: dependencies.platform || process.platform,
+    homedir: dependencies.homedir,
+    execPath: dependencies.execPath || process.execPath,
+    fs: dependencies.fs || fs,
+    nodePath: dependencies.codexNodePath,
+    scriptPath: dependencies.interlockScriptPath,
+    checkExecpolicy: dependencies.checkExecpolicy || defaultCheckExecpolicy,
+  };
+  try {
+    if (parsed.action === 'install') {
+      const receipt = policy.installPolicy(shared);
+      printPolicyReceipt(io.stdout, receipt);
+      return EXIT_OK;
+    }
+    if (parsed.action === 'check') {
+      const receipt = policy.checkPolicy(shared);
+      if (parsed.json) {
+        line(io.stdout, JSON.stringify({
+          ok: true,
+          path: receipt.path,
+          mode: receipt.mode,
+          connection: receipt.connection,
+          restart_required: true,
+          active: false,
+        }));
+        return EXIT_OK;
+      }
+      line(io.stdout, `Policy file: ${receipt.path}`);
+      line(io.stdout, `Mode: ${receipt.mode}`);
+      line(io.stdout, 'Restart Codex Desktop. The policy is not active until Codex has restarted and this check still passes.');
+      return EXIT_OK;
+    }
+    const removed = policy.removePolicy(shared);
+    line(io.stdout, `Removed ${removed.removed}.`);
+    line(io.stdout, 'Restart Codex Desktop to restore the previous Auto-review baseline.');
+    return EXIT_OK;
+  } catch (error) {
+    return reportCodexPolicyError(io.stderr, error);
+  }
+}
+
 function run(argv, io, dependencies = {}) {
   const { stdout, stderr } = io;
 
@@ -1614,6 +1810,8 @@ function run(argv, io, dependencies = {}) {
 
   if (argv[0] === 'leave') return runLeave(argv.slice(1), io, dependencies);
 
+  if (argv[0] === 'codex-policy') return runCodexPolicy(argv.slice(1), io, dependencies);
+
   line(stderr, 'interlock: unknown command; run "interlock --help".');
   return EXIT_USAGE;
 }
@@ -1633,6 +1831,7 @@ module.exports = {
   runSay,
   runStart,
   runRestore,
+  runCodexPolicy,
   commandOptions,
   joinOptions,
   storageOptions,
