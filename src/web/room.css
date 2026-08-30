@@ -335,6 +335,17 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }
 .account-label { font-family: var(--font-ai); font-size: 0.78rem; color: var(--owner); }
 
+/* The words for the strip's amber state — who is holding an unanswered ring.
+ * Empty (and hidden) whenever nothing is waiting. */
+.strip-waiting {
+  margin-left: 6px;
+  font-family: var(--font-ai);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--wait-text);
+}
+.strip-waiting:empty { display: none; }
+
 /* ---------- the block strip ----------
  * The signature instrument: an interlocking block diagram under the header.
  * One lit segment per AI connection in People, rendered by room.js from the

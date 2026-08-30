@@ -19,6 +19,7 @@ const inviteRedeemButton = document.querySelector('#invite-redeem-button');
 const accountLabel = document.querySelector('#account-label');
 const rosterList = document.querySelector('#roster-list');
 const blockStrip = document.querySelector('#block-strip');
+const stripWaiting = document.querySelector('#strip-waiting');
 const roomNotice = document.querySelector('#room-notice');
 const logoutButton = document.querySelector('#logout-button');
 const connectAiButton = document.querySelector('#connect-ai-button');
@@ -220,6 +221,7 @@ function showLogin(message = '') {
   rosterKnown = false;
   rosterList.replaceChildren();
   if (blockStrip) blockStrip.replaceChildren();
+  if (stripWaiting) stripWaiting.textContent = '';
   roomView.hidden = true;
   loginView.hidden = false;
   inviteRedeemForm.hidden = true;
@@ -678,10 +680,23 @@ function renderBlockStrip(participants) {
     return segment;
   };
   blockStrip.append(track());
+  const waitingNames = [];
   for (const seat of participants.filter(row => row.kind === 'seat' && row.present)) {
     const segment = document.createElement('i');
-    segment.className = 'segment ' + (seat.outstanding > 0 ? 'waiting' : 'heard');
+    const waiting = seat.outstanding > 0;
+    segment.className = 'segment ' + (waiting ? 'waiting' : 'heard');
+    segment.title = waiting
+      ? `${seat.name} — ${seat.outstanding} ${seat.outstanding === 1 ? 'message' : 'messages'} not picked up`
+      : `${seat.name} — heard recently`;
+    if (waiting) waitingNames.push(seat.name);
     blockStrip.append(segment, track());
+  }
+  /* The amber state is the one that asks something of the owner, so it gets
+   * words in the header; teal stays wordless — heard-and-quiet is the
+   * unremarkable state. Colour repeats these words, never replaces them. */
+  if (stripWaiting) {
+    stripWaiting.textContent = waitingNames.length === 0
+      ? '' : `waiting: ${waitingNames.join(', ')}`;
   }
 }
 

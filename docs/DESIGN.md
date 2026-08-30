@@ -56,6 +56,13 @@ A strip with no lit segments means no AI connection is in People. The strip
 must never show a state the server did not report — a decorative segment is a
 lie in instrument's clothing.
 
+Anonymous colour failed its first live owner ("it doesn't tell me who or what
+it means" — the v0.1.1 working session), so the strip carries its words:
+every segment has a `title` naming its seat and state, and whenever any
+segment is amber the header states it in text (`#strip-waiting`, a polite
+live region: "waiting: Marlow"). Teal gets no header words on purpose —
+heard-and-quiet is the unremarkable state and does not nag.
+
 ## Colour
 
 Tokens live in `src/web/room.css` (`setup.css` and `recovery.css` carry
