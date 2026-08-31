@@ -37,6 +37,8 @@ test('the supported boundary states local plaintext and shared-room consequences
     /allowing an AI, creating a human invite, removing a participant,\s+and clearing the transcript/);
   assert.match(SECURITY,
     /Transcript export, owner password change, and\s+signing out other sessions[^]*authenticated owner session/);
+  assert.match(SECURITY,
+    /read-only History index[^]*verified archive downloads[^]*authenticated human room reader/);
 });
 
 test('the security guide describes built recovery without inventing a master code', () => {

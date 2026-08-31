@@ -56,22 +56,26 @@ test('the upgrade path backs up first and never teaches an in-place downgrade', 
 });
 
 test('the tested-on list names exact runtimes without turning WSL into native Ubuntu', () => {
-  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*cffcc4a[^\n]*364\/364/);
-  assert.match(README, /Native Windows[\s\S]*clean-archive testing passed 362\/362/,
-    'the native Windows result must retain its exact pre-final-delta boundary');
+  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked RC tree[^\n]*377\/377/);
   assert.match(README,
-    /final\s+delta[^]*Codex-policy cross-host validation[^]*native Windows → WSL[^]*live-proven at the release commit/,
+    /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*377\/377/);
+  assert.match(README,
+    /v0\.1\.3 is the context-navigation release[^]*plain-text Reply references[^]*durable History page/);
+  assert.match(README, /v0\.1\.2 release commit `cffcc4a` passed 364\/364 on WSL\/Linux/);
+  assert.match(README, /native\s+Windows clean-archive proof passed 362\/362[^]*product-complete RC1/,
+    'the historical v0.1.2 Windows result must retain its exact pre-final-delta boundary');
+  assert.match(README,
+    /final\s+Codex-policy delta[^]*live-proven through native Windows → WSL/,
     'the final policy-only delta needs its real cross-host evidence, not an invented full-suite claim');
-  assert.match(README, /fresh\s+source trees passed 308\/308 tests/,
+  assert.match(README, /fresh\s+source\s+trees that passed 308\/308 tests/,
     'the v0.1.0 tag proofs stay described as that tag\'s, never re-claimed');
   assert.match(README, /automated runtime compatibility/);
-  assert.match(README,
-    /v0\.1\.0 tag.s[\s\S]*deeper proofs[\s\S]*not re-run for v0\.1\.2 beyond the suites named above/,
-    'unrepeated proofs must say so');
-  assert.match(README, /deferred to v0\.1\.3 by owner ruling/,
-    'Features 4 and 5 must be named as deferred, not omitted');
+  assert.match(README, /historical proofs retain their original\s+boundaries/,
+    'unrepeated proofs must keep their original release boundary');
+  assert.match(README, /Plain-text Reply references[\s\S]*never silently ring an\s+AI/);
+  assert.match(README, /Durable History[\s\S]*signed-in person[\s\S]*verified transcript archive/);
   assert.match(README, /native(?: Ubuntu)?\s+browser\/passkey journey/i);
-  assert.match(README, /no native macOS journey was run/i);
+  assert.match(README, /no\s+native macOS journey was run/i);
   assert.match(README, /post-v0\.1\s+evidence goals,\s+not claims made by this tested-on table/i);
   assert.match(README, /cold-newcomer[\s\S]*journey[\s\S]*open evidence goal[\s\S]*discretion/i);
   assert.doesNotMatch(README, /journeys remain open[^]*not yet a public release/i,
@@ -92,4 +96,10 @@ test('the tested-on list names exact runtimes without turning WSL into native Ub
     /connection_session[^]*ended same-name\s+generation is never submitted by the replacement bearer/);
   assert.match(PROTOCOL,
     /five-minute recent-client `present` state[^]*People always shows people[^]*only while its authenticated client has reached[^]*within the last five minutes[^]*not a doorbell or\s+model-attention claim[^]*remains admitted[^]*manageable in Settings/);
+  assert.match(PROTOCOL,
+    /GET \/api\/history\/names[^]*no subject id, credential, principal, grant, or audit field/);
+  assert.match(PROTOCOL,
+    /GET \/api\/history\/archives[^]*complete transcript pairs[^]*corrupt[^]*unavailable/);
+  assert.match(PROTOCOL,
+    /GET \/api\/transcript\/exports\/:archive_id\.md\|json[^]*authenticated room-read authority/);
 });

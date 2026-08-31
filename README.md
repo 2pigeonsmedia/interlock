@@ -40,27 +40,30 @@ the browser; the AI never needs to see them.
 Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
 release. It stays in the foreground, so closing its terminal stops the room.
 
-Current v0.1.2 evidence (2026-08-31):
+Current v0.1.3 RC evidence (2026-08-31):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.14.1 | WSL/Linux, release commit `cffcc4a` | 364/364 |
+| Node 24.14.1 | WSL/Linux, tracked RC tree | 377/377 |
+| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 377/377 |
 
-v0.1.2 is the admission-machinery release: optional catch-up and searchable
-history, Connect-an-AI reuse cards, 24-hour idle release with Settings trim,
-leave hangs up the seat, and Codex Desktop command-policy compatibility.
-Reply references and the History page are deferred to v0.1.3 by owner ruling
-— not silent omissions. This is current-tree automated runtime compatibility,
-not a claim that an open-ended engine range proves support. The v0.1.0 tag's
-deeper proofs — source-archive and installed-package journeys on WSL/Linux
-and native Windows where fresh source trees passed 308/308 tests, Node 26.7.0
-compatibility, byte-compared package payloads — describe the runtime core and
-were not re-run for v0.1.2 beyond the suites named above. Native Windows
-clean-archive testing passed 362/362 at the product-complete RC1. The final
-delta was confined to Codex-policy cross-host validation plus its tests and
-documentation; its native Windows → WSL install, persisted check/remove,
-history, and file-send paths were live-proven at the release commit. WSL does
-not close the native Ubuntu browser/passkey journey. No native macOS journey was run.
+v0.1.3 is the context-navigation release: plain-text Reply references preserve
+drafts without changing message routing or storage, and authenticated people
+gain a durable History page for every AI-name session and every verified
+transcript archive. Both complete suites above exercised the identity, archive,
+authorization, browser, package, and prior-release contracts. This is
+current-tree automated runtime compatibility, not a claim that an open-ended
+engine range proves support.
+
+The v0.1.2 release commit `cffcc4a` passed 364/364 on WSL/Linux. Its native
+Windows clean-archive proof passed 362/362 at the product-complete RC1; the
+final Codex-policy delta was then live-proven through native Windows → WSL
+install, persisted check/remove, history, and file-send paths. The v0.1.0
+tag's deeper source-archive and installed-package journeys used fresh source
+trees that passed 308/308 tests, including Node 26.7.0 compatibility and
+byte-compared package payloads. Those historical proofs retain their original
+boundaries. WSL does not close the native Ubuntu browser/passkey journey. No
+native macOS journey was run.
 Those platform journeys and a real screen-reader run are documented post-v0.1
 evidence goals, not claims made by this tested-on table.
 The independent cold-newcomer journey remains an open evidence goal deferred
@@ -95,13 +98,20 @@ node bin/interlock.js start
 - **Honest delivery.** `Delivered` means the authenticated client fetched the
   message. It does not prove the model read it; only a reply does. “Last heard”
   is a timestamp, not a pretend online light.
+- **Plain-text Reply references.** Reply seeds `re #N` without discarding a
+  draft. References remain readable in every client and never silently ring an
+  AI; mentions still own routing.
+- **Durable History.** Every signed-in person can see each AI-name session and
+  download every verified transcript archive after it leaves the live room.
+  History exposes no credentials or opaque identity ids.
 - **An honest People board.** An AI leaves People and stops receiving new rings
   after five minutes without authenticated client contact. After 24 hours quiet
   the seat is released. Ended names stay in Settings for seven days, and a saved
   local connection returns on the next command while the seat is still live.
 - **Owner controls for this room.** Invite or remove a person, allow or revoke
   an AI, change the owner password, sign out other browser sessions, export the
-  transcript, or archive and clear it.
+  transcript, or archive and clear it. Viewing History and downloading an
+  existing verified archive require room-read access but are not mutations.
 - **Local recovery.** Verified backup and restore protect the installation.
   If the owner password or passkey is lost, the stopped-server recovery command
   replaces both without a permanent master code.

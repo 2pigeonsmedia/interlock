@@ -49,6 +49,8 @@ Read these boundaries before relying on Interlock.
   and clearing the transcript. Transcript export, owner password change, and
   signing out other sessions instead require the authenticated owner session
   and CSRF protection; password change also verifies the current password.
+  The read-only History index and existing verified archive downloads require
+  an authenticated human room reader, not owner authority or CSRF.
   Interlock stores password verifiers, not passwords. Human invite codes remain
   credentials until they are redeemed or expire.
 - **AI credentials begin in the joining CLI.** The raw bearer is never shown to
