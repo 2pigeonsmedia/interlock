@@ -298,6 +298,26 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
   assert.strictEqual(house.listParticipants({ now: seat.expires_at + 14 })
     .find(row => row.name === 'mArLoW').session, 2,
   'the live roster must carry the reused name generation');
+  const nameHistory = house.listAiSeatHistory({ now: seat.expires_at + 14 });
+  assert.deepStrictEqual(nameHistory, [
+    {
+      name: 'Marlow', session: 1, product: 'Claude Code',
+      product_provenance: 'client-reported', started_at: seat.created_at,
+      ended_at: seat.expires_at, ended_how: 'expired',
+    },
+    {
+      name: 'mArLoW', session: 2, product: 'Claude Code',
+      product_provenance: 'client-reported', started_at: secondSeat.created_at,
+      ended_at: null, ended_how: null,
+    },
+  ], 'History must retain every folded-name generation and derive admission-cap expiry once');
+  assert.strictEqual(Object.isFrozen(nameHistory), true);
+  assert.strictEqual(Object.isFrozen(nameHistory[0]), true);
+  assert.deepStrictEqual(Object.keys(nameHistory[0]).sort(), [
+    'ended_at', 'ended_how', 'name', 'product', 'product_provenance', 'session', 'started_at',
+  ], 'the History seam must expose no subject, credential, grant, or audit identifier');
+  assert.throws(() => house.listAiSeatHistory({ now: seat.expires_at + 14, extra: true }),
+    /requires trusted now/, 'the durable History seam keeps its trusted-time input closed');
   assert.throws(() => world.repo.transact(draft => {
     const direct = Object.assign({}, secondSeat, {
       id: crypto.randomUUID(),
@@ -407,6 +427,10 @@ test('Interlock administration seams revoke non-owners and preserve only the cur
   const revokedSeat = world.repo.read().subjects.find(row => row.id === seat.subject_id);
   assert.strictEqual(revokedSeat.ended_how, 'revoked',
     'owner removal must stamp how the seat ended');
+  assert.strictEqual(
+    house.listAiSeatHistory({ now: revokedSeat.revoked_at }).find(row => row.name === 'Marlow')
+      .ended_how,
+    'removed', 'History translates the internal revocation stamp into owner-facing cause text');
   const replacementCandidate = identity.newAiCredential();
   const replacementBody = admission(replacementCandidate, { name: 'MARLOW' });
   assert.deepStrictEqual(
@@ -475,6 +499,7 @@ test('an authenticated seat can hang up itself without the owner door', async ()
   const left = world.repo.read().subjects.find(row => row.id === seat.subject_id);
   assert.strictEqual(left.status, 'revoked');
   assert.strictEqual(left.ended_how, 'left');
+  assert.strictEqual(house.listAiSeatHistory({ now: left.revoked_at })[0].ended_how, 'left');
   assert.strictEqual(house.authorizeSeatBearer(bearer(candidate.token), 'read', 'room:main').allow,
     false, 'a seat that left must fail immediately');
   assert.deepStrictEqual(
@@ -549,6 +574,7 @@ test('idle release kills the seat and credential without pretending the owner re
   const released = world.repo.read().subjects.find(row => row.id === seat.subject_id);
   assert.strictEqual(released.status, 'revoked');
   assert.strictEqual(released.ended_how, 'released');
+  assert.strictEqual(house.listAiSeatHistory({ now: released.revoked_at })[0].ended_how, 'released');
   assert.strictEqual(house.authorizeSeatBearer(bearer(candidate.token), 'read', 'room:main').allow,
     false, 'the idle-released bearer must fail immediately');
   assert.strictEqual(house.listParticipants({ now: world.T + 15 }).some(row => row.name === 'Marlow'),
@@ -564,6 +590,25 @@ test('idle release kills the seat and credential without pretending the owner re
     reuse: 'ended',
     reuse_session: 1,
   }, again));
+});
+
+test('admission-cap expiry remains the History cause if cleanup stamps a later release', async () => {
+  const world = await Step.freshAdmin(F);
+  const house = world.instance;
+  const identity = F.load('index.js');
+  const candidate = identity.newAiCredential();
+  const allowed = await world.elevate(world.T + 10);
+  const seat = house.allowAiAdmission(world.env(allowed, world.T + 13), admission(candidate));
+  assert.strictEqual(seat.ok, true, JSON.stringify(seat));
+  assert.strictEqual(house.releaseIdleSeats({
+    now: seat.expires_at + 1,
+    subject_ids: [seat.subject_id],
+  }), 1);
+  const stored = world.repo.read().subjects.find(row => row.id === seat.subject_id);
+  assert.strictEqual(stored.ended_how, 'released', 'cleanup records what it attempted');
+  assert.strictEqual(
+    house.listAiSeatHistory({ now: seat.expires_at + 1 })[0].ended_how,
+    'expired', 'History reports the admission cap that ended the seat first');
 });
 
 test('idle release refuses a person id with zero mutation', async () => {

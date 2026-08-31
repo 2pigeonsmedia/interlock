@@ -781,6 +781,57 @@ function create(config) {
     })));
   }
 
+  function listAiSeatHistory(meta = {}) {
+    if (meta === null || typeof meta !== 'object' || Array.isArray(meta) ||
+        Object.keys(meta).length !== 1 ||
+        !Object.prototype.hasOwnProperty.call(meta, 'now') ||
+        !Number.isSafeInteger(meta.now) || meta.now < 0) {
+      reject('listAiSeatHistory(meta) requires trusted now');
+    }
+    const now = meta.now;
+    const rows = subjects.list(tenant).filter(subject =>
+      subject && subject.kind === 'seat' &&
+      Object.prototype.hasOwnProperty.call(subject, 'product')).map(subject => {
+      const endedAt = subjects.endedSeatAt(subject, now);
+      let endedHow = null;
+      if (endedAt !== null) {
+        const revokedAt = subject.status === 'revoked' &&
+          Number.isSafeInteger(subject.revoked_at) ? subject.revoked_at : null;
+        if (subject.expires_at === endedAt &&
+            (revokedAt === null || subject.expires_at < revokedAt)) endedHow = 'expired';
+        else if (subject.ended_how === 'left') endedHow = 'left';
+        else if (subject.ended_how === 'revoked') endedHow = 'removed';
+        else if (subject.ended_how === 'released') endedHow = 'released';
+        else if (subject.expires_at === endedAt && subject.expires_at <= now) endedHow = 'expired';
+        else {
+          throw new Error('identity: AI seat history has an unknown end cause');
+        }
+      }
+      const session = Object.prototype.hasOwnProperty.call(subject, 'session_ordinal')
+        ? subject.session_ordinal : 1;
+      if (!Number.isSafeInteger(session) || session < 1) {
+        throw new Error('identity: AI seat history has an invalid session ordinal');
+      }
+      return Object.freeze({
+        name: subject.name,
+        session,
+        product: subject.product,
+        product_provenance: subject.product_provenance,
+        started_at: subject.created_at,
+        ended_at: endedAt,
+        ended_how: endedHow,
+      });
+    });
+    rows.sort((left, right) => {
+      const leftName = subjects.fold(left.name);
+      const rightName = subjects.fold(right.name);
+      if (leftName < rightName) return -1;
+      if (leftName > rightName) return 1;
+      return left.session - right.session;
+    });
+    return Object.freeze(rows);
+  }
+
   function endOwnSeat(meta) {
     if (meta === null || typeof meta !== 'object') {
       reject('endOwnSeat(meta) requires the trusted metadata object');
@@ -928,6 +979,7 @@ function create(config) {
     listParticipants,
     releaseIdleSeats,
     listRecentEndedSeats,
+    listAiSeatHistory,
     endOwnSeat,
     revokeParticipant,
     signOutOtherSessions,
