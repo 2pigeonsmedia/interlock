@@ -383,6 +383,21 @@ function publicReceipt(receipt) {
   });
 }
 
+function publicListing(id, verified) {
+  const document = verified.document;
+  return Object.freeze({
+    archive_id: id,
+    exported_at: document.exported_at,
+    message_count: document.transcript.message_count,
+    first_id: document.transcript.first_id,
+    next_id: document.transcript.next_id,
+    downloads: Object.freeze({
+      markdown: `/api/transcript/exports/${id}.md`,
+      json: `/api/transcript/exports/${id}.json`,
+    }),
+  });
+}
+
 function createArchiveService(options) {
   const input = closedObject(options, OPTION_KEYS);
   if (!input || typeof input.dataDir !== 'string' || !path.isAbsolute(input.dataDir) ||
@@ -409,6 +424,48 @@ function createArchiveService(options) {
     }));
   }
 
+  function listArchives() {
+    const root = path.join(input.dataDir, 'archives');
+    if (!fs.existsSync(root)) return Object.freeze([]);
+    let entries;
+    try {
+      const stat = fs.lstatSync(root);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw error('archive-list-unavailable');
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch (caught) {
+      if (caught && caught.code === 'archive-list-unavailable') throw caught;
+      throw error('archive-list-unavailable');
+    }
+    const candidates = new Map();
+    for (const entry of entries) {
+      let format = null;
+      if (entry.name.endsWith('.json')) format = 'json';
+      else if (entry.name.endsWith('.md')) format = 'md';
+      if (format === null) continue;
+      const id = entry.name.slice(0, -(format.length + 1));
+      if (!ARCHIVE_ID.test(id)) continue;
+      if (!entry.isFile() || entry.isSymbolicLink()) throw error('archive-verification-failed');
+      const formats = candidates.get(id) || new Set();
+      formats.add(format);
+      candidates.set(id, formats);
+    }
+    const listed = [];
+    for (const [id, formats] of candidates) {
+      if (formats.size !== 2 || !formats.has('json') || !formats.has('md')) {
+        throw error('archive-verification-failed');
+      }
+      listed.push(publicListing(id, verifyArchiveSet(input.dataDir, id)));
+    }
+    listed.sort((left, right) => {
+      if (left.exported_at !== right.exported_at) {
+        return left.exported_at > right.exported_at ? -1 : 1;
+      }
+      return left.archive_id < right.archive_id ? 1 :
+        (left.archive_id > right.archive_id ? -1 : 0);
+    });
+    return Object.freeze(listed);
+  }
+
   function readArtifact(id, format) {
     if (!ARCHIVE_ID.test(id) || (format !== 'json' && format !== 'md')) {
       throw error('invalid-archive');
@@ -422,7 +479,7 @@ function createArchiveService(options) {
     });
   }
 
-  return Object.freeze({ exportTranscript, clearTranscript, readArtifact });
+  return Object.freeze({ exportTranscript, clearTranscript, listArchives, readArtifact });
 }
 
 module.exports = Object.freeze({

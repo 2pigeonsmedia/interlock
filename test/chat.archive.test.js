@@ -135,6 +135,65 @@ test('clear verifies both copies first, preserves activity, and never reuses mes
   await reopened.close();
 });
 
+test('archive listing is verified, closed, newest-first, and loud about missing pairs', async () => {
+  const dataDir = freshDir();
+  const store = openStore({ dataDir });
+  const archive = createArchiveService({ dataDir, store });
+  assert.deepEqual(archive.listArchives(), []);
+  assert.equal(Object.isFrozen(archive.listArchives()), true);
+
+  await store.append({ text: 'first era' }, PERSON);
+  const first = writeArchive(dataDir, await store.snapshot(), 1000);
+  await store.append({ text: '<script>still text</script>' }, PERSON);
+  const second = writeArchive(dataDir, await store.snapshot(), 2000);
+  const root = path.join(dataDir, 'archives');
+  fs.writeFileSync(path.join(root, 'notes.txt'), 'unrelated');
+  fs.writeFileSync(path.join(root, 'transcript-not-an-id.json'), 'unrelated');
+
+  const rows = archive.listArchives();
+  assert.equal(Object.isFrozen(rows), true);
+  assert.deepEqual(rows.map(row => row.archive_id), [second.archive_id, first.archive_id]);
+  assert.deepEqual(rows.map(row => ({
+    exported_at: row.exported_at,
+    message_count: row.message_count,
+    first_id: row.first_id,
+    next_id: row.next_id,
+  })), [
+    { exported_at: 2000, message_count: 2, first_id: 1, next_id: 3 },
+    { exported_at: 1000, message_count: 1, first_id: 1, next_id: 2 },
+  ]);
+  for (const row of rows) {
+    assert.equal(Object.isFrozen(row), true);
+    assert.equal(Object.isFrozen(row.downloads), true);
+    assert.deepEqual(Object.keys(row).sort(), [
+      'archive_id', 'downloads', 'exported_at', 'first_id', 'message_count', 'next_id',
+    ]);
+    assert.deepEqual(row.downloads, {
+      markdown: `/api/transcript/exports/${row.archive_id}.md`,
+      json: `/api/transcript/exports/${row.archive_id}.json`,
+    });
+  }
+
+  const secondJsonPath = path.join(root, second.archive_id + '.json');
+  const secondMarkdownPath = path.join(root, second.archive_id + '.md');
+  const secondJson = fs.readFileSync(secondJsonPath);
+  const secondMarkdown = fs.readFileSync(secondMarkdownPath);
+  fs.appendFileSync(secondJsonPath, ' ');
+  assert.throws(() => archive.listArchives(),
+    value => codeOf(value) === 'archive-verification-failed');
+  fs.writeFileSync(secondJsonPath, secondJson);
+  fs.appendFileSync(secondMarkdownPath, 'changed');
+  assert.throws(() => archive.listArchives(),
+    value => codeOf(value) === 'archive-verification-failed');
+  fs.writeFileSync(secondMarkdownPath, secondMarkdown);
+
+  fs.unlinkSync(path.join(root, first.archive_id + '.md'));
+  assert.throws(() => archive.listArchives(),
+    value => codeOf(value) === 'archive-verification-failed',
+    'a valid archive id with only half its pair must never disappear silently');
+  await store.close();
+});
+
 test('tampered or stale archive pairs cannot clear the live transcript', async () => {
   const tamperedDir = freshDir();
   const tamperedStore = openStore({ dataDir: tamperedDir });
@@ -234,4 +293,14 @@ test('schema-1 transcript archives remain verifiable after session discriminator
   fs.writeFileSync(path.join(root, id + '.json'), JSON.stringify(document, null, 2) + '\n');
   fs.writeFileSync(path.join(root, id + '.md'), markdown);
   assert.equal(verifyArchiveSet(dataDir, id).document.schema, 1);
+  const store = openStore({ dataDir });
+  const listed = createArchiveService({ dataDir, store }).listArchives();
+  assert.deepEqual(listed.map(row => ({
+    archive_id: row.archive_id,
+    exported_at: row.exported_at,
+    message_count: row.message_count,
+    first_id: row.first_id,
+    next_id: row.next_id,
+  })), [{ archive_id: id, exported_at: 0, message_count: 1, first_id: 1, next_id: 2 }]);
+  return store.close();
 });
