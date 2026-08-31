@@ -389,6 +389,11 @@ function rulesPathForChecker(rulesPath, platform, checkerPath) {
     : rulesPath;
 }
 
+function wslCheckerArgv(checkerPath, args) {
+  const quote = value => `'${String(value).replace(/'/g, `'"'"'`)}'`;
+  return ['/bin/sh', '-lc', [pathForHost(checkerPath, 'wsl'), ...args].map(quote).join(' ')];
+}
+
 function resolveCodexNode(options, ioFs) {
   if (options.nodePath) return requireRegularFile(options.nodePath, ioFs, 'invalid-node');
   const candidates = [];
@@ -677,7 +682,7 @@ function decideChecker(options, rulesPath, command) {
   const args = ['execpolicy', 'check', '--rules', checkerRulesPath, '--', ...command];
   let result;
   if (platform === 'win32' && /\/bin\/wsl\//i.test(String(checkerPath).replace(/\\/g, '/'))) {
-    result = spawnSync('wsl.exe', [pathForHost(checkerPath, 'wsl'), ...args], {
+    result = spawnSync('wsl.exe', wslCheckerArgv(checkerPath, args), {
       encoding: 'utf8', timeout: 20_000,
     });
   } else {
@@ -869,6 +874,7 @@ module.exports = {
   removePolicy,
   resolveCodexChecker,
   rulesPathForChecker,
+  wslCheckerArgv,
   historyPattern,
   sayPattern,
 };

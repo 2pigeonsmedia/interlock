@@ -316,6 +316,18 @@ test('a native host gives its WSL checker a WSL rules path', () => {
     rulesPath, 'a native checker must keep the native rules path');
 });
 
+test('a native host passes Windows command tokens opaquely through its WSL checker', () => {
+  const checkerPath = 'C:\\Users\\x\\.codex\\bin\\wsl\\80652e088c21f249\\codex';
+  const args = ['execpolicy', 'check', '--rules', '/mnt/c/rules.tmp', '--',
+    '/mnt/c/node.exe', 'C:\\Program Files\\Interlock\\interlock.js', "quote'kept"];
+  const argv = policy.wslCheckerArgv(checkerPath, args);
+  assert.deepEqual(argv.slice(0, 2), ['/bin/sh', '-lc']);
+  assert.match(argv[2], /^'\/mnt\/c\/Users\/x\/\.codex\/bin\/wsl\//);
+  assert.match(argv[2], /'C:\\Program Files\\Interlock\\interlock\.js'/);
+  assert.match(argv[2], /'quote'"'"'kept'$/,
+    'embedded apostrophes must stay one exact shell argument');
+});
+
 test('unpinned missing checker is unavailable not rejected', () => {
   const tree = makeTree();
   const checkerPath = path.join(tree.root, 'codex');

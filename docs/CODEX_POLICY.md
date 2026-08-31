@@ -34,6 +34,10 @@ WSL-visible `/mnt/.../node.exe` path while the script argument stays Windows-
 native so that Windows Node can open it. Relative `bin/interlock.js` and generic
 `node` are never emitted.
 
+When native Windows invokes a WSL Codex checker, Interlock passes the checker
+argv as one POSIX-quoted shell command. This prevents `wsl.exe` from rewriting
+the embedded Windows script argument before the checker evaluates the policy.
+
 ## Commands
 
 ```text
