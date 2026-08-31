@@ -378,6 +378,12 @@ function displayHistoryArgv(nodePath, scriptPath, connection, host) {
   return historyPattern(node, script, connection);
 }
 
+function rulesPathForChecker(rulesPath, platform, checkerPath) {
+  return platform === 'win32' && /\/bin\/wsl\//i.test(String(checkerPath).replace(/\\/g, '/'))
+    ? pathForHost(rulesPath, 'wsl')
+    : rulesPath;
+}
+
 function resolveCodexNode(options, ioFs) {
   if (options.nodePath) return requireRegularFile(options.nodePath, ioFs, 'invalid-node');
   const candidates = [];
@@ -662,7 +668,8 @@ function decideChecker(options, rulesPath, command) {
   const checkerPath = resolveCodexChecker(options, ioFs);
   const spawnSync = options.spawnSync || require('node:child_process').spawnSync;
   const platform = options.platform || process.platform;
-  const args = ['execpolicy', 'check', '--rules', rulesPath, '--', ...command];
+  const checkerRulesPath = rulesPathForChecker(rulesPath, platform, checkerPath);
+  const args = ['execpolicy', 'check', '--rules', checkerRulesPath, '--', ...command];
   let result;
   if (platform === 'win32' && /\/bin\/wsl\//i.test(String(checkerPath).replace(/\\/g, '/'))) {
     result = spawnSync('wsl.exe', [pathForHost(checkerPath, 'wsl'), ...args], {
@@ -856,6 +863,7 @@ module.exports = {
   checkPolicy,
   removePolicy,
   resolveCodexChecker,
+  rulesPathForChecker,
   historyPattern,
   sayPattern,
 };

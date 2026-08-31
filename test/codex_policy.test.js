@@ -301,6 +301,18 @@ test('Windows native paths emit only the WSL host pair when host is wsl', () => 
   assert.ok(patterns[0][1].startsWith('/mnt/c/'));
 });
 
+test('a native host gives its WSL checker a WSL rules path', () => {
+  const rulesPath = 'C:\\Users\\x\\.codex\\rules\\interlock-codex-policy.rules.tmp';
+  const checkerPath = 'C:\\Users\\x\\.codex\\bin\\wsl\\80652e088c21f249\\codex';
+  const wslRulesPath = ['', 'mnt', 'c', 'Users', 'x', '.codex', 'rules',
+    'interlock-codex-policy.rules.tmp'].join('/');
+  assert.equal(policy.rulesPathForChecker(rulesPath, 'win32', checkerPath),
+    wslRulesPath);
+  assert.equal(policy.rulesPathForChecker(rulesPath, 'win32',
+    'C:\\Users\\x\\AppData\\Local\\OpenAI\\Codex\\bin\\b99306303521e97e\\codex.exe'),
+    rulesPath, 'a native checker must keep the native rules path');
+});
+
 test('unpinned missing checker is unavailable not rejected', () => {
   const tree = makeTree();
   const checkerPath = path.join(tree.root, 'codex');
