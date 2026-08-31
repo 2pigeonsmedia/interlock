@@ -18,6 +18,9 @@ test('browser message metadata shows the server message id as inert text', () =>
     /byline\.textContent = message\.byline;[\s\S]*session\.className = 'message-session';[\s\S]*`Session \$\{message\.session\}`/,
     'the chosen name and durable session discriminator must be separate DOM text');
   assert.match(css, /\.message-id \{[^}]*font-family: var\(--font-ai\);[^}]*\}/s);
+  assert.match(room,
+    /function formatTime\(timestamp\)[\s\S]*dateStyle: 'medium', timeStyle: 'short'/,
+    'a visible message citation needs its local date as well as its time');
 });
 
 test('long product metadata wraps on desktop and narrow screens', () => {

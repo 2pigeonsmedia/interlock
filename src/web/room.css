@@ -290,6 +290,8 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }
 
 .brand, .room-actions { display: flex; align-items: center; gap: 12px; }
+.page-nav { display: flex; align-items: center; gap: 8px; }
+.page-nav [aria-current="page"] { border-color: var(--signal-bright); }
 .brand { gap: 11px; }
 
 /* Connection state is derived by room.js from the /health probe:
@@ -765,6 +767,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   .room-view { height: auto; min-height: 100dvh; }
   .room-header { flex-wrap: wrap; padding: 10px 14px; }
   .room-actions { width: 100%; flex-wrap: wrap; gap: 8px; }
+  .page-nav { flex-wrap: wrap; }
   .pending-ai-card { grid-template-columns: 1fr; }
   .pending-ai-actions { justify-content: flex-start; }
   .account-label { order: 1; width: 100%; margin-top: 2px; }

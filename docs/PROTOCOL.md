@@ -209,6 +209,8 @@ listener before recovery `history`.
   not-picked-up addressed deliveries. Opaque subject ids stay server-side.
 - `GET /api/deliveries?after=CURSOR&limit=1..100` supplies the browser's durable
   acknowledgement-change cursor without exposing subject ids.
+- Browser message rows render the server timestamp with local date and time;
+  the machine-readable `<time datetime>` remains the exact ISO instant.
 - `GET /api/history/names` returns the closed durable AI-session ledger to a
   signed-in room reader: admitted spelling, positive session ordinal,
   product/provenance, start/end times, and one identity-derived end cause. It

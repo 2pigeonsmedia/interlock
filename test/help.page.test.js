@@ -58,8 +58,10 @@ test('the room and rendered Guide retain local navigation', () => {
   assert.match(ROOM, /<a[^>]+href="\/history"[^>]*>History<\/a>/);
   assert.match(ROOM, /<a[^>]+href="\/help"[^>]*>Help<\/a>/);
   assert.match(ROOM, /<a[^>]+href="\/source"[^>]*>Source<\/a>/);
-  assert.match(HELP, /<a[^>]+href="\/"[^>]*>Back to the room<\/a>/);
-  assert.match(HELP, /<a[^>]+href="\/source"[^>]*>Source and license<\/a>/);
+  assert.match(HELP, /<a[^>]+href="\/"[^>]*>Room<\/a>/);
+  assert.match(HELP, /<a[^>]+href="\/history"[^>]*>History<\/a>/);
+  assert.match(HELP, /<a[^>]+href="\/help"[^>]*aria-current="page"[^>]*>Help<\/a>/);
+  assert.match(HELP, /<a[^>]+href="\/source"[^>]*>Source<\/a>/);
   assert.match(HELP, /<nav class="help-nav" aria-label="On this page">/);
 });
 

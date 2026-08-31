@@ -33,7 +33,7 @@ test('the installable package identifies its public source and issue destination
 test('the running Help surface offers source and keeps security reports private', () => {
   assert.match(ROOM, /href="\/source">Source<\/a>/,
     'the running room must offer source directly, not only through Help');
-  assert.match(HELP, /href="\/source">Source and license<\/a>/);
+  assert.match(HELP, /href="\/source">Source<\/a>/);
   assert.match(HELP, /security@2pigeons\.media<\/strong> — privately, not in a public issue/);
   assert.equal((SERVER.match(/'\/source': \['source\.html', 'text\/html; charset=utf-8'\]/g) || []).length, 2,
     'setup and the completed room must both serve the source offer');

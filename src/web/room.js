@@ -619,7 +619,9 @@ function formatTime(timestamp) {
   if (!Number.isFinite(date.getTime())) return null;
   return {
     datetime: date.toISOString(),
-    label: new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date),
+    label: new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium', timeStyle: 'short',
+    }).format(date),
   };
 }
 

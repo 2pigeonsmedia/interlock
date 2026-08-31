@@ -73,9 +73,12 @@
       <div class="room-actions">
         <button id="connect-ai-button" type="button" class="primary-action" disabled>Connect an AI</button>
         <button id="settings-button" type="button" class="quiet-action" disabled>Settings</button>
-        <a id="history-link" class="quiet-action" href="/history">History</a>
-        <a id="help-link" class="quiet-action" href="/help">Help</a>
-        <a id="source-link" class="quiet-action" href="/source">Source</a>
+        <nav class="page-nav" aria-label="Primary">
+          <a class="quiet-action" href="/" aria-current="page">Room</a>
+          <a id="history-link" class="quiet-action" href="/history">History</a>
+          <a id="help-link" class="quiet-action" href="/help">Help</a>
+          <a id="source-link" class="quiet-action" href="/source">Source</a>
+        </nav>
         <span id="account-label" class="account-label"></span>
         <button id="logout-button" type="button" class="quiet-action">Sign out</button>
       </div>

@@ -9,14 +9,23 @@ const ROOT = path.join(__dirname, '..');
 const HISTORY = fs.readFileSync(path.join(ROOT, 'src', 'web', 'history.html'), 'utf8');
 const HISTORY_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'history.js'), 'utf8');
 const ROOM = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.html'), 'utf8');
+const HELP = fs.readFileSync(path.join(ROOT, 'src', 'web', 'help.html'), 'utf8');
+const SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'web', 'source.html'), 'utf8');
 const CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.css'), 'utf8');
 const HOST = fs.readFileSync(path.join(ROOT, 'src', 'first_owner.js'), 'utf8');
 const GUIDE = fs.readFileSync(path.join(ROOT, 'GUIDE.md'), 'utf8');
 
 test('History is a navigable authenticated room surface with two independent records', () => {
   assert.match(ROOM, /id="history-link"[^>]*href="\/history"[^>]*>History<\/a>/);
-  assert.match(HISTORY, /<nav class="room-actions" aria-label="History navigation">/);
-  assert.match(HISTORY, /href="\/">Back to the room<\/a>/);
+  for (const page of [ROOM, HISTORY, HELP, SOURCE]) {
+    assert.match(page, /aria-label="Primary"/);
+    assert.match(page, /href="\/"[^>]*>Room<\/a>/);
+    assert.match(page, /href="\/history"[^>]*>History<\/a>/);
+    assert.match(page, /href="\/help"[^>]*>Help<\/a>/);
+    assert.match(page, /href="\/source"[^>]*>Source<\/a>/);
+    assert.equal((page.match(/aria-current="page"/g) || []).length, 1,
+      'each completed page must identify exactly one current destination');
+  }
   assert.match(HISTORY, /<section class="history-section" aria-labelledby="names-heading">/);
   assert.match(HISTORY, /<section class="history-section" aria-labelledby="archives-heading">/);
   assert.match(HISTORY, /id="name-history"[^>]*aria-live="polite"[^>]*aria-busy="true"/);
@@ -56,6 +65,7 @@ test('History tables, downloads, and narrow layouts retain accessible native con
   assert.match(CSS, /\.history-table-scroll \{[^}]*overflow-x: auto/s);
   assert.match(CSS, /@media \(max-width: 760px\)[\s\S]*\.history-table \{ min-width: 760px; \}/);
   assert.match(CSS, /\.archive-history \{[^}]*grid-template-columns: repeat\(auto-fit/s);
+  assert.match(CSS, /\.page-nav \{[^}]*display: flex[^}]*gap: 8px/s);
 });
 
 test('the Guide distinguishes seven-day Settings from durable signed-in History', () => {
