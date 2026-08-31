@@ -436,6 +436,41 @@ test('a digest-valid v1 owned file can be removed and upgraded', () => {
   assert.doesNotMatch(fs.readFileSync(upgraded.path, 'utf8'), /"say"/);
 });
 
+test('legacy generators match authentic 30e867c/75c3578 Windows participate bytes', () => {
+  const crypto = require('node:crypto');
+  const opts = {
+    connection: 'Marlow',
+    mode: 'participate',
+    nodePath: 'C:\\Codex\\node.exe',
+    scriptPath: 'C:\\App\\interlock.js',
+  };
+  const v1 = policy.generatePolicyV1(opts);
+  const v2 = policy.generatePolicyV2(opts);
+  assert.equal(Buffer.byteLength(v1), 3728);
+  assert.equal((v1.match(/prefix_rule\(/g) || []).length, 8);
+  assert.equal(
+    crypto.createHash('sha256').update(v1, 'utf8').digest('hex'),
+    '5912787f37c3979290cbbe962a07dcb86b19b7fd345bd2a7d7d1cb91442b6db0',
+  );
+  assert.equal(
+    crypto.createHash('sha256').update(v2, 'utf8').digest('hex'),
+    '70d129a42ddc450816c1c9518217522a55b1fb48e4980e41c86529fafeab623d',
+  );
+  assert.match(v1, /One Interlock-owned file/);
+  assert.match(v1, /\/mnt\/c\/Codex\/node\.exe/);
+  assert.match(v2, /\n\nprefix_rule\(\n    pattern = \[\n        "C:\\\\Codex\\\\node\.exe",\n        "C:\\\\App\\\\interlock\.js",\n        "say"/);
+  assert.equal(policy.parseOwned(v1).version, 1);
+  assert.equal(policy.parseOwned(v2).version, 2);
+  const tree = makeTree();
+  fs.writeFileSync(path.join(tree.rulesDir, policy.OWNED_NAME), v1);
+  const removed = policy.removePolicy({
+    connection: 'Marlow',
+    codexHome: tree.codexHome,
+    fs,
+  });
+  assert.equal(fs.existsSync(removed.removed), false);
+});
+
 test('a digest-valid file with an extra say-only rule is rejected', () => {
   const base = policy.generatePolicyV1({
     connection: 'Marlow',
@@ -468,6 +503,41 @@ test('leave Other does not fail because a Marlow policy is installed', () => {
     fs,
   }), /not-installed/);
   assert.equal(fs.existsSync(path.join(tree.rulesDir, policy.OWNED_NAME)), true);
+});
+
+test('leave fails closed on ambiguous Codex home and keeps the profile', async () => {
+  const tree = makeTree();
+  const admitted = admittedDir('Marlow');
+  const posixHome = path.join(tree.root, 'posix-user');
+  const posixCodex = path.join(posixHome, '.codex');
+  fs.mkdirSync(path.join(posixCodex, 'rules'), { recursive: true });
+  const userProfile = path.join(tree.root, 'win-user');
+  fs.mkdirSync(path.join(`${userProfile}\\.codex`, 'rules'), { recursive: true });
+  policy.installPolicy({
+    connection: 'Marlow',
+    mode: 'receive',
+    nodePath: tree.nodePath,
+    scriptPath: tree.scriptPath,
+    codexHome: posixCodex,
+    checkExecpolicy: checker,
+    fs,
+  });
+  let hungUp = false;
+  const result = await capture(['leave', '--connection', 'Marlow'], {
+    config: { resolveConnectionDir: () => admitted.connectionDir },
+    homedir: posixHome,
+    env: { USERPROFILE: userProfile },
+    fetch: async () => {
+      hungUp = true;
+      throw new Error('leave must not hang up while Codex home is ambiguous');
+    },
+  });
+  assert.equal(result.code, EXIT_USAGE, result.stderr);
+  assert.match(result.stderr, /--codex-home/);
+  assert.equal(hungUp, false);
+  assert.equal(fs.existsSync(path.join(posixCodex, 'rules', policy.OWNED_NAME)), true);
+  const remaining = profileModule.openProfiles({ connectionDir: admitted.connectionDir }).load('Marlow');
+  assert.equal(remaining.state, 'admitted');
 });
 
 test('check does not create a missing home', () => {

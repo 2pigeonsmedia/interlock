@@ -882,8 +882,8 @@ async function runLeave(args, io, dependencies = {}) {
       codexHome: dependencies.codexHome,
     });
   } catch (error) {
-    if (error && (error.code === 'not-installed' || error.code === 'ambiguous-codex-home')) {
-      /* no unique owned policy for this name */
+    if (error && error.code === 'not-installed') {
+      /* no owned policy for this name */
     } else {
       return reportCodexPolicyError(io.stderr, error);
     }
