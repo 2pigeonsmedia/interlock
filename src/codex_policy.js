@@ -126,12 +126,14 @@ function pathForHost(absPath, host) {
 }
 
 function verifiedPair(nodePath, scriptPath, host) {
+  const windowsNodeInWsl = host === 'wsl' && /^[A-Za-z]:[\\/]/.test(nodePath);
   const node = pathForHost(nodePath, host);
-  const script = pathForHost(scriptPath, host);
+  const script = pathForHost(scriptPath, windowsNodeInWsl ? 'windows' : host);
   if (host === 'windows' && (!/^[A-Za-z]:[\\/]/.test(node) || !/^[A-Za-z]:[\\/]/.test(script))) {
     throw failure('invalid-path');
   }
-  if (host === 'wsl' && (!node.startsWith('/') || !script.startsWith('/'))) {
+  if (host === 'wsl' && (!node.startsWith('/') ||
+      (!script.startsWith('/') && !(windowsNodeInWsl && /^[A-Za-z]:[\\/]/.test(script))))) {
     throw failure('invalid-path');
   }
   return [node, script];

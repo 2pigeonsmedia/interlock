@@ -28,9 +28,11 @@ That lets Codex send any readable file through that named seat without
 per-message Auto-review. There is no payload inspection, classification,
 redaction, or restriction. Confirm `PARTICIPATE` before install.
 
-Both patterns pin the absolute Codex Node executable and the absolute
-installed `interlock.js`. Relative `bin/interlock.js` and generic `node` are
-never emitted.
+Both patterns pin the absolute Codex Node executable and the absolute installed
+`interlock.js`. When WSL launches Windows Codex Node, the executable is the
+WSL-visible `/mnt/.../node.exe` path while the script argument stays Windows-
+native so that Windows Node can open it. Relative `bin/interlock.js` and generic
+`node` are never emitted.
 
 ## Commands
 

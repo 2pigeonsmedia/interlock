@@ -284,7 +284,7 @@ test('CLI check fails closed when execpolicy is unavailable', async () => {
   assert.match(result.stderr, /not active|unavailable|unsupported/);
 });
 
-test('Windows native paths emit only the WSL host pair when host is wsl', () => {
+test('a Windows Node reached from WSL keeps the script argument Windows-native', () => {
   const text = policy.generatePolicy({
     connection: 'Marlow',
     mode: 'receive',
@@ -293,12 +293,11 @@ test('Windows native paths emit only the WSL host pair when host is wsl', () => 
     scriptPath: 'C:\\Users\\x\\npm\\node_modules\\interlock\\bin\\interlock.js',
   });
   assert.match(text, /\/mnt\/c\/Users\/x\/AppData\/Local\/OpenAI\/Codex\/bin\/node\.exe/);
-  assert.doesNotMatch(text, /C:\\\\Users\\\\x\\\\AppData/);
   const patterns = [...text.matchAll(/pattern = \[\n([\s\S]*?)\n    \],/g)].map(block =>
     block[1].trim().split('\n').map(line => JSON.parse(line.trim().replace(/,$/, ''))));
   assert.equal(patterns.length, 1);
   assert.ok(patterns[0][0].startsWith('/mnt/c/'));
-  assert.ok(patterns[0][1].startsWith('/mnt/c/'));
+  assert.equal(patterns[0][1], 'C:\\Users\\x\\npm\\node_modules\\interlock\\bin\\interlock.js');
 });
 
 test('a native host gives its WSL checker a WSL rules path', () => {
