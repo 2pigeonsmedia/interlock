@@ -117,6 +117,32 @@ test('a live digest-only knock is atomically allowed and wakes its exact waiter'
   world.service.close();
 });
 
+test('Allow re-checks ended-name reuse against the current room setting', async () => {
+  let allowEnded = true;
+  const world = fixture();
+  world.service.close();
+  const service = openAdmissionService({
+    dataDir: world.dataDir,
+    house: world.house,
+    clock: world.clock,
+    pendingTtlMs: 100,
+    cooldownMs: 50,
+    endedReuseAllowed: () => allowEnded,
+  });
+  const waiting = service.knock(candidate(1, 'Reused'), { timeoutMs: 100 });
+  assert.equal(service.list()[0].reuse, 'ended');
+  allowEnded = false;
+  assert.deepEqual(service.allow(requestId(1), { fresh: true }), {
+    ok: false, reason: 'reuse-disabled',
+  });
+  assert.equal(service.list().length, 1);
+  allowEnded = true;
+  const allowed = service.allow(requestId(1), { fresh: true });
+  assert.equal(allowed.state, 'allowed');
+  assert.deepEqual(await waiting, allowed);
+  service.close();
+});
+
 test('invalid, occupied, duplicate pending, and over-cap knocks refuse before enrollment', async () => {
   const world = fixture({ maxPending: 2 });
   assert.deepEqual(await world.service.knock(Object.assign(candidate(1), { token: 'raw' })),

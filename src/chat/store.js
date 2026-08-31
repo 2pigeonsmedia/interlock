@@ -911,8 +911,38 @@ function openStore(opts) {
     });
   }
 
+  function coordinateIdleRelease(options) {
+    const seats = options && options.seats;
+    const now = options && options.now;
+    const idleMs = options && options.idleMs;
+    const commit = options && options.commit;
+    if (!Array.isArray(seats) || !Number.isSafeInteger(now) || now < 0 ||
+        !Number.isSafeInteger(idleMs) || idleMs < 1 || typeof commit !== 'function') {
+      fail('invalid-activity');
+    }
+    return exclusive(() => {
+      requireOpen();
+      assertLiveLog();
+      assertLiveReceipts();
+      assertLiveActivity();
+      const subject_ids = [];
+      for (const row of seats) {
+        if (!row || !boundedString(row.subject_id, 64) ||
+            !Number.isSafeInteger(row.created_at) || row.created_at < 0) {
+          fail('invalid-activity');
+        }
+        const lastHeard = activity.get(row.subject_id);
+        const contact = Number.isSafeInteger(lastHeard) ? lastHeard : row.created_at;
+        if (contact + idleMs <= now) subject_ids.push(row.subject_id);
+      }
+      if (subject_ids.length === 0) return 0;
+      return commit(subject_ids);
+    });
+  }
+
   return Object.freeze({
-    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch, participantState, deliveryChanges, close,
+    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
+    participantState, coordinateIdleRelease, deliveryChanges, close,
   });
 }
 

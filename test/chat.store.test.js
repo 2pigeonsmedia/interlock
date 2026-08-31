@@ -566,3 +566,30 @@ test('peekFind reports the scanned window so empty is not a silent miss', async 
   assert.equal(miss.next_before, null);
   await store.close();
 });
+
+test('idle release commits before a queued touch can refresh last_heard', async () => {
+  const store = openStore({ dataDir: freshDir() });
+  const id = SEAT.subject_id;
+  await store.touch(id, 0);
+  const order = [];
+  const release = store.coordinateIdleRelease({
+    seats: [{ subject_id: id, created_at: 0 }],
+    now: 100,
+    idleMs: 100,
+    commit(subject_ids) {
+      order.push('commit:' + subject_ids.join(','));
+      return subject_ids.length;
+    },
+  });
+  const contact = store.touch(id, 100).then(result => {
+    order.push('touch:' + result.last_heard);
+    return result;
+  });
+  assert.equal(await release, 1);
+  await contact;
+  assert.deepEqual(order, ['commit:' + id, 'touch:100']);
+  assert.deepEqual(await store.participantState([id]), [{
+    subject_id: id, last_heard: 100, outstanding: 0,
+  }]);
+  await store.close();
+});

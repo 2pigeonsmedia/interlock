@@ -33,6 +33,7 @@ const ENROLLMENT_KEYS = Object.freeze([
 ]);
 const OPTION_KEYS = Object.freeze([
   'dataDir', 'house', 'clock', 'pendingTtlMs', 'cooldownMs', 'maxPending',
+  'endedReuseAllowed',
 ]);
 const WAIT_KEYS = Object.freeze(['signal', 'timeoutMs']);
 const DIRECTORY_SYNC_SUPPORTED = process.platform !== 'win32';
@@ -533,6 +534,10 @@ function openAdmissionService(optionsIn) {
     if (record.state !== 'pending') return publicOutcome(record);
     if (!(waiters.get(requestId) || new Set()).size) {
       return Object.freeze({ ok: false, reason: 'not-connected' });
+    }
+    if (record.reuse === 'ended' && typeof options.endedReuseAllowed === 'function' &&
+        options.endedReuseAllowed() === false) {
+      return Object.freeze({ ok: false, reason: 'reuse-disabled' });
     }
     const result = options.house.allowAiAdmission(meta, Object.fromEntries(
       CANDIDATE_KEYS.map(key => [key, record[key]]),

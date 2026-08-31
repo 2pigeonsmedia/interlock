@@ -736,8 +736,18 @@ function create(config) {
     if (ids.length === 0) return 0;
     const now = meta.now;
     return repo.transact(draft => {
+      for (const id of ids) {
+        const subject = draft.subjects.find(row => row && row.id === id);
+        if (!subject) continue;
+        if (subject.tenant !== tenant || subject.kind !== 'seat') {
+          throw new Error('identity: releaseIdleSeats refuses non-seat or cross-tenant subjects');
+        }
+      }
       let count = 0;
       for (const id of ids) {
+        const subject = draft.subjects.find(row => row && row.id === id);
+        if (!subject || subject.tenant !== tenant || subject.kind !== 'seat' ||
+            subject.status !== 'active') continue;
         if (subjects.revokeInDraft(draft, id, 'released', now)) count += 1;
       }
       return count;

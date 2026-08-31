@@ -565,3 +565,22 @@ test('idle release kills the seat and credential without pretending the owner re
     reuse_session: 1,
   }, again));
 });
+
+test('idle release refuses a person id with zero mutation', async () => {
+  const world = await Step.freshAdmin(F);
+  const house = world.instance;
+  const identity = F.load('index.js');
+  const candidate = identity.newAiCredential();
+  const allowed = await world.elevate(world.T + 10);
+  const seat = house.allowAiAdmission(world.env(allowed, world.T + 13), admission(candidate));
+  assert.strictEqual(seat.ok, true, JSON.stringify(seat));
+  const before = enrollmentState(world.repo.read());
+  assert.throws(
+    () => house.releaseIdleSeats({ now: world.T + 14, subject_ids: [world.person_id] }),
+    /non-seat or cross-tenant/,
+  );
+  assert.strictEqual(enrollmentState(world.repo.read()), before);
+  assert.strictEqual(house.authorizeSeatBearer(bearer(candidate.token), 'read', 'room:main').allow, true);
+  const owner = world.repo.read().subjects.find(row => row.id === world.person_id);
+  assert.strictEqual(owner.status, 'active');
+});

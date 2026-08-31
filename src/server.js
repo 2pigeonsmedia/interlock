@@ -300,7 +300,11 @@ async function startInterlockServer(options) {
         return house.allowAiAdmission(meta, body);
       },
     });
-    admission = openAdmissionService({ dataDir, house: admissionHouse });
+    admission = openAdmissionService({
+      dataDir,
+      house: admissionHouse,
+      endedReuseAllowed: () => readRoomSettings(dataDir).allow_ended_reuse !== false,
+    });
     const chatStore = openStore({
       dataDir,
       aiSessionDiscriminator: subjectId => house.aiSessionDiscriminator(subjectId),
@@ -310,7 +314,13 @@ async function startInterlockServer(options) {
       participants: meta => house.listParticipants(meta),
     });
     archive = createArchiveService({ dataDir, store: chatStore });
-    const releaseIdle = now => releaseIdleSeats({ house, store: chatStore, now });
+    let idleBusy = null;
+    const releaseIdle = now => {
+      if (idleBusy) return idleBusy;
+      idleBusy = Promise.resolve(releaseIdleSeats({ house, store: chatStore, now }))
+        .finally(() => { idleBusy = null; });
+      return idleBusy;
+    };
     const handler = createFirstOwnerHandler({
       house, origin, assets, chat, admission, archive, releaseIdle, dataDir,
     });

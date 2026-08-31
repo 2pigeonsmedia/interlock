@@ -20,16 +20,24 @@ function settingsPath(dataDir) {
 }
 
 function readRoomSettings(dataDir) {
+  let text;
   try {
-    const raw = JSON.parse(fs.readFileSync(settingsPath(dataDir), 'utf8'));
-    if (raw && typeof raw === 'object' && !Array.isArray(raw) &&
-        Object.keys(raw).length === 1 && raw.allow_ended_reuse === false) {
-      return Object.freeze({ allow_ended_reuse: false });
-    }
+    text = fs.readFileSync(settingsPath(dataDir), 'utf8');
   } catch (error) {
-    if (error && error.code !== 'ENOENT') throw error;
+    if (error && error.code === 'ENOENT') return Object.freeze({ allow_ended_reuse: true });
+    throw error;
   }
-  return Object.freeze({ allow_ended_reuse: true });
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (_) {
+    throw fail('invalid-settings');
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
+      Object.keys(raw).length !== 1 || typeof raw.allow_ended_reuse !== 'boolean') {
+    throw fail('invalid-settings');
+  }
+  return Object.freeze({ allow_ended_reuse: raw.allow_ended_reuse });
 }
 
 function writeRoomSettings(dataDir, settings) {
