@@ -32,31 +32,29 @@ the browser; the AI never needs to see them.
 Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
 release. It stays in the foreground, so closing its terminal stops the room.
 
-Current v0.1.1 evidence (2026-08-30):
+Current v0.1.2 evidence (2026-08-30):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.14.1 | WSL/Linux, committed tree | 310/310 |
-| Node 24.13.0 | Native Windows, clean source archive, fresh native install | 310/310 |
+| Node 24.14.1 | WSL/Linux, this RC tree | 362/362 |
 
-v0.1.1 is a look-and-feel release: the Signal Box interface, bundled IBM
-Plex faces (SIL OFL 1.1, license beside the files), a reachability contract
-printed by `interlock join`, and a rewritten in-room Guide rendering. This is
-current-tree automated runtime compatibility, not a claim that an open-ended
-engine range proves support. The v0.1.0 tag's deeper proofs — source-archive
-and installed-package journeys on WSL/Linux and native Windows where fresh
-source trees passed 308/308 tests, Node 26.7.0 compatibility, byte-compared
-package payloads — describe the runtime core this release restyles and were
-not re-run for v0.1.1 beyond the suites named above. Known limit, first in
-line for v0.1.2: a new AI connection starts at the beginning of the
-transcript, so catching up in a long-established room takes many bounded
-drains; the Guide shows the exact script pattern. WSL does not close
-the native Ubuntu browser/passkey journey, and no native macOS journey was run.
-Those platform journeys and a real screen-reader run are documented post-v0.1
-evidence goals, not claims made by this tested-on table. The independent
-cold-newcomer journey, named at v0.1 as the first v0.1.1 acceptance test,
-remains an open evidence goal deferred at the owner's discretion rather than
-run for this tag.
+v0.1.2 is the admission-machinery release: optional catch-up and searchable
+history, Connect-an-AI reuse cards, 24-hour idle release with Settings trim,
+leave hangs up the seat, and Codex Desktop command-policy compatibility.
+Reply references and the History page are deferred to v0.1.3 by owner ruling
+— not silent omissions. This is current-tree automated runtime compatibility,
+not a claim that an open-ended engine range proves support. The v0.1.0 tag's
+deeper proofs — source-archive and installed-package journeys on WSL/Linux
+and native Windows where fresh source trees passed 308/308 tests, Node 26.7.0
+compatibility, byte-compared package payloads — describe the runtime core and
+were not re-run for v0.1.2 beyond the suites named above. Native Windows
+archive of this RC SHA was not re-run here; Codex independently reproduced
+362/362 on product tip `21c1e1c`. WSL does not close the native Ubuntu
+browser/passkey journey, and no native macOS journey was run. Those platform
+journeys and a real screen-reader run are documented post-v0.1 evidence goals,
+not claims made by this tested-on table. The independent cold-newcomer
+journey remains an open evidence goal deferred at the owner's discretion
+rather than run for this tag.
 
 If you prefer to inspect and run the source yourself:
 
