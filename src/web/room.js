@@ -1013,25 +1013,51 @@ async function loadDeliveryChanges() {
   }
 }
 
-/* Message text is never interpreted as HTML. To colour mentions, the string
- * is split on the shared mention grammar and every piece — plain runs and
- * mention spans alike — is written with textContent. The colour marks mention
- * SYNTAX, the way code formatting marks code: whether anyone was actually
- * rung is stated in words by the delivery record, never by the colour. (An
- * earlier delivery-gated version left an @all that rang nobody plain — which
- * read as broken, not as information.) */
+/* Message text is never interpreted as HTML. A valid leading plain-text reply
+ * reference is split out first; then the remaining string is split on the
+ * shared mention grammar. Every piece — reference label, plain run, and
+ * mention span — is written with textContent. Mention colour marks syntax:
+ * whether anyone was actually rung is stated by the delivery record. */
 function renderMessageText(element, message) {
   element.textContent = '';
+  const reference = InterlockReplyReference.parse(message.text);
+  if (reference) {
+    const control = document.createElement('button');
+    control.className = 'message-reference';
+    control.type = 'button';
+    control.textContent = `Reply to #${reference.id}`;
+    control.setAttribute('aria-label', `Go to message #${reference.id}`);
+    control.addEventListener('click', () => {
+      const target = transcript.querySelector(`[data-message-id="${reference.id}"]`);
+      if (target) target.scrollIntoView({ block: 'center' });
+    });
+    const body = document.createElement('span');
+    body.className = 'message-body';
+    renderMessageTextRuns(body, message.text.slice(reference.bodyStart));
+    element.append(control, body);
+    return;
+  }
+  renderMessageTextRuns(element, message.text);
+}
+
+function renderMessageTextRuns(element, text) {
   let cursor = 0;
-  for (const token of InterlockMentions.tokens(message.text)) {
-    element.append(document.createTextNode(message.text.slice(cursor, token.start)));
+  for (const token of InterlockMentions.tokens(text)) {
+    element.append(document.createTextNode(text.slice(cursor, token.start)));
     const mention = document.createElement('span');
     mention.className = 'mention';
-    mention.textContent = message.text.slice(token.start, token.end);
+    mention.textContent = text.slice(token.start, token.end);
     element.append(mention);
     cursor = token.end;
   }
-  element.append(document.createTextNode(message.text.slice(cursor)));
+  element.append(document.createTextNode(text.slice(cursor)));
+}
+
+function seedReply(messageId) {
+  messageBody.value = InterlockReplyReference.seed(messageBody.value, messageId);
+  updateMentionPreview();
+  messageBody.focus();
+  messageBody.setSelectionRange(messageBody.value.length, messageBody.value.length);
 }
 
 function renderMessage(message) {
@@ -1065,7 +1091,13 @@ function renderMessage(message) {
   const ident = document.createElement('span');
   ident.className = 'message-id';
   ident.textContent = '#' + String(message.id);
-  meta.append(byline, session, kind, timestamp, ident);
+  const reply = document.createElement('button');
+  reply.className = 'message-reply';
+  reply.type = 'button';
+  reply.textContent = 'Reply';
+  reply.setAttribute('aria-label', `Reply to message #${message.id}`);
+  reply.addEventListener('click', () => seedReply(message.id));
+  meta.append(byline, session, kind, timestamp, ident, reply);
 
   const text = document.createElement('p');
   text.className = 'message-text';

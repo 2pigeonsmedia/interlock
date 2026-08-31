@@ -350,10 +350,10 @@ test('the loopback browser transport completes first-owner setup through the pub
     assert.match(roomScript.text, /function renderMessageText\(element, message\)/,
       'untrusted message text must reach the page only through the text renderer');
     assert.match(roomScript.text,
-      /element\.append\(document\.createTextNode\(message\.text\.slice\(cursor\)\)\)/,
+      /element\.append\(document\.createTextNode\(text\.slice\(cursor\)\)\)/,
       'the text renderer must write plain runs as DOM text nodes');
     assert.match(roomScript.text,
-      /mention\.textContent = message\.text\.slice\(token\.start, token\.end\)/,
+      /mention\.textContent = text\.slice\(token\.start, token\.end\)/,
       'a highlighted mention must be written as DOM text, never as markup');
     assert.match(roomScript.text, /fetch\('\/api\/messages'/,
       'the human composer must post through the authenticated message route');
@@ -374,6 +374,12 @@ test('the loopback browser transport completes first-owner setup through the pub
     });
     assert.equal(mentionScript.status, 200,
       'the room must serve the same mention parser used by the chat service');
+    const replyReferenceScript = await call(runtime, {
+      path: '/reply_reference.js', headers: { host: `localhost:${port}` },
+    });
+    assert.equal(replyReferenceScript.status, 200,
+      'the room must serve the tested plain-text reply-reference contract it loads');
+    assert.match(replyReferenceScript.text, /function parse\(text\)[\s\S]*function seed\(text, id\)/);
     const requestGenerationScript = await call(runtime, {
       path: '/request_generation.js', headers: { host: `localhost:${port}` },
     });

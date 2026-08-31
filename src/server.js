@@ -155,6 +155,7 @@ function loadBrowserAssets() {
       '/fonts/plex-mono-600.woff2': ['fonts/plex-mono-600.woff2', 'font/woff2'],
       '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
       '/mentions.js': ['mentions.js', 'text/javascript; charset=utf-8'],
+      '/reply_reference.js': ['reply_reference.js', 'text/javascript; charset=utf-8'],
       '/message_page.js': ['message_page.js', 'text/javascript; charset=utf-8'],
       '/request_generation.js': ['request_generation.js', 'text/javascript; charset=utf-8'],
       '/transcript_scroll.js': ['transcript_scroll.js', 'text/javascript; charset=utf-8'],
