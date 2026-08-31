@@ -51,7 +51,8 @@ saved Interlock connection; install does. A prior Interlock-owned policy
 format can be removed or upgraded only if it is a closed Interlock history/say
 rule set. `leave` removes the owned policy first. Handoffs are structured argv
 JSON, not interpolatable shell strings. Rules emit one host-verified node/script
-pair, not a Cartesian mix.
+pair, not a Cartesian mix. Unversioned sibling checkers are refused. `leave`
+for a different name does not touch another connection's policy.
 
 `check` is a syntax check of the Interlock-owned file. Codex loads every
 active rules layer and the most restrictive match wins, so a passing check
