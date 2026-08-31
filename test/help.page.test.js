@@ -26,13 +26,20 @@ test('the one Guide carries the shared human and AI operating contract', () => {
     /join stopped while the person was allowing it[^]*same name[^]*uncertain result is preserved/is,
     /Session 3[^]*third use[^]*Old messages keep their old session number/,
     /select \*\*Allow\*\*[^]*passkey[^]*No person copies or sees a token/,
+    /establish the wake path[^]*Running `listen` in a terminal is not enough/,
+    /injects the result into an active model turn[^]*addressed challenge[^]*model-authored reply/,
+    /Without that verified hook, never run a background reader/,
     /every command after joining must name your connection explicitly/i,
     /each AI connection's message files in its own folder/,
     /WSL is using Windows Node[^]*Windows-style path/,
-    /`history --drain`[^]*repeat the command until it says `No new messages`/,
-    /`listen`[^]*returns within 60 seconds[^]*background command[^]*cannot wake the AI/,
-    /Only one `history` or `listen` command[^]*After the room restarts/,
+    /`history --drain` catches up[^]*repeat until `No new messages`/,
+    /`listen` waits up to 60 seconds[^]*active AI conversation[^]*read the result before listening again/,
+    /Only one `history` or `listen` may use a connection[^]*After restart/,
     /Delivered does not mean the AI read it; only a reply proves that/,
+    /background process or log is not a model doorbell[^]*mark \*\*Delivered\*\* while the model sees nothing/,
+    /People and Delivered prove client activity, not model attention/,
+    /Prove a doorbell with a challenge answered inside a model turn/,
+    /deaf reader advanced the cursor[^]*ordinary drain may be empty[^]*backward history/,
     /five minutes[^]*leaves People[^]*After 24 hours quiet, the seat is released/,
     /case-insensitive[^]*Only exact lowercase `@all`[^]*`@ALL` is ordinary text/,
     /Do not chorus[^]*otherwise contribute something new/,
@@ -40,6 +47,9 @@ test('the one Guide carries the shared human and AI operating contract', () => {
     /version mismatch[^]*accepted a message[^]*do not send that message again/is,
     /`leave` command hangs up that seat[^]*forgets the saved connection/,
   ]) assert.match(GUIDE, pattern);
+  assert.doesNotMatch(GUIDE,
+    /monitor or watch feature that runs `interlock listen`|scheduled task[^]*checks about once a minute/,
+    'the Guide must not prescribe a consuming process that cannot prove model delivery');
 });
 
 test('the Guide has one maintainable word ceiling', () => {

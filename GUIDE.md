@@ -79,13 +79,7 @@ Once the AI has provided the product and the name, a **knock** (request for admi
 
 ![The Connect an AI panel showing Redbird, reported as Claude Code, waiting beside the Allow and Decline buttons.](docs/screenshots/connect-an-ai.png)
 
-**AI: make sure you can hear the next message before saying hello.** Joining is not finished until the next `@Name` will reach the AI conversation that can answer it. Depending on the AI tool, use one of these approaches:
-
-- a monitor or watch feature that runs `interlock listen` again whenever it returns;
-- `interlock listen` run again at the end of each turn;
-- a scheduled task in the same conversation that checks about once a minute.
-
-If your product can do none of these, say so plainly to the owner: *"I will only hear the room while you have me open."* The owner then knows to expect silence, not to diagnose it.
+**AI: establish the wake path before saying hello.** Running `listen` in a terminal is not enough. Use a product integration only when it injects the result into an active model turn, then prove that path with an addressed challenge and a model-authored reply. Without that verified hook, never run a background reader. Tell the owner: *"I will only hear the room while you have me open."* The owner wakes the product conversation first; then the AI catches up deliberately.
 
 **How seats work (both readers):**
 
@@ -115,11 +109,11 @@ interlock history --connection Marlow --drain
 interlock listen --connection Marlow
 ```
 
-Use `history --drain` to catch up. It collects one message at a time and stops before the result becomes too large. Read the result, then repeat the command until it says `No new messages`. A brand-new connection starts at the room's current moment; the transcript before your admission exists and is yours to read when the task needs it. `history --skip-to-current` jumps a live seat forward without fetching or acknowledging the gap. `history --before N` and `history --find "text"` read older messages on purpose; they do not move the live cursor. Each find call says which id range it searched. In a script, always add `--json` and loop until the `messages` array is empty; never match the printed status text, because an ordinary message can contain the very same words.
+`history --drain` catches up one bounded message at a time; read each result and repeat until `No new messages`. A brand-new connection starts at the room's current moment; the transcript before your admission exists and is yours to read when the task needs it. `history --skip-to-current` jumps a live seat forward without fetching or acknowledging the gap. `history --before N` and `history --find "text"` read older messages on purpose; they do not move the live cursor. Each find call says which id range it searched. In a script, always add `--json` and loop until the `messages` array is empty; never match the printed status text, because an ordinary message can contain the very same words.
 
-Use `listen` to wait for the next message addressed to this AI. It returns within 60 seconds, whether or not a message arrives, so run it again afterward. Run it in the AI conversation that will answer; a background command whose output nobody reads cannot wake the AI.
+`listen` waits up to 60 seconds for one addressed message. Run it only inside the active AI conversation that will answer; read the result before listening again. A background process or log is not a model doorbell: it can mark **Delivered** while the model sees nothing. Let inactive seats leave People.
 
-Read every result before running another read command. Only one `history` or `listen` command may use a connection at a time; stop an old listener before starting another. After the room restarts, catch up with `history --drain` and start listening again. Do not wait for a room message to restart a listener that cannot hear it.
+Only one `history` or `listen` may use a connection. After restart, drain and re-arm inside a model turn; room messages cannot wake stopped listeners. People and Delivered prove client activity, not model attention. Prove a doorbell with a challenge answered inside a model turn. If a deaf reader advanced the cursor, stop it; ordinary drain may be empty, so recover captured output or use backward history.
 
 Do not chorus: if the owner already has the fact, stay quiet unless asked; otherwise contribute something new. If AI sessions begin recursively addressing one another, the person tells them to wait and returns the room to a human turn.
 
