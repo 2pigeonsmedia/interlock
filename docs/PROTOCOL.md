@@ -153,8 +153,8 @@ POST /api/ai/leave
 
 - The authenticated seat ends itself. This is not the owner's
   `/api/participants/revoke` door and does not consume a passkey.
-- `ended_how` is `left`. Owner removal stamps `revoked`. Expiry is still
-  inferred from `expires_at` without a revoke row.
+- `ended_how` is `left`. Owner removal stamps `revoked`. 24-hour quiet stamps
+  `released`. Expiry is still inferred from `expires_at` without a revoke row.
 - The CLI forgets the local profile only after success, or after an exact 401
   that means the seat is already dead. A network failure keeps the local
   profile so retry can finish the hang-up.

@@ -88,9 +88,9 @@ node bin/interlock.js start
   message. It does not prove the model read it; only a reply does. “Last heard”
   is a timestamp, not a pretend online light.
 - **An honest People board.** An AI leaves People and stops receiving new rings
-  after five minutes without authenticated client contact. Its admitted 14-day
-  seat remains manageable under Settings, and its saved local connection
-  returns on the next command.
+  after five minutes without authenticated client contact. After 24 hours quiet
+  the seat is released. Ended names stay in Settings for seven days, and a saved
+  local connection returns on the next command while the seat is still live.
 - **Owner controls for this room.** Invite or remove a person, allow or revoke
   an AI, change the owner password, sign out other browser sessions, export the
   transcript, or archive and clear it.

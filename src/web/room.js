@@ -32,6 +32,7 @@ const inviteExpiry = document.querySelector('#invite-expiry');
 const copyInviteButton = document.querySelector('#copy-invite-button');
 const settingsParticipantList = document.querySelector('#settings-participant-list');
 const settingsPeopleStatus = document.querySelector('#settings-people-status');
+const allowEndedReuse = document.querySelector('#allow-ended-reuse');
 const changePasswordForm = document.querySelector('#change-password-form');
 const changePasswordButton = document.querySelector('#change-password-button');
 const signOutOthersButton = document.querySelector('#sign-out-others-button');
@@ -630,6 +631,32 @@ function formatFullTime(timestamp) {
   }).format(date);
 }
 
+function formatEndedDay(timestamp) {
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
+}
+
+function quietWords(lastHeard, now) {
+  if (!Number.isSafeInteger(lastHeard)) return 'Not heard yet';
+  const elapsed = now - lastHeard;
+  if (!Number.isSafeInteger(elapsed) || elapsed < 0) return 'Last heard unavailable';
+  const minutes = Math.floor(elapsed / 60_000);
+  const hours = Math.floor(elapsed / 3_600_000);
+  const days = Math.floor(elapsed / 86_400_000);
+  if (days >= 1) return `quiet ${days} ${days === 1 ? 'day' : 'days'}`;
+  if (hours >= 1) return `quiet ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  if (minutes >= 1) return `quiet ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  return 'just heard';
+}
+
+function settingsSortValue(row) {
+  if (row.kind === 'person') return Number.POSITIVE_INFINITY;
+  if (Number.isSafeInteger(row.last_heard)) return row.last_heard;
+  if (Number.isSafeInteger(row.ended_at)) return row.ended_at;
+  return 0;
+}
+
 function validParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
@@ -739,12 +766,16 @@ function renderRoster(participants) {
   renderMentionSuggestions();
   updateMentionPreview();
   refreshPendingDeliveryPresence();
-  if (settingsDialog.open) renderSettingsParticipants();
 }
 
-function renderSettingsParticipants() {
+function renderSettingsParticipants(settings = null) {
+  const rows = settings && Array.isArray(settings.participants)
+    ? settings.participants.slice()
+    : [];
+  rows.sort((left, right) => settingsSortValue(right) - settingsSortValue(left));
   settingsParticipantList.replaceChildren();
-  for (const participant of rosterParticipants) {
+  const now = Date.now();
+  for (const participant of rows) {
     const row = document.createElement('div');
     row.className = 'settings-participant';
     const facts = document.createElement('div');
@@ -754,11 +785,13 @@ function renderSettingsParticipants() {
     const isOwner = currentUser && participant.kind === 'person' &&
       participant.name === currentUser.name && Array.isArray(currentUser.roles) &&
       currentUser.roles.includes('owner');
+    const endedDay = Number.isSafeInteger(participant.ended_at)
+      ? formatEndedDay(participant.ended_at) : null;
     detail.textContent = isOwner
       ? 'Owner · cannot be removed'
       : (participant.kind === 'seat'
         ? `${participant.product} · ${participant.product_provenance}` +
-          (participant.present ? '' : ' · Not currently in People')
+          (endedDay ? ` · ended ${endedDay}` : ` · ${quietWords(participant.last_heard, now)}`)
         : 'Person');
     facts.append(name);
     if (participant.session !== null) {
@@ -769,7 +802,7 @@ function renderSettingsParticipants() {
     }
     facts.append(detail);
     row.append(facts);
-    if (!isOwner) {
+    if (!isOwner && participant.live !== false) {
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'quiet-action remove';
@@ -780,6 +813,41 @@ function renderSettingsParticipants() {
     }
     settingsParticipantList.append(row);
   }
+}
+
+function validSettingsParticipant(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 8 || ![
+    'name', 'kind', 'session', 'product', 'product_provenance',
+    'last_heard', 'ended_at', 'live',
+  ].every(key => keys.includes(key))) return false;
+  return typeof value.name === 'string' && value.name.length > 0 &&
+    (value.kind === 'person' || value.kind === 'seat') &&
+    typeof value.live === 'boolean' &&
+    (value.last_heard === null || Number.isSafeInteger(value.last_heard)) &&
+    (value.ended_at === null || Number.isSafeInteger(value.ended_at));
+}
+
+async function loadSettingsParticipants() {
+  const response = await fetch('/api/settings/participants', {
+    cache: 'no-store', credentials: 'same-origin',
+  });
+  const result = await readJson(response);
+  if (response.status === 401) {
+    forgetCsrf();
+    showLogin('Your session ended. Sign in again to continue.');
+    throw Object.assign(new Error('not-authenticated'), { code: 'not-authenticated' });
+  }
+  if (!response.ok || !result || result.ok !== true ||
+      typeof result.allow_ended_reuse !== 'boolean' ||
+      !Array.isArray(result.participants) ||
+      result.participants.some(row => !validSettingsParticipant(row))) {
+    throw new Error('invalid-settings');
+  }
+  allowEndedReuse.checked = result.allow_ended_reuse;
+  renderSettingsParticipants(result);
+  return result;
 }
 
 async function freshAdminMutation(path, body) {
@@ -798,6 +866,7 @@ async function removeParticipant(participant, button) {
   try {
     await freshAdminMutation('/api/participants/revoke', { name: participant.name });
     await loadRoster();
+    if (settingsDialog.open) await loadSettingsParticipants();
     setSettingsStatus(settingsPeopleStatus, `${identifiedName(participant)} was removed.`, 'success');
   } catch (error) {
     if (error.code === 'not-authenticated') {
@@ -1346,9 +1415,34 @@ settingsButton.addEventListener('click', async () => {
   setSettingsStatus(settingsPeopleStatus, '');
   setSettingsStatus(settingsOwnerStatus, '');
   setSettingsStatus(settingsTranscriptStatus, '');
-  renderSettingsParticipants();
   settingsDialog.showModal();
-  await loadRoster();
+  try { await loadSettingsParticipants(); }
+  catch (_) {
+    setSettingsStatus(settingsPeopleStatus, 'Interlock could not load Settings people.', 'error');
+  }
+});
+
+allowEndedReuse.addEventListener('change', async () => {
+  const wanted = allowEndedReuse.checked;
+  setSettingsStatus(settingsPeopleStatus, 'Confirm this room setting with your passkey…');
+  try {
+    const result = await freshAdminMutation('/api/settings/reuse', { allow_ended_reuse: wanted });
+    allowEndedReuse.checked = result.allow_ended_reuse !== false;
+    setSettingsStatus(settingsPeopleStatus,
+      wanted ? 'Ended names may be reused on Allow.' : 'New sessions must choose a fresh name.',
+      'success');
+  } catch (error) {
+    allowEndedReuse.checked = !wanted;
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    setSettingsStatus(settingsPeopleStatus,
+      (error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
+        ? 'Passkey confirmation was cancelled. The setting was not changed.'
+        : 'Interlock did not change that setting. Refresh and try again.', 'error');
+  }
 });
 
 settingsDialog.addEventListener('close', () => {

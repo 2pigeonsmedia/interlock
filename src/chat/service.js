@@ -348,6 +348,11 @@ function createChatService(options) {
     return await participantSnapshot(Date.now());
   }
 
+  async function participantState(subjectIds) {
+    requireOpen();
+    return await store.participantState(subjectIds);
+  }
+
   async function readDeliveryChanges(query) {
     requireOpen();
     return await store.deliveryChanges(query);
@@ -384,7 +389,7 @@ function createChatService(options) {
 
   return Object.freeze({
     append, read, readForSeat, wait, waitForSeat, acknowledge, peekBefore, peekFind, head,
-    touchParticipant, listParticipants, readDeliveryChanges, transcriptCleared, close,
+    touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });
 }
 

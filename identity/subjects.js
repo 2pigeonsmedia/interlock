@@ -437,12 +437,12 @@ function list(tenant) {
 //     wrong cleanup unimplementable, not merely unchosen).
 // Two transactions here would be F-06's resurrection bug: a crash between them
 // leaves live keys hanging off a dead subject.
-const ENDED_HOW = Object.freeze(['left', 'revoked']);
+const ENDED_HOW = Object.freeze(['left', 'revoked', 'released']);
 
 function revokeInDraft(draft, id, endedHow, now) {
   const how = endedHow === undefined ? 'revoked' : endedHow;
   if (!ENDED_HOW.includes(how)) {
-    throw new Error('subjects.revoke: ended_how must be left or revoked');
+    throw new Error('subjects.revoke: ended_how must be left, revoked, or released');
   }
   if (typeof now !== 'number' || !Number.isFinite(now)) {
     throw new Error('subjects.revoke: now must be a finite number');
@@ -493,7 +493,7 @@ function revoke(id, endedHow) {
   // FATAL before any no-op answer could mask them.
   const how = endedHow === undefined ? 'revoked' : endedHow;
   if (!ENDED_HOW.includes(how)) {
-    throw new Error('subjects.revoke: ended_how must be left or revoked');
+    throw new Error('subjects.revoke: ended_how must be left, revoked, or released');
   }
   const target = get(id);
   if (!target || target.status !== 'active') return false; // I14: the no-op path never opens a transaction
@@ -512,6 +512,6 @@ module.exports = {
   create, createPersonInDraft, createSeatInDraft, createAiSeatInDraft,
   get, byName, rename, list, revoke, revokeInDraft, fold, KINDS, validDisplayName, DISPLAY_NAME_RE,
   normalizeAiName, normalizeAiProduct, validAiProductProvenance,
-  nameHistory, historicallyHeld, aiNameStatus, aiSessionDiscriminator,
+  nameHistory, historicallyHeld, endedSeatAt, aiNameStatus, aiSessionDiscriminator,
   AI_NAME_RE, AI_PRODUCT_PROVENANCE, MAX_NAME_HISTORY,
 };

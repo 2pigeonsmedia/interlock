@@ -12,6 +12,8 @@ const { createArchiveService } = require('./chat/archive.js');
 const { createChatService } = require('./chat/service.js');
 const { openStore } = require('./chat/store.js');
 const { createFirstOwnerHandler } = require('./first_owner.js');
+const { releaseIdleSeats } = require('./idle.js');
+const { readRoomSettings } = require('./room_settings.js');
 const { renderGuidePage } = require('./guide.js');
 const { acquireInstanceLock } = require('./instance_lock.js');
 
@@ -285,7 +287,20 @@ async function startInterlockServer(options) {
     await house.ready();
     instanceLock.assertOwned();
 
-    admission = openAdmissionService({ dataDir, house });
+    const admissionHouse = Object.freeze({
+      inspectAiAdmission(body, trustedNow) {
+        const inspected = house.inspectAiAdmission(body, trustedNow);
+        if (inspected && inspected.ok === true && inspected.reuse === 'ended' &&
+            readRoomSettings(dataDir).allow_ended_reuse === false) {
+          return Object.freeze({ ok: false, reason: 'name-taken' });
+        }
+        return inspected;
+      },
+      allowAiAdmission(meta, body) {
+        return house.allowAiAdmission(meta, body);
+      },
+    });
+    admission = openAdmissionService({ dataDir, house: admissionHouse });
     const chatStore = openStore({
       dataDir,
       aiSessionDiscriminator: subjectId => house.aiSessionDiscriminator(subjectId),
@@ -295,7 +310,10 @@ async function startInterlockServer(options) {
       participants: meta => house.listParticipants(meta),
     });
     archive = createArchiveService({ dataDir, store: chatStore });
-    const handler = createFirstOwnerHandler({ house, origin, assets, chat, admission, archive });
+    const releaseIdle = now => releaseIdleSeats({ house, store: chatStore, now });
+    const handler = createFirstOwnerHandler({
+      house, origin, assets, chat, admission, archive, releaseIdle, dataDir,
+    });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));
     let reportFailure;
@@ -307,12 +325,17 @@ async function startInterlockServer(options) {
     }
 
     const outboxTimer = house.startOutboxFlusher({ intervalMs: 1_000 });
+    const idleTimer = setInterval(() => {
+      Promise.resolve(releaseIdle(Date.now())).catch(() => { /* next tick retries */ });
+    }, 60_000);
+    idleTimer.unref();
     try {
       for (let index = 0; index < servers.length; index += 1) {
         await listen(servers[index], addresses[index], port);
       }
     } catch (error) {
       clearInterval(outboxTimer);
+      clearInterval(idleTimer);
       const closed = await Promise.allSettled(servers.map(closeServer));
       const closeErrors = closed
         .filter(result => result.status === 'rejected')
@@ -337,6 +360,7 @@ async function startInterlockServer(options) {
       url: origin,
       async close() {
         clearInterval(outboxTimer);
+        clearInterval(idleTimer);
         let shutdownFailure = null;
         try { admission.close(); }
         catch (error) { shutdownFailure = error; }

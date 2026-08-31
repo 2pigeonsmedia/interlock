@@ -1565,10 +1565,10 @@ function assertRelationalDeltas(prev, next) {
       const noPriorRevocation = a.revoked_at === null || a.revoked_at === 0;
       const nowRevoked = b.status === 'revoked';
       const stamped = typeof b.revoked_at === 'number' && Number.isFinite(b.revoked_at) && b.revoked_at > 0;
-      const how = b.ended_how === 'left' || b.ended_how === 'revoked';
+      const how = b.ended_how === 'left' || b.ended_how === 'revoked' || b.ended_how === 'released';
       if (wasLive && noPriorRevocation && nowRevoked && stamped && how) continue;   // legal T1
       throw bad('subject "' + a.id + '": the only legal status/revoked_at transition is active -> revoked with a ' +
-        'positive timestamp and ended_how left|revoked, set together and exactly once — revival and re-stamping are refused (I-R2.5-3a/4)');
+        'positive timestamp and ended_how left|revoked|released, set together and exactly once — revival and re-stamping are refused (I-R2.5-3a/4)');
     }
 
     if (shape === T2_KEYS) {

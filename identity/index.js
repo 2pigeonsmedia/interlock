@@ -723,6 +723,54 @@ function create(config) {
     return subjects.aiSessionDiscriminator(tenant, subjectId);
   }
 
+  function releaseIdleSeats(meta = {}) {
+    if (meta === null || typeof meta !== 'object' || Array.isArray(meta) ||
+        Object.keys(meta).some(key => key !== 'now' && key !== 'subject_ids') ||
+        !Number.isSafeInteger(meta.now) || meta.now < 0 ||
+        !Array.isArray(meta.subject_ids) ||
+        meta.subject_ids.some(id => typeof id !== 'string' || id.length === 0 ||
+          id.length > 64 || id.includes('\0'))) {
+      reject('releaseIdleSeats(meta) requires trusted now and subject_ids');
+    }
+    const ids = [...new Set(meta.subject_ids)];
+    if (ids.length === 0) return 0;
+    const now = meta.now;
+    return repo.transact(draft => {
+      let count = 0;
+      for (const id of ids) {
+        if (subjects.revokeInDraft(draft, id, 'released', now)) count += 1;
+      }
+      return count;
+    });
+  }
+
+  function listRecentEndedSeats(meta = {}) {
+    if (meta === null || typeof meta !== 'object' || Array.isArray(meta) ||
+        Object.keys(meta).some(key => key !== 'now' && key !== 'since') ||
+        !Number.isSafeInteger(meta.now) || meta.now < 0 ||
+        !Number.isSafeInteger(meta.since) || meta.since < 0 || meta.since > meta.now) {
+      reject('listRecentEndedSeats(meta) requires trusted now and since');
+    }
+    const now = meta.now;
+    return Object.freeze(subjects.list(tenant).filter(subject => {
+      if (!subject || subject.kind !== 'seat') return false;
+      const endedAt = subjects.endedSeatAt(subject, now);
+      return endedAt !== null && endedAt >= meta.since && endedAt <= now;
+    }).map(subject => Object.freeze({
+      subject_id: subject.id,
+      name: subject.name,
+      kind: 'seat',
+      created_at: subject.created_at,
+      product: subject.product,
+      product_provenance: subject.product_provenance,
+      session: subjects.aiSessionDiscriminator(tenant, subject.id).session,
+      expires_at: subject.expires_at,
+      ended_at: subjects.endedSeatAt(subject, now),
+      ended_how: subject.ended_how === 'left' || subject.ended_how === 'revoked' ||
+        subject.ended_how === 'released' ? subject.ended_how : null,
+    })));
+  }
+
   function endOwnSeat(meta) {
     if (meta === null || typeof meta !== 'object') {
       reject('endOwnSeat(meta) requires the trusted metadata object');
@@ -868,6 +916,8 @@ function create(config) {
     inspectAiAdmission,
     aiSessionDiscriminator,
     listParticipants,
+    releaseIdleSeats,
+    listRecentEndedSeats,
     endOwnSeat,
     revokeParticipant,
     signOutOtherSessions,

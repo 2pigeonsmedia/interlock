@@ -70,11 +70,14 @@ test('People excludes quiet AI clients without deleting their managed connection
     /participants\.filter\(row => row\.kind === 'person' \|\| row\.present\)/,
     'quiet AI seats must leave the live People tile');
   assert.match(room,
-    /participant\.present \? '' : ' · Not currently in People'/,
-    'quiet admitted seats must remain visible for owner removal in Settings');
+    /endedDay \? ` · ended \$\{endedDay\}` : ` · \$\{quietWords\(participant\.last_heard, now\)\}`/,
+    'Settings must say ended dates and quiet durations in words');
+  assert.match(room,
+    /!isOwner && participant\.live !== false/,
+    'live seats stay removable in Settings; already-ended seats do not');
   assert.match(room,
     /'Not picked up · not in People'/,
     'an old pending receipt must not make an absent AI look present and ignoring');
   assert.match(readme,
-    /AI leaves People and stops receiving new rings[\s\S]*admitted 14-day\s+seat remains manageable under Settings[\s\S]*saved local connection/);
+    /AI leaves People and stops receiving new rings[\s\S]*After 24 hours quiet[\s\S]*Ended names stay in Settings/);
 });

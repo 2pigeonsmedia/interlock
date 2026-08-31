@@ -536,3 +536,32 @@ test('Allow on a held name ends the quiet seat and admits the new one', async ()
   const live = world.repo.read().subjects.find(row => row.id === next.subject_id);
   assert.strictEqual(live.session_ordinal, 2);
 });
+
+test('idle release kills the seat and credential without pretending the owner revoked it', async () => {
+  const world = await Step.freshAdmin(F);
+  const house = world.instance;
+  const identity = F.load('index.js');
+  const candidate = identity.newAiCredential();
+  const allowed = await world.elevate(world.T + 10);
+  const seat = house.allowAiAdmission(world.env(allowed, world.T + 13), admission(candidate));
+  assert.strictEqual(seat.ok, true, JSON.stringify(seat));
+  assert.strictEqual(house.releaseIdleSeats({ now: world.T + 14, subject_ids: [seat.subject_id] }), 1);
+  const released = world.repo.read().subjects.find(row => row.id === seat.subject_id);
+  assert.strictEqual(released.status, 'revoked');
+  assert.strictEqual(released.ended_how, 'released');
+  assert.strictEqual(house.authorizeSeatBearer(bearer(candidate.token), 'read', 'room:main').allow,
+    false, 'the idle-released bearer must fail immediately');
+  assert.strictEqual(house.listParticipants({ now: world.T + 15 }).some(row => row.name === 'Marlow'),
+    false);
+  const recent = house.listRecentEndedSeats({ now: world.T + 15, since: world.T });
+  assert.strictEqual(recent.length, 1);
+  assert.strictEqual(recent[0].ended_how, 'released');
+  const again = admission(identity.newAiCredential(), { name: 'Marlow' });
+  assert.deepStrictEqual(house.inspectAiAdmission(again, world.T + 16), Object.assign({
+    ok: true,
+    previously_used: true,
+    last_ended_at: released.revoked_at,
+    reuse: 'ended',
+    reuse_session: 1,
+  }, again));
+});

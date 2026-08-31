@@ -1,5 +1,9 @@
 'use strict';
 
+const path = require('node:path');
+const { SETTINGS_ENDED_MS } = require('./idle.js');
+const { readRoomSettings, writeRoomSettings } = require('./room_settings.js');
+
 const MAX_JSON_BYTES = 384 * 1024;
 const JSON_TYPE = 'application/json; charset=utf-8';
 const BROWSER_WAIT_MS = 25_000;
@@ -277,13 +281,16 @@ function deliveryQuery(target) {
 }
 
 function createFirstOwnerHandler(options) {
-  const { house, origin, assets, chat, admission, archive } = options || {};
+  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir } = options || {};
   if (!house || !house.firstOwner || !house.authenticators || !house.sessions || !house.login ||
       typeof house.authorizeRead !== 'function' || typeof house.authorizeWrite !== 'function' ||
       typeof house.authorizeSeatBearer !== 'function' ||
       typeof house.aiSessionDiscriminator !== 'function' ||
       typeof house.resolveSession !== 'function' || typeof house.whoami !== 'function' ||
-      typeof house.listParticipants !== 'function' || typeof house.invite !== 'function' ||
+      typeof house.listParticipants !== 'function' ||
+      typeof house.releaseIdleSeats !== 'function' ||
+      typeof house.listRecentEndedSeats !== 'function' ||
+      typeof house.invite !== 'function' ||
       typeof house.redeem !== 'function' || typeof house.revokeParticipant !== 'function' ||
       typeof house.endOwnSeat !== 'function' ||
       typeof house.changePassword !== 'function' ||
@@ -304,6 +311,7 @@ function createFirstOwnerHandler(options) {
       typeof chat.readForSeat !== 'function' || typeof chat.wait !== 'function' ||
       typeof chat.waitForSeat !== 'function' || typeof chat.acknowledge !== 'function' ||
       typeof chat.touchParticipant !== 'function' || typeof chat.listParticipants !== 'function' ||
+      typeof chat.participantState !== 'function' ||
       typeof chat.readDeliveryChanges !== 'function' || typeof chat.transcriptCleared !== 'function' ||
       typeof chat.peekBefore !== 'function' || typeof chat.peekFind !== 'function') {
     throw new TypeError('first owner transport: a complete chat service is required');
@@ -316,6 +324,10 @@ function createFirstOwnerHandler(options) {
   if (!archive || typeof archive.exportTranscript !== 'function' ||
       typeof archive.clearTranscript !== 'function' || typeof archive.readArtifact !== 'function') {
     throw new TypeError('first owner transport: a complete transcript archive service is required');
+  }
+  if (typeof releaseIdle !== 'function' || typeof dataDir !== 'string' ||
+      dataDir.length === 0 || dataDir.includes('\0') || !path.isAbsolute(dataDir)) {
+    throw new TypeError('first owner transport: idle release and an absolute data directory are required');
   }
   const expectedHost = parsedOrigin.host;
   let bootstrapSecret = null;
@@ -1336,11 +1348,81 @@ function createFirstOwnerHandler(options) {
       return;
     }
     try {
+      await releaseIdle(now);
       const participants = (await chat.listParticipants()).map(publicParticipant);
       if (participants.some(row => row === null)) throw new Error('invalid participant');
       sendJson(request, response, 200, { ok: true, participants });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+    }
+  }
+
+  function publicSettingsSeat(row, state, now) {
+    const lastHeard = state && Number.isSafeInteger(state.last_heard) ? state.last_heard : null;
+    const endedAt = Number.isSafeInteger(row.ended_at) ? row.ended_at : null;
+    return Object.freeze({
+      name: row.name,
+      kind: 'seat',
+      session: row.session,
+      product: row.product,
+      product_provenance: row.product_provenance,
+      last_heard: lastHeard,
+      ended_at: endedAt,
+      live: endedAt === null,
+    });
+  }
+
+  async function listSettingsParticipants(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    if (!ownerSession(request, response, false)) return;
+    const now = Date.now();
+    try {
+      await releaseIdle(now);
+      const live = (await chat.listParticipants()).filter(row => row.kind === 'seat' || row.kind === 'person');
+      const ended = house.listRecentEndedSeats({ now, since: now - SETTINGS_ENDED_MS });
+      const ids = [...live, ...ended].map(row => row.subject_id).filter(id => typeof id === 'string');
+      const states = await chat.participantState(ids);
+      const stateById = new Map(states.map(row => [row.subject_id, row]));
+      const people = live.filter(row => row.kind === 'person').map(row => Object.freeze({
+        name: row.name,
+        kind: 'person',
+        session: null,
+        product: null,
+        product_provenance: null,
+        last_heard: null,
+        ended_at: null,
+        live: true,
+      }));
+      const seats = live.filter(row => row.kind === 'seat').map(row =>
+        publicSettingsSeat(Object.assign({}, row, { ended_at: null }), stateById.get(row.subject_id), now));
+      const endedSeats = ended.map(row => publicSettingsSeat(row, stateById.get(row.subject_id), now));
+      sendJson(request, response, 200, {
+        ok: true,
+        allow_ended_reuse: readRoomSettings(dataDir).allow_ended_reuse,
+        participants: Object.freeze([...people, ...seats, ...endedSeats]),
+      });
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+    }
+  }
+
+  function updateEndedReuse(request, response, body) {
+    if (!completed()) {
+      return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    }
+    if (!ownerSession(request, response, true)) return;
+    if (!closedObject(body, ['allow_ended_reuse']) || typeof body.allow_ended_reuse !== 'boolean') {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-settings' });
+      return;
+    }
+    try {
+      const settings = writeRoomSettings(dataDir, { allow_ended_reuse: body.allow_ended_reuse });
+      sendJson(request, response, 200, { ok: true, allow_ended_reuse: settings.allow_ended_reuse });
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'settings-unavailable' });
     }
   }
 
@@ -1418,6 +1500,7 @@ function createFirstOwnerHandler(options) {
     ['/api/invitations', issueInvitation],
     ['/api/invitations/redeem', redeemInvitation],
     ['/api/participants/revoke', revokeParticipant],
+    ['/api/settings/reuse', updateEndedReuse],
     ['/api/owner/password', changeOwnerPassword],
     ['/api/owner/sessions/revoke-others', signOutOtherSessions],
     ['/api/transcript/export', exportTranscript],
@@ -1531,6 +1614,17 @@ function createFirstOwnerHandler(options) {
           return;
         }
         await aiSession(request, response);
+        return;
+      }
+      if (pathname === '/api/settings/participants') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false,
+            error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-settings-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        await listSettingsParticipants(request, response);
         return;
       }
       if (pathname === '/api/participants') {
