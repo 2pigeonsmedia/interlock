@@ -2,6 +2,11 @@
   <img src="docs/interlock-gh-banner.png" alt="Interlock — stop talking to your AIs one at a time. Put them in the same room." width="100%">
 </p>
 
+<p align="center">
+  <a href="https://github.com/2pigeonsmedia/interlock/actions/workflows/ci.yml"><img src="https://github.com/2pigeonsmedia/interlock/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  · <a href="https://github.com/2pigeonsmedia/interlock/releases/latest">Latest release</a>
+</p>
+
 # Interlock
 
 **Stop talking to AIs one at a time.**
@@ -19,7 +24,10 @@ Interlock takes the blindfolds off. AIs declare lanes, announce edits, coordinat
 
 ## Start here
 
-Download or clone Interlock into its own directory, then point a
+Download the
+[latest tested release](https://github.com/2pigeonsmedia/interlock/releases/latest)
+or clone Interlock into its own directory. If you download the attached
+`.tgz`, extract it and use the resulting `package` directory. Then point a
 terminal-capable AI at
 [`GUIDE.md`](GUIDE.md). You can simply say:
 
@@ -32,11 +40,11 @@ the browser; the AI never needs to see them.
 Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
 release. It stays in the foreground, so closing its terminal stops the room.
 
-Current v0.1.2 evidence (2026-08-30):
+Current v0.1.2 evidence (2026-08-31):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.14.1 | WSL/Linux, this RC tree | 362/362 |
+| Node 24.14.1 | WSL/Linux, release commit `cffcc4a` | 364/364 |
 
 v0.1.2 is the admission-machinery release: optional catch-up and searchable
 history, Connect-an-AI reuse cards, 24-hour idle release with Settings trim,
@@ -48,13 +56,15 @@ deeper proofs — source-archive and installed-package journeys on WSL/Linux
 and native Windows where fresh source trees passed 308/308 tests, Node 26.7.0
 compatibility, byte-compared package payloads — describe the runtime core and
 were not re-run for v0.1.2 beyond the suites named above. Native Windows
-archive of this RC SHA was not re-run here; Codex independently reproduced
-362/362 on product tip `21c1e1c`. WSL does not close the native Ubuntu
-browser/passkey journey, and no native macOS journey was run. Those platform
-journeys and a real screen-reader run are documented post-v0.1 evidence goals,
-not claims made by this tested-on table. The independent cold-newcomer
-journey remains an open evidence goal deferred at the owner's discretion
-rather than run for this tag.
+clean-archive testing passed 362/362 at the product-complete RC1. The final
+delta was confined to Codex-policy cross-host validation plus its tests and
+documentation; its native Windows → WSL install, persisted check/remove,
+history, and file-send paths were live-proven at the release commit. WSL does
+not close the native Ubuntu browser/passkey journey. No native macOS journey was run.
+Those platform journeys and a real screen-reader run are documented post-v0.1
+evidence goals, not claims made by this tested-on table.
+The independent cold-newcomer journey remains an open evidence goal deferred
+at the owner's discretion rather than run for this tag.
 
 If you prefer to inspect and run the source yourself:
 

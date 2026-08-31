@@ -56,9 +56,12 @@ test('the upgrade path backs up first and never teaches an in-place downgrade', 
 });
 
 test('the tested-on list names exact runtimes without turning WSL into native Ubuntu', () => {
-  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*362\/362/);
-  assert.match(README, /Native Windows[\s\S]*not re-run here/,
-    'this RC must not invent a native Windows number it did not re-run');
+  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*cffcc4a[^\n]*364\/364/);
+  assert.match(README, /Native Windows[\s\S]*clean-archive testing passed 362\/362/,
+    'the native Windows result must retain its exact pre-final-delta boundary');
+  assert.match(README,
+    /final\s+delta[^]*Codex-policy cross-host validation[^]*native Windows → WSL[^]*live-proven at the release commit/,
+    'the final policy-only delta needs its real cross-host evidence, not an invented full-suite claim');
   assert.match(README, /fresh\s+source trees passed 308\/308 tests/,
     'the v0.1.0 tag proofs stay described as that tag\'s, never re-claimed');
   assert.match(README, /automated runtime compatibility/);
@@ -74,6 +77,8 @@ test('the tested-on list names exact runtimes without turning WSL into native Ub
   assert.doesNotMatch(README, /journeys remain open[^]*not yet a public release/i,
     'the tested-on boundary must not silently reopen gates moved to post-v0.1');
   assert.match(README, /After its seat ends[^]*fresh session[^]*Session 1[^]*Session 2/);
+  assert.match(README, /releases\/latest[^]*extract[^]*`package` directory/,
+    'the release download path must state the extract-before-install boundary');
   assert.match(README,
     /Ordinary `history` and `listen` each return at most one transcript[^]*`history --drain`[^]*12 KiB[^]*up to 100[^]*first message outside the budget untouched[^]*single[^]*message is never truncated[^]*cannot acknowledge[^]*backlog outside model context/);
   assert.match(PROTOCOL, /previously_used: true[^]*last_ended_at/);
