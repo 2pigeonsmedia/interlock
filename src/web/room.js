@@ -1099,12 +1099,15 @@ function renderMessage(message) {
   reply.textContent = 'Reply';
   reply.setAttribute('aria-label', `Reply to message #${message.id}`);
   reply.addEventListener('click', () => seedReply(message.id));
-  meta.append(byline, session, kind, timestamp, ident, reply);
+  meta.append(byline, session, kind, timestamp, ident);
 
   const text = document.createElement('p');
   text.className = 'message-text';
   renderMessageText(text, message);
-  article.append(meta, text);
+  const actions = document.createElement('div');
+  actions.className = 'message-actions';
+  actions.append(reply);
+  article.append(meta, text, actions);
   if (message.delivery.length > 0) {
     const delivery = document.createElement('div');
     delivery.className = 'delivery';

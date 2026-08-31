@@ -13,7 +13,10 @@ const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
 test('browser message metadata shows the server message id as inert text', () => {
   assert.match(room, /ident\.className = 'message-id';\s*ident\.textContent = '#' \+ String\(message\.id\);/,
     'people must be able to cite the same numeric message id shown by the CLI');
-  assert.match(room, /meta\.append\(byline, session, kind, timestamp, ident, reply\);/);
+  assert.match(room, /meta\.append\(byline, session, kind, timestamp, ident\);/);
+  assert.match(room,
+    /actions\.className = 'message-actions';\s*actions\.append\(reply\);\s*article\.append\(meta, text, actions\);/,
+    'Reply belongs below the message text, never in the people/byline column');
   assert.match(room,
     /byline\.textContent = message\.byline;[\s\S]*session\.className = 'message-session';[\s\S]*`Session \$\{message\.session\}`/,
     'the chosen name and durable session discriminator must be separate DOM text');

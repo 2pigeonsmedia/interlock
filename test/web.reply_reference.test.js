@@ -85,6 +85,10 @@ test('reply controls are named, keyboard-native, and preserve safe text renderin
   assert.match(ROOM_JS, /mention\.textContent = text\.slice\(token\.start, token\.end\)/);
   assert.doesNotMatch(ROOM_JS, /\.innerHTML\b|insertAdjacentHTML|\.outerHTML\b/);
   assert.match(ROOM_CSS, /\.message-reply \{[^}]*font-size: 0\.7rem;[^}]*\}/s);
+  assert.match(ROOM_CSS,
+    /\.message-actions \{[^}]*grid-column: 2;[^}]*justify-content: flex-start;[^}]*\}/s);
+  assert.match(ROOM_CSS, /\.message-actions \{ grid-column: 1; \}/,
+    'Reply must stay under the message when the narrow layout becomes one column');
   assert.match(ROOM_CSS, /\.message-reference \{[^}]*display: block;[^}]*text-decoration: underline;[^}]*\}/s);
 });
 

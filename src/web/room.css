@@ -623,8 +623,6 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }   /* the id the CLI shows as [n]; people cite it — worn as a signal plate */
 
 .message-reply {
-  justify-self: start;
-  margin-top: 2px;
   padding: 2px 6px;
   border-color: var(--tile-edge);
   background: transparent;
@@ -633,6 +631,12 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   color: var(--ink-2);
 }
 .message-reply:hover { background: var(--paper-3); }
+.message-actions {
+  grid-column: 2;
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 5px;
+}
 
 .message-text {
   white-space: pre-wrap;
@@ -779,6 +783,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   .message-byline, .message-session, .message-kind { min-width: 0; overflow-wrap: anywhere; }
   .message-id { margin-top: 0; }
   .delivery { grid-column: 1; }
+  .message-actions { grid-column: 1; }
   .conversation-heading, .composer, .room-notice { padding-left: 14px; padding-right: 14px; }
 }
 
