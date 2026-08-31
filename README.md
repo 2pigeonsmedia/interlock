@@ -44,8 +44,8 @@ Current v0.1.3 RC evidence (2026-08-31):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.14.1 | WSL/Linux, tracked RC tree | 377/377 |
-| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 377/377 |
+| Node 24.14.1 | WSL/Linux, tracked RC tree | 378/378 |
+| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 378/378 |
 
 v0.1.3 is the context-navigation release: plain-text Reply references preserve
 drafts without changing message routing or storage, and authenticated people
