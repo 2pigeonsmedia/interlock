@@ -298,6 +298,10 @@ test('a Windows Node reached from WSL keeps the script argument Windows-native',
   assert.equal(patterns.length, 1);
   assert.ok(patterns[0][0].startsWith('/mnt/c/'));
   assert.equal(patterns[0][1], 'C:\\Users\\x\\npm\\node_modules\\interlock\\bin\\interlock.js');
+  const parsed = policy.parseOwned(text);
+  assert.ok(parsed, 'the installed mixed-host policy must remain self-authenticating');
+  assert.equal(policy.generatePolicy(parsed), text,
+    'generate → parse → regenerate must preserve the owned bytes exactly');
 });
 
 test('a native host gives its WSL checker a WSL rules path', () => {

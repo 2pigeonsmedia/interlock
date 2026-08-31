@@ -126,7 +126,10 @@ function pathForHost(absPath, host) {
 }
 
 function verifiedPair(nodePath, scriptPath, host) {
-  const windowsNodeInWsl = host === 'wsl' && /^[A-Za-z]:[\\/]/.test(nodePath);
+  const windowsScript = /^[A-Za-z]:[\\/]/.test(scriptPath);
+  const windowsNodeInWsl = host === 'wsl' &&
+    (/^[A-Za-z]:[\\/]/.test(nodePath) ||
+      (nodePath.startsWith('/mnt/') && /\.exe$/i.test(nodePath) && windowsScript));
   const node = pathForHost(nodePath, host);
   const script = pathForHost(scriptPath, windowsNodeInWsl ? 'windows' : host);
   if (host === 'windows' && (!/^[A-Za-z]:[\\/]/.test(node) || !/^[A-Za-z]:[\\/]/.test(script))) {
