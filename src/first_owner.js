@@ -781,7 +781,7 @@ function createFirstOwnerHandler(options) {
         !(value.ended_at === null ||
           (Number.isSafeInteger(value.ended_at) && value.ended_at >= value.started_at &&
             value.ended_at <= MAX_DATE_MS)) ||
-        !(value.ended_how === null || ['left', 'removed', 'released', 'expired']
+        !(value.ended_how === null || ['left', 'removed', 'released', 'expired', 'legacy']
           .includes(value.ended_how)) ||
         ((value.ended_at === null) !== (value.ended_how === null))) return null;
     return Object.freeze({

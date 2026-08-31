@@ -213,6 +213,9 @@ listener before recovery `history`.
   signed-in room reader: admitted spelling, positive session ordinal,
   product/provenance, start/end times, and one identity-derived end cause. It
   exposes no subject id, credential, principal, grant, or audit field.
+  A pre-cause-tracking revoked record is labelled as legacy-unknown rather than
+  falsely attributed to the owner; a recorded or earlier expiry remains
+  `expired`.
 - `GET /api/history/archives` returns newest-first metadata and download routes
   only for complete transcript pairs that pass the archive verifier. A corrupt
   or incomplete candidate pair makes this section unavailable rather than

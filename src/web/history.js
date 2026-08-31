@@ -30,7 +30,7 @@ function validSession(value) {
       value.product_provenance === 'adapter-reported') &&
     validTime(value.started_at) &&
     (value.ended_at === null || (validTime(value.ended_at) && value.ended_at >= value.started_at)) &&
-    (value.ended_how === null || ['left', 'removed', 'released', 'expired']
+    (value.ended_how === null || ['left', 'removed', 'released', 'expired', 'legacy']
       .includes(value.ended_how)) &&
     ((value.ended_at === null) === (value.ended_how === null));
 }
@@ -98,6 +98,7 @@ function endLabel(value) {
     removed: 'Removed by owner',
     released: 'Released after 24 hours quiet',
     expired: 'Admission expired',
+    legacy: 'Ended before cause tracking',
   }[value];
 }
 

@@ -792,21 +792,7 @@ function create(config) {
     const rows = subjects.list(tenant).filter(subject =>
       subject && subject.kind === 'seat' &&
       Object.prototype.hasOwnProperty.call(subject, 'product')).map(subject => {
-      const endedAt = subjects.endedSeatAt(subject, now);
-      let endedHow = null;
-      if (endedAt !== null) {
-        const revokedAt = subject.status === 'revoked' &&
-          Number.isSafeInteger(subject.revoked_at) ? subject.revoked_at : null;
-        if (subject.expires_at === endedAt &&
-            (revokedAt === null || subject.expires_at < revokedAt)) endedHow = 'expired';
-        else if (subject.ended_how === 'left') endedHow = 'left';
-        else if (subject.ended_how === 'revoked') endedHow = 'removed';
-        else if (subject.ended_how === 'released') endedHow = 'released';
-        else if (subject.expires_at === endedAt && subject.expires_at <= now) endedHow = 'expired';
-        else {
-          throw new Error('identity: AI seat history has an unknown end cause');
-        }
-      }
+      const ending = subjects.aiHistoryEnding(subject, now);
       const session = Object.prototype.hasOwnProperty.call(subject, 'session_ordinal')
         ? subject.session_ordinal : 1;
       if (!Number.isSafeInteger(session) || session < 1) {
@@ -818,8 +804,8 @@ function create(config) {
         product: subject.product,
         product_provenance: subject.product_provenance,
         started_at: subject.created_at,
-        ended_at: endedAt,
-        ended_how: endedHow,
+        ended_at: ending.ended_at,
+        ended_how: ending.ended_how,
       });
     });
     rows.sort((left, right) => {

@@ -97,6 +97,27 @@ function endedSeatAt(subject, now) {
   return endings.length ? Math.min(...endings) : null;
 }
 
+function aiHistoryEnding(subject, now) {
+  if (!subject || subject.kind !== 'seat' || !Number.isSafeInteger(now) || now < 0) {
+    throw new Error('subjects.aiHistoryEnding: seat and trusted now are required');
+  }
+  const endedAt = endedSeatAt(subject, now);
+  if (endedAt === null) return Object.freeze({ ended_at: null, ended_how: null });
+  const revokedAt = subject.status === 'revoked' && Number.isSafeInteger(subject.revoked_at)
+    ? subject.revoked_at : null;
+  let endedHow = null;
+  if (subject.expires_at === endedAt &&
+      (revokedAt === null || subject.expires_at < revokedAt)) endedHow = 'expired';
+  else if (subject.ended_how === 'left') endedHow = 'left';
+  else if (subject.ended_how === 'revoked') endedHow = 'removed';
+  else if (subject.ended_how === 'released') endedHow = 'released';
+  else if (!Object.prototype.hasOwnProperty.call(subject, 'ended_how') &&
+      revokedAt === endedAt) endedHow = 'legacy';
+  else if (subject.expires_at === endedAt && subject.expires_at <= now) endedHow = 'expired';
+  else throw new Error('subjects.aiHistoryEnding: unknown end cause');
+  return Object.freeze({ ended_at: endedAt, ended_how: endedHow });
+}
+
 function aiNameStatusIn(subjects, tenant, input, now) {
   const name = normalizeAiName(input);
   if (!name) return Object.freeze({ ok: false, reason: 'invalid-name' });
@@ -513,5 +534,6 @@ module.exports = {
   get, byName, rename, list, revoke, revokeInDraft, fold, KINDS, validDisplayName, DISPLAY_NAME_RE,
   normalizeAiName, normalizeAiProduct, validAiProductProvenance,
   nameHistory, historicallyHeld, endedSeatAt, aiNameStatus, aiSessionDiscriminator,
+  aiHistoryEnding,
   AI_NAME_RE, AI_PRODUCT_PROVENANCE, MAX_NAME_HISTORY,
 };

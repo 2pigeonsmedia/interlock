@@ -32,6 +32,30 @@ function enrollmentState(state) {
   });
 }
 
+test('History labels pre-cause-tracking endings without inventing an owner action', () => {
+  const subjects = F.load('subjects.js');
+  const legacy = {
+    kind: 'seat', status: 'revoked', expires_at: 200, revoked_at: 150,
+  };
+  assert.deepStrictEqual(subjects.aiHistoryEnding(legacy, 250), {
+    ended_at: 150, ended_how: 'legacy',
+  });
+  assert.deepStrictEqual(subjects.aiHistoryEnding(Object.assign({}, legacy, {
+    expires_at: 100,
+  }), 250), { ended_at: 100, ended_how: 'expired' },
+  'a known earlier admission cap remains more specific than the absent legacy stamp');
+  assert.deepStrictEqual(subjects.aiHistoryEnding(Object.assign({}, legacy, {
+    ended_how: 'revoked',
+  }), 250), { ended_at: 150, ended_how: 'removed' });
+  assert.deepStrictEqual(subjects.aiHistoryEnding({
+    kind: 'seat', status: 'active', expires_at: 300,
+  }, 250), { ended_at: null, ended_how: null });
+  assert.throws(() => subjects.aiHistoryEnding(Object.assign({}, legacy, {
+    ended_how: null,
+  }), 250), /unknown end cause/,
+  'a current-shaped record may not erase its required cause and masquerade as legacy');
+});
+
 test('Interlock admission seam — client-held credential, chosen name, fresh L2, atomic idempotent bind', async () => {
   const world = await Step.freshAdmin(F);
   const house = world.instance;

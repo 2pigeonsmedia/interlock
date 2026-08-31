@@ -46,6 +46,7 @@ test('History keeps names available when archives fail and carries honest empty 
   assert.match(HISTORY_JS, /Removed by owner/);
   assert.match(HISTORY_JS, /Released after 24 hours quiet/);
   assert.match(HISTORY_JS, /Admission expired/);
+  assert.match(HISTORY_JS, /Ended before cause tracking/);
 });
 
 test('History tables, downloads, and narrow layouts retain accessible native controls', () => {
