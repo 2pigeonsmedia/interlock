@@ -156,6 +156,8 @@ function loadBrowserAssets() {
       '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
       '/mentions.js': ['mentions.js', 'text/javascript; charset=utf-8'],
       '/reply_reference.js': ['reply_reference.js', 'text/javascript; charset=utf-8'],
+      '/history': ['history.html', 'text/html; charset=utf-8'],
+      '/history.js': ['history.js', 'text/javascript; charset=utf-8'],
       '/message_page.js': ['message_page.js', 'text/javascript; charset=utf-8'],
       '/request_generation.js': ['request_generation.js', 'text/javascript; charset=utf-8'],
       '/transcript_scroll.js': ['transcript_scroll.js', 'text/javascript; charset=utf-8'],

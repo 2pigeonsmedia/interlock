@@ -55,6 +55,7 @@ test('the documented reachability probe exits after fetch handles close', () => 
 });
 
 test('the room and rendered Guide retain local navigation', () => {
+  assert.match(ROOM, /<a[^>]+href="\/history"[^>]*>History<\/a>/);
   assert.match(ROOM, /<a[^>]+href="\/help"[^>]*>Help<\/a>/);
   assert.match(ROOM, /<a[^>]+href="\/source"[^>]*>Source<\/a>/);
   assert.match(HELP, /<a[^>]+href="\/"[^>]*>Back to the room<\/a>/);

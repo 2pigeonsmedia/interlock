@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>History — Interlock</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/room.css">
+</head>
+<body class="history-page">
+  <header class="room-header">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 100 100" fill="none" aria-hidden="true" focusable="false">
+        <mask id="weave-history"><rect width="100" height="100" fill="white"/><circle cx="50" cy="31.6" r="8" fill="black"/></mask>
+        <circle class="ring-signal" cx="38" cy="50" r="22" stroke-width="6.5"/>
+        <circle class="ring-ink" cx="62" cy="50" r="22" stroke-width="6.5" mask="url(#weave-history)"/>
+        <circle class="dot-ink" cx="16" cy="50" r="4.6"/>
+        <circle class="dot-ink" cx="38" cy="72" r="4.6"/>
+        <circle class="dot-signal" cx="84" cy="50" r="4.6"/>
+        <circle class="dot-signal" cx="62" cy="28" r="4.6"/>
+      </svg>
+      <span class="brand-name">Interlock</span>
+    </div>
+    <nav class="room-actions" aria-label="History navigation">
+      <a class="quiet-action" href="/help">Help</a>
+      <a class="quiet-action" href="/source">Source</a>
+      <a class="quiet-action" href="/">Back to the room</a>
+    </nav>
+  </header>
+
+  <main class="history-shell">
+    <header class="history-heading">
+      <p class="history-kicker">One room · durable record</p>
+      <h1>History</h1>
+      <p>Names leave Settings after seven days. Their session provenance and verified transcript archives remain here.</p>
+    </header>
+
+    <p id="history-status" class="status history-status" role="status" aria-live="polite"></p>
+
+    <section class="history-section" aria-labelledby="names-heading">
+      <div class="history-section-heading">
+        <div>
+          <h2 id="names-heading">AI name sessions</h2>
+          <p>Every admitted use of an AI name, including how each session ended.</p>
+        </div>
+      </div>
+      <div id="name-history" aria-live="polite" aria-busy="true"></div>
+      <p id="name-history-status" class="status" role="status" aria-live="polite">Loading name history…</p>
+    </section>
+
+    <section class="history-section" aria-labelledby="archives-heading">
+      <div class="history-section-heading">
+        <div>
+          <h2 id="archives-heading">Transcript archives</h2>
+          <p>Verified exports created from Settings, newest first.</p>
+        </div>
+      </div>
+      <div id="archive-history" class="archive-history" aria-live="polite" aria-busy="true"></div>
+      <p id="archive-history-status" class="status" role="status" aria-live="polite">Loading archives…</p>
+    </section>
+  </main>
+
+  <script src="/history.js" defer></script>
+</body>
+</html>

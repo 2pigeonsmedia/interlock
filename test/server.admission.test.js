@@ -599,6 +599,76 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       assert.equal(refused.json.error, 'not-authorized');
     }
 
+    const historyExport = await post(runtime, '/api/transcript/export', {}, owner);
+    assert.equal(historyExport.status, 200, historyExport.text);
+    const anonymousHistory = await call(runtime, { path: '/history' });
+    assert.equal(anonymousHistory.status, 401,
+      'the durable History page itself requires an authenticated room reader');
+    assert.equal((await call(runtime, { path: '/api/history/names' })).status, 401);
+    assert.equal((await call(runtime, { path: '/api/history/archives' })).status, 401);
+    const bearerHistory = await call(runtime, {
+      path: '/api/history/names', headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(bearerHistory.status, 401,
+      'an AI bearer keeps its CLI history access and gains no browser-person session');
+
+    for (const reader of [owner, rowan]) {
+      const historyPage = await call(runtime, {
+        path: '/history', headers: { cookie: reader.cookie },
+      });
+      assert.equal(historyPage.status, 200, historyPage.text);
+      assert.match(historyPage.text, /<h1>History<\/h1>/);
+      const historyScript = await call(runtime, {
+        path: '/history.js', headers: { cookie: reader.cookie },
+      });
+      assert.equal(historyScript.status, 200, historyScript.text);
+      assert.doesNotMatch(historyScript.text,
+        /localStorage|sessionStorage|\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|\beval\s*\(/);
+
+      const names = await call(runtime, {
+        path: '/api/history/names', headers: { cookie: reader.cookie },
+      });
+      assert.equal(names.status, 200, names.text);
+      assert.equal(names.json.sessions.some(row => row.name === 'Marlow'), true);
+      assert.equal(names.json.sessions.some(row => row.name === 'Quill'), true);
+      assert.equal(names.text.includes('subject_id'), false);
+      assert.equal(names.text.includes('selector'), false);
+      assert.equal(names.text.includes('digest'), false);
+      assert.deepEqual(Object.keys(names.json.sessions[0]).sort(), [
+        'ended_at', 'ended_how', 'name', 'product', 'product_provenance', 'session', 'started_at',
+      ]);
+
+      const archives = await call(runtime, {
+        path: '/api/history/archives', headers: { cookie: reader.cookie },
+      });
+      assert.equal(archives.status, 200, archives.text);
+      assert.equal(archives.json.archives[0].archive_id, historyExport.json.archive_id);
+      assert.equal(archives.json.archives[0].message_count, historyExport.json.message_count);
+      const downloaded = await call(runtime, {
+        path: archives.json.archives[0].downloads.json,
+        headers: { cookie: reader.cookie },
+      });
+      assert.equal(downloaded.status, 200, downloaded.text);
+      assert.equal(downloaded.headers['content-type'], 'application/json; charset=utf-8');
+    }
+
+    const historyHead = await call(runtime, {
+      path: '/history', method: 'HEAD', headers: { cookie: rowan.cookie },
+    });
+    assert.equal(historyHead.status, 200);
+    assert.equal(historyHead.text, '');
+    const historyQuery = await call(runtime, {
+      path: '/history?unused=1', headers: { cookie: rowan.cookie },
+    });
+    assert.equal(historyQuery.status, 400);
+    const namesQuery = await call(runtime, {
+      path: '/api/history/names?unused=1', headers: { cookie: rowan.cookie },
+    });
+    assert.equal(namesQuery.status, 400);
+    const namesMutation = await post(runtime, '/api/history/names', {}, rowan);
+    assert.equal(namesMutation.status, 405);
+    assert.equal(namesMutation.headers.allow, 'GET');
+
     const otherOwner = await login(runtime, password);
     const signedOutElsewhere = await post(
       runtime, '/api/owner/sessions/revoke-others', {}, owner,

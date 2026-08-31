@@ -11,6 +11,7 @@ const AI_ADMISSION_WAIT_MS = 20_000;
 const AI_MESSAGE_WAIT_MS = 45_000;
 const CHAT_READ_LIMIT = 100;
 const CHAT_RESOURCE = 'room:main';
+const MAX_DATE_MS = 8_640_000_000_000_000;
 const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(allow|decline)$/;
 const TRANSCRIPT_EXPORT_ROUTE = /^\/api\/transcript\/exports\/(transcript-[0-9]{8}T[0-9]{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(json|md)$/;
 
@@ -290,6 +291,7 @@ function createFirstOwnerHandler(options) {
       typeof house.listParticipants !== 'function' ||
       typeof house.releaseIdleSeats !== 'function' ||
       typeof house.listRecentEndedSeats !== 'function' ||
+      typeof house.listAiSeatHistory !== 'function' ||
       typeof house.invite !== 'function' ||
       typeof house.redeem !== 'function' || typeof house.revokeParticipant !== 'function' ||
       typeof house.endOwnSeat !== 'function' ||
@@ -322,7 +324,8 @@ function createFirstOwnerHandler(options) {
     throw new TypeError('first owner transport: a complete admission service is required');
   }
   if (!archive || typeof archive.exportTranscript !== 'function' ||
-      typeof archive.clearTranscript !== 'function' || typeof archive.readArtifact !== 'function') {
+      typeof archive.clearTranscript !== 'function' || typeof archive.listArchives !== 'function' ||
+      typeof archive.readArtifact !== 'function') {
     throw new TypeError('first owner transport: a complete transcript archive service is required');
   }
   if (typeof releaseIdle !== 'function' || typeof dataDir !== 'string' ||
@@ -736,6 +739,62 @@ function createFirstOwnerHandler(options) {
     });
   }
 
+  function publicArchiveListing(value) {
+    if (!closedObject(value, [
+      'archive_id', 'exported_at', 'message_count', 'first_id', 'next_id', 'downloads',
+    ]) || typeof value.archive_id !== 'string' ||
+        !Number.isSafeInteger(value.exported_at) || value.exported_at < 0 ||
+        value.exported_at > MAX_DATE_MS ||
+        !Number.isSafeInteger(value.message_count) || value.message_count < 0 ||
+        !Number.isSafeInteger(value.first_id) || value.first_id < 1 ||
+        !Number.isSafeInteger(value.next_id) || value.next_id < value.first_id ||
+        value.message_count !== value.next_id - value.first_id ||
+        !closedObject(value.downloads, ['markdown', 'json'])) return null;
+    const markdownRoute = TRANSCRIPT_EXPORT_ROUTE.exec(value.downloads.markdown);
+    const jsonRoute = TRANSCRIPT_EXPORT_ROUTE.exec(value.downloads.json);
+    if (!markdownRoute || markdownRoute[1] !== value.archive_id || markdownRoute[2] !== 'md' ||
+        !jsonRoute || jsonRoute[1] !== value.archive_id || jsonRoute[2] !== 'json') return null;
+    return Object.freeze({
+      archive_id: value.archive_id,
+      exported_at: value.exported_at,
+      message_count: value.message_count,
+      first_id: value.first_id,
+      next_id: value.next_id,
+      downloads: Object.freeze({
+        markdown: value.downloads.markdown,
+        json: value.downloads.json,
+      }),
+    });
+  }
+
+  function publicAiHistory(value) {
+    if (!closedObject(value, [
+      'name', 'session', 'product', 'product_provenance', 'started_at', 'ended_at',
+      'ended_how',
+    ]) || typeof value.name !== 'string' || value.name.length < 1 ||
+        !Number.isSafeInteger(value.session) || value.session < 1 ||
+        typeof value.product !== 'string' || value.product.length < 1 ||
+        (value.product_provenance !== 'client-reported' &&
+          value.product_provenance !== 'adapter-reported') ||
+        !Number.isSafeInteger(value.started_at) || value.started_at < 0 ||
+        value.started_at > MAX_DATE_MS ||
+        !(value.ended_at === null ||
+          (Number.isSafeInteger(value.ended_at) && value.ended_at >= value.started_at &&
+            value.ended_at <= MAX_DATE_MS)) ||
+        !(value.ended_how === null || ['left', 'removed', 'released', 'expired']
+          .includes(value.ended_how)) ||
+        ((value.ended_at === null) !== (value.ended_how === null))) return null;
+    return Object.freeze({
+      name: value.name,
+      session: value.session,
+      product: value.product,
+      product_provenance: value.product_provenance,
+      started_at: value.started_at,
+      ended_at: value.ended_at,
+      ended_how: value.ended_how,
+    });
+  }
+
   async function exportTranscript(request, response, body) {
     if (!completed()) {
       return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -788,7 +847,7 @@ function createFirstOwnerHandler(options) {
     if (!completed()) {
       return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
     }
-    if (!ownerSession(request, response, false)) return;
+    if (!roomReader(request, response, Date.now())) return;
     try {
       const artifact = archive.readArtifact(archiveId, format);
       if (!artifact || !Buffer.isBuffer(artifact.body) ||
@@ -814,6 +873,45 @@ function createFirstOwnerHandler(options) {
       ok: false,
       error: noSession ? 'not-authenticated' : 'not-authorized',
     });
+  }
+
+  function roomReader(request, response, now) {
+    const authorization = house.authorizeRead(requestMeta(request, now), 'read', CHAT_RESOURCE);
+    if (!authorization || authorization.allow !== true) {
+      refuseAuthorization(request, response, authorization);
+      return null;
+    }
+    return authorization;
+  }
+
+  async function listAiHistory(request, response) {
+    if (!completed()) {
+      return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    }
+    const now = Date.now();
+    if (!roomReader(request, response, now)) return;
+    try {
+      await releaseIdle(now);
+      const sessions = house.listAiSeatHistory({ now }).map(publicAiHistory);
+      if (sessions.some(row => row === null)) throw new Error('invalid AI History response');
+      return sendJson(request, response, 200, { ok: true, sessions: Object.freeze(sessions) });
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'history-unavailable' });
+    }
+  }
+
+  function listArchiveHistory(request, response) {
+    if (!completed()) {
+      return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    }
+    if (!roomReader(request, response, Date.now())) return;
+    try {
+      const archives = archive.listArchives().map(publicArchiveListing);
+      if (archives.some(row => row === null)) throw new Error('invalid archive History response');
+      return sendJson(request, response, 200, { ok: true, archives: Object.freeze(archives) });
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'archives-unavailable' });
+    }
   }
 
   function authorizedActor(request, authorization, now) {
@@ -1577,6 +1675,18 @@ function createFirstOwnerHandler(options) {
         sendJson(request, response, 200, { ok: true, authenticated: true, user });
         return;
       }
+      if (pathname === '/api/history/names' || pathname === '/api/history/archives') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false,
+            error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-history-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        if (pathname === '/api/history/names') await listAiHistory(request, response);
+        else listArchiveHistory(request, response);
+        return;
+      }
       const transcriptExport = TRANSCRIPT_EXPORT_ROUTE.exec(pathname);
       if (transcriptExport) {
         if (target.search !== '') {
@@ -1683,6 +1793,17 @@ function createFirstOwnerHandler(options) {
           { allow: 'POST' });
         return;
       }
+      if (pathname === '/history' || pathname === '/history.js') {
+        if (target.search !== '') {
+          sendJson(request, response, 400, { ok: false, error: 'invalid-history-query' });
+          return;
+        }
+        if (!completed()) {
+          sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+          return;
+        }
+        if (!roomReader(request, response, Date.now())) return;
+      }
       const route = pathname === '/' ? '/index.html' : pathname;
       const isComplete = completed();
       const retiredSetupAsset = isComplete &&
@@ -1725,6 +1846,18 @@ function createFirstOwnerHandler(options) {
         request.method !== 'GET') {
       sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
         { allow: 'GET' });
+      return;
+    }
+
+    if (pathname === '/api/history/names' || pathname === '/api/history/archives') {
+      sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+        { allow: 'GET' });
+      return;
+    }
+
+    if (pathname === '/history' || pathname === '/history.js') {
+      sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+        { allow: 'GET, HEAD' });
       return;
     }
 

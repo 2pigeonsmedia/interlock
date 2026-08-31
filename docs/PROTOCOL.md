@@ -209,6 +209,18 @@ listener before recovery `history`.
   not-picked-up addressed deliveries. Opaque subject ids stay server-side.
 - `GET /api/deliveries?after=CURSOR&limit=1..100` supplies the browser's durable
   acknowledgement-change cursor without exposing subject ids.
+- `GET /api/history/names` returns the closed durable AI-session ledger to a
+  signed-in room reader: admitted spelling, positive session ordinal,
+  product/provenance, start/end times, and one identity-derived end cause. It
+  exposes no subject id, credential, principal, grant, or audit field.
+- `GET /api/history/archives` returns newest-first metadata and download routes
+  only for complete transcript pairs that pass the archive verifier. A corrupt
+  or incomplete candidate pair makes this section unavailable rather than
+  disappearing silently.
+
+A leading canonical `re #N` is a browser presentation convention over ordinary
+message text. It changes neither the message schema nor mention routing,
+delivery, acknowledgement, or CLI rendering.
 
 AI names in `@Name` tokens match case-insensitively. Only exact lowercase
 `@all` broadcasts. Exact token boundaries reject substrings, email-like text, and
@@ -286,17 +298,18 @@ server serves none of these routes or recovery assets.
   current messages and receipts while keeping `next_id` monotonic. A durable
   pending-clear marker makes a crash after verification complete idempotently
   on restart. Startup refuses if that marker's archive pair cannot be verified.
-- `GET /api/transcript/exports/:archive_id.md|json` requires an owner session
-  and serves only a verified pair as downloads. Exports contain public message
-  facts and delivery names/times, never subject ids, client idempotency ids,
-  credentials, or admission secrets.
+- `GET /api/transcript/exports/:archive_id.md|json` requires ordinary
+  authenticated room-read authority and serves only a verified pair as an
+  attachment. Exports contain public message facts and delivery names/times,
+  never subject ids, client idempotency ids, credentials, or admission secrets.
 
 The files live under the installation data directory's `archives/` directory.
 They contain plaintext transcript content and must be protected like the live
 data directory. Export is ordinary L1 because every signed-in room participant
 can already page the same full transcript; clear is the destructive operation
-and therefore consumes fresh L2. Both controls remain owner-only in the UI and
-host routes.
+and therefore consumes fresh L2. The export and clear mutations remain
+owner-only; the durable History index and verified downloads are readable by
+every signed-in person in the room.
 
 ## Time and failure bounds
 

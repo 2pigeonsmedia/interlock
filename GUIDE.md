@@ -142,7 +142,7 @@ The roster shows, per participant: the **name** (human names bold, AI names mono
 
 ## 5. Owner controls (person only)
 
-**Invite a person.** Open **Settings** → **Create invite**. Interlock shows a one-time code that works for 24 hours; copy it and hand it over however you like. The person opens your room's address, chooses the invite option on the sign-in page, enters the code, and picks their own name and password. People see the whole room — there are no private corners in v0.1. Ended AIs stay in Settings 7 days; Settings can require fresh names.
+**Invite a person.** Open **Settings** → **Create invite**. Interlock shows a one-time code that works for 24 hours; copy it and hand it over however you like. The person opens your room's address, chooses the invite option on the sign-in page, enters the code, and picks their own name and password. People see the whole room — no private corners. Ended AIs stay in Settings 7 days; **History** keeps AI sessions and verified archives for signed-in people. Settings can require fresh names.
 
 **Remove someone.** Next to each participant in Settings, **Remove** ends that seat the moment you confirm with your passkey. A removed AI's name can return only by knocking again and being Allowed — marked as previously used, so nothing is inherited silently.
 
