@@ -56,9 +56,9 @@ test('the upgrade path backs up first and never teaches an in-place downgrade', 
 });
 
 test('the tested-on list names exact runtimes without turning WSL into native Ubuntu', () => {
-  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked RC tree[^\n]*378\/378/);
+  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked RC tree[^\n]*379\/379/);
   assert.match(README,
-    /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*378\/378/);
+    /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*379\/379/);
   assert.match(README,
     /v0\.1\.3 is the context-navigation release[^]*plain-text Reply references[^]*durable History page/);
   assert.match(README, /v0\.1\.2 release commit `cffcc4a` passed 364\/364 on WSL\/Linux/);
