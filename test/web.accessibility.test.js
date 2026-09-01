@@ -11,6 +11,9 @@ const ROOM_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.css'), 'utf
 const ROOM_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.js'), 'utf8');
 const SETUP_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'setup.css'), 'utf8');
 const RECOVERY_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'recovery.css'), 'utf8');
+const HELP = fs.readFileSync(path.join(ROOT, 'src', 'web', 'help.html'), 'utf8');
+const HISTORY_PAGE = fs.readFileSync(path.join(ROOT, 'src', 'web', 'history.html'), 'utf8');
+const SOURCE = fs.readFileSync(path.join(ROOT, 'src', 'web', 'source.html'), 'utf8');
 
 function luminance(hex) {
   const channels = hex.match(/[0-9a-f]{2}/gi).map(channel => parseInt(channel, 16) / 255)
@@ -89,4 +92,54 @@ test('stale browser code receives reload guidance without disguising outages', (
     /error\.code === 'malformed-response'[\s\S]*delivery response[^]*HARD_REFRESH_GUIDANCE/);
   assert.match(ROOM_JS,
     /error\.code === 'malformed-response'[\s\S]*message response[^]*HARD_REFRESH_GUIDANCE/);
+});
+
+/* The header carries three different kinds of control: navigation moves you
+ * between pages, an action does something here, and the account is who you
+ * are. They were once one flat row sharing a single class on links and
+ * buttons alike, so no stylesheet could tell them apart, and the room nested
+ * its nav inside the actions while the other three shells did not -- which is
+ * why the menu only half-appeared from page to page. This pins the shape, not
+ * the decoration. */
+function primaryNav(html, name) {
+  const open = html.indexOf('<nav class="page-nav" aria-label="Primary">');
+  assert.notEqual(open, -1, `${name}: one labelled primary navigation`);
+  const close = html.indexOf('</nav>', open);
+  assert.notEqual(close, -1, `${name}: the primary navigation is closed`);
+  return html.slice(open, close);
+}
+
+test('the header keeps navigation, actions, and the account separable on every page', () => {
+  assert.match(ROOM_CSS,
+    /\.page-nav \{[^}]*display: flex[^}]*gap: 16px[^}]*margin-right: auto[^}]*\}/s);
+
+  for (const [name, shell] of [['room', ROOM], ['help', HELP], ['history', HISTORY_PAGE], ['source', SOURCE]]) {
+    const nav = primaryNav(shell, name);
+    assert.equal((nav.match(/<a\b[^>]*\bclass="nav-link"/g) || []).length, 4,
+      `${name}: four navigation links`);
+    assert.equal((nav.match(/aria-current="page"/g) || []).length, 1,
+      `${name}: exactly one link marks the current page`);
+    assert.doesNotMatch(nav, /class="[^"]*(?:quiet|primary)-action/,
+      `${name}: a navigation link is wearing an action class`);
+  }
+
+  const navOpen = ROOM.indexOf('<nav class="page-nav"');
+  const navClose = ROOM.indexOf('</nav>', navOpen);
+  const actionsOpen = ROOM.indexOf('<div class="room-actions">');
+  assert.ok(navOpen !== -1 && actionsOpen !== -1 && navClose < actionsOpen,
+    'the room navigation closes before the actions group opens: a sibling, not a child');
+
+  assert.match(ROOM, /<span class="header-rule" aria-hidden="true"><\/span>/);
+  assert.ok(
+    ROOM.indexOf('id="settings-button"') < ROOM.indexOf('class="header-rule"')
+      && ROOM.indexOf('class="header-rule"') < ROOM.indexOf('id="account-label"'),
+    'the hairline sits between the last action and the account');
+
+  assert.match(ROOM_CSS,
+    /\.nav-link \{[^}]*border: 0;[^}]*border-bottom: 1px solid transparent[^}]*\}/s);
+  assert.match(ROOM_CSS,
+    /\.nav-link\[aria-current="page"\][^{]*\{[^}]*border-bottom-color: var\(--signal-bright\)/s);
+  assert.match(ROOM, /id="connect-ai-button"[^>]*class="primary-action"/);
+  assert.match(ROOM, /id="settings-button"[^>]*class="quiet-action"/);
+  assert.match(ROOM, /id="logout-button"[^>]*class="quiet-action"/);
 });

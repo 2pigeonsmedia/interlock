@@ -70,15 +70,16 @@
         <span id="connection-state" class="connection-state checking" role="status" aria-live="polite">Local: checking…</span>
         <span id="waiting-note" class="waiting-note" role="status" aria-live="polite"></span>
       </div>
+      <nav class="page-nav" aria-label="Primary">
+        <a class="nav-link" href="/" aria-current="page">Room</a>
+        <a id="history-link" class="nav-link" href="/history">History</a>
+        <a id="help-link" class="nav-link" href="/help">Help</a>
+        <a id="source-link" class="nav-link" href="/source">Source</a>
+      </nav>
       <div class="room-actions">
         <button id="connect-ai-button" type="button" class="primary-action" disabled>Connect an AI</button>
         <button id="settings-button" type="button" class="quiet-action" disabled>Settings</button>
-        <nav class="page-nav" aria-label="Primary">
-          <a class="quiet-action" href="/" aria-current="page">Room</a>
-          <a id="history-link" class="quiet-action" href="/history">History</a>
-          <a id="help-link" class="quiet-action" href="/help">Help</a>
-          <a id="source-link" class="quiet-action" href="/source">Source</a>
-        </nav>
+        <span class="header-rule" aria-hidden="true"></span>
         <span id="account-label" class="account-label"></span>
         <button id="logout-button" type="button" class="quiet-action">Sign out</button>
       </div>

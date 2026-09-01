@@ -65,7 +65,6 @@ test('History tables, downloads, and narrow layouts retain accessible native con
   assert.match(CSS, /\.history-table-scroll \{[^}]*overflow-x: auto/s);
   assert.match(CSS, /@media \(max-width: 760px\)[\s\S]*\.history-table \{ min-width: 760px; \}/);
   assert.match(CSS, /\.archive-history \{[^}]*grid-template-columns: repeat\(auto-fit/s);
-  assert.match(CSS, /\.page-nav \{[^}]*display: flex[^}]*gap: 8px/s);
 });
 
 test('the Guide distinguishes seven-day Settings from durable signed-in History', () => {

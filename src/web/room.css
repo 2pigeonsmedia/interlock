@@ -282,17 +282,38 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   min-height: 58px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 18px;
   padding: 10px 22px;
   background: var(--frame-2);
   color: var(--frame-ink);
 }
 
 .brand, .room-actions { display: flex; align-items: center; gap: 12px; }
-.page-nav { display: flex; align-items: center; gap: 8px; }
-.page-nav [aria-current="page"] { border-color: var(--signal-bright); }
 .brand { gap: 11px; }
+
+/* Three groups, three jobs, three treatments. Navigation moves you between
+ * pages; an action does something here; the account is who you are. All six
+ * controls used to share one class -- quiet-action, on links and buttons
+ * alike -- which is why no amount of styling could tell them apart.
+ * `margin-right: auto` on the nav is what seats navigation beside the brand
+ * and sends everything else right; on the pages that carry no actions at all,
+ * the nav still lands in exactly the same place. */
+.page-nav { display: flex; align-items: center; gap: 16px; margin-right: auto; }
+.nav-link {
+  padding-bottom: 2px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--frame-ink-2);
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--frame-ink); }
+.nav-link[aria-current="page"] { color: var(--frame-ink); border-bottom-color: var(--signal-bright); }
+.nav-link:focus-visible { outline-color: var(--focus); }
+
+/* the account is a different kind of thing from the action beside it */
+.header-rule { width: 1px; align-self: stretch; margin: 3px 0; background: var(--frame-line); }
 
 /* Connection state is derived by room.js from the /health probe:
  * class checking | running | unavailable. Never static copy. */
