@@ -24,6 +24,16 @@ test('an opening AI read restores presence before its bounded wait can be rung',
     'a stale returning listener must become a current recipient before it waits for a ring');
 });
 
+test('a doorbell poll is client presence so the quiet adapter remains ring-eligible', () => {
+  const read = FIRST_OWNER_SOURCE.slice(
+    FIRST_OWNER_SOURCE.indexOf('async function readAiRings'),
+    FIRST_OWNER_SOURCE.indexOf('async function appendAiMessage'),
+  );
+  assert.match(read,
+    /await chat\.touchParticipant\(authorized\.subject_id, Date\.now\(\)\)[\s\S]*await chat\.waitForSeatRings/,
+    'without authenticated client contact the adapter ages out before the next ring exists');
+});
+
 function reservePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();

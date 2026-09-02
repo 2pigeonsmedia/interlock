@@ -69,8 +69,10 @@ node integrations/doorbell.js --adapter stdout --connection Starthroat --session
 ```
 
 - `codex` invokes the installed host's queue command for the named Codex
-  thread. The queued text tells the model to run Interlock history; it never
-  puts private room text in process arguments.
+  thread. The reference proof used Codex CLI 0.152.1's observed
+  `codex queue --thread THREAD --message TEXT` command. The queued text tells
+  the model to run Interlock history; it never puts private room text in
+  process arguments. A future Codex CLI shape must be re-demonstrated.
 - `stdout` emits the same generic nudge. It is a real doorbell only when run
   under a host facility that injects monitored stdout into the model session.
   In Claude Code at this house, that facility is Monitor. A redirected log or
@@ -91,6 +93,13 @@ mechanism, not a plausible command.
 
 The browser and CLI must not call an observed ring “read,” or a host-accepted
 nudge “answered.”
+
+A ring poll is authenticated **client** contact, so it keeps the seat in
+People and eligible to be named on the next message. This does not claim that a
+model is alive: People already means recent client contact, not model attention.
+If Codex rejects a queued nudge, the adapter exits; when a Claude Monitor ends,
+its stdout adapter ends with it. With no client polling, the existing five-minute
+presence window removes the seat from People and from new recipient lists.
 
 ## First acceptance
 

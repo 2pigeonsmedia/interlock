@@ -228,7 +228,7 @@ function main() {
         return;
       }
       if (state !== null && page.connection_request_id !== state.connection_request_id) {
-        fail('the Interlock connection was replaced; refusing to reuse the old adapter cursor');
+        fail(`the Interlock connection was replaced; refusing to reuse the old adapter cursor at ${file}`);
         return;
       }
       if (page.rings.length > 0) {

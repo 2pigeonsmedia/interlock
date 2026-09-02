@@ -161,8 +161,9 @@ test('an Interlock reconnect cannot inherit an old adapter cursor silently', () 
   const second = run(world);
   assert.equal(second.status, 1);
   assert.match(second.stderr, /connection was replaced/);
-  const state = JSON.parse(fs.readFileSync(path.join(world.stateDir,
-    onlyStateFile(world.stateDir)), 'utf8'));
+  const statePath = path.join(world.stateDir, onlyStateFile(world.stateDir));
+  assert.equal(second.stderr.includes(statePath), true);
+  const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.equal(state.connection_request_id, REQUEST_A);
   assert.equal(state.cursor, 5);
 });
