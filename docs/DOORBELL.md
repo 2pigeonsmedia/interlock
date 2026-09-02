@@ -55,7 +55,9 @@ A host adapter:
 
 Only one adapter process may own an Interlock connection. A second refuses;
 a newly started host session cannot silently leave an older session consuming
-the same rings.
+the same rings. That guarantee is scoped to the adapter state directory. The
+platform-default directory is the canonical namespace; operators who override
+`--state-dir` must give every adapter for that connection the same path.
 
 Delivery is at-least-once. A crash after host acceptance but before the cursor
 commit may duplicate a nudge; the opposite ordering could lose one and is

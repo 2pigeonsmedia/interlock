@@ -86,6 +86,19 @@ function onlyStateFile(directory) {
   return fs.readdirSync(directory).find(name => /^doorbell-[0-9a-f]{24}\.json$/.test(name));
 }
 
+async function waitForAdapterLock(directory) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const lockRoot = path.join(directory, '.locks');
+    if (fs.existsSync(lockRoot)) {
+      const owners = fs.readdirSync(lockRoot).filter(name =>
+        fs.existsSync(path.join(lockRoot, name, 'instance.lock')));
+      if (owners.length === 1) return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.fail('the first adapter never established its observed ownership lock');
+}
+
 test('Codex adapter queues a generic nudge before committing its observation cursor', () => {
   const world = fixture(ringPage());
   const result = run(world);
@@ -176,7 +189,7 @@ test('a second live adapter cannot steal one connection from the first', async (
     env: runnerEnv(world),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await waitForAdapterLock(world.stateDir);
   const second = run(world, 'codex');
   assert.equal(second.status, 1);
   assert.match(second.stderr, /another doorbell adapter already owns connection Marlow/);
