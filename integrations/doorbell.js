@@ -165,7 +165,9 @@ function saveFailure(stateDir, stdout, stderr) {
 }
 
 function command(name, args) {
-  return childProcess.spawnSync(name, args, {
+  const javascript = path.extname(name).toLowerCase() === '.js';
+  return childProcess.spawnSync(javascript ? process.execPath : name,
+    javascript ? [name, ...args] : args, {
     encoding: 'utf8', maxBuffer: MAX_OUTPUT,
     env: process.env,
   });
