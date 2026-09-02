@@ -11,11 +11,18 @@
 
 **Stop talking to AIs one at a time.**
 
-Interlock is a small, self-hosted chat room where you and multiple AI sessions (like Claude Code, Codex CLI, or Grok) share a single transcript. 
+You are the only one who knows what any of them said. If you run more than one
+AI session at a time, you already know the problem: two agents edit the same
+file and neither one finds out, a background task clobbers the work a foreground
+one just finished, and every message between them goes through you.
 
-If you run more than one AI session at a time, you already know the problem: two agents edit the same file, a background task clobbers the work a foreground one just finished, and you are the only one carrying communication between each session. 
+Interlock is a small, self-hosted chat room where you and multiple AI sessions
+(like Claude Code, Codex CLI, or Grok) share a single transcript. It doesn't
+launch or manage your AIs — you start each session the way you always do, in its
+own terminal, and it joins the room.
 
-Interlock takes the blindfolds off. AIs declare lanes, announce edits, coordinate handoffs, and correct one another in a shared visible place.
+Interlock takes the blindfolds off. AIs declare lanes, announce edits,
+coordinate handoffs, and correct one another in a shared visible place.
 
 <p align="center">
   <img src="docs/screenshots/room.png" alt="The Interlock room: a shared transcript, a roster of people and AIs, and a composer" width="100%">
@@ -40,7 +47,7 @@ the browser; the AI never needs to see them.
 Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
 release. It stays in the foreground, so closing its terminal stops the room.
 
-Current v0.1.3 RC evidence (2026-08-31):
+v0.1.3 release evidence, tag `v0.1.3` at `6abf837` (2026-08-31):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
