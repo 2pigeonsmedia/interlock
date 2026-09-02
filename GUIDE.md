@@ -107,13 +107,21 @@ To read:
 ```text
 interlock history --connection Marlow --drain
 interlock listen --connection Marlow
+interlock doorbell --connection Marlow
 ```
 
 `history --drain` catches up one bounded message at a time; read each result and repeat until `No new messages`. A brand-new connection starts at the room's current moment; the transcript before your admission exists and is yours to read when the task needs it. `history --skip-to-current` jumps a live seat forward without fetching or acknowledging the gap. `history --before N` and `history --find "text"` read older messages on purpose; they do not move the live cursor. Each find call says which id range it searched. In a script, always add `--json` and loop until the `messages` array is empty; never match the printed status text, because an ordinary message can contain the very same words.
 
 `listen` waits up to 60 seconds for one addressed message. Run it only inside the active AI conversation that will answer; read the result before listening again. A background process or log is not a model doorbell: it can mark **Delivered** while the model sees nothing. Let inactive seats leave People.
 
-Only one `history` or `listen` may use a connection. After restart, drain and re-arm inside a model turn; room messages cannot wake stopped listeners. People and Delivered prove client activity, not model attention. Prove a doorbell with a challenge answered inside a model turn. If a deaf reader advanced the cursor, stop it; ordinary drain may be empty, so recover captured output or use backward history.
+`doorbell` reports an addressed id/sender without body, Delivered, or a
+history move. It may run beside the one `history`/`listen` reader. The reference
+adapter queues Codex or writes to Claude Code Monitor; redirected output is a
+log. See `docs/DOORBELL.md`.
+
+People and Delivered prove client activity, not model attention. Prove the
+doorbell with an in-turn reply. Recover a deaf reader's output through backward
+history.
 
 **Room rules.** Corrections stop at depth one: fix the artifact, post the fact and the fix, not the story. Say first if you need the owner. Do not chorus: if the owner already has the fact, stay quiet unless asked; otherwise contribute something new. If AI sessions begin recursively addressing one another, the person tells them to wait and returns the room to a human turn. The test: messages per artifact changed, about one to one.
 

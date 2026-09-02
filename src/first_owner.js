@@ -186,6 +186,18 @@ function publicMessage(message) {
   });
 }
 
+function publicRing(message) {
+  const row = publicMessage(message);
+  if (row === null) return null;
+  return Object.freeze({
+    id: row.id,
+    ts: row.ts,
+    byline: row.byline,
+    kind: row.kind,
+    session: row.session,
+  });
+}
+
 function publicParticipant(participant) {
   if (!participant || typeof participant.name !== 'string' ||
       (participant.kind !== 'person' && participant.kind !== 'seat') ||
@@ -311,7 +323,8 @@ function createFirstOwnerHandler(options) {
   }
   if (!chat || typeof chat.append !== 'function' || typeof chat.read !== 'function' ||
       typeof chat.readForSeat !== 'function' || typeof chat.wait !== 'function' ||
-      typeof chat.waitForSeat !== 'function' || typeof chat.acknowledge !== 'function' ||
+      typeof chat.waitForSeat !== 'function' || typeof chat.waitForSeatRings !== 'function' ||
+      typeof chat.acknowledge !== 'function' ||
       typeof chat.touchParticipant !== 'function' || typeof chat.listParticipants !== 'function' ||
       typeof chat.participantState !== 'function' ||
       typeof chat.readDeliveryChanges !== 'function' || typeof chat.transcriptCleared !== 'function' ||
@@ -1378,6 +1391,87 @@ function createFirstOwnerHandler(options) {
     });
   }
 
+  async function readAiRings(request, response, target) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const query = messageQuery(target);
+    if (!query) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-ring-query' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    try { await chat.touchParticipant(authorized.subject_id, Date.now()); }
+    catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    const controller = new AbortController();
+    function clientGone() { controller.abort(); }
+    function responseClosed() { if (!response.writableEnded) controller.abort(); }
+    request.once('aborted', clientGone);
+    response.once('close', responseClosed);
+    let result;
+    try {
+      result = query.wait
+        ? await chat.waitForSeatRings({ after: query.after, limit: query.limit },
+          authorized.subject_id, { timeoutMs: AI_MESSAGE_WAIT_MS, signal: controller.signal })
+        : Object.freeze(Object.assign({}, await chat.readForSeat(
+          { after: query.after, limit: query.limit }, authorized.subject_id,
+          { addressedOnly: true },
+        ), { timed_out: false }));
+    } catch (error) {
+      if (controller.signal.aborted || response.destroyed) return;
+      const status = error && error.code === 'invalid-read' ? 400 : 503;
+      sendJson(request, response, status, {
+        ok: false,
+        error: status === 400 ? 'invalid-ring-query' : 'chat-unavailable',
+      });
+      return;
+    } finally {
+      request.removeListener('aborted', clientGone);
+      response.removeListener('close', responseClosed);
+    }
+    if (response.destroyed) return;
+    const reauthorized = seatAuthorization(request, 'read');
+    if (!reauthorized || reauthorized.allow !== true ||
+        reauthorized.subject_id !== authorized.subject_id) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let connectionSession;
+    try {
+      const discriminator = house.aiSessionDiscriminator(reauthorized.subject_id);
+      if (!closedObject(discriminator, ['session']) ||
+          !(discriminator.session === null ||
+            (Number.isSafeInteger(discriminator.session) && discriminator.session > 0))) {
+        throw new Error('invalid session discriminator');
+      }
+      connectionSession = discriminator.session;
+      await chat.touchParticipant(reauthorized.subject_id, Date.now());
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    const rings = result.messages.map(publicRing);
+    if (rings.some(ring => ring === null) || !Number.isSafeInteger(result.cursor)) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    sendJson(request, response, 200, {
+      ok: true,
+      rings: Object.freeze(rings),
+      cursor: result.cursor,
+      timed_out: result.timed_out === true,
+      connection_session: connectionSession,
+    });
+  }
+
   async function appendAiMessage(request, response, body) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -1766,6 +1860,15 @@ function createFirstOwnerHandler(options) {
         await readAiMessages(request, response, target);
         return;
       }
+      if (pathname === '/api/ai/rings') {
+        if (request.method !== 'GET') {
+          sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+            { allow: 'GET' });
+          return;
+        }
+        await readAiRings(request, response, target);
+        return;
+      }
       if (pathname === '/api/ai/peek') {
         if (request.method !== 'GET') {
           sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
@@ -1842,7 +1945,8 @@ function createFirstOwnerHandler(options) {
       return;
     }
 
-    if ((pathname === '/api/ai/head' || pathname === '/api/ai/peek') &&
+    if ((pathname === '/api/ai/head' || pathname === '/api/ai/peek' ||
+        pathname === '/api/ai/rings') &&
         request.method !== 'GET') {
       sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
         { allow: 'GET' });

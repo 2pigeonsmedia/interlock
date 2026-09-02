@@ -43,6 +43,7 @@ Usage:
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
   interlock listen --connection NAME [--json]
+  interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
   interlock leave --connection NAME [--json]
   interlock codex-policy install --connection NAME --mode receive|participate
   interlock codex-policy check --connection NAME [--json]
@@ -68,7 +69,7 @@ function refuseSay(stderr) {
 function commandOptions(command, args) {
   const options = {
     connection: null, drain: false, skipToCurrent: false, before: null, find: null,
-    json: false, source: null,
+    after: null, json: false, source: null,
   };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
@@ -111,6 +112,16 @@ function commandOptions(command, args) {
       }
       seen.add(flag);
       options.find = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (command === 'doorbell' && flag === '--after') {
+      if (seen.has(flag) || typeof args[index + 1] !== 'string' ||
+          !/^(?:0|[1-9][0-9]*)$/.test(args[index + 1])) return null;
+      const after = Number(args[index + 1]);
+      if (!Number.isSafeInteger(after)) return null;
+      seen.add(flag);
+      options.after = after;
       index += 1;
       continue;
     }
@@ -372,6 +383,36 @@ function validPage(result, after) {
   for (const message of page.messages) {
     if (message.id <= prior || message.id > page.cursor) return false;
     prior = message.id;
+  }
+  return true;
+}
+
+function validPublicRing(value) {
+  const ring = exactObject(value, ['id', 'ts', 'byline', 'kind', 'session']);
+  return !!ring && Number.isSafeInteger(ring.id) && ring.id > 0 &&
+    Number.isSafeInteger(ring.ts) && ring.ts >= 0 &&
+    typeof ring.byline === 'string' && ring.byline.length > 0 &&
+    (ring.kind === 'person' || ring.kind === 'seat') &&
+    (ring.kind === 'seat'
+      ? (ring.session === null || (Number.isSafeInteger(ring.session) && ring.session > 0))
+      : ring.session === null);
+}
+
+function validRingPage(result, after) {
+  const page = exactObject(result, [
+    'ok', 'rings', 'cursor', 'timed_out', 'connection_session',
+  ]);
+  if (!page || page.ok !== true || !Array.isArray(page.rings) ||
+      page.rings.length > HISTORY_PEEK_LIMIT ||
+      !Number.isSafeInteger(page.cursor) || page.cursor < after ||
+      typeof page.timed_out !== 'boolean' ||
+      !(page.connection_session === null ||
+        (Number.isSafeInteger(page.connection_session) && page.connection_session > 0)) ||
+      !page.rings.every(validPublicRing)) return false;
+  let prior = after;
+  for (const ring of page.rings) {
+    if (ring.id <= prior || ring.id > page.cursor) return false;
+    prior = ring.id;
   }
   return true;
 }
@@ -816,6 +857,58 @@ async function runReadCommand(command, args, io, dependencies = {}) {
     }
   }
   return result;
+}
+
+async function runDoorbell(args, io, dependencies = {}) {
+  const parsed = commandOptions('doorbell', args);
+  if (!parsed) {
+    line(io.stderr,
+      'interlock: usage: interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]');
+    return EXIT_USAGE;
+  }
+  let selected;
+  try {
+    selected = selectedConnection(parsed.connection, dependencies);
+  } catch (error) {
+    reportConnectionError(io.stderr, error, parsed.connection);
+    return EXIT_RUNTIME;
+  }
+  const { profile } = selected;
+  const clock = dependencies.clock || Date.now;
+  if (profile.expires_at <= clock()) {
+    line(io.stderr,
+      `interlock: connection ${terminalSafe(profile.name)} has expired; run "interlock join" for a new session.`);
+    return EXIT_RUNTIME;
+  }
+  const after = parsed.after === null ? profile.cursor : parsed.after;
+  let page;
+  try {
+    const fetcher = dependencies.fetch || globalThis.fetch;
+    page = await localRequest(fetcher, profile,
+      `/api/ai/rings?after=${after}&limit=${HISTORY_PEEK_LIMIT}&wait=1`,
+      { timeoutMs: LISTEN_FETCH_TIMEOUT_MS });
+    if (!validRingPage(page, after)) throw incompatibleResponse();
+  } catch (error) {
+    reportRequestError(io.stderr, error, profile);
+    return EXIT_RUNTIME;
+  }
+  if (parsed.json) {
+    line(io.stdout, JSON.stringify(Object.assign({}, page, {
+      connection_request_id: profile.request_id,
+    })));
+  } else if (page.rings.length === 0) {
+    line(io.stdout,
+      `No ring yet — re-run \`interlock doorbell --connection ${terminalSafe(profile.name)} --after ${page.cursor}\`.`);
+  } else {
+    for (const ring of page.rings) {
+      const session = ring.session === null ? '' : ` · Session ${ring.session}`;
+      line(io.stdout,
+        `Interlock ring ${ring.id} from ${terminalSafe(ring.byline)}${session}.`);
+    }
+    line(io.stdout,
+      `Run \`interlock history --connection ${terminalSafe(profile.name)}\` to read and acknowledge the room.`);
+  }
+  return EXIT_OK;
 }
 
 async function runSay(args, io, dependencies = {}) {
@@ -1851,6 +1944,8 @@ function run(argv, io, dependencies = {}) {
     return runReadCommand(argv[0], argv.slice(1), io, dependencies);
   }
 
+  if (argv[0] === 'doorbell') return runDoorbell(argv.slice(1), io, dependencies);
+
   if (argv[0] === 'say') return runSay(argv.slice(1), io, dependencies);
 
   if (argv[0] === 'leave') return runLeave(argv.slice(1), io, dependencies);
@@ -1871,6 +1966,7 @@ module.exports = {
   runBackup,
   runJoin,
   runLeave,
+  runDoorbell,
   runReadCommand,
   runRecover,
   runSay,

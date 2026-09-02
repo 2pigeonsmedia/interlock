@@ -231,6 +231,49 @@ test('seat listen sleeps through chatter, then returns the preserved shared catc
   await chat.close();
 });
 
+test('doorbell observes addressed rows without consuming shared history', async () => {
+  const chat = service();
+  const marlow = ROSTER[1];
+  const ordinary = await chat.append({ text: 'ordinary room chatter' }, ACTOR);
+  const quiet = await chat.waitForSeatRings(
+    { after: 0, limit: 10 }, marlow.subject_id, { timeoutMs: 5 },
+  );
+  assert.equal(quiet.timed_out, true);
+  assert.deepEqual(quiet.messages, []);
+  assert.equal(quiet.cursor, ordinary.id,
+    'the observation cursor may cross chatter without changing message delivery');
+
+  const other = await chat.append({ text: '@Codex not Marlow' }, ACTOR);
+  const ring = await chat.append({ text: '@Marlow please look' }, ACTOR);
+  const observed = await chat.waitForSeatRings(
+    { after: quiet.cursor, limit: 10 }, marlow.subject_id, { timeoutMs: 50 },
+  );
+  assert.equal(observed.timed_out, false);
+  assert.deepEqual(observed.messages.map(message => message.id), [ring.id]);
+  assert.equal(observed.cursor, ring.id);
+
+  const history = await chat.readForSeat(
+    { after: 0, limit: 10 }, marlow.subject_id, { addressedOnly: false },
+  );
+  assert.deepEqual(history.messages.map(message => message.id),
+    [ordinary.id, other.id, ring.id], 'doorbell observation must not move the history cursor');
+  assert.equal(history.messages.at(-1).recipients[0].acknowledged_at, null,
+    'doorbell observation must not write a delivery receipt');
+  await chat.close();
+});
+
+test('doorbell wait validation and close behavior match the durable listener', async () => {
+  const chat = service();
+  await assert.rejects(chat.waitForSeatRings(
+    { after: 0, limit: 10 }, ROSTER[1].subject_id, { timeoutMs: -1 },
+  ), error => code(error) === 'invalid-wait');
+  const waiting = chat.waitForSeatRings(
+    { after: 0, limit: 10 }, ROSTER[1].subject_id, { timeoutMs: 2_000 },
+  );
+  await chat.close();
+  await assert.rejects(waiting, error => code(error) === 'service-closed');
+});
+
 test('concurrent seat listeners wake only for their own addressed delivery', async () => {
   const chat = service();
   const marlow = ROSTER[1];

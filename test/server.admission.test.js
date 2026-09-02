@@ -253,6 +253,12 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     });
     assert.equal(invalidMessages.status, 401);
     assert.equal(invalidMessages.json.error, 'invalid-connection');
+    const invalidRings = await call(runtime, {
+      path: '/api/ai/rings?after=0&limit=100&wait=0',
+      headers: { authorization: 'Bearer not-a-token' },
+    });
+    assert.equal(invalidRings.status, 401);
+    assert.equal(invalidRings.json.error, 'invalid-connection');
     const invalidHead = await call(runtime, {
       path: '/api/ai/head', headers: { authorization: 'Bearer not-a-token' },
     });
@@ -412,6 +418,41 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       const posted = await post(runtime, '/api/messages', { text }, owner);
       assert.equal(posted.status, 201, posted.text);
     }
+
+    const marlowRings = await call(runtime, {
+      path: '/api/ai/rings?after=0&limit=100&wait=0',
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(marlowRings.status, 200, marlowRings.text);
+    assert.equal(marlowRings.json.timed_out, false);
+    assert.deepEqual(marlowRings.json.rings.map(ring => ({
+      id: ring.id, byline: ring.byline, kind: ring.kind, session: ring.session,
+      text: ring.text,
+    })), [
+      { id: 2, byline: 'Ana', kind: 'person', session: null, text: undefined },
+      { id: 3, byline: 'Ana', kind: 'person', session: null, text: undefined },
+      { id: 5, byline: 'Ana', kind: 'person', session: null, text: undefined },
+    ], 'the doorbell exposes addressed metadata only, never room message bodies');
+    const beforeDelivery = await call(runtime, {
+      path: '/api/messages?after=0&limit=20&wait=0',
+      headers: { cookie: owner.cookie },
+    });
+    assert.equal(beforeDelivery.status, 200, beforeDelivery.text);
+    assert.equal(beforeDelivery.json.messages.find(message => message.id === 2)
+      .delivery[0].acknowledged_at, null,
+    'observing a ring must not claim that the model received the message');
+
+    const malformedRings = await call(runtime, {
+      path: '/api/ai/rings?after=0&limit=100',
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(malformedRings.status, 400);
+    assert.equal(malformedRings.json.error, 'invalid-ring-query');
+    const postRings = await call(runtime, {
+      path: '/api/ai/rings?after=0&limit=100&wait=0', method: 'POST',
+      headers: { authorization: `Bearer ${candidate.token}` },
+    });
+    assert.equal(postRings.status, 405);
 
     async function cli(argv, extra = {}) {
       let commandOut = '';

@@ -102,6 +102,11 @@ node bin/interlock.js start
   messages), leaving the first message outside the budget untouched. A single
   legal message is never truncated. One command therefore cannot acknowledge
   an entire backlog outside model context.
+- **A host-neutral ring observation.** `interlock doorbell` waits without
+  reading or acknowledging room text. The shipped adapter runner can queue a
+  generic nudge into Codex or write one to a Claude Code Monitor. A log file or
+  detached listener alone is still not a model doorbell; only a model reply is
+  the end-to-end proof. See [`docs/DOORBELL.md`](docs/DOORBELL.md).
 - **Honest delivery.** `Delivered` means the authenticated client fetched the
   message. It does not prove the model read it; only a reply does. “Last heard”
   is a timestamp, not a pretend online light.

@@ -331,6 +331,77 @@ function createChatService(options) {
     });
   }
 
+  /* A doorbell observes only addressed rows and owns no message-delivery
+   * cursor. It may advance its private scan across ordinary chatter, but it
+   * never acknowledges a message or changes the seat's normal history. */
+  async function waitForSeatRings(query, subjectId, optionsIn = {}) {
+    requireOpen();
+    const options = closedObject(optionsIn, ['signal', 'timeoutMs']);
+    if (!options || typeof subjectId !== 'string' || subjectId.length === 0) {
+      throw fail('invalid-wait');
+    }
+    const timeoutMs = options.timeoutMs === undefined ? MAX_WAIT_MS : options.timeoutMs;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_WAIT_MS ||
+        (options.signal !== undefined && !abortSignal(options.signal))) throw fail('invalid-wait');
+    if (options.signal && options.signal.aborted) throw fail('wait-aborted');
+    let scanCursor = query.after;
+    let firstId = 1;
+    return await new Promise((resolve, reject) => {
+      let settled = false;
+      let reading = false;
+      let wakeDue = false;
+      let timeoutDue = false;
+      let timer = null;
+      const signal = options.signal;
+
+      function cleanup() {
+        waiters.delete(waiter);
+        if (timer !== null) clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+      }
+      function succeed(messages, timedOut) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(Object.freeze({
+          messages: Object.freeze(messages), cursor: scanCursor,
+          first_id: firstId, timed_out: timedOut,
+        }));
+      }
+      function refuse(error) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      }
+      function inspect() {
+        if (settled || reading) return;
+        reading = true;
+        wakeDue = false;
+        const priorScanCursor = scanCursor;
+        scanForSeat({ after: scanCursor, limit: query.limit }, subjectId, true).then(page => {
+          reading = false;
+          if (settled) return;
+          scanCursor = page.cursor;
+          firstId = page.first_id;
+          if (page.messages.length > 0) return succeed(page.messages, false);
+          const transcriptMoved = firstId > 1 && firstId - 1 >= priorScanCursor;
+          if (transcriptMoved) return succeed([], false);
+          if (timeoutDue) return succeed([], true);
+          if (wakeDue) inspect();
+        }).catch(refuse);
+      }
+      function notify() { wakeDue = true; inspect(); }
+      function onTimeout() { timeoutDue = true; inspect(); }
+      function onAbort() { refuse(fail('wait-aborted')); }
+      const waiter = Object.freeze({ notify, stop() { refuse(fail('service-closed')); } });
+      waiters.add(waiter);
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      timer = setTimeout(onTimeout, timeoutMs);
+      inspect();
+    });
+  }
+
   async function acknowledge(subjectId, messageIds, now = Date.now()) {
     requireOpen();
     const receipt = await store.acknowledge({ subject_id: subjectId, message_ids: messageIds, now });
@@ -388,7 +459,8 @@ function createChatService(options) {
   }
 
   return Object.freeze({
-    append, read, readForSeat, wait, waitForSeat, acknowledge, peekBefore, peekFind, head,
+    append, read, readForSeat, wait, waitForSeat, waitForSeatRings,
+    acknowledge, peekBefore, peekFind, head,
     touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });
 }

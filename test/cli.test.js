@@ -43,6 +43,7 @@ test('the empty CLI prints honest current help', () => {
   assert.match(result.stdout, /One shared chat room/);
   assert.match(result.stdout, /An AI runs "interlock join"/);
   assert.match(result.stdout, /history --connection NAME/);
+  assert.match(result.stdout, /doorbell --connection NAME/);
   assert.match(result.stdout, /backup --to ABSOLUTE_PATH/);
   assert.match(result.stdout, /restore --from ABSOLUTE_PATH/);
   assert.match(result.stdout, /recover \[--port PORT\]/);
@@ -2155,6 +2156,81 @@ test('an empty listen finishes cleanly with the exact bounded retry command', as
   assert.equal(result.stdout,
     'Nothing yet — run `interlock listen --connection Marlow` again.\n');
   assert.equal(result.stderr, '');
+});
+
+test('doorbell observes addressed metadata without acknowledging or moving history', async () => {
+  const world = admittedConnection({ cursor: 7 });
+  world.dependencies.fetch = async url => {
+    assert.equal(url, 'http://localhost:8788/api/ai/rings?after=7&limit=100&wait=1');
+    return fakeResponse(200, {
+      ok: true,
+      rings: [{ id: 9, ts: 1_788_379_200_000, byline: 'Ana', kind: 'person', session: null }],
+      cursor: 9,
+      timed_out: false,
+      connection_session: 3,
+    });
+  };
+  const result = await captureCommand(
+    ['doorbell', '--connection', 'Marlow', '--json'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ok: true,
+    rings: [{ id: 9, ts: 1_788_379_200_000, byline: 'Ana', kind: 'person', session: null }],
+    cursor: 9,
+    timed_out: false,
+    connection_session: 3,
+    connection_request_id: world.profile.request_id,
+  });
+  assert.deepEqual(world.events, [['load', 'Marlow']],
+    'doorbell must not acquire the history reader or update its cursor');
+});
+
+test('doorbell has an independent cursor and prints only a generic nudge', async () => {
+  const world = admittedConnection({ cursor: 40 });
+  world.dependencies.fetch = async url => {
+    assert.equal(url, 'http://localhost:8788/api/ai/rings?after=12&limit=100&wait=1');
+    return fakeResponse(200, {
+      ok: true,
+      rings: [{ id: 13, ts: 1_788_379_200_000, byline: 'Ana', kind: 'person', session: null }],
+      cursor: 13,
+      timed_out: false,
+      connection_session: null,
+    });
+  };
+  const result = await captureCommand(
+    ['doorbell', '--connection', 'Marlow', '--after', '12'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /Interlock ring 13 from Ana/);
+  assert.match(result.stdout, /interlock history --connection Marlow/);
+  assert.equal(result.stdout.includes('private room body'), false);
+  assert.deepEqual(world.events, [['load', 'Marlow']]);
+});
+
+test('doorbell rejects malformed pages and option shapes without touching history', async () => {
+  const world = admittedConnection({ cursor: 2 });
+  world.dependencies.fetch = async () => fakeResponse(200, {
+    ok: true,
+    rings: [{ id: 3, ts: 1, byline: 'Ana', kind: 'person', session: null, text: 'leak' }],
+    cursor: 3,
+    timed_out: false,
+    connection_session: null,
+  });
+  const malformed = await captureCommand(
+    ['doorbell', '--connection', 'Marlow', '--json'], world.dependencies);
+  assert.equal(malformed.code, EXIT_RUNTIME);
+  assert.match(malformed.stderr, /does not match this CLI version/);
+  assert.deepEqual(world.events, [['load', 'Marlow']]);
+
+  for (const argv of [
+    ['doorbell'],
+    ['doorbell', '--connection', 'Marlow', '--after', '-1'],
+    ['doorbell', '--connection', 'Marlow', '--after', '1', '--after', '2'],
+    ['doorbell', '--connection', 'Marlow', '--drain'],
+  ]) {
+    const refused = await captureCommand(argv, admittedConnection().dependencies);
+    assert.equal(refused.code, EXIT_USAGE, argv.join(' '));
+    assert.match(refused.stderr, /usage/);
+  }
 });
 
 test('machine-readable output is available only behind the explicit json flag', async () => {
