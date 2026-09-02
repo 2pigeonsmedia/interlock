@@ -138,17 +138,19 @@
     }
 
     function messages(rows, currentName, initialPage = false, owner = false) {
-      if (initialPage || owner !== true || typeof currentName !== 'string' ||
-          !Array.isArray(rows) || typeof mentionTokens !== 'function') return false;
+      if (initialPage || typeof currentName !== 'string' || !Array.isArray(rows)) return false;
+      const fromOthers = rows.filter(row => row &&
+        typeof row.byline === 'string' && row.byline !== currentName);
+      if (fromOthers.length === 0) return false;
+      const marked = !looking() && markUnread();
+      if (owner !== true || typeof mentionTokens !== 'function') return marked;
       const foldedName = currentName.toLowerCase();
-      const addressed = rows.filter(row => row && Number.isSafeInteger(row.id) && row.id > 0 &&
-        typeof row.byline === 'string' && row.byline !== currentName &&
+      const addressed = fromOthers.filter(row => Number.isSafeInteger(row.id) && row.id > 0 &&
         typeof row.text === 'string' && mentionTokens(row.text).some(token =>
           token.handle.toLowerCase() === foldedName));
-      if (addressed.length === 0) return false;
+      if (addressed.length === 0) return marked;
       const newestId = Math.max(...addressed.map(row => row.id));
-      if (!claimOwnerMention(currentName, newestId)) return false;
-      if (!looking()) markUnread();
+      if (!claimOwnerMention(currentName, newestId)) return marked;
       chirp();
       nativeNotification(addressed, newestId);
       return true;

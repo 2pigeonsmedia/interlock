@@ -59,7 +59,7 @@ function memoryStorage() {
   };
 }
 
-test('only a new message explicitly addressing the Owner signals', () => {
+test('only a new message explicitly addressing the Owner chirps', () => {
   const document = page();
   const { calls, FakeAudioContext } = fakeAudio();
   const signal = attention.create({
@@ -97,7 +97,15 @@ test('only a new message explicitly addressing the Owner signals', () => {
 
   document.setFocused(false);
   assert.equal(signal.messages([
-    { id: 7, byline: 'Grok', text: '@Ana background mention' },
+    { id: 7, byline: 'Grok', text: 'ordinary background traffic' },
+  ], 'Ana', false, true), true, 'ordinary traffic keeps the quiet tab marker');
+  assert.equal(document.title, '● Interlock');
+  assert.deepEqual(calls, { starts: 1, stops: 1 }, 'ordinary traffic must not chirp');
+  document.setFocused(true);
+  assert.equal(signal.clearIfLooking(), true);
+  document.setFocused(false);
+  assert.equal(signal.messages([
+    { id: 8, byline: 'Grok', text: '@Ana background mention' },
   ], 'Ana', false, true), true);
   assert.equal(document.title, '● Interlock');
   assert.deepEqual(calls, { starts: 2, stops: 2 });
@@ -188,22 +196,26 @@ test('Owner explicitly enables generic native notifications from a user gesture'
   assert.equal(created[0].options.tag, 'interlock-owner-mention-12');
 });
 
-test('duplicate tabs share one monotonic Owner-mention claim', () => {
+test('duplicate tabs share one monotonic Owner alert while retaining both quiet markers', () => {
   const storage = memoryStorage();
   const { calls, FakeAudioContext } = fakeAudio();
+  const firstPage = page({ focused: false });
+  const secondPage = page({ focused: false });
   const first = attention.create({
-    document: page({ focused: false }), AudioContext: FakeAudioContext,
+    document: firstPage, AudioContext: FakeAudioContext,
     Notification: null, mentionTokens: mentions.tokens, storage,
   });
   const second = attention.create({
-    document: page({ focused: false }), AudioContext: FakeAudioContext,
+    document: secondPage, AudioContext: FakeAudioContext,
     Notification: null, mentionTokens: mentions.tokens, storage,
   });
   first.arm();
   second.arm();
   const rows = [{ id: 14, byline: 'Grok', text: '@Ana once' }];
   assert.equal(first.messages(rows, 'Ana', false, true), true);
-  assert.equal(second.messages(rows, 'Ana', false, true), false);
+  assert.equal(second.messages(rows, 'Ana', false, true), true);
+  assert.equal(firstPage.title, '● Interlock');
+  assert.equal(secondPage.title, '● Interlock');
   assert.deepEqual(calls, { starts: 1, stops: 1 });
 });
 
