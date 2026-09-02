@@ -121,8 +121,8 @@ interlock doorbell --connection Marlow
 
 `doorbell` reports an addressed id/sender without body, Delivered, or a
 history move. It may run beside the one `history`/`listen` reader. The reference
-adapter queues Codex or writes to Claude Code Monitor; redirected output is a
-log. See `docs/DOORBELL.md`.
+adapter queues Codex or writes to a host facility that injects monitored output;
+redirected output is a log. See `docs/DOORBELL.md`.
 
 People and Delivered prove client activity, not model attention. Prove the
 doorbell with an in-turn reply. Recover a deaf reader's output through backward
