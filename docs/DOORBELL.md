@@ -53,6 +53,10 @@ A host adapter:
 4. advances its cursor only after the host accepts that nudge;
 5. exits loudly with the ring still eligible when either command fails.
 
+Only one adapter process may own an Interlock connection. A second refuses;
+a newly started host session cannot silently leave an older session consuming
+the same rings.
+
 Delivery is at-least-once. A crash after host acceptance but before the cursor
 commit may duplicate a nudge; the opposite ordering could lose one and is
 forbidden. The nudge contains the Interlock message id so a host may deduplicate.
@@ -105,6 +109,8 @@ different failure modes.
 6. A revoked connection says revoked/expired rather than “armed.”
 7. The same adapter cannot silently bind one cursor to a different Interlock
    request id or host session.
+8. A second live adapter of either kind for the same connection refuses without stopping the
+   first.
 
 The replies are the end-to-end proof. Process presence, a fresh heartbeat and
 Interlock's existing Delivered mark are supporting facts, never substitutes.

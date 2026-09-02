@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const childProcess = require('node:child_process');
+const { acquireInstanceLock } = require('../src/instance_lock.js');
 
 const SCHEMA = 1;
 const MAX_OUTPUT = 256 * 1024;
@@ -124,6 +125,13 @@ function stateFile(options) {
   return path.join(options.stateDir || defaultStateDir(), `doorbell-${key}.json`);
 }
 
+function lockDirectory(options, stateDir) {
+  const key = crypto.createHash('sha256')
+    .update(options.connection)
+    .digest('hex').slice(0, 24);
+  return path.join(stateDir, '.locks', key);
+}
+
 function loadState(file, options) {
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); }
@@ -189,60 +197,76 @@ function main() {
     ? [] : [path.join(__dirname, '..', 'bin', 'interlock.js')];
   const codex = process.env.INTERLOCK_DOORBELL_CODEX ||
     (process.platform === 'win32' ? 'codex.exe' : 'codex');
+  const lockDir = lockDirectory(options, stateDir);
+  fs.mkdirSync(lockDir, { recursive: true, mode: 0o700 });
+  let adapterLock;
+  try {
+    adapterLock = acquireInstanceLock({ dataDir: lockDir });
+  } catch (error) {
+    fail(error && error.code === 'already-running'
+      ? `another doorbell adapter already owns connection ${options.connection}`
+      : `adapter ownership could not be established safely (${error && error.code || 'unknown'})`);
+    return;
+  }
 
-  while (true) {
-    const args = ['doorbell', '--connection', options.connection, '--json'];
-    if (after !== null) args.push('--after', String(after));
-    const polled = command(interlock, [...interlockPrefix, ...args]);
-    if (polled.error || polled.status !== 0) {
-      const saved = saveFailure(stateDir, polled.stdout || '',
-        (polled.stderr || '') + (polled.error ? `\n${polled.error.message}` : ''));
-      fail(`Interlock poll failed; raw output preserved at ${saved}`);
-      return;
-    }
-    const minimum = after === null ? 0 : after;
-    const page = parsePage(polled.stdout, minimum);
-    if (!page) {
-      const saved = saveFailure(stateDir, polled.stdout || '', polled.stderr || '');
-      fail(`Interlock returned an unusable ring page; raw output preserved at ${saved}`);
-      return;
-    }
-    if (state !== null && page.connection_request_id !== state.connection_request_id) {
-      fail('the Interlock connection was replaced; refusing to reuse the old adapter cursor');
-      return;
-    }
-    if (page.rings.length > 0) {
-      const message = nudge(options, page.rings);
-      if (options.adapter === 'codex') {
-        const delivered = command(codex,
-          ['queue', '--thread', options.session, '--message', message]);
-        if (delivered.error || delivered.status !== 0) {
-          const saved = saveFailure(stateDir, delivered.stdout || '',
-            (delivered.stderr || '') + (delivered.error ? `\n${delivered.error.message}` : ''));
-          fail(`Codex rejected the nudge; ring remains eligible and output is at ${saved}`);
-          return;
-        }
-      } else {
-        fs.writeSync(process.stdout.fd, message + '\n');
+  try {
+    while (true) {
+      const args = ['doorbell', '--connection', options.connection, '--json'];
+      if (after !== null) args.push('--after', String(after));
+      const polled = command(interlock, [...interlockPrefix, ...args]);
+      if (polled.error || polled.status !== 0) {
+        const saved = saveFailure(stateDir, polled.stdout || '',
+          (polled.stderr || '') + (polled.error ? `\n${polled.error.message}` : ''));
+        fail(`Interlock poll failed; raw output preserved at ${saved}`);
+        return;
       }
+      const minimum = after === null ? 0 : after;
+      const page = parsePage(polled.stdout, minimum);
+      if (!page) {
+        const saved = saveFailure(stateDir, polled.stdout || '', polled.stderr || '');
+        fail(`Interlock returned an unusable ring page; raw output preserved at ${saved}`);
+        return;
+      }
+      if (state !== null && page.connection_request_id !== state.connection_request_id) {
+        fail('the Interlock connection was replaced; refusing to reuse the old adapter cursor');
+        return;
+      }
+      if (page.rings.length > 0) {
+        const message = nudge(options, page.rings);
+        if (options.adapter === 'codex') {
+          const delivered = command(codex,
+            ['queue', '--thread', options.session, '--message', message]);
+          if (delivered.error || delivered.status !== 0) {
+            const saved = saveFailure(stateDir, delivered.stdout || '',
+              (delivered.stderr || '') + (delivered.error ? `\n${delivered.error.message}` : ''));
+            fail(`Codex rejected the nudge; ring remains eligible and output is at ${saved}`);
+            return;
+          }
+        } else {
+          fs.writeSync(process.stdout.fd, message + '\n');
+        }
+      }
+      try {
+        const nextState = {
+          schema: SCHEMA,
+          adapter: options.adapter,
+          connection: options.connection,
+          session: options.session,
+          connection_request_id: page.connection_request_id,
+          cursor: page.cursor,
+        };
+        atomicJson(file, nextState);
+        state = nextState;
+      } catch (error) {
+        fail(`host accepted the nudge but cursor commit failed; a duplicate is possible: ${error.message}`);
+        return;
+      }
+      after = page.cursor;
+      if (options.once) return;
     }
-    try {
-      const nextState = {
-        schema: SCHEMA,
-        adapter: options.adapter,
-        connection: options.connection,
-        session: options.session,
-        connection_request_id: page.connection_request_id,
-        cursor: page.cursor,
-      };
-      atomicJson(file, nextState);
-      state = nextState;
-    } catch (error) {
-      fail(`host accepted the nudge but cursor commit failed; a duplicate is possible: ${error.message}`);
-      return;
-    }
-    after = page.cursor;
-    if (options.once) return;
+  } finally {
+    try { adapterLock.release(); }
+    catch (error) { fail(`adapter ownership could not be released safely (${error.code || 'unknown'})`); }
   }
 }
 

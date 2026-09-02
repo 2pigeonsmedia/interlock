@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { once } = require('node:events');
 
 const ROOT = path.join(__dirname, '..');
 const RUNNER = path.join(ROOT, 'integrations', 'doorbell.js');
@@ -34,6 +35,8 @@ function fixture(page, hostExit = 0) {
   fs.writeFileSync(pageFile, typeof page === 'string' ? page : JSON.stringify(page) + '\n');
   fs.writeFileSync(interlock, `#!/usr/bin/env node
 const fs = require('node:fs');
+const delay = Number(process.env.FAKE_INTERLOCK_DELAY || 0);
+if (delay > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
 fs.writeFileSync(process.env.FAKE_INTERLOCK_ARGS, JSON.stringify(process.argv.slice(2)));
 process.stdout.write(fs.readFileSync(process.env.FAKE_RING_PAGE, 'utf8'));
 `, { mode: 0o700 });
@@ -42,28 +45,40 @@ const fs = require('node:fs');
 fs.writeFileSync(process.env.FAKE_HOST_ARGS, JSON.stringify(process.argv.slice(2)));
 process.exit(Number(process.env.FAKE_HOST_EXIT || 0));
 `, { mode: 0o700 });
-  return { root, stateDir, pageFile, interlockArgs, hostArgs, interlock, host, hostExit };
+  return {
+    root, stateDir, pageFile, interlockArgs, hostArgs, interlock, host,
+    hostExit, delay: 0,
+  };
 }
 
-function run(world, adapter = 'codex') {
-  return childProcess.spawnSync(process.execPath, [
+function runnerArgs(world, adapter) {
+  return [
     RUNNER,
     '--adapter', adapter,
     '--connection', 'Marlow',
     '--session', 'host-session-1',
     '--state-dir', world.stateDir,
     '--once',
-  ], {
-    cwd: ROOT,
-    encoding: 'utf8',
-    env: Object.assign({}, process.env, {
+  ];
+}
+
+function runnerEnv(world) {
+  return Object.assign({}, process.env, {
       INTERLOCK_DOORBELL_INTERLOCK: world.interlock,
       INTERLOCK_DOORBELL_CODEX: world.host,
       FAKE_RING_PAGE: world.pageFile,
       FAKE_INTERLOCK_ARGS: world.interlockArgs,
       FAKE_HOST_ARGS: world.hostArgs,
       FAKE_HOST_EXIT: String(world.hostExit),
-    }),
+      FAKE_INTERLOCK_DELAY: String(world.delay),
+  });
+}
+
+function run(world, adapter = 'codex') {
+  return childProcess.spawnSync(process.execPath, runnerArgs(world, adapter), {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: runnerEnv(world),
   });
 }
 
@@ -74,7 +89,11 @@ function onlyStateFile(directory) {
 test('Codex adapter queues a generic nudge before committing its observation cursor', () => {
   const world = fixture(ringPage());
   const result = run(world);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, JSON.stringify({
+    status: result.status, signal: result.signal,
+    error: result.error && result.error.message,
+    stdout: result.stdout, stderr: result.stderr,
+  }));
   assert.deepEqual(JSON.parse(fs.readFileSync(world.interlockArgs, 'utf8')),
     ['doorbell', '--connection', 'Marlow', '--json']);
   const host = JSON.parse(fs.readFileSync(world.hostArgs, 'utf8'));
@@ -146,4 +165,20 @@ test('an Interlock reconnect cannot inherit an old adapter cursor silently', () 
     onlyStateFile(world.stateDir)), 'utf8'));
   assert.equal(state.connection_request_id, REQUEST_A);
   assert.equal(state.cursor, 5);
+});
+
+test('a second live adapter cannot steal one connection from the first', async () => {
+  const world = fixture(ringPage({ rings: [], cursor: 5 }));
+  world.delay = 500;
+  const first = childProcess.spawn(process.execPath, runnerArgs(world, 'stdout'), {
+    cwd: ROOT,
+    env: runnerEnv(world),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const second = run(world, 'codex');
+  assert.equal(second.status, 1);
+  assert.match(second.stderr, /another doorbell adapter already owns connection Marlow/);
+  const [code] = await once(first, 'exit');
+  assert.equal(code, 0);
 });
