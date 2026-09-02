@@ -466,6 +466,22 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       return { code, stdout: commandOut, stderr: commandErr };
     }
 
+    const beforePeekCursor = profiles.load('Marlow').cursor;
+    const found = await cli([
+      'history', '--connection', 'Marlow', '--find', 'first only',
+    ]);
+    assert.equal(found.code, EXIT_OK, found.stderr);
+    assert.match(found.stdout, /@Marlow first only/);
+    assert.match(found.stdout, /@mArLoW case-folded first only/);
+    const beforePage = await cli([
+      'history', '--connection', 'Marlow', '--before', '7',
+    ]);
+    assert.equal(beforePage.code, EXIT_OK, beforePage.stderr);
+    assert.match(beforePage.stdout, /ordinary shared history/);
+    assert.match(beforePage.stdout, /@ALL is ordinary text/);
+    assert.equal(profiles.load('Marlow').cursor, beforePeekCursor,
+      'non-empty find and before pages must not move the live cursor');
+
     async function listenAndDrain(name) {
       const outputs = [];
       const first = await cli(['listen', '--connection', name]);

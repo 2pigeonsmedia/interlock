@@ -1219,9 +1219,14 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
+    const messages = page.messages.map(publicMessage);
+    if (messages.some(message => message === null)) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
     sendJson(request, response, 200, {
       ok: true,
-      messages: page.messages,
+      messages: Object.freeze(messages),
       next_before: page.next_before,
       first_id: page.first_id,
       searched_from: page.searched_from,

@@ -1097,25 +1097,24 @@ function admissionBody(profile) {
 
 function joinedOutput(stdout, profile, start = 'tip') {
   line(stdout, `Connected as ${profile.name} (${profile.product}).`);
+  if (start === 'beginning') {
+    line(stdout, 'Interlock could not read the current tip, so this seat starts at the');
+    line(stdout, 'beginning. Read earlier history if the task needs it, or skip to current.');
+  } else {
+    line(stdout, 'Your seat starts now, at the room\'s current moment. Earlier history');
+    line(stdout, 'exists and is read on demand only when the assigned task needs it.');
+  }
   line(stdout, 'Use this exact connection name for every command in this conversation:');
-  line(stdout, `  interlock history --connection ${profile.name} --drain`);
   line(stdout, `  interlock history --connection ${profile.name} --skip-to-current`);
+  line(stdout, `  interlock history --connection ${profile.name} --drain`);
   line(stdout, `  interlock say --connection ${profile.name} --file PATH`);
   line(stdout, `  interlock listen --connection ${profile.name}`);
   line(stdout, 'The contract for staying reachable:');
   line(stdout, '  listen returns after one message or about a minute; run it again every');
   line(stdout, '  time. A listener that is not re-armed is deaf.');
-  line(stdout, '  Catch up with history --drain, repeated until it reports no new');
-  line(stdout, '  messages. In a script, add --json and loop until "messages" is empty.');
-  if (start === 'beginning') {
-    line(stdout, '  Could not read the current tip; this seat starts at the beginning of');
-    line(stdout, '  the transcript. Catch up with history --drain, or skip later.');
-  } else {
-    line(stdout, '  Your seat starts at the room\'s current moment. Earlier history exists;');
-    line(stdout, '  read what the task needs - the Guide covers it.');
-    line(stdout, '  Skip with history --skip-to-current; that is not a read and does not');
-    line(stdout, '  mark the gap delivered.');
-  }
+  line(stdout, '  history --drain is deliberate catch-up, not a join step. In scripts,');
+  line(stdout, '  use --json and stop only when the messages array is empty.');
+  line(stdout, '  history --skip-to-current is not a read and marks nothing delivered.');
   line(stdout, '  Run one history or listen at a time for this connection.');
   line(stdout, '  The full shared guide is GUIDE.md, served at /help on the room address.');
 }
@@ -1228,6 +1227,13 @@ async function runJoin(args, io, dependencies = {}) {
   const parsed = joinOptions(args);
   if (!parsed) {
     line(stderr, 'interlock: usage: interlock join [--product LABEL] [--name NAME] [--url LOOPBACK_URL]');
+    return EXIT_USAGE;
+  }
+  const promptInput = io.stdin || process.stdin;
+  if (!dependencies.ask && (parsed.product === null || parsed.name === null) &&
+      (!promptInput || promptInput.isTTY !== true)) {
+    line(stderr, 'interlock: join cannot prompt without an interactive terminal.');
+    line(stderr, 'Use: interlock join --product "PRODUCT" --name NAME');
     return EXIT_USAGE;
   }
   const profileModule = dependencies.profiles || require('./client/profiles.js');

@@ -272,6 +272,25 @@ test('join options are closed and preserve only non-secret adapter hints', () =>
   ]) assert.equal(joinOptions(args), null);
 });
 
+test('join refuses a prompt path on non-interactive stdin before creating a candidate', async () => {
+  const connectionDir = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-join-pipe-')), 'profiles',
+  );
+  const stdin = Readable.from(['Codex CLI\nCodex\n']);
+  Object.defineProperty(stdin, 'isTTY', { value: false });
+  const result = await captureCommand(['join'], {
+    config: { resolveConnectionDir: () => connectionDir },
+    identity: { newAiCredential() { throw new Error('must refuse before minting'); } },
+    fetch: async () => { throw new Error('must refuse before network'); },
+  }, stdin);
+  assert.equal(result.code, EXIT_USAGE);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /cannot prompt without an interactive terminal/);
+  assert.match(result.stderr, /interlock join --product "PRODUCT" --name NAME/);
+  assert.equal(fs.existsSync(connectionDir), false,
+    'a refused prompt path must not create a connection directory or candidate');
+});
+
 test('interactive join asks for product and room name as separate facts', async () => {
   const connectionDir = path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-join-name-')), 'profiles',
@@ -374,11 +393,11 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
     /listen returns after one message or about a minute; run it again/,
     'join output must teach the listen contract, not just the command — two seats went silently deaf learning it the hard way');
   assert.match(result.stdout, /A listener that is not re-armed is deaf/);
-  assert.match(result.stdout, /add --json and loop until "messages" is empty/);
-  assert.match(result.stdout, /Your seat starts at the room's current moment/,
+  assert.match(result.stdout, /use --json and stop only when the messages array is empty/);
+  assert.match(result.stdout, /Your seat starts now, at the room's current moment/,
     'a new seat must start at current, not consume the transcript');
   assert.doesNotMatch(result.stdout, /starts at the beginning of the transcript/);
-  assert.match(result.stdout, /read what the task needs/i);
+  assert.match(result.stdout, /read on demand only when the assigned task needs it/i);
   assert.match(result.stdout, /skip-to-current[^]*not a read/i);
   assert.match(result.stdout, /one history or listen at a time/);
   assert.match(result.stdout, /GUIDE\.md, served at \/help/);
@@ -2054,7 +2073,7 @@ test('fresh join fail-open keeps cursor 0 when the head GET hiccups after Allow'
   });
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /Connected as Marlow/);
-  assert.match(result.stdout, /Could not read the current tip; this seat starts at the beginning/);
+  assert.match(result.stdout, /could not read the current tip[^]*seat starts at the[^]*beginning/i);
   assert.doesNotMatch(result.stdout, /starts at the current tip/);
   const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'marlow.json'), 'utf8'));
   assert.equal(profile.state, 'admitted');

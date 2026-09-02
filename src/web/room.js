@@ -37,6 +37,8 @@ const changePasswordForm = document.querySelector('#change-password-form');
 const changePasswordButton = document.querySelector('#change-password-button');
 const signOutOthersButton = document.querySelector('#sign-out-others-button');
 const settingsOwnerStatus = document.querySelector('#settings-owner-status');
+const enableOwnerNotificationsButton = document.querySelector('#enable-owner-notifications-button');
+const ownerNotificationsStatus = document.querySelector('#owner-notifications-status');
 const exportTranscriptButton = document.querySelector('#export-transcript-button');
 const clearTranscriptButton = document.querySelector('#clear-transcript-button');
 const archiveResult = document.querySelector('#archive-result');
@@ -1195,7 +1197,9 @@ async function runMessages(generation, signal) {
         rendered = true;
       }
       messageCursor = page.cursor;
-      roomAttention.messages(page.messages, currentUser && currentUser.name, catchingUp);
+      const owner = currentUser && Array.isArray(currentUser.roles) &&
+        currentUser.roles.includes('owner');
+      roomAttention.messages(page.messages, currentUser && currentUser.name, catchingUp, owner);
       transcript.setAttribute('aria-busy', 'false');
       setConnectionState('running');
       const sentMessageReached = InterlockTranscriptScroll.reachedMessage(
@@ -1451,12 +1455,36 @@ settingsButton.addEventListener('click', async () => {
   if (settingsButton.disabled) return;
   setSettingsStatus(settingsPeopleStatus, '');
   setSettingsStatus(settingsOwnerStatus, '');
+  const notificationPermission = roomAttention.notificationPermission();
+  enableOwnerNotificationsButton.disabled = notificationPermission !== 'default';
+  enableOwnerNotificationsButton.textContent = notificationPermission === 'granted'
+    ? 'Owner notifications enabled'
+    : (notificationPermission === 'denied'
+      ? 'Owner notifications blocked' : 'Enable owner notifications');
+  ownerNotificationsStatus.textContent = notificationPermission === 'unsupported'
+    ? 'This browser does not offer local notifications.' : '';
   setSettingsStatus(settingsTranscriptStatus, '');
   settingsDialog.showModal();
   try { await loadSettingsParticipants(); }
   catch (_) {
     setSettingsStatus(settingsPeopleStatus, 'Interlock could not load Settings people.', 'error');
   }
+});
+
+enableOwnerNotificationsButton.addEventListener('click', async () => {
+  enableOwnerNotificationsButton.disabled = true;
+  ownerNotificationsStatus.textContent = 'Waiting for your browser…';
+  const permission = await roomAttention.requestNotifications();
+  enableOwnerNotificationsButton.textContent = permission === 'granted'
+    ? 'Owner notifications enabled'
+    : (permission === 'denied'
+      ? 'Owner notifications blocked' : 'Enable owner notifications');
+  enableOwnerNotificationsButton.disabled = permission !== 'default';
+  ownerNotificationsStatus.textContent = permission === 'granted'
+    ? 'When Interlock is not in front, an @mention can show a local notification. It does not mean you read it.'
+    : (permission === 'denied'
+      ? 'Notifications are blocked in this browser. Change the site permission to enable them.'
+      : 'This browser did not enable local notifications.');
 });
 
 allowEndedReuse.addEventListener('change', async () => {

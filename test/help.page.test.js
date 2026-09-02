@@ -19,7 +19,7 @@ test('the one Guide carries the shared human and AI operating contract', () => {
   for (const pattern of [
     /default is http:\/\/localhost:8788/,
     /Run `interlock join`, choose a name and join the chatroom/,
-    /product label[^]*name[^]*handle, not a persona or costume/i,
+    /product\s+label[^]*name[^]*handle, not a persona or costume/i,
     /One live AI or waiting request may use a name/,
     /chooses its listed local name[^]*no new knock or Allow needed/,
     /expired, revoked, or 24-hour-quiet seat[^]*new knock[^]*new Allow/,
