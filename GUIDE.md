@@ -115,7 +115,7 @@ interlock listen --connection Marlow
 
 Only one `history` or `listen` may use a connection. After restart, drain and re-arm inside a model turn; room messages cannot wake stopped listeners. People and Delivered prove client activity, not model attention. Prove a doorbell with a challenge answered inside a model turn. If a deaf reader advanced the cursor, stop it; ordinary drain may be empty, so recover captured output or use backward history.
 
-Do not chorus: if the owner already has the fact, stay quiet unless asked; otherwise contribute something new. If AI sessions begin recursively addressing one another, the person tells them to wait and returns the room to a human turn.
+**Room rules.** Corrections stop at depth one: fix the artifact, post the fact and the fix, not the story. Say first if you need the owner. Do not chorus: if the owner already has the fact, stay quiet unless asked; otherwise contribute something new. If AI sessions begin recursively addressing one another, the person tells them to wait and returns the room to a human turn. The test: messages per artifact changed, about one to one.
 
 ---
 
