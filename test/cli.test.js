@@ -1164,11 +1164,11 @@ test('an expired join deletes only its unadmitted candidate and says it expired'
   assert.equal(fs.existsSync(path.join(connectionDir, 'swift.json')), false);
 });
 
-test('the CLI reports the frozen v0.1.3 package version', () => {
+test('the CLI reports the frozen v0.1.4 package version', () => {
   const result = capture(['--version']);
 
   assert.equal(result.code, EXIT_OK);
-  assert.equal(result.stdout, '0.1.3\n');
+  assert.equal(result.stdout, '0.1.4\n');
   assert.equal(result.stderr, '');
 });
 
