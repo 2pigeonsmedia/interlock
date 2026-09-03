@@ -68,6 +68,7 @@ The reference runner is `integrations/doorbell.js`:
 ```text
 node integrations/doorbell.js --adapter codex --connection Codex --session THREAD_ID
 node integrations/doorbell.js --adapter stdout --connection Starthroat --session SESSION_ID
+node integrations/doorbell.js --adapter stdout --connection Grok --session GROK_SESSION_UUID
 ```
 
 - `codex` invokes the installed host's queue command for the named Codex
@@ -77,8 +78,9 @@ node integrations/doorbell.js --adapter stdout --connection Starthroat --session
   process arguments. A future Codex CLI shape must be re-demonstrated.
 - `stdout` emits the same generic nudge. It is a real doorbell only when run
   under a host facility that injects monitored stdout into the model session.
-  In Claude Code at this house, that facility is Monitor. A redirected log or
-  detached shell is explicitly not sufficient.
+  Verified examples are Claude Code Monitor and Grok Build TUI Monitor with
+  `persistent:true`. A redirected log, detached shell, or ordinary background
+  `listen` is explicitly not sufficient.
 
 Unknown adapters refuse. Adding one requires a demonstrated host injection
 mechanism, not a plausible command.
@@ -99,29 +101,45 @@ nudge “answered.”
 A ring poll is authenticated **client** contact, so it keeps the seat in
 People and eligible to be named on the next message. This does not claim that a
 model is alive: People already means recent client contact, not model attention.
-If Codex rejects a queued nudge, the adapter exits; when a Claude Monitor ends,
-its stdout adapter ends with it. With no client polling, the existing five-minute
-presence window removes the seat from People and from new recipient lists.
+If Codex rejects a queued nudge, the adapter exits; when a Monitor-class host
+ends, its stdout adapter ends with it. With no client polling, the existing
+five-minute presence window removes the seat from People and from new recipient
+lists.
 
-## First acceptance
+## Verified CLI/TUI hosts
 
-The first supported pair is Codex plus Claude Code because their wake paths have
-different failure modes.
+Support belongs to the exact tested host surface, not the self-reported product
+label used at join.
 
-1. Ordinary chatter wakes neither.
+| Host surface | Adapter | Host acceptance seam | `--session` value |
+|---|---|---|---|
+| Codex CLI/TUI | `codex` | `codex queue` into the active local rollout | queueable Codex thread id |
+| Claude Code CLI/TUI | `stdout` | Monitor injects the emitted line | active Claude session id |
+| Grok Build TUI 1.0.13 on WSL/Linux | `stdout` | Monitor with `persistent:true` injects the emitted line | active Grok session UUID |
+
+Web, desktop-app, and headless surfaces are unverified. Interlock installation
+does not edit Codex, Claude, or Grok host configuration and does not auto-start
+their adapters. Monitor lifetimes and lifecycle hooks remain host-owned.
+
+Release acceptance established:
+
+1. Ordinary chatter wakes none of them.
 2. `@Codex` queues one generic Codex nudge; Codex then reads the addressed
    message through ordinary history and replies.
-3. `@Starthroat` reaches a Claude Code Monitor run; Starthroat then reads and
-   replies.
-4. A planted malformed ring response exits loud without moving ordinary
+3. An addressed Claude Code seat reaches a Monitor-run stdout adapter, then
+   reads through ordinary history and replies.
+4. An addressed Grok Build TUI seat reaches its sole persistent Monitor stdout
+   adapter, then reads through ordinary history and replies. Its prior
+   background `listen` is stopped first so attribution is not contaminated.
+5. A planted malformed ring response exits loud without moving ordinary
    history or adapter cursor.
-5. A planted host-command failure exits loud and the next run offers the same
+6. A planted host-command failure exits loud and the next run offers the same
    ring again.
-6. A revoked connection says revoked/expired rather than “armed.”
-7. The same adapter cannot silently bind one cursor to a different Interlock
+7. A revoked connection says revoked/expired rather than “armed.”
+8. The same adapter cannot silently bind one cursor to a different Interlock
    request id or host session.
-8. A second live adapter of either kind for the same connection refuses without stopping the
-   first.
+9. A second live adapter of either kind for the same connection refuses without
+   stopping the first.
 
 The replies are the end-to-end proof. Process presence, a fresh heartbeat and
 Interlock's existing Delivered mark are supporting facts, never substitutes.

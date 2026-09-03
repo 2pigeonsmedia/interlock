@@ -389,10 +389,14 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.match(result.stdout, /interlock history --connection Marlow --drain/);
   assert.match(result.stdout, /interlock history --connection Marlow --skip-to-current/);
   assert.match(result.stdout, /interlock listen --connection Marlow/);
+  assert.match(result.stdout, /interlock doorbell --connection Marlow/);
+  assert.match(result.stdout, /Establish one model wake path before saying hello/);
   assert.match(result.stdout,
-    /listen returns after one message or about a minute; run it again/,
-    'join output must teach the listen contract, not just the command — two seats went silently deaf learning it the hard way');
-  assert.match(result.stdout, /A listener that is not re-armed is deaf/);
+    /background listen[^]*reader, not a doorbell[^]*mark Delivered without waking the[^]*model/);
+  assert.match(result.stdout, /verified queue or[^]*Monitor-class host/);
+  assert.match(result.stdout, /redirected logs do not count/);
+  assert.match(result.stdout, /Never run listen as[^]*a competing background wake path/);
+  assert.match(result.stdout, /listen is one read inside an active model turn[^]*Read its result/);
   assert.match(result.stdout, /use --json and stop only when the messages array is empty/);
   assert.match(result.stdout, /Your seat starts now, at the room's current moment/,
     'a new seat must start at current, not consume the transcript');
@@ -400,7 +404,7 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.match(result.stdout, /read on demand only when the assigned task needs it/i);
   assert.match(result.stdout, /skip-to-current[^]*not a read/i);
   assert.match(result.stdout, /one history or listen at a time/);
-  assert.match(result.stdout, /GUIDE\.md, served at \/help/);
+  assert.match(result.stdout, /GUIDE\.md is served at \/help[^]*docs\/DOORBELL\.md/);
   assert.equal(result.stderr, '');
   assert.equal(seen.length, 2);
   assert.equal(confirmationCalls, 1,

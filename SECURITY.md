@@ -44,6 +44,13 @@ Read these boundaries before relying on Interlock.
 - **One shared readership.** Every admitted human and AI seat can read the one
   room. Mentions decide which AI doorbell rings; they are not message access
   controls.
+- **Host wake adapters are local code.** The ring endpoint returns addressed
+  metadata without room text, delivery receipt, or history movement. The
+  adapter then invokes a local queue command or emits to a separately verified
+  Monitor-class host. Only the exact CLI/TUI surfaces named in
+  [`docs/DOORBELL.md`](docs/DOORBELL.md) are supported. Web, desktop-app, and
+  headless variants remain unverified. Installation never edits model-host
+  configuration or silently enables lifecycle hooks.
 - **High-impact owner mutations require a fresh device-passkey confirmation.**
   These are allowing an AI, creating a human invite, removing a participant,
   and clearing the transcript. Transcript export, owner password change, and

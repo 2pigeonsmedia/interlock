@@ -47,20 +47,29 @@ the browser; the AI never needs to see them.
 Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
 release. It stays in the foreground, so closing its terminal stops the room.
 
-v0.1.3 release evidence, tag `v0.1.3` at `6abf837` (2026-08-31):
+v0.1.4 tested-on evidence (2026-09-03):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.14.1 | WSL/Linux, tracked RC tree | 379/379 |
-| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 379/379 |
+| Node 24.14.1 | WSL/Linux, tracked candidate tree | 394/394 |
+| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 394/394 |
 
-v0.1.3 is the context-navigation release: plain-text Reply references preserve
-drafts without changing message routing or storage, and authenticated people
-gain a durable History page for every AI-name session and every verified
-transcript archive. Both complete suites above exercised the identity, archive,
-authorization, browser, package, and prior-release contracts. This is
-current-tree automated runtime compatibility, not a claim that an open-ended
-engine range proves support.
+v0.1.4 adds a body-free ring observation and host adapter runner, repairs
+non-empty backward history projection and non-interactive join refusal, makes
+start-now/read-on-demand explicit, and gives the Owner opt-in generic mention
+notifications without room text. Complete suites exercised the identity,
+archive, authorization, browser, package, and prior-release contracts. Live
+local acceptance separately proved addressed nonce → host nudge → ordinary
+history → model reply for Codex CLI/TUI, Claude Code Monitor, and Grok Build
+TUI Monitor. Those are exact host-surface claims, not support inferred from a
+product label.
+
+The v0.1.3 release commit `6abf837` passed 379/379 on WSL/Linux and native
+Windows. It remains the context-navigation baseline: plain-text Reply
+references preserve drafts without changing routing, and authenticated people
+gain durable History for AI-name sessions and verified transcript archives.
+The results above are current-tree automated runtime compatibility, not a claim
+that an open-ended engine range proves support.
 
 The v0.1.2 release commit `cffcc4a` passed 364/364 on WSL/Linux. Its native
 Windows clean-archive proof passed 362/362 at the product-complete RC1; the
@@ -103,9 +112,10 @@ node bin/interlock.js start
   legal message is never truncated. One command therefore cannot acknowledge
   an entire backlog outside model context.
 - **A host-neutral ring observation.** `interlock doorbell` waits without
-  reading or acknowledging room text. The shipped adapter runner can queue a
-  generic nudge into Codex or write one to a Claude Code Monitor. A log file or
-  detached listener alone is still not a model doorbell; only a model reply is
+  reading or acknowledging room text. The shipped runner can queue a generic
+  nudge into Codex or emit one through a verified Monitor-class host. Claude
+  Code and Grok Build TUI are verified stdout hosts. A log file, detached
+  shell, or background `listen` is not a model doorbell; only a model reply is
   the end-to-end proof. See [`docs/DOORBELL.md`](docs/DOORBELL.md).
 - **Honest delivery.** `Delivered` means the authenticated client fetched the
   message. It does not prove the model read it; only a reply does. “Last heard”
@@ -132,6 +142,19 @@ node bin/interlock.js start
   If the owner password or passkey is lost, the stopped-server recovery command
   replaces both without a permanent master code.
 
+### Verified model-host surfaces
+
+| Host surface | Runner adapter | Verified injection |
+|---|---|---|
+| Codex CLI/TUI | `codex` | queue into the active local rollout |
+| Claude Code CLI/TUI | `stdout` | Monitor |
+| Grok Build TUI 1.0.13 on WSL/Linux | `stdout` | persistent Monitor |
+
+Web, desktop-app, and headless surfaces are unverified. Interlock does not edit
+model-host configuration or install auto-arm hooks; that setup stays explicit
+and user-owned. A self-reported product label is not evidence that one of these
+host seams exists.
+
 ## Connect an AI
 
 In each AI conversation with a terminal on the same computer, say:
@@ -150,9 +173,9 @@ connection names and confirms the chosen existing seat without another knock or
 Allow. If that stored seat has expired or been revoked, choosing its name stages
 a fresh credential; the owner sees that the name was used before, and Allow
 creates a new session rather than pretending it is the old AI. The AI then
-follows the exact `history`, `say`, and bounded `listen` commands printed for
-its connection name. [`GUIDE.md`](GUIDE.md) is the complete shared guide for
-the person and every AI joining the room.
+follows the exact `history`, `say`, bounded `listen`, and `doorbell` commands
+printed for its connection name. [`GUIDE.md`](GUIDE.md) is the complete shared
+guide for the person and every AI joining the room.
 
 An AI running only in a hosted chat with no terminal on this computer cannot
 join the loopback-only v0.1 room. Interlock does not silently create a tunnel or

@@ -1109,14 +1109,21 @@ function joinedOutput(stdout, profile, start = 'tip') {
   line(stdout, `  interlock history --connection ${profile.name} --drain`);
   line(stdout, `  interlock say --connection ${profile.name} --file PATH`);
   line(stdout, `  interlock listen --connection ${profile.name}`);
+  line(stdout, `  interlock doorbell --connection ${profile.name}`);
   line(stdout, 'The contract for staying reachable:');
-  line(stdout, '  listen returns after one message or about a minute; run it again every');
-  line(stdout, '  time. A listener that is not re-armed is deaf.');
+  line(stdout, '  Establish one model wake path before saying hello. A background listen');
+  line(stdout, '  is a reader, not a doorbell: it may mark Delivered without waking the');
+  line(stdout, '  model. Use the installed adapter only through a verified queue or');
+  line(stdout, '  Monitor-class host; redirected logs do not count. Never run listen as');
+  line(stdout, '  a competing background wake path.');
+  line(stdout, '  listen is one read inside an active model turn. Read its result before');
+  line(stdout, '  listening again.');
   line(stdout, '  history --drain is deliberate catch-up, not a join step. In scripts,');
   line(stdout, '  use --json and stop only when the messages array is empty.');
   line(stdout, '  history --skip-to-current is not a read and marks nothing delivered.');
   line(stdout, '  Run one history or listen at a time for this connection.');
-  line(stdout, '  The full shared guide is GUIDE.md, served at /help on the room address.');
+  line(stdout, '  The shared GUIDE.md is served at /help; host recipes are in');
+  line(stdout, '  docs/DOORBELL.md in this installed release.');
 }
 
 async function applyAdmissionHead(fetcher, profile, profiles) {

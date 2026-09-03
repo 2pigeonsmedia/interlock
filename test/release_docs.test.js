@@ -9,6 +9,8 @@ const ROOT = path.join(__dirname, '..');
 const NOTICE = fs.readFileSync(path.join(ROOT, 'THIRD_PARTY_NOTICES.md'), 'utf8');
 const README = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 const PROTOCOL = fs.readFileSync(path.join(ROOT, 'docs', 'PROTOCOL.md'), 'utf8');
+const DOORBELL = fs.readFileSync(path.join(ROOT, 'docs', 'DOORBELL.md'), 'utf8');
+const SECURITY = fs.readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
 const UPGRADE = fs.readFileSync(path.join(ROOT, 'UPGRADE.md'), 'utf8');
 const LOCK = require('../package-lock.json');
 
@@ -44,23 +46,29 @@ test('the upgrade path backs up first and never teaches an in-place downgrade', 
   assert.match(UPGRADE, /configured data path is absent/);
   assert.match(UPGRADE, /interlock restore --from ABSOLUTE_NEW_BACKUP_PATH/);
   assert.match(UPGRADE, /Do not delete or clean the data\s+directory/);
-  assert.match(UPGRADE, /Stop every old listening command before replacing its CLI/);
+  assert.match(UPGRADE, /Stop every old background `listen` or adapter before replacing its CLI/);
   assert.match(UPGRADE, /reload the browser tab/);
   assert.match(UPGRADE,
-    /local\s+re-arm rule before the outage.*never make an Interlock “UP” message the\s+trigger, because a stopped listener cannot hear it/is);
+    /local\s+trigger before the outage.*never make an Interlock “UP” message the trigger,\s+because a stopped wake path cannot hear it/is);
   assert.match(UPGRADE,
-    /prearranged local trigger.*upgraded `history` and `listen` without waiting for a room message.*retry the globally installed command.*resolves that command afresh.*never retain a\s+direct path to the old release/is);
+    /prearranged local\s+trigger.*upgraded `history` and establish exactly one wake path[^]*addressed nonce[^]*in-turn model reply[^]*retry the globally installed command[^]*resolves it afresh[^]*never retain a\s+direct path to the old release/is);
+  assert.match(UPGRADE, /package does not edit Codex, Claude, Grok[^]*configuration/);
+  assert.match(UPGRADE, /never run a\s+background `listen` beside it during proof/);
   assert.match(UPGRADE, /pre-repair CLI may report[^]*unreachable[^]*version mismatch/);
   assert.match(UPGRADE, /old `say` reports failure[^]*do\s+not retry[^]*already have been\s+accepted/);
   assert.doesNotMatch(UPGRADE, /rm\s+-rf|rmdir\s+\/s|git reset/i);
 });
 
-test('the tested-on list names exact runtimes without turning WSL into native Ubuntu', () => {
-  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked RC tree[^\n]*379\/379/);
+test('the tested-on list and exact host surfaces retain their evidence boundaries', () => {
+  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked candidate tree[^\n]*394\/394/);
   assert.match(README,
-    /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*379\/379/);
+    /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*394\/394/);
   assert.match(README,
-    /v0\.1\.3 is the context-navigation release[^]*plain-text Reply references[^]*durable History page/);
+    /v0\.1\.4 adds[^]*body-free ring observation[^]*non-empty backward history[^]*non-interactive join[^]*Owner[^]*notifications/);
+  assert.match(README,
+    /addressed nonce[^]*host nudge[^]*ordinary\s+history[^]*model reply[^]*Codex CLI\/TUI[^]*Claude Code Monitor[^]*Grok Build\s+TUI Monitor/);
+  assert.match(README,
+    /v0\.1\.3 release commit `6abf837` passed 379\/379[^]*context-navigation baseline/);
   assert.match(README, /v0\.1\.2 release commit `cffcc4a` passed 364\/364 on WSL\/Linux/);
   assert.match(README, /native\s+Windows clean-archive proof passed 362\/362[^]*product-complete RC1/,
     'the historical v0.1.2 Windows result must retain its exact pre-final-delta boundary');
@@ -78,6 +86,18 @@ test('the tested-on list names exact runtimes without turning WSL into native Ub
   assert.match(README, /no\s+native macOS journey was run/i);
   assert.match(README, /post-v0\.1\s+evidence goals,\s+not claims made by this tested-on table/i);
   assert.match(README, /cold-newcomer[\s\S]*journey[\s\S]*open evidence goal[\s\S]*discretion/i);
+  assert.match(README,
+    /Verified model-host surfaces[^]*Codex CLI\/TUI[^]*Claude Code CLI\/TUI[^]*Grok Build TUI 1\.0\.13 on WSL\/Linux/);
+  assert.match(README,
+    /Web, desktop-app, and headless surfaces are unverified[^]*does not edit\s+model-host configuration/);
+  assert.match(DOORBELL,
+    /Verified CLI\/TUI hosts[^]*Codex CLI\/TUI[^]*Claude Code CLI\/TUI[^]*Grok Build TUI 1\.0\.13 on WSL\/Linux/);
+  assert.match(DOORBELL,
+    /Web, desktop-app, and headless surfaces are unverified[^]*does not edit Codex, Claude, or Grok host configuration/);
+  assert.match(DOORBELL,
+    /background `listen` is stopped first so attribution is not contaminated/);
+  assert.match(SECURITY,
+    /Host wake adapters are local code[^]*without room text, delivery receipt, or history movement[^]*desktop-app[^]*unverified[^]*never edits model-host\s+configuration/);
   assert.doesNotMatch(README, /journeys remain open[^]*not yet a public release/i,
     'the tested-on boundary must not silently reopen gates moved to post-v0.1');
   assert.match(README, /After its seat ends[^]*fresh session[^]*Session 1[^]*Session 2/);
