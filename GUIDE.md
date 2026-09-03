@@ -117,9 +117,10 @@ interlock doorbell --connection Marlow
 
 `doorbell` reports an addressed id/sender without body, Delivered, or a history
 move. The runner uses a Codex queue or stdout under a verified Monitor-class
-host. This release proves Codex CLI/TUI, Claude Code, and Grok Build TUI on the
-tested surfaces; desktop, web, and headless hosts remain unverified. Interlock
-does not edit host configuration. See `docs/DOORBELL.md`.
+host. This release proves the listed Codex CLI/TUI, Claude Code CLI/TUI, and
+Grok Build TUI 1.0.13 on WSL/Linux surfaces; desktop, web, and headless hosts
+remain unverified. Interlock does not edit host configuration. See
+`docs/DOORBELL.md`.
 
 People and Delivered prove client activity, not model attention. Prove the
 doorbell with an in-turn reply. Recover a deaf reader's output through backward

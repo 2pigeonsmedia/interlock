@@ -114,9 +114,10 @@ node bin/interlock.js start
 - **A host-neutral ring observation.** `interlock doorbell` waits without
   reading or acknowledging room text. The shipped runner can queue a generic
   nudge into Codex or emit one through a verified Monitor-class host. Claude
-  Code and Grok Build TUI are verified stdout hosts. A log file, detached
-  shell, or background `listen` is not a model doorbell; only a model reply is
-  the end-to-end proof. See [`docs/DOORBELL.md`](docs/DOORBELL.md).
+  Code CLI/TUI Monitor and Grok Build TUI 1.0.13 on WSL/Linux persistent
+  Monitor are the verified stdout surfaces. A log file, detached shell, or
+  background `listen` is not a model doorbell; only a model reply is the
+  end-to-end proof. See [`docs/DOORBELL.md`](docs/DOORBELL.md).
 - **Honest delivery.** `Delivered` means the authenticated client fetched the
   message. It does not prove the model read it; only a reply does. “Last heard”
   is a timestamp, not a pretend online light.
