@@ -37,6 +37,11 @@ function ownerUser(user) {
     user.roles.includes('owner');
 }
 
+function readCsrf() {
+  try { return sessionStorage.getItem(CSRF_STORAGE_KEY); }
+  catch (_) { return null; }
+}
+
 function showSignedOut() {
   currentUser = null;
   accountLabel.textContent = 'Not signed in';
@@ -56,8 +61,10 @@ function showUser(user) {
   connectAiButton.title = owner ? '' : 'Only the owner can connect an AI';
   settingsButton.disabled = !owner;
   settingsButton.title = owner ? '' : 'Only the owner can manage this Interlock';
-  logoutButton.textContent = 'Sign out';
-  logoutButton.dataset.action = 'sign-out';
+  const canSignOut = Boolean(readCsrf());
+  logoutButton.textContent = canSignOut ? 'Sign out' : 'Sign in to sign out';
+  logoutButton.dataset.action = canSignOut ? 'sign-out' : 'sign-in';
+  logoutButton.title = canSignOut ? '' : 'This tab must sign in before it can securely sign out';
 }
 
 function showPendingCount(count) {
@@ -125,9 +132,7 @@ logoutButton.addEventListener('click', async () => {
     window.location.assign('/');
     return;
   }
-  let token = null;
-  try { token = sessionStorage.getItem(CSRF_STORAGE_KEY); }
-  catch (_) { token = null; }
+  const token = readCsrf();
   if (!token) {
     window.location.assign('/');
     return;

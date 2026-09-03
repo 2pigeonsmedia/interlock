@@ -51,8 +51,8 @@ v0.1.4 tested-on evidence (2026-09-03):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.14.1 | WSL/Linux, tracked candidate tree | 396/396 |
-| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 396/396 |
+| Node 24.14.1 | WSL/Linux, tracked candidate tree | 398/398 |
+| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 398/398 |
 
 v0.1.4 adds a body-free ring observation and host adapter runner, repairs
 non-empty backward history projection and non-interactive join refusal, makes

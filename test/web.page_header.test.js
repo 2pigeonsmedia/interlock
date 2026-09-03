@@ -144,3 +144,46 @@ test('secondary header keeps owner actions closed when no person is signed in', 
   await elements['#logout-button'].click();
   assert.deepEqual(assigned, ['/']);
 });
+
+test('secondary header identifies a signed-in non-owner without opening owner actions', async () => {
+  const calls = [];
+  const fetcher = async url => {
+    calls.push(url);
+    if (url === '/api/session') return response(200, {
+      ok: true,
+      authenticated: true,
+      user: { name: 'Rowan', roles: ['participant'] },
+    });
+    if (url === '/health') return response(200, { ok: true });
+    throw new Error('unexpected fetch: ' + url);
+  };
+  const { elements } = world(fetcher);
+  await settle();
+
+  assert.equal(elements['#account-label'].textContent, 'Rowan · Person');
+  assert.equal(elements['#connect-ai-button'].disabled, true);
+  assert.equal(elements['#settings-button'].disabled, true);
+  assert.equal(elements['#logout-button'].textContent, 'Sign out');
+  assert.equal(calls.includes('/api/ai/admissions'), false);
+});
+
+test('secondary header does not claim it can sign out without this tab csrf', async () => {
+  const fetcher = async url => {
+    if (url === '/api/session') return response(200, {
+      ok: true,
+      authenticated: true,
+      user: { name: 'Patti', roles: ['owner'] },
+    });
+    if (url === '/api/ai/admissions') return response(200, { ok: true, pending: [] });
+    if (url === '/health') return response(200, { ok: true });
+    throw new Error('unexpected fetch: ' + url);
+  };
+  const { elements, assigned } = world(fetcher, null);
+  await settle();
+
+  assert.equal(elements['#account-label'].textContent, 'Patti · Owner');
+  assert.equal(elements['#logout-button'].textContent, 'Sign in to sign out');
+  assert.match(elements['#logout-button'].title, /sign in before it can securely sign out/);
+  await elements['#logout-button'].click();
+  assert.deepEqual(assigned, ['/']);
+});
