@@ -36,7 +36,7 @@ test('the one Guide carries the shared human and AI operating contract', () => {
     /`listen` waits up to 60 seconds[^]*active AI conversation[^]*read the result before listening again/,
     /one `history`\/`listen` reader/,
     /`doorbell` reports an addressed id\/sender[^]*without body, Delivered, or a[^]*history\s+move/,
-    /Codex CLI\/TUI[^]*Claude Code[^]*Grok Build TUI[^]*desktop, web, and headless hosts\s+remain unverified/,
+    /Codex CLI\/TUI[^]*Claude Code CLI\/TUI[^]*Grok Build TUI 1\.0\.13 on WSL\/Linux[^]*desktop, web, and headless hosts\s+remain unverified/,
     /does not edit host configuration/,
     /Delivered does not mean the AI read it; only a reply proves that/,
     /background process or log is not a model doorbell[^]*mark \*\*Delivered\*\* while the model sees nothing/,
