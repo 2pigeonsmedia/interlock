@@ -20,6 +20,7 @@
         <circle class="dot-signal" cx="62" cy="28" r="4.6"/>
       </svg>
       <span class="brand-name">Interlock</span>
+      <span id="connection-state" class="connection-state checking" role="status" aria-live="polite">Local: checking…</span>
     </div>
     <nav class="page-nav" aria-label="Primary">
       <a class="nav-link" href="/">Room</a>
@@ -27,6 +28,13 @@
       <a class="nav-link" href="/help">Help</a>
       <a class="nav-link" href="/source">Source</a>
     </nav>
+    <div class="room-actions">
+      <button id="connect-ai-button" type="button" class="primary-action" disabled>Connect an AI</button>
+      <button id="settings-button" type="button" class="quiet-action" disabled>Settings</button>
+      <span class="header-rule" aria-hidden="true"></span>
+      <span id="account-label" class="account-label"></span>
+      <button id="logout-button" type="button" class="quiet-action">Sign in</button>
+    </div>
   </header>
 
   <main class="history-shell">
@@ -61,6 +69,7 @@
     </section>
   </main>
 
+  <script src="/page_header.js" defer></script>
   <script src="/history.js" defer></script>
 </body>
 </html>

@@ -9,6 +9,7 @@ const ROOT = path.join(__dirname, '..');
 const ROOM = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.html'), 'utf8');
 const ROOM_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.css'), 'utf8');
 const ROOM_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.js'), 'utf8');
+const PAGE_HEADER_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'page_header.js'), 'utf8');
 const SETUP_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'setup.css'), 'utf8');
 const RECOVERY_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'recovery.css'), 'utf8');
 const HELP = fs.readFileSync(path.join(ROOT, 'src', 'web', 'help.html'), 'utf8');
@@ -97,10 +98,8 @@ test('stale browser code receives reload guidance without disguising outages', (
 /* The header carries three different kinds of control: navigation moves you
  * between pages, an action does something here, and the account is who you
  * are. They were once one flat row sharing a single class on links and
- * buttons alike, so no stylesheet could tell them apart, and the room nested
- * its nav inside the actions while the other three shells did not -- which is
- * why the menu only half-appeared from page to page. This pins the shape, not
- * the decoration. */
+ * buttons alike, so no stylesheet could tell them apart. The full structure is
+ * shared by every room page; this pins the shape, not the decoration. */
 function primaryNav(html, name) {
   const open = html.indexOf('<nav class="page-nav" aria-label="Primary">');
   assert.notEqual(open, -1, `${name}: one labelled primary navigation`);
@@ -121,6 +120,20 @@ test('the header keeps navigation, actions, and the account separable on every p
       `${name}: exactly one link marks the current page`);
     assert.doesNotMatch(nav, /class="[^"]*(?:quiet|primary)-action/,
       `${name}: a navigation link is wearing an action class`);
+    const actionsOpen = shell.indexOf('<div class="room-actions">');
+    const actionsClose = shell.indexOf('</div>', actionsOpen);
+    assert.ok(actionsOpen !== -1 && actionsClose > actionsOpen,
+      `${name}: complete room actions group`);
+    const actions = shell.slice(actionsOpen, actionsClose);
+    for (const id of ['connect-ai-button', 'settings-button', 'account-label', 'logout-button']) {
+      assert.match(actions, new RegExp(`id="${id}"`), `${name}: ${id} appears in the top bar`);
+    }
+    assert.match(actions, /<span class="header-rule" aria-hidden="true"><\/span>/,
+      `${name}: action/account divider`);
+    assert.ok(
+      actions.indexOf('id="settings-button"') < actions.indexOf('class="header-rule"')
+        && actions.indexOf('class="header-rule"') < actions.indexOf('id="account-label"'),
+      `${name}: divider sits between actions and account`);
   }
 
   const navOpen = ROOM.indexOf('<nav class="page-nav"');
@@ -129,12 +142,6 @@ test('the header keeps navigation, actions, and the account separable on every p
   assert.ok(navOpen !== -1 && actionsOpen !== -1 && navClose < actionsOpen,
     'the room navigation closes before the actions group opens: a sibling, not a child');
 
-  assert.match(ROOM, /<span class="header-rule" aria-hidden="true"><\/span>/);
-  assert.ok(
-    ROOM.indexOf('id="settings-button"') < ROOM.indexOf('class="header-rule"')
-      && ROOM.indexOf('class="header-rule"') < ROOM.indexOf('id="account-label"'),
-    'the hairline sits between the last action and the account');
-
   assert.match(ROOM_CSS,
     /\.nav-link \{[^}]*border: 0;[^}]*border-bottom: 1px solid transparent[^}]*\}/s);
   assert.match(ROOM_CSS,
@@ -142,4 +149,16 @@ test('the header keeps navigation, actions, and the account separable on every p
   assert.match(ROOM, /id="connect-ai-button"[^>]*class="primary-action"/);
   assert.match(ROOM, /id="settings-button"[^>]*class="quiet-action"/);
   assert.match(ROOM, /id="logout-button"[^>]*class="quiet-action"/);
+  assert.doesNotMatch(ROOM + ROOM_JS + ROOM_CSS, /waiting-note/,
+    'the duplicate amber waiting text is absent from the room header');
+  for (const shell of [HELP, HISTORY_PAGE, SOURCE]) {
+    assert.match(shell, /<script src="\/page_header\.js" defer><\/script>/);
+  }
+  assert.match(PAGE_HEADER_JS,
+    /openRoomPanel\('connect-ai'\)[^]*openRoomPanel\('settings'\)/);
+  assert.match(PAGE_HEADER_JS, /fetch\('\/api\/session'/);
+  assert.match(PAGE_HEADER_JS, /fetch\('\/api\/ai\/admissions'/);
+  assert.match(PAGE_HEADER_JS, /fetch\('\/api\/logout'/);
+  assert.match(ROOM_JS,
+    /searchParams\.get\('open'\)[^]*requested === 'connect-ai'[^]*requested === 'settings'[^]*button\.click\(\)/);
 });

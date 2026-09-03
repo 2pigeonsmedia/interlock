@@ -103,7 +103,11 @@ test('Help is a plain local rendering of GUIDE.md, not a second authored guide',
   assert.match(HELP, /docs\/screenshots\/connect-an-ai\.png/);
   assert.match(SERVER, /renderGuidePage\(guideMarkdown, helpShell\)/);
   assert.match(SERVER, /'\/docs\/screenshots\/connect-an-ai\.png'/);
-  assert.doesNotMatch(HELP, /<script/i);
+  const scripts = HELP.match(/<script\b[^>]*><\/script>/gi) || [];
+  assert.equal(scripts.length, 1, 'Help loads only the shared page-header controller');
+  assert.match(scripts[0], /^<script src="\/page_header\.js" defer><\/script>$/i);
+  assert.doesNotMatch(HELP, /<script\b(?![^>]*src="\/page_header\.js")[^>]*>/i,
+    'Help has no inline or second authored script');
   assert.doesNotMatch(HELP, /\b(?:href|src|action)\s*=\s*["']https?:\/\//i,
     'Help must not load or submit to a network resource');
 

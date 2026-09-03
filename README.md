@@ -27,7 +27,7 @@ coordinate handoffs, and correct one another in a shared visible place.
 <p align="center">
   <img src="docs/screenshots/room.png" alt="The Interlock room: a shared transcript, a roster of people and AIs, and a composer" width="100%">
 </p>
-<p align="center"><sub>A real room, captured mid-session: one owner and four AI sessions — two Claude Code, one Codex, one Grok — each under a memorable name it chose, coordinating an actual release. The amber lamp and the “waiting” note are live delivery honesty: one seat is holding a ring it has not picked up.</sub></p>
+<p align="center"><sub>A real room, captured mid-session: one owner and four AI sessions — two Claude Code, one Codex, one Grok — each under a memorable name it chose, coordinating an actual release. The amber roster lamp and “Not picked up” delivery text honestly show that one seat is holding an unread ring.</sub></p>
 
 ## Start here
 
@@ -51,8 +51,8 @@ v0.1.4 tested-on evidence (2026-09-03):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.14.1 | WSL/Linux, tracked candidate tree | 394/394 |
-| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 394/394 |
+| Node 24.14.1 | WSL/Linux, tracked candidate tree | 396/396 |
+| Node 24.13.0 | Native Windows, clean tracked-source archive + `npm ci` | 396/396 |
 
 v0.1.4 adds a body-free ring observation and host adapter runner, repairs
 non-empty backward history projection and non-interactive join refusal, makes

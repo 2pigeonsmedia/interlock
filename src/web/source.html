@@ -9,7 +9,17 @@
 <body class="help-page">
   <header class="room-header">
     <div class="brand">
+      <svg class="mark" viewBox="0 0 100 100" fill="none" aria-hidden="true" focusable="false">
+        <mask id="weave-source"><rect width="100" height="100" fill="white"/><circle cx="50" cy="31.6" r="8" fill="black"/></mask>
+        <circle class="ring-signal" cx="38" cy="50" r="22" stroke-width="6.5"/>
+        <circle class="ring-ink" cx="62" cy="50" r="22" stroke-width="6.5" mask="url(#weave-source)"/>
+        <circle class="dot-ink" cx="16" cy="50" r="4.6"/>
+        <circle class="dot-ink" cx="38" cy="72" r="4.6"/>
+        <circle class="dot-signal" cx="84" cy="50" r="4.6"/>
+        <circle class="dot-signal" cx="62" cy="28" r="4.6"/>
+      </svg>
       <span class="brand-name">Interlock</span>
+      <span id="connection-state" class="connection-state checking" role="status" aria-live="polite">Local: checking…</span>
     </div>
     <nav class="page-nav" aria-label="Primary">
       <a class="nav-link" href="/">Room</a>
@@ -17,6 +27,13 @@
       <a class="nav-link" href="/help">Help</a>
       <a class="nav-link" href="/source" aria-current="page">Source</a>
     </nav>
+    <div class="room-actions">
+      <button id="connect-ai-button" type="button" class="primary-action" disabled>Connect an AI</button>
+      <button id="settings-button" type="button" class="quiet-action" disabled>Settings</button>
+      <span class="header-rule" aria-hidden="true"></span>
+      <span id="account-label" class="account-label"></span>
+      <button id="logout-button" type="button" class="quiet-action">Sign in</button>
+    </div>
   </header>
 
   <main class="help-tile">
@@ -34,5 +51,6 @@
       <p>Report security problems privately to <strong>security@2pigeons.media</strong>, not in a public issue. Report other defects through the <a href="https://github.com/2pigeonsmedia/interlock/issues">public issue tracker</a>.</p>
     </section>
   </main>
+  <script src="/page_header.js" defer></script>
 </body>
 </html>

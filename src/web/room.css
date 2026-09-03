@@ -296,8 +296,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
  * controls used to share one class -- quiet-action, on links and buttons
  * alike -- which is why no amount of styling could tell them apart.
  * `margin-right: auto` on the nav is what seats navigation beside the brand
- * and sends everything else right; on the pages that carry no actions at all,
- * the nav still lands in exactly the same place. */
+ * and sends the shared actions and account group right on every page. */
 .page-nav { display: flex; align-items: center; gap: 16px; margin-right: auto; }
 .nav-link {
   padding-bottom: 2px;
@@ -357,17 +356,6 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   box-shadow: 0 0 0 3px rgb(44 229 203 / 0.24);
 }
 .account-label { font-family: var(--font-ai); font-size: 0.78rem; color: var(--owner); }
-
-/* The amber words — who is holding an unanswered ring. Empty (and hidden)
- * whenever nothing is waiting. */
-.waiting-note {
-  margin-left: 6px;
-  font-family: var(--font-ai);
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  color: var(--wait-text);
-}
-.waiting-note:empty { display: none; }
 
 /* ---------- Connect an AI ---------- */
 
@@ -695,8 +683,8 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   padding: 0 4px;
 }
 
-/* Delivery is a record, not a promise. Waiting is amber — the same fact as
- * the roster line and the header waiting-note; words carry it, color repeats it. */
+/* Delivery is a record, not a promise. Waiting is amber — the roster line
+ * carries the words and color repeats that same fact. */
 .delivery {
   grid-column: 2;
   display: flex;

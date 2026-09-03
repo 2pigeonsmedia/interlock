@@ -60,9 +60,9 @@ test('the upgrade path backs up first and never teaches an in-place downgrade', 
 });
 
 test('the tested-on list and exact host surfaces retain their evidence boundaries', () => {
-  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked candidate tree[^\n]*394\/394/);
+  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked candidate tree[^\n]*396\/396/);
   assert.match(README,
-    /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*394\/394/);
+    /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*396\/396/);
   assert.match(README,
     /v0\.1\.4 adds[^]*body-free ring observation[^]*non-empty backward history[^]*non-interactive join[^]*Owner[^]*notifications/);
   assert.match(README,

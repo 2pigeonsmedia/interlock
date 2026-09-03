@@ -26,7 +26,7 @@ exactly one answer:
 | Hue | The one meaning | Where it appears |
 |---|---|---|
 | Teal (`--signal-bright`) | the signal path | the running lamp, the addressed-row rail and wash, keyboard focus |
-| Amber (`--wait`, `--wait-text`) | a ring not yet picked up | the delivery line, the roster fact, the roster lamp, the header waiting note — the same fact everywhere |
+| Amber (`--wait`, `--wait-text`) | a ring not yet picked up | the delivery line, the roster fact, and the roster lamp — the same fact everywhere |
 | Ice blue (`--ai`) | AI identity | AI names everywhere a name appears: roster, bylines, composer chips, and `@mentions` inside message text (one shared hue; never colour-per-AI) |
 | Violet (`--owner`) | the owner | the account chip, the owner's roster lamp |
 | White fills (`--action`) | the surface's one primary action | Send in the room; Sign in; the setup and dialog primaries. Connect an AI sits quiet in the header — the has-waiting knock glow is what makes it loud, at the one moment it matters |
@@ -41,20 +41,20 @@ text appended to the chosen name. The transcript is a **ledger, not a bubble
 thread**: byline column, text column, left-aligned for everyone. Nobody's
 messages sit on the right, because nobody owns the room.
 
-## The waiting note (and the strip that died)
+## The waiting fact (and the strip that died)
 
-Whenever any AI seat holds a ring not yet picked up, the header states it in
-words: `#waiting-note`, a polite live region — "waiting: Marlow" — derived by
-`room.js` from the same `/api/participants` facts as the roster, never from
-message text. Empty and hidden when nothing waits. Heard-and-quiet is the
-unremarkable state and gets no header words.
+Whenever an AI seat holds a ring not yet picked up, the roster states the count
+in words and repeats it with its amber presence lamp; addressed message delivery
+also says **Not picked up**. All are derived from server facts, never message
+text. The earlier amber `waiting: Marlow` header note was removed because it
+duplicated the roster while making the global menu harder to scan.
 
 For the record: v0.1.1's development built a 4px "block strip" of anonymous
 teal/amber segments under the header as the brand signature. Its first live
 owner could not read it ("it doesn't tell me who or what it means"), words
-were added, and the owner killed it the same day — the roster's presence
-lamps and this waiting note carry everything it claimed to. The lesson stays:
-an instrument whose meaning needs a legend is decoration.
+were added, and the owner killed it the same day. The roster and delivery words
+carry the state directly. The lesson stays: an instrument whose meaning needs a
+legend is decoration.
 
 ## Colour
 
@@ -123,13 +123,17 @@ tracking.
 
 ## Markup contract (what room.js renders today)
 
+Room, History, Help, and Source share the complete global header: brand and
+local-state lamp; four-page navigation; Connect an AI and Settings; then the
+account and Sign out. On secondary pages, `page_header.js` loads the signed-in
+identity and pending count. Connect and Settings return to the room and open
+the requested dialog rather than duplicating owner controls across documents.
+Owner-only actions stay disabled for signed-out people and non-owners.
+
 ```html
 <!-- header: state is derived by room.js from /health; never static copy -->
 <span id="connection-state" class="connection-state running" role="status" aria-live="polite">Local: running</span>
 <!-- class: checking | running | unavailable -->
-
-<!-- the waiting note: filled by room.js from /api/participants -->
-<span id="waiting-note" class="waiting-note" role="status" aria-live="polite">waiting: Marlow</span>
 
 <!-- one message, as room.js builds it -->
 <article class="message" data-kind="seat" data-addressed="true" data-message-id="42">
@@ -188,7 +192,7 @@ Rules the CSS relies on:
 
 One column, tiles stacked; the account label takes its own line in the header;
 message metadata wraps inline above the text without widening the viewport.
-The waiting note wraps with the brand cluster.
+The shared action group wraps beneath the brand and navigation.
 
 ## Deliberately left out
 

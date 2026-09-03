@@ -68,6 +68,7 @@ function loadAssets() {
     '/recovery.css': ['recovery.css', 'text/css; charset=utf-8'],
     '/recovery.js': ['recovery.js', 'text/javascript; charset=utf-8'],
     '/room.css': ['room.css', 'text/css; charset=utf-8'],
+    '/page_header.js': ['page_header.js', 'text/javascript; charset=utf-8'],
     '/source': ['source.html', 'text/html; charset=utf-8'],
     '/license': ['../../LICENSE', 'text/plain; charset=utf-8'],
   });

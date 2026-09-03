@@ -18,7 +18,6 @@ const inviteRedeemForm = document.querySelector('#invite-redeem-form');
 const inviteRedeemButton = document.querySelector('#invite-redeem-button');
 const accountLabel = document.querySelector('#account-label');
 const rosterList = document.querySelector('#roster-list');
-const waitingNote = document.querySelector('#waiting-note');
 const roomNotice = document.querySelector('#room-notice');
 const logoutButton = document.querySelector('#logout-button');
 const connectAiButton = document.querySelector('#connect-ai-button');
@@ -222,7 +221,6 @@ function showLogin(message = '') {
   rosterSeats = [];
   rosterKnown = false;
   rosterList.replaceChildren();
-  if (waitingNote) waitingNote.textContent = '';
   roomView.hidden = true;
   loginView.hidden = false;
   inviteRedeemForm.hidden = true;
@@ -257,6 +255,19 @@ function showRoom(user) {
     loadDeliveryChanges();
     if (owner) loadPendingAis();
   }, ROOM_FACT_INTERVAL_MS);
+  openRequestedPanel();
+}
+
+function openRequestedPanel() {
+  const url = new URL(window.location.href);
+  const requested = url.searchParams.get('open');
+  const button = requested === 'connect-ai'
+    ? connectAiButton
+    : (requested === 'settings' ? settingsButton : null);
+  if (!button || button.disabled) return;
+  url.searchParams.delete('open');
+  window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+  queueMicrotask(() => button.click());
 }
 
 async function readJson(response) {
@@ -713,18 +724,6 @@ function presenceLamp(state) {
   return lamp;
 }
 
-/* The amber state is the one that asks something of the owner, so it gets
- * words in the header ("waiting: Marlow"); heard-and-quiet is the
- * unremarkable state and stays silent. Derived from the same server
- * participant facts as the roster, never from message text. */
-function renderWaitingNote(participants) {
-  if (!waitingNote) return;
-  const names = participants
-    .filter(row => row.kind === 'seat' && row.present && row.outstanding > 0)
-    .map(row => row.name);
-  waitingNote.textContent = names.length === 0 ? '' : `waiting: ${names.join(', ')}`;
-}
-
 function renderRoster(participants) {
   rosterList.replaceChildren();
   rosterParticipants = participants.slice();
@@ -766,7 +765,6 @@ function renderRoster(participants) {
     }
     rosterList.append(card);
   }
-  renderWaitingNote(participants);
   renderMentionSuggestions();
   updateMentionPreview();
   refreshPendingDeliveryPresence();

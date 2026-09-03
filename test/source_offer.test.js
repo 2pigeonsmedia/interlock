@@ -39,12 +39,21 @@ test('the running Help surface offers source and keeps security reports private'
     'setup and the completed room must both serve the source offer');
   assert.match(RECOVERY, /'\/source': \['source\.html', 'text\/html; charset=utf-8'\]/,
     'the stopped-server recovery surface must retain the same source offer');
+  assert.equal((SERVER.match(/'\/page_header\.js': \['page_header\.js', 'text\/javascript; charset=utf-8'\]/g) || []).length, 2,
+    'setup and completed room surfaces both serve the shared page header');
+  assert.match(RECOVERY,
+    /'\/page_header\.js': \['page_header\.js', 'text\/javascript; charset=utf-8'\]/,
+    'the recovery source offer must not reference a missing local script');
   assert.match(SOURCE, /GNU Affero General Public License v3/);
   assert.match(SOURCE, /extracted release directory is the program's preferred source form/);
   assert.match(SOURCE, /href="\/license">GNU AGPLv3 license<\/a>/);
   assert.match(SOURCE, new RegExp(`href="${REPOSITORY}"`));
   assert.match(SOURCE, new RegExp(`href="${ISSUES}"`));
-  assert.doesNotMatch(SOURCE, /<script/i);
+  const scripts = SOURCE.match(/<script\b[^>]*><\/script>/gi) || [];
+  assert.equal(scripts.length, 1, 'Source loads only the shared page-header controller');
+  assert.match(scripts[0], /^<script src="\/page_header\.js" defer><\/script>$/i);
+  assert.doesNotMatch(SOURCE, /<script\b(?![^>]*src="\/page_header\.js")[^>]*>/i,
+    'Source has no inline or second authored script');
   assert.equal((SERVER.match(/'\/license': \['\.\.\/\.\.\/LICENSE', 'text\/plain; charset=utf-8'\]/g) || []).length, 2,
     'setup and the completed room must both serve the local license');
   assert.match(RECOVERY, /'\/license': \['\.\.\/\.\.\/LICENSE', 'text\/plain; charset=utf-8'\]/,
