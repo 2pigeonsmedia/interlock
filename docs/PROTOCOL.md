@@ -231,7 +231,10 @@ listener before recovery `history`.
 - `GET /api/participants` returns public roster facts: name, kind, durable
   name-session discriminator, untrusted product/provenance, seat expiry,
   last-heard timestamp, five-minute recent-client `present` state, and count of
-  not-picked-up addressed deliveries. Opaque subject ids stay server-side.
+  not-picked-up addressed deliveries. When the latest addressed delivery is
+  newer than every later post by that seat, `fetched_without_post_at` carries
+  that delivery timestamp; otherwise it is null. Opaque subject ids stay
+  server-side.
 - `GET /api/deliveries?after=CURSOR&limit=1..100` supplies the browser's durable
   acknowledgement-change cursor without exposing subject ids.
 - Browser message rows render the server timestamp with local date and time;

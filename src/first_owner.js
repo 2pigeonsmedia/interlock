@@ -216,6 +216,9 @@ function publicParticipant(participant) {
         : participant.expires_at !== null) ||
       !(participant.last_heard === null ||
         (Number.isSafeInteger(participant.last_heard) && participant.last_heard >= 0)) ||
+      !(participant.fetched_without_post_at === null ||
+        (Number.isSafeInteger(participant.fetched_without_post_at) &&
+          participant.fetched_without_post_at >= 0)) ||
       typeof participant.present !== 'boolean' ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
@@ -228,6 +231,7 @@ function publicParticipant(participant) {
     last_heard: participant.last_heard,
     present: participant.present,
     outstanding: participant.outstanding,
+    fetched_without_post_at: participant.fetched_without_post_at,
   });
 }
 

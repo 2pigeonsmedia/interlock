@@ -29,7 +29,7 @@ function isolatedCopy() {
   const dest = path.join(root, 'identity');
   fs.cpSync(MODULE_DIR, dest, {
     recursive: true,
-    filter: (src) => !src.includes('node_modules'),
+    filter: (src) => path.basename(src) !== 'node_modules',
   });
   const siblingState = path.join(root, 'state');
   const envState = path.join(root, 'environment-state');

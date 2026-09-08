@@ -124,6 +124,7 @@ test('clear verifies both copies first, preserves activity, and never reuses mes
     subject_id: RECIPIENT.subject_id,
     last_heard: addressed.ts,
     outstanding: 0,
+    fetched_without_post_at: null,
   }]);
   assert.equal(verifyArchiveSet(dataDir, result.archive_id).document.messages.length, 2);
   const after = await store.append({ text: 'new era' }, PERSON);

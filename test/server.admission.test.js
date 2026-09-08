@@ -551,15 +551,16 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       heard: Number.isSafeInteger(row.last_heard),
       present: row.present,
       outstanding: row.outstanding,
+      fetched: Number.isSafeInteger(row.fetched_without_post_at),
       subject_id: row.subject_id,
     })), [
       {
         name: 'Marlow', product: 'Codex CLI', product_provenance: 'client-reported',
-        heard: true, present: true, outstanding: 0, subject_id: undefined,
+        heard: true, present: true, outstanding: 0, fetched: true, subject_id: undefined,
       },
       {
         name: 'Quill', product: 'Codex CLI', product_provenance: 'client-reported',
-        heard: true, present: true, outstanding: 0, subject_id: undefined,
+        heard: true, present: true, outstanding: 0, fetched: true, subject_id: undefined,
       },
     ]);
     const deliveries = await call(runtime, {
@@ -583,6 +584,17 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     assert.equal(marlowOwn.code, EXIT_OK, marlowOwn.stderr);
     assert.equal(marlowOwn.stdout, 'No new messages.\n',
       'a seat never receives its own post while its cursor still advances');
+
+    const rosterAfterPost = await call(runtime, {
+      path: '/api/participants', headers: { cookie: owner.cookie },
+    });
+    assert.equal(rosterAfterPost.status, 200, rosterAfterPost.text);
+    const marlowAfterPost = rosterAfterPost.json.participants.find(row => row.name === 'Marlow');
+    const quillAfterFetch = rosterAfterPost.json.participants.find(row => row.name === 'Quill');
+    assert.equal(marlowAfterPost.fetched_without_post_at, null,
+      'Marlow posted after fetching, so the factual warning must clear');
+    assert.equal(Number.isSafeInteger(quillAfterFetch.fetched_without_post_at), true,
+      'Quill fetched Marlow\'s later post and has not posted since');
 
     assert.notEqual(profiles.load('Marlow').token, profiles.load('Quill').token);
     assert.equal(profiles.load('Marlow').cursor, profiles.load('Quill').cursor);

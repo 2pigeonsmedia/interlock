@@ -92,6 +92,7 @@ function createChatService(options) {
       return Object.freeze(Object.assign({}, row, {
         last_heard: state ? state.last_heard : null,
         outstanding: state ? state.outstanding : 0,
+        fetched_without_post_at: state ? state.fetched_without_post_at : null,
         present: isPresent(row, state, now),
       }));
     }));

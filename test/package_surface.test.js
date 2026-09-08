@@ -43,6 +43,7 @@ test('the release package surface includes newcomer/runtime proof and excludes p
     'LICENSE', 'README.md', 'package.json', 'bin/interlock.js',
     'src/server.js', 'src/codex_policy.js', 'src/web/source.html', 'identity/index.js',
     'docs/PROTOCOL.md', 'docs/CODEX_POLICY.md', 'docs/DOORBELL.md',
+    'docs/ADAPTER_AUTHORING.md',
     'integrations/doorbell.js',
     'docs/screenshots/connect-an-ai.png',
     'test/guide.test.js', 'test/source_offer.test.js', 'test/product_scope.test.js',
@@ -50,6 +51,8 @@ test('the release package surface includes newcomer/runtime proof and excludes p
   ]) {
     assert.equal(files.has(required), true, `release package surface is missing ${required}`);
   }
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.equal(packageJson.bin['interlock-doorbell'], 'integrations/doorbell.js');
   for (const privatePath of [
     'START_HERE.md',
     'CONNECT_AN_AI.md',

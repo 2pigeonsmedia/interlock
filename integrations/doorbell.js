@@ -6,11 +6,26 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const childProcess = require('node:child_process');
-const { acquireInstanceLock } = require('../src/instance_lock.js');
+const { acquireInstanceLock, inspectInstanceLock } = require('../src/instance_lock.js');
 
 const SCHEMA = 1;
+const RUNTIME_SCHEMA = 1;
 const MAX_OUTPUT = 256 * 1024;
+const MAX_STATUS_FILE = 16 * 1024;
+const FRESH_MS = 75 * 1000;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const STATE_FILE = /^doorbell-[0-9a-f]{24}\.json$/;
+
+const HELP = `Interlock doorbell adapter
+
+Usage:
+  interlock-doorbell run --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--once]
+  interlock-doorbell status --connection NAME [--adapter codex|stdout --session HOST_SESSION] [--state-dir ABSOLUTE_PATH] [--json]
+  interlock-doorbell guide
+
+The legacy direct form remains supported:
+  node integrations/doorbell.js --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--once]
+`;
 
 function fail(message) {
   process.stderr.write(`interlock doorbell adapter: ${message}\n`);
@@ -20,6 +35,12 @@ function fail(message) {
 function validText(value, max = 160) {
   return typeof value === 'string' && value.length > 0 &&
     Buffer.byteLength(value, 'utf8') <= max &&
+    !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
+}
+
+function validAbsolutePath(value) {
+  return typeof value === 'string' && path.isAbsolute(value) &&
+    Buffer.byteLength(value, 'utf8') <= 4096 &&
     !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
 }
 
@@ -47,8 +68,33 @@ function parseArgs(argv) {
   }
   if (!['codex', 'stdout'].includes(result.adapter) ||
       !validText(result.connection, 80) || !validText(result.session) ||
-      (result.stateDir !== null && (!path.isAbsolute(result.stateDir) ||
-        result.stateDir.includes('\0')))) return null;
+      (result.stateDir !== null && !validAbsolutePath(result.stateDir))) return null;
+  return Object.freeze(result);
+}
+
+function parseStatusArgs(argv) {
+  const result = { adapter: null, connection: null, session: null, stateDir: null, json: false };
+  const seen = new Set();
+  for (let index = 0; index < argv.length; index += 1) {
+    const flag = argv[index];
+    if (flag === '--json') {
+      if (seen.has(flag)) return null;
+      seen.add(flag);
+      result.json = true;
+      continue;
+    }
+    if (!['--adapter', '--connection', '--session', '--state-dir'].includes(flag) ||
+        seen.has(flag) || typeof argv[index + 1] !== 'string' ||
+        argv[index + 1].length === 0) return null;
+    seen.add(flag);
+    result[flag === '--state-dir' ? 'stateDir' : flag.slice(2)] = argv[index + 1];
+    index += 1;
+  }
+  if (!validText(result.connection, 80) ||
+      !(result.adapter === null || ['codex', 'stdout'].includes(result.adapter)) ||
+      !(result.session === null || validText(result.session)) ||
+      ((result.adapter === null) !== (result.session === null)) ||
+      (result.stateDir !== null && !validAbsolutePath(result.stateDir))) return null;
   return Object.freeze(result);
 }
 
@@ -118,11 +164,16 @@ function atomicJson(file, value) {
   }
 }
 
-function stateFile(options) {
+function adapterStateName(adapter, connection, session) {
   const key = crypto.createHash('sha256')
-    .update(`${options.adapter}\0${options.connection}\0${options.session}`)
+    .update(`${adapter}\0${connection}\0${session}`)
     .digest('hex').slice(0, 24);
-  return path.join(options.stateDir || defaultStateDir(), `doorbell-${key}.json`);
+  return `doorbell-${key}.json`;
+}
+
+function stateFile(options) {
+  return path.join(options.stateDir || defaultStateDir(),
+    adapterStateName(options.adapter, options.connection, options.session));
 }
 
 function lockDirectory(options, stateDir) {
@@ -130,6 +181,10 @@ function lockDirectory(options, stateDir) {
     .update(options.connection)
     .digest('hex').slice(0, 24);
   return path.join(stateDir, '.locks', key);
+}
+
+function runtimeFile(options, stateDir) {
+  return path.join(lockDirectory(options, stateDir), 'runtime.json');
 }
 
 function loadState(file, options) {
@@ -151,6 +206,188 @@ function loadState(file, options) {
     throw new Error(`state does not match this adapter session: ${file}`);
   }
   return state;
+}
+
+function readStatusJson(file) {
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); }
+  catch (error) {
+    if (error && error.code === 'ENOENT') return { kind: 'absent', value: null };
+    throw error;
+  }
+  if (Buffer.byteLength(raw, 'utf8') > MAX_STATUS_FILE) return { kind: 'invalid', value: null };
+  try { return { kind: 'value', value: JSON.parse(raw) }; }
+  catch (_) { return { kind: 'invalid', value: null }; }
+}
+
+function validRuntime(value) {
+  const runtime = exactObject(value, [
+    'schema', 'adapter', 'connection', 'session', 'pid', 'started_at',
+    'updated_at', 'state_file',
+  ]);
+  return runtime && runtime.schema === RUNTIME_SCHEMA &&
+    ['codex', 'stdout'].includes(runtime.adapter) && validText(runtime.connection, 80) &&
+    validText(runtime.session) && Number.isSafeInteger(runtime.pid) && runtime.pid > 1 &&
+    Number.isSafeInteger(runtime.started_at) && runtime.started_at >= 0 &&
+    Number.isSafeInteger(runtime.updated_at) && runtime.updated_at >= runtime.started_at &&
+    typeof runtime.state_file === 'string' && STATE_FILE.test(runtime.state_file) &&
+    runtime.state_file === adapterStateName(
+      runtime.adapter, runtime.connection, runtime.session) ? runtime : null;
+}
+
+function runtimeValue(options, file, clock = Date.now) {
+  const now = clock();
+  return {
+    schema: RUNTIME_SCHEMA,
+    adapter: options.adapter,
+    connection: options.connection,
+    session: options.session,
+    pid: process.pid,
+    started_at: now,
+    updated_at: now,
+    state_file: path.basename(file),
+  };
+}
+
+function recoveryCommand(options, runtime, stateDir) {
+  const adapter = runtime ? runtime.adapter : options.adapter;
+  const session = runtime ? runtime.session : options.session;
+  if (!adapter || !session) return ['interlock-doorbell', 'guide'];
+  return [
+    'interlock-doorbell', 'run', '--adapter', adapter, '--connection', options.connection,
+    '--session', session, '--state-dir', stateDir,
+  ];
+}
+
+function statusResult(options, overrides) {
+  return Object.assign({
+    ok: true,
+    state: 'absent',
+    adapter: null,
+    connection: options.connection,
+    session: null,
+    pid: null,
+    started_at: null,
+    updated_at: null,
+    state_file: null,
+    state_dir: options.stateDir || defaultStateDir(),
+    detail: '',
+    recovery: null,
+  }, overrides);
+}
+
+function inspectStatus(options, clock = Date.now) {
+  const stateDir = options.stateDir || defaultStateDir();
+  const lockDir = lockDirectory(options, stateDir);
+  const runtimeRead = readStatusJson(runtimeFile(options, stateDir));
+  let lock;
+  try { lock = inspectInstanceLock({ dataDir: lockDir }); }
+  catch (_) {
+    return statusResult(options, {
+      state: 'mismatch', state_dir: stateDir,
+      detail: 'adapter ownership evidence is invalid',
+      recovery: recoveryCommand(options, null, stateDir),
+    });
+  }
+  if (runtimeRead.kind === 'absent') {
+    const absent = lock.state === 'absent';
+    return statusResult(options, {
+      state: absent ? 'absent' : 'mismatch', state_dir: stateDir,
+      detail: absent ? 'no adapter runtime is recorded' :
+        'adapter ownership exists without a runtime manifest',
+      recovery: recoveryCommand(options, null, stateDir),
+    });
+  }
+  const runtime = runtimeRead.kind === 'value' ? validRuntime(runtimeRead.value) : null;
+  if (!runtime) {
+    return statusResult(options, {
+      state: 'mismatch', state_dir: stateDir,
+      detail: 'runtime manifest is invalid',
+      recovery: recoveryCommand(options, null, stateDir),
+    });
+  }
+  const common = {
+    adapter: runtime.adapter,
+    session: runtime.session,
+    pid: runtime.pid,
+    started_at: runtime.started_at,
+    updated_at: runtime.updated_at,
+    state_file: runtime.state_file,
+    state_dir: stateDir,
+  };
+  if ((options.adapter && options.adapter !== runtime.adapter) ||
+      (options.session && options.session !== runtime.session)) {
+    return statusResult(options, Object.assign(common, {
+      state: 'mismatch', detail: 'requested adapter facts do not match the runtime manifest',
+      recovery: recoveryCommand(options, runtime, stateDir),
+    }));
+  }
+  if (lock.state === 'unverifiable') {
+    return statusResult(options, Object.assign(common, {
+      state: 'unverifiable', detail: 'the current platform cannot verify the recorded owner',
+      recovery: null,
+    }));
+  }
+  if (lock.state === 'absent' || lock.state === 'stale') {
+    return statusResult(options, Object.assign(common, {
+      state: 'stale', detail: 'the recorded adapter owner is no longer active',
+      recovery: recoveryCommand(options, runtime, stateDir),
+    }));
+  }
+  if (!lock.owner || lock.owner.pid !== runtime.pid) {
+    return statusResult(options, Object.assign(common, {
+      state: 'mismatch', detail: 'runtime manifest and ownership pid disagree',
+      recovery: null,
+    }));
+  }
+  const statePath = path.join(stateDir, runtime.state_file);
+  const stateRead = readStatusJson(statePath);
+  if (stateRead.kind === 'absent') {
+    const age = clock() - runtime.started_at;
+    return statusResult(options, Object.assign(common, {
+      state: age >= -60_000 && age <= FRESH_MS ? 'starting' : 'mismatch',
+      detail: age >= -60_000 && age <= FRESH_MS ?
+        'adapter owns the connection and is completing its first bounded poll' :
+        'active adapter has not committed state inside the startup window',
+      recovery: null,
+    }));
+  }
+  let state;
+  try {
+    state = loadState(statePath, runtime);
+  } catch (_) {
+    return statusResult(options, Object.assign(common, {
+      state: 'mismatch', detail: 'adapter state does not match the runtime manifest',
+      recovery: null,
+    }));
+  }
+  const age = clock() - fs.statSync(statePath).mtimeMs;
+  if (age < -60_000 || age > FRESH_MS) {
+    return statusResult(options, Object.assign(common, {
+      state: 'mismatch', detail: 'active adapter state is outside the freshness window',
+      recovery: null,
+    }));
+  }
+  return statusResult(options, Object.assign(common, {
+    state: 'ready', updated_at: Math.max(runtime.updated_at, Math.trunc(fs.statSync(statePath).mtimeMs)),
+    detail: `adapter recently completed a successful poll at cursor ${state.cursor}`,
+    recovery: null,
+  }));
+}
+
+function printStatus(result, json) {
+  if (json) {
+    process.stdout.write(JSON.stringify(result) + '\n');
+  } else {
+    process.stdout.write(`${result.connection}: ${result.state} — ${result.detail}\n`);
+    if (result.recovery) {
+      const directlyPrintable = result.recovery.every(part => /^[A-Za-z0-9_./:-]+$/.test(part));
+      process.stdout.write(directlyPrintable
+        ? `Next: ${result.recovery.join(' ')}\n`
+        : `Next arguments (do not evaluate as shell text): ${JSON.stringify(result.recovery)}\n`);
+    }
+  }
+  return result.state === 'starting' || result.state === 'ready' ? 0 : 1;
 }
 
 function saveFailure(stateDir, stdout, stderr) {
@@ -180,11 +417,11 @@ function nudge(options, rings) {
     `Run interlock history --connection ${options.connection} to read and acknowledge the room.`;
 }
 
-function main() {
-  const options = parseArgs(process.argv.slice(2));
+function runAdapter(argv) {
+  const options = parseArgs(argv);
   if (!options) {
-    fail('usage: node integrations/doorbell.js --adapter codex|stdout ' +
-      '--connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--once]');
+    fail('usage: interlock-doorbell run --adapter codex|stdout --connection NAME ' +
+      '--session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--once]');
     return;
   }
   const file = stateFile(options);
@@ -212,6 +449,12 @@ function main() {
   }
 
   try {
+    let runtime = runtimeValue(options, file);
+    try { atomicJson(runtimeFile(options, stateDir), runtime); }
+    catch (error) {
+      fail(`runtime manifest could not be committed: ${error.message}`);
+      return;
+    }
     while (true) {
       const args = ['doorbell', '--connection', options.connection, '--json'];
       if (after !== null) args.push('--after', String(after));
@@ -248,19 +491,26 @@ function main() {
           fs.writeSync(process.stdout.fd, message + '\n');
         }
       }
-      try {
-        const nextState = {
+      const nextState = {
           schema: SCHEMA,
           adapter: options.adapter,
           connection: options.connection,
           session: options.session,
           connection_request_id: page.connection_request_id,
           cursor: page.cursor,
-        };
+      };
+      try {
         atomicJson(file, nextState);
         state = nextState;
       } catch (error) {
         fail(`host accepted the nudge but cursor commit failed; a duplicate is possible: ${error.message}`);
+        return;
+      }
+      try {
+        runtime = Object.assign({}, runtime, { updated_at: Date.now() });
+        atomicJson(runtimeFile(options, stateDir), runtime);
+      } catch (error) {
+        fail(`adapter cursor committed but runtime status update failed: ${error.message}`);
         return;
       }
       after = page.cursor;
@@ -272,4 +522,47 @@ function main() {
   }
 }
 
-main();
+function printGuide() {
+  const guide = path.join(__dirname, '..', 'docs', 'ADAPTER_AUTHORING.md');
+  try { process.stdout.write(fs.readFileSync(guide, 'utf8')); }
+  catch (error) { fail(`the installed adapter-authoring guide is unavailable (${error.code || 'unknown'})`); }
+}
+
+function main(argv = process.argv.slice(2)) {
+  if (argv.length === 0 || (argv.length === 1 && ['--help', '-h', 'help'].includes(argv[0]))) {
+    process.stdout.write(HELP);
+    return;
+  }
+  if (argv[0] === 'run') {
+    runAdapter(argv.slice(1));
+    return;
+  }
+  if (argv[0] === 'status') {
+    const options = parseStatusArgs(argv.slice(1));
+    if (!options) {
+      fail('usage: interlock-doorbell status --connection NAME ' +
+        '[--adapter codex|stdout --session HOST_SESSION] ' +
+        '[--state-dir ABSOLUTE_PATH] [--json]');
+      return;
+    }
+    try { process.exitCode = printStatus(inspectStatus(options), options.json); }
+    catch (error) { fail(`status could not inspect adapter state (${error.code || 'unknown'})`); }
+    return;
+  }
+  if (argv.length === 1 && argv[0] === 'guide') {
+    printGuide();
+    return;
+  }
+  runAdapter(argv);
+}
+
+if (require.main === module) main();
+
+module.exports = Object.freeze({
+  FRESH_MS,
+  HELP,
+  inspectStatus,
+  main,
+  parseArgs,
+  parseStatusArgs,
+});

@@ -12,14 +12,50 @@ const PROTOCOL = fs.readFileSync(path.join(ROOT, 'docs', 'PROTOCOL.md'), 'utf8')
 const DOORBELL = fs.readFileSync(path.join(ROOT, 'docs', 'DOORBELL.md'), 'utf8');
 const SECURITY = fs.readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
 const UPGRADE = fs.readFileSync(path.join(ROOT, 'UPGRADE.md'), 'utf8');
-const LOCK = require('../package-lock.json');
+const LOCK_PATH = path.join(ROOT, 'package-lock.json');
 
 function dependencyName(packagePath) {
   return packagePath.slice(packagePath.lastIndexOf('node_modules/') + 'node_modules/'.length);
 }
 
-test('third-party notices cover every exact production package in the lockfile', () => {
-  const dependencies = Object.entries(LOCK.packages)
+function installedDependencies() {
+  const dependencies = [];
+  function visit(nodeModules) {
+    if (!fs.existsSync(nodeModules)) return;
+    for (const entry of fs.readdirSync(nodeModules, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('@')) {
+        for (const child of fs.readdirSync(path.join(nodeModules, entry.name), {
+          withFileTypes: true,
+        })) {
+          if (child.isDirectory()) visitPackage(path.join(nodeModules, entry.name, child.name));
+        }
+      } else {
+        visitPackage(path.join(nodeModules, entry.name));
+      }
+    }
+  }
+  function visitPackage(directory) {
+    const manifest = path.join(directory, 'package.json');
+    if (!fs.existsSync(manifest)) return;
+    const details = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+    if (details.name !== 'identity') {
+      dependencies.push({
+        name: details.name,
+        version: details.version,
+        license: details.license,
+      });
+    }
+    visit(path.join(directory, 'node_modules'));
+  }
+  visit(path.join(ROOT, 'node_modules'));
+  return dependencies;
+}
+
+function productionDependencies() {
+  if (!fs.existsSync(LOCK_PATH)) return installedDependencies();
+  const lock = JSON.parse(fs.readFileSync(LOCK_PATH, 'utf8'));
+  return Object.entries(lock.packages)
     .filter(([packagePath, details]) => packagePath.includes('node_modules/') &&
       packagePath !== 'node_modules/identity' && details.dev !== true)
     .map(([packagePath, details]) => ({
@@ -27,6 +63,10 @@ test('third-party notices cover every exact production package in the lockfile',
       version: details.version,
       license: details.license,
     }));
+}
+
+test('third-party notices cover the source lock or exact installed production graph', () => {
+  const dependencies = productionDependencies();
   assert.ok(dependencies.length > 0);
   for (const dependency of dependencies) {
     const row = `| \`${dependency.name}\` | \`${dependency.version}\` | ${dependency.license} |`;

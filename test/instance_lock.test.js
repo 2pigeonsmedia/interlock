@@ -13,6 +13,7 @@ const {
   LOCK_FILENAME,
   SCHEMA,
   acquireInstanceLock,
+  inspectInstanceLock,
 } = require('../src/instance_lock.js');
 
 function freshDir() {
@@ -50,6 +51,32 @@ test('one owner acquires, a second refuses, and release removes only its lock', 
   assert.deepEqual(first.release(), { released: true });
   assert.equal(fs.existsSync(first.path), false);
   assert.deepEqual(first.release(), { released: false });
+});
+
+test('inspection reports absent, active, stale, and unverifiable without mutation', async () => {
+  const dataDir = freshDir();
+  assert.deepEqual(inspectInstanceLock({ dataDir }), { state: 'absent', owner: null });
+
+  const active = acquireInstanceLock({ dataDir });
+  assert.deepEqual(inspectInstanceLock({ dataDir }), {
+    state: 'active', owner: active.owner,
+  });
+  active.release();
+
+  const modulePath = path.resolve(__dirname, '..', 'src', 'instance_lock.js');
+  const childCode = [
+    "const { acquireInstanceLock } = require(process.argv[2]);",
+    'acquireInstanceLock({ dataDir: process.argv[1] });',
+  ].join('');
+  const child = spawn(process.execPath, ['-e', childCode, dataDir, modulePath]);
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0);
+  assert.equal(inspectInstanceLock({ dataDir }).state, 'stale');
+
+  fs.writeFileSync(lockPath(dataDir), JSON.stringify(record({
+    platform: process.platform === 'win32' ? 'linux' : 'win32',
+  })) + '\n');
+  assert.equal(inspectInstanceLock({ dataDir }).state, 'unverifiable');
 });
 
 test('an abruptly exited same-host process leaves a stale lock that is atomically recovered', async () => {

@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -38,7 +39,11 @@ const fs = require('node:fs');
 const delay = Number(process.env.FAKE_INTERLOCK_DELAY || 0);
 if (delay > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
 fs.writeFileSync(process.env.FAKE_INTERLOCK_ARGS, JSON.stringify(process.argv.slice(2)));
-process.stdout.write(fs.readFileSync(process.env.FAKE_RING_PAGE, 'utf8'));
+const page = JSON.parse(fs.readFileSync(process.env.FAKE_RING_PAGE, 'utf8'));
+const afterIndex = process.argv.indexOf('--after');
+const after = afterIndex >= 0 ? Number(process.argv[afterIndex + 1]) : -1;
+if (after >= page.cursor) page.rings = [];
+process.stdout.write(JSON.stringify(page) + '\\n');
 `, { mode: 0o700 });
   fs.writeFileSync(host, `#!/usr/bin/env node
 const fs = require('node:fs');
@@ -80,6 +85,28 @@ function run(world, adapter = 'codex') {
     encoding: 'utf8',
     env: runnerEnv(world),
   });
+}
+
+function runCommand(world, args) {
+  return childProcess.spawnSync(process.execPath, [RUNNER, ...args], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: runnerEnv(world),
+  });
+}
+
+function statusArgs(world) {
+  return ['status', '--connection', 'Marlow', '--state-dir', world.stateDir, '--json'];
+}
+
+function runtimeFile(directory) {
+  const lockRoot = path.join(directory, '.locks');
+  if (!fs.existsSync(lockRoot)) return null;
+  for (const owner of fs.readdirSync(lockRoot)) {
+    const candidate = path.join(lockRoot, owner, 'runtime.json');
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 function onlyStateFile(directory) {
@@ -151,6 +178,140 @@ test('stdout adapter emits one monitored nudge and persists the cursor', () => {
   const state = JSON.parse(fs.readFileSync(path.join(world.stateDir,
     onlyStateFile(world.stateDir)), 'utf8'));
   assert.equal(state.cursor, 9);
+});
+
+test('the public run verb writes a closed runtime manifest and preserves legacy invocation', () => {
+  const world = fixture(ringPage());
+  const result = runCommand(world, [
+    'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir, '--once',
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Interlock rang for Marlow: message 9 from Ana/);
+  const manifestPath = runtimeFile(world.stateDir);
+  assert.ok(manifestPath, 'run must publish a runtime manifest before status can be truthful');
+  const runtime = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  assert.deepEqual(Object.keys(runtime).sort(), [
+    'adapter', 'connection', 'pid', 'schema', 'session', 'started_at',
+    'state_file', 'updated_at',
+  ]);
+  assert.equal(runtime.schema, 1);
+  assert.equal(runtime.adapter, 'stdout');
+  assert.equal(runtime.connection, 'Marlow');
+  assert.equal(runtime.session, 'host-session-1');
+  assert.equal(runtime.pid > 1, true);
+  assert.equal(runtime.started_at <= runtime.updated_at, true);
+  assert.match(runtime.state_file, /^doorbell-[0-9a-f]{24}\.json$/);
+
+  const legacy = run(world, 'stdout');
+  assert.equal(legacy.status, 0, legacy.stderr);
+});
+
+test('help and guide are public executable surfaces', () => {
+  const world = fixture(ringPage());
+  const help = runCommand(world, ['--help']);
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /interlock-doorbell run/);
+  assert.match(help.stdout, /interlock-doorbell status/);
+  assert.match(help.stdout, /interlock-doorbell guide/);
+
+  const guide = runCommand(world, ['guide']);
+  assert.equal(guide.status, 0, guide.stderr);
+  assert.match(guide.stdout, /Build a host bridge/);
+  assert.match(guide.stdout, /unsupported host/);
+});
+
+test('status reports absent, starting, ready, then stale without private hooks', async () => {
+  const absent = fixture(ringPage());
+  const missing = runCommand(absent, statusArgs(absent));
+  assert.equal(missing.status, 1);
+  assert.equal(JSON.parse(missing.stdout).state, 'absent');
+
+  const world = fixture(ringPage());
+  world.delay = 500;
+  const child = childProcess.spawn(process.execPath, [
+    RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir,
+  ], {
+    cwd: ROOT,
+    env: runnerEnv(world),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  await waitForAdapterLock(world.stateDir);
+  for (let attempt = 0; attempt < 100 && runtimeFile(world.stateDir) === null; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  const starting = runCommand(world, statusArgs(world));
+  assert.equal(starting.status, 0, starting.stderr);
+  assert.equal(JSON.parse(starting.stdout).state, 'starting');
+
+  for (let attempt = 0; attempt < 200 && !onlyStateFile(world.stateDir); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  const ready = runCommand(world, statusArgs(world));
+  assert.equal(ready.status, 0, ready.stderr);
+  assert.equal(JSON.parse(ready.stdout).state, 'ready');
+
+  child.kill();
+  await once(child, 'exit');
+  const stale = runCommand(world, statusArgs(world));
+  assert.equal(stale.status, 1);
+  const staleStatus = JSON.parse(stale.stdout);
+  assert.equal(staleStatus.state, 'stale');
+  assert.deepEqual(staleStatus.recovery.slice(0, 2), ['interlock-doorbell', 'run']);
+});
+
+test('status reports mismatched and unverifiable evidence without mutating ownership', () => {
+  const world = fixture(ringPage());
+  const completed = runCommand(world, [
+    'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir, '--once',
+  ]);
+  assert.equal(completed.status, 0, completed.stderr);
+  const manifestPath = runtimeFile(world.stateDir);
+  fs.writeFileSync(manifestPath, '{"bad":true}\n');
+  const mismatched = runCommand(world, statusArgs(world));
+  assert.equal(mismatched.status, 1);
+  assert.equal(JSON.parse(mismatched.stdout).state, 'mismatch');
+
+  const repaired = runCommand(world, [
+    'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir, '--once',
+  ]);
+  assert.equal(repaired.status, 0, repaired.stderr);
+  const lockDir = path.dirname(manifestPath);
+  const lockPath = path.join(lockDir, 'instance.lock');
+  const foreign = JSON.stringify({
+    schema: 1,
+    pid: process.pid,
+    platform: process.platform === 'win32' ? 'linux' : 'win32',
+    hostname: os.hostname(),
+    started_at: Date.now(),
+    instance_id: crypto.randomUUID(),
+  }) + '\n';
+  fs.writeFileSync(lockPath, foreign, { mode: 0o600 });
+  const unverifiable = runCommand(world, statusArgs(world));
+  assert.equal(unverifiable.status, 1);
+  assert.equal(JSON.parse(unverifiable.stdout).state, 'unverifiable');
+  assert.equal(fs.readFileSync(lockPath, 'utf8'), foreign,
+    'status must never reap or rewrite an unverifiable owner');
+});
+
+test('status option grammar is closed and does not reflect hostile input', () => {
+  const world = fixture(ringPage());
+  for (const args of [
+    ['status'],
+    ['status', '--connection', 'Marlow', '--adapter', 'stdout'],
+    ['status', '--connection', 'Marlow', '--session', 'host-session-1'],
+    ['status', '--connection', 'Marlow', '--json', '--json'],
+    ['status', '--connection', 'Marlow', '--unknown', 'hostile-value'],
+    ['status', '--connection', 'Marlow', '--state-dir', '/tmp/hostile\u001bvalue'],
+  ]) {
+    const result = runCommand(world, args);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /usage: interlock-doorbell status/);
+    assert.equal(result.stderr.includes('hostile-value'), false);
+  }
 });
 
 test('malformed ring output is preserved and cannot advance adapter state', () => {

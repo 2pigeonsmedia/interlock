@@ -14,8 +14,11 @@ test('the private foundation admits Node 24 and newer without claiming an untest
   assert.ok(Number(process.versions.node.split('.')[0]) >= 24);
 });
 
-test('the package exposes only the portable interlock CLI', () => {
-  assert.deepEqual(packageJson.bin, { interlock: 'bin/interlock.js' });
+test('the package exposes only the portable room and doorbell CLIs', () => {
+  assert.deepEqual(packageJson.bin, {
+    interlock: 'bin/interlock.js',
+    'interlock-doorbell': 'integrations/doorbell.js',
+  });
 });
 
 test('the first-party identity package carries the root project license', () => {

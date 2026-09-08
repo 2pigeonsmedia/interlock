@@ -272,8 +272,28 @@ function acquireInstanceLock(options) {
   });
 }
 
+function inspectInstanceLock(options) {
+  const input = closedObject(options, ['dataDir']);
+  if (!input) fail('invalid-options');
+  if (typeof input.dataDir !== 'string' || input.dataDir.includes('\0') ||
+      !path.isAbsolute(input.dataDir)) fail('invalid-data-dir');
+  let dataStat;
+  try { dataStat = fs.statSync(input.dataDir); }
+  catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return Object.freeze({ state: 'absent', owner: null });
+    }
+    throw error;
+  }
+  if (!dataStat.isDirectory()) fail('invalid-data-dir');
+  const existing = readRecord(path.join(input.dataDir, LOCK_FILENAME));
+  if (existing === null) return Object.freeze({ state: 'absent', owner: null });
+  return Object.freeze({ state: ownerState(existing.record), owner: existing.record });
+}
+
 module.exports = Object.freeze({
   LOCK_FILENAME,
   SCHEMA,
   acquireInstanceLock,
+  inspectInstanceLock,
 });

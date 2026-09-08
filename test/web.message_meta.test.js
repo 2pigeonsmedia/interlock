@@ -67,8 +67,13 @@ test('delivery state is written as DOM text on first render and live client deli
 
 test('People excludes quiet AI clients without deleting their managed connection', () => {
   assert.match(room,
-    /'expires_at', 'last_heard', 'present', 'outstanding'/,
+    /'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at'/,
     'the browser must require the server-authored presence fact');
+  assert.match(room,
+    /`Fetched \$\{elapsed\} · no post since`/,
+    'People must expose the exact delivery-without-later-post fact');
+  assert.doesNotMatch(room, /participantFact\([^)]*Fetched[^)]*(?:deaf|ignored|read|answered|online)/i,
+    'the fetched-without-post fact must not infer model attention');
   assert.match(room,
     /rosterSeats = participants\.filter\(row => row\.kind === 'seat' && row\.present\)/,
     'only present seats may be offered as new mention recipients');

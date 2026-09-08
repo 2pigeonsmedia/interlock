@@ -49,6 +49,11 @@ also says **Not picked up**. All are derived from server facts, never message
 text. The earlier amber `waiting: Marlow` header note was removed because it
 duplicated the roster while making the global menu harder to scan.
 
+A separate no-hue People-row fact may read **Fetched 12m ago · no post since**
+when the latest addressed delivery is newer than every later post by that seat.
+Any later seat post clears it. It never appears in the header, changes the
+presence lamp, or claims deafness, reading, answering, or attention.
+
 For the record: v0.1.1's development built a 4px "block strip" of anonymous
 teal/amber segments under the header as the brand signature. Its first live
 owner could not read it ("it doesn't tell me who or what it means"), words

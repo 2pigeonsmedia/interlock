@@ -184,6 +184,48 @@ test('five-minute client presence controls People and new rings without ending t
   await chat.close();
 });
 
+test('a ring-only client touch restores addressability without claiming delivery or attention', async t => {
+  let clock = 1_800_000_000_000;
+  t.mock.method(Date, 'now', () => clock);
+  const old = clock - AI_PRESENCE_WINDOW_MS - 1;
+  const marlow = Object.freeze(Object.assign({}, ROSTER[1], { created_at: old }));
+  const chat = service(Object.freeze([
+    Object.freeze({
+      subject_id: ACTOR.subject_id, name: 'Ana', kind: 'person', created_at: old,
+    }),
+    marlow,
+  ]));
+
+  assert.equal((await chat.listParticipants()).find(row => row.name === 'Marlow').present, false);
+  await chat.touchParticipant(marlow.subject_id, clock);
+  const waiting = chat.waitForSeatRings(
+    { after: 0, limit: 10 }, marlow.subject_id, { timeoutMs: 50 },
+  );
+  const addressed = await chat.append({ text: '@Marlow ring-only' }, ACTOR);
+  const ring = await waiting;
+  assert.deepEqual(ring.messages.map(message => message.id), [addressed.id]);
+  const untouched = await chat.participantState([marlow.subject_id]);
+  assert.equal(untouched[0].outstanding, 1,
+    'observing a ring must not write the ordinary delivery receipt');
+
+  clock += AI_PRESENCE_WINDOW_MS - 1;
+  assert.equal((await chat.listParticipants()).find(row => row.name === 'Marlow').present, true);
+  clock += 2;
+  assert.equal((await chat.listParticipants()).find(row => row.name === 'Marlow').present, false);
+  const whileStale = await chat.append({ text: '@Marlow not eligible yet' }, ACTOR);
+  assert.deepEqual(whileStale.recipients, []);
+
+  await chat.touchParticipant(marlow.subject_id, clock);
+  const secondWait = chat.waitForSeatRings(
+    { after: ring.cursor, limit: 10 }, marlow.subject_id, { timeoutMs: 50 },
+  );
+  const eligibleAgain = await chat.append({ text: '@Marlow eligible again' }, ACTOR);
+  const secondRing = await secondWait;
+  assert.deepEqual(secondRing.messages.map(message => message.id), [eligibleAgain.id]);
+  assert.equal((await chat.participantState([marlow.subject_id]))[0].outstanding, 2);
+  await chat.close();
+});
+
 test('seat history excludes its own posts while advancing across skipped records', async () => {
   const chat = service();
   const marlow = ROSTER[1];

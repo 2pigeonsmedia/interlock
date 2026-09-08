@@ -65,7 +65,9 @@ const rel = f => path.relative(F.MODULE_DIR, f);
 // Segments, never substrings. Compared case-sensitively, because the exemption
 // is for the real directory and not for anything that resembles it.
 function isDeclaredDependency(filePath) {
-  return filePath.split(path.sep).includes('node_modules');
+  const packageRoot = path.dirname(fs.realpathSync(F.MODULE_DIR));
+  const relative = path.relative(packageRoot, filePath);
+  return relative.split(path.sep)[0] === 'node_modules';
 }
 
 function makeEscapeFilter(insideDir) {

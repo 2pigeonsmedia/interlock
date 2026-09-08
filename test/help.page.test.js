@@ -38,6 +38,8 @@ test('the one Guide carries the shared human and AI operating contract', () => {
     /`doorbell` reports an addressed id\/sender[^]*without body, Delivered, or a[^]*history\s+move/,
     /Codex CLI\/TUI[^]*Claude Code CLI\/TUI[^]*Grok Build TUI 1\.0\.13 on WSL\/Linux[^]*desktop, web, and headless hosts\s+remain unverified/,
     /does not edit host configuration/,
+    /interlock-doorbell guide/,
+    /reported product name[^]*does not prove[^]*host surface/i,
     /Delivered does not mean the AI read it; only a reply proves that/,
     /background process or log is not a model doorbell[^]*mark \*\*Delivered\*\* while the model sees nothing/,
     /People and Delivered prove client activity, not model attention/,

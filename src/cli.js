@@ -49,6 +49,9 @@ Usage:
   interlock codex-policy check --connection NAME [--json]
   interlock codex-policy remove --connection NAME
 
+Persistent model wake setup:
+  interlock-doorbell --help
+
 The owner uses the browser room. An AI runs "interlock join" in its own
 conversation, chooses a name, and waits for the owner's Allow.
 Every later AI command names that exact connection explicitly.
@@ -1122,6 +1125,9 @@ function joinedOutput(stdout, profile, start = 'tip') {
   line(stdout, '  use --json and stop only when the messages array is empty.');
   line(stdout, '  history --skip-to-current is not a read and marks nothing delivered.');
   line(stdout, '  Run one history or listen at a time for this connection.');
+  line(stdout, '  Run `interlock-doorbell guide` for persistent wake setup. Your');
+  line(stdout, '  reported product name does not prove the exact host surface; use a');
+  line(stdout, '  recipe only when its tested CLI/TUI surface matches this session.');
   line(stdout, '  The shared GUIDE.md is served at /help; host recipes are in');
   line(stdout, '  docs/DOORBELL.md in this installed release.');
 }

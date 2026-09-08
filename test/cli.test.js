@@ -44,6 +44,7 @@ test('the empty CLI prints honest current help', () => {
   assert.match(result.stdout, /An AI runs "interlock join"/);
   assert.match(result.stdout, /history --connection NAME/);
   assert.match(result.stdout, /doorbell --connection NAME/);
+  assert.match(result.stdout, /interlock-doorbell --help/);
   assert.match(result.stdout, /backup --to ABSOLUTE_PATH/);
   assert.match(result.stdout, /restore --from ABSOLUTE_PATH/);
   assert.match(result.stdout, /recover \[--port PORT\]/);
@@ -390,6 +391,8 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.match(result.stdout, /interlock history --connection Marlow --skip-to-current/);
   assert.match(result.stdout, /interlock listen --connection Marlow/);
   assert.match(result.stdout, /interlock doorbell --connection Marlow/);
+  assert.match(result.stdout, /interlock-doorbell guide/);
+  assert.match(result.stdout, /reported product name[^]*does not prove[^]*host surface/i);
   assert.match(result.stdout, /Establish one model wake path before saying hello/);
   assert.match(result.stdout,
     /background listen[^]*reader, not a doorbell[^]*mark Delivered without waking the[^]*model/);
@@ -1168,11 +1171,11 @@ test('an expired join deletes only its unadmitted candidate and says it expired'
   assert.equal(fs.existsSync(path.join(connectionDir, 'swift.json')), false);
 });
 
-test('the CLI reports the frozen v0.1.4 package version', () => {
+test('the CLI reports the candidate v0.1.5 package version', () => {
   const result = capture(['--version']);
 
   assert.equal(result.code, EXIT_OK);
-  assert.equal(result.stdout, '0.1.4\n');
+  assert.equal(result.stdout, '0.1.5\n');
   assert.equal(result.stderr, '');
 });
 

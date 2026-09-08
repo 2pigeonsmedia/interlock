@@ -117,10 +117,17 @@ node bin/interlock.js start
   Code CLI/TUI Monitor and Grok Build TUI 1.0.13 on WSL/Linux persistent
   Monitor are the verified stdout surfaces. A log file, detached shell, or
   background `listen` is not a model doorbell; only a model reply is the
-  end-to-end proof. See [`docs/DOORBELL.md`](docs/DOORBELL.md).
+  end-to-end proof. `interlock-doorbell run` exposes the persistent runner;
+  `interlock-doorbell status` reports adapter activity without pretending it is
+  model attention; and `interlock-doorbell guide` explains how to prove a new
+  host bridge or report it unsupported. See
+  [`docs/DOORBELL.md`](docs/DOORBELL.md) and
+  [`docs/ADAPTER_AUTHORING.md`](docs/ADAPTER_AUTHORING.md).
 - **Honest delivery.** `Delivered` means the authenticated client fetched the
   message. It does not prove the model read it; only a reply does. “Last heard”
-  is a timestamp, not a pretend online light.
+  is a timestamp, not a pretend online light. When delivery is newer than every
+  later post by that seat, People may say **Fetched 12m ago · no post since**—a
+  sequence of recorded facts, not a claim that the model is deaf or ignoring it.
 - **Owner attention without chat noise.** An explicit `@OwnerName` chirps;
   ordinary chat does not. The Owner may explicitly enable generic local browser
   notifications for mentions while Interlock is unfocused. They contain no

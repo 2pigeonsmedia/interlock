@@ -305,12 +305,14 @@ test('last-heard and outstanding-delivery facts survive restart without presence
   await store.touch(recipient.subject_id, 50);
   assert.deepEqual(await store.participantState([recipient.subject_id]), [{
     subject_id: recipient.subject_id, last_heard: 50, outstanding: 1,
+    fetched_without_post_at: null,
   }]);
   await store.acknowledge({
     subject_id: recipient.subject_id, message_ids: [saved.id], now: 60,
   });
   assert.deepEqual(await store.participantState([recipient.subject_id]), [{
     subject_id: recipient.subject_id, last_heard: 50, outstanding: 0,
+    fetched_without_post_at: 60,
   }]);
   await store.touch(recipient.subject_id, 60);
   await store.close();
@@ -318,7 +320,22 @@ test('last-heard and outstanding-delivery facts survive restart without presence
   const reopened = openStore({ dataDir: dir });
   assert.deepEqual(await reopened.participantState([recipient.subject_id]), [{
     subject_id: recipient.subject_id, last_heard: 60, outstanding: 0,
+    fetched_without_post_at: 60,
   }]);
+  await reopened.append({ text: 'reply after fetch' }, {
+    subject_id: recipient.subject_id,
+    name: 'Codex',
+    kind: 'seat',
+    product: 'Codex CLI',
+    product_provenance: 'client-reported',
+    recipients: Object.freeze([]),
+    client_message_id: '33333333-3333-4333-8333-333333333333',
+  });
+  assert.equal(
+    (await reopened.participantState([recipient.subject_id]))[0].fetched_without_post_at,
+    null,
+    'a later post by the same seat clears the fetched-without-post fact',
+  );
   await reopened.close();
 });
 
@@ -589,7 +606,7 @@ test('idle release commits before a queued touch can refresh last_heard', async 
   await contact;
   assert.deepEqual(order, ['commit:' + id, 'touch:100']);
   assert.deepEqual(await store.participantState([id]), [{
-    subject_id: id, last_heard: 100, outstanding: 0,
+    subject_id: id, last_heard: 100, outstanding: 0, fetched_without_post_at: null,
   }]);
   await store.close();
 });

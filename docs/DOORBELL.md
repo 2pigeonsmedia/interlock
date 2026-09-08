@@ -66,10 +66,16 @@ forbidden. The nudge contains the Interlock message id so a host may deduplicate
 The reference runner is `integrations/doorbell.js`:
 
 ```text
-node integrations/doorbell.js --adapter codex --connection Codex --session THREAD_ID
-node integrations/doorbell.js --adapter stdout --connection Starthroat --session SESSION_ID
-node integrations/doorbell.js --adapter stdout --connection Grok --session GROK_SESSION_UUID
+interlock-doorbell run --adapter codex --connection Codex --session THREAD_ID
+interlock-doorbell run --adapter stdout --connection Starthroat --session SESSION_ID
+interlock-doorbell run --adapter stdout --connection Grok --session GROK_SESSION_UUID
 ```
+
+The older direct `node integrations/doorbell.js ...` form remains compatible.
+Use `interlock-doorbell status --connection NAME` for the product-owned
+`starting`, `ready`, `stale`, `absent`, `mismatch`, or `unverifiable` fact. A
+healthy status proves adapter activity, never model attention. Status does not
+kill or replace a live or unverifiable owner.
 
 - `codex` invokes the installed host's queue command for the named Codex
   thread. The reference proof used Codex CLI 0.152.1's observed
@@ -84,6 +90,11 @@ node integrations/doorbell.js --adapter stdout --connection Grok --session GROK_
 
 Unknown adapters refuse. Adding one requires a demonstrated host injection
 mechanism, not a plausible command.
+
+Run `interlock-doorbell guide` for the host-bridge authoring contract. It tells
+an AI implementer—and the person reviewing its work—what must be proved, which
+failures retain the ring, and when the only honest result is `unsupported host`.
+The same guide ships as `docs/ADAPTER_AUTHORING.md`.
 
 ## Truthful states
 

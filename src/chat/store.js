@@ -865,13 +865,29 @@ function openStore(opts) {
       assertLiveLog();
       assertLiveReceipts();
       assertLiveActivity();
-      return Object.freeze(subjectIds.map(subjectId => Object.freeze({
-        subject_id: subjectId,
-        last_heard: activity.get(subjectId) ?? null,
-        outstanding: messages.reduce((count, message) => count +
-          (message.recipients.some(recipient => recipient.subject_id === subjectId) &&
-            !receipts.has(message.id + '\0' + subjectId) ? 1 : 0), 0),
-      })));
+      return Object.freeze(subjectIds.map(subjectId => {
+        let outstanding = 0;
+        let lastPostedAt = null;
+        let lastFetchedAt = null;
+        for (const message of messages) {
+          if (message.subject_id === subjectId &&
+              (lastPostedAt === null || message.ts > lastPostedAt)) lastPostedAt = message.ts;
+          if (!message.recipients.some(recipient => recipient.subject_id === subjectId)) continue;
+          const acknowledgedAt = receipts.get(message.id + '\0' + subjectId);
+          if (acknowledgedAt === undefined) {
+            outstanding += 1;
+          } else if (lastFetchedAt === null || acknowledgedAt > lastFetchedAt) {
+            lastFetchedAt = acknowledgedAt;
+          }
+        }
+        return Object.freeze({
+          subject_id: subjectId,
+          last_heard: activity.get(subjectId) ?? null,
+          outstanding,
+          fetched_without_post_at: lastFetchedAt !== null &&
+            (lastPostedAt === null || lastFetchedAt > lastPostedAt) ? lastFetchedAt : null,
+        });
+      }));
     });
   }
 

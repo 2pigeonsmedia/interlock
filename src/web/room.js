@@ -237,7 +237,7 @@ function showRoom(user) {
   currentUser = user;
   renderRoster([{
     name: user.name, kind: 'person', session: null, product: null, product_provenance: null,
-    expires_at: null, last_heard: null, outstanding: 0,
+    expires_at: null, last_heard: null, outstanding: 0, fetched_without_post_at: null,
   }]);
   connectAiButton.disabled = !owner;
   connectAiButton.title = owner ? '' : 'Only the owner can connect an AI';
@@ -665,6 +665,18 @@ function quietWords(lastHeard, now) {
   return 'just heard';
 }
 
+function elapsedWords(timestamp, now) {
+  const elapsed = now - timestamp;
+  if (!Number.isSafeInteger(elapsed) || elapsed < 0) return null;
+  const minutes = Math.floor(elapsed / 60_000);
+  const hours = Math.floor(elapsed / 3_600_000);
+  const days = Math.floor(elapsed / 86_400_000);
+  if (days >= 1) return `${days}d ago`;
+  if (hours >= 1) return `${hours}h ago`;
+  if (minutes >= 1) return `${minutes}m ago`;
+  return 'just now';
+}
+
 function settingsSortValue(row) {
   if (row.kind === 'person') return Number.POSITIVE_INFINITY;
   if (Number.isSafeInteger(row.last_heard)) return row.last_heard;
@@ -675,9 +687,9 @@ function settingsSortValue(row) {
 function validParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 9 || ![
+  if (keys.length !== 10 || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
-    'expires_at', 'last_heard', 'present', 'outstanding',
+    'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
   ].every(key => keys.includes(key))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
@@ -692,6 +704,8 @@ function validParticipant(value) {
       : value.product_provenance === null) &&
     (value.kind === 'seat' ? Number.isSafeInteger(value.expires_at) : value.expires_at === null) &&
     (value.last_heard === null || Number.isSafeInteger(value.last_heard)) &&
+    (value.fetched_without_post_at === null ||
+      Number.isSafeInteger(value.fetched_without_post_at)) &&
     typeof value.present === 'boolean' &&
     (value.kind === 'seat' || value.present === true) &&
     Number.isSafeInteger(value.outstanding) && value.outstanding >= 0;
@@ -760,6 +774,13 @@ function renderRoster(participants) {
         card.append(participantFact(
           `${participant.outstanding} ${participant.outstanding === 1 ? 'message' : 'messages'} not picked up`,
           'outstanding',
+        ));
+      }
+      if (participant.fetched_without_post_at !== null) {
+        const elapsed = elapsedWords(participant.fetched_without_post_at, Date.now());
+        card.append(participantFact(
+          elapsed === null ? 'Fetched · time unavailable · no post since' :
+            `Fetched ${elapsed} · no post since`,
         ));
       }
     }

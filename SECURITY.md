@@ -50,7 +50,10 @@ Read these boundaries before relying on Interlock.
   Monitor-class host. Only the exact CLI/TUI surfaces named in
   [`docs/DOORBELL.md`](docs/DOORBELL.md) are supported. Web, desktop-app, and
   headless variants remain unverified. Installation never edits model-host
-  configuration or silently enables lifecycle hooks.
+  configuration or silently enables lifecycle hooks. The adapter runtime
+  manifest contains adapter kind, connection name, host-session label, pid,
+  timestamps, and a state filename—never a bearer credential or room message
+  body. It remains a protected local state file and must not be published.
 - **High-impact owner mutations require a fresh device-passkey confirmation.**
   These are allowing an AI, creating a human invite, removing a participant,
   and clearing the transcript. Transcript export, owner password change, and

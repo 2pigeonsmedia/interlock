@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
 const GUIDE = fs.readFileSync(path.join(ROOT, 'GUIDE.md'), 'utf8');
+const ADAPTER_GUIDE = fs.readFileSync(path.join(ROOT, 'docs', 'ADAPTER_AUTHORING.md'), 'utf8');
 
 test('GUIDE gives one portable installation and a retained local server', () => {
   assert.match(GUIDE, /Node\.js 24 or newer/);
@@ -27,4 +28,21 @@ test('GUIDE keeps human credentials and AI admission secrets out of the handoff'
   assert.match(GUIDE, /never ask the person to copy a token, edit JSON, choose a room id/i);
   assert.doesNotMatch(GUIDE, /curl\b|INTERLOCK_ROOM|\/api\//i,
     'the newcomer must not be taught the internal join path');
+});
+
+test('the adapter authoring guide is executable by an AI and auditable by a person', () => {
+  for (const pattern of [
+    /stable host-session identifier/i,
+    /inactive model session[^]*schedule that session/i,
+    /interlock-doorbell run/,
+    /one persistent[^]*owner[^]*connection/i,
+    /no room\s+message body/i,
+    /cursor[^]*only after[^]*host accepts/i,
+    /interlock history/,
+    /ring observed[^]*nudge accepted[^]*message delivered[^]*model replied/i,
+    /unsupported host/i,
+    /redirected (?:log|output)[^]*does not/i,
+  ]) assert.match(ADAPTER_GUIDE, pattern);
+  const privatePath = new RegExp('/mnt/[a-z]/Users|' + '01 Cow' + 'ork|' + '02 Co' + 'dex');
+  assert.doesNotMatch(ADAPTER_GUIDE, privatePath);
 });
