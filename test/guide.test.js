@@ -14,6 +14,8 @@ test('GUIDE gives one portable installation and a retained local server', () => 
   assert.match(GUIDE, /npm install --global --install-links=true \./);
   assert.match(GUIDE, /interlock --version/);
   assert.match(GUIDE, /interlock start/);
+  assert.match(GUIDE, /interlock join --url LOOPBACK_URL/);
+  assert.match(GUIDE, /exact `Open:` address/);
   assert.match(GUIDE, /Keep this window open while using Interlock/);
   assert.match(GUIDE, /reachable only on this computer/);
   assert.match(GUIDE, /\[`UPGRADE\.md`\]\(UPGRADE\.md\) before replacing an installed release/);
@@ -28,6 +30,14 @@ test('GUIDE keeps human credentials and AI admission secrets out of the handoff'
   assert.match(GUIDE, /never ask the person to copy a token, edit JSON, choose a room id/i);
   assert.doesNotMatch(GUIDE, /curl\b|INTERLOCK_ROOM|\/api\//i,
     'the newcomer must not be taught the internal join path');
+});
+
+test('GUIDE keeps alternate-port targeting and WSL diagnosis honest', () => {
+  assert.match(GUIDE,
+    /Windows-hosted listener[^]*may be reachable from WSL[^]*Linux port tools[^]*cannot see/i);
+  assert.match(GUIDE, /interlock --version[^]*same terminal[^]*reach the room/i);
+  assert.doesNotMatch(GUIDE, /require\(['"]identity['"]\)/,
+    'the extracted directory cannot resolve the installed file dependency by package name');
 });
 
 test('the adapter authoring guide is executable by an AI and auditable by a person', () => {

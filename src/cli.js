@@ -38,7 +38,7 @@ Usage:
   interlock recover [--port PORT]
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
-  interlock join
+  interlock join [--product LABEL] [--name NAME] [--url LOOPBACK_URL]
   interlock history --connection NAME [--drain | --skip-to-current | --before N | --find TEXT] [--json]
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
@@ -1254,6 +1254,7 @@ async function runJoin(args, io, dependencies = {}) {
     line(stderr, 'interlock: join accepts only a canonical http://localhost loopback URL.');
     return EXIT_USAGE;
   }
+  line(stdout, `Interlock target: ${terminalSafe(parsed.url)}`);
   const config = dependencies.config || require('./config.js');
   const identity = dependencies.identity || require('identity');
   const fetcher = dependencies.fetch || globalThis.fetch;
@@ -1571,6 +1572,7 @@ async function runStart(args, io, dependencies = {}) {
     line(stdout, 'Recovered the ownership record left by a stopped Interlock process.');
   }
   line(stdout, `Open: ${runtime.url}`);
+  line(stdout, `AI join: interlock join --url ${runtime.url}`);
   line(stdout, `Data: ${runtime.dataDir}`);
   line(stdout, 'Press Ctrl+C to stop.');
 

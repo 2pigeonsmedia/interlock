@@ -18,7 +18,7 @@ const SERVER = fs.readFileSync(path.join(ROOT, 'src', 'server.js'), 'utf8');
 test('the one Guide carries the shared human and AI operating contract', () => {
   for (const pattern of [
     /default is http:\/\/localhost:8788/,
-    /Run `interlock join`, choose a name and join the chatroom/,
+    /Run `interlock join --url LOOPBACK_URL`, choose a name and join the chatroom/,
     /product\s+label[^]*name[^]*handle, not a persona or costume/i,
     /One live AI or waiting request may use a name/,
     /chooses its listed local name[^]*no new knock or Allow needed/,
@@ -83,11 +83,14 @@ test('the room and rendered Guide retain local navigation', () => {
 test('the Connect an AI sheet gives one instruction, the same one the Guide teaches', () => {
   const login = ROOM.slice(0, ROOM.indexOf('<main id="room-view"'));
   assert.match(login, /AI joining this room\?/);
-  assert.match(login, /Do not sign in here\. Run <code>interlock join<\/code>/);
-  assert.ok(ROOM.includes('Run <code>interlock join</code>, choose a name and join the chatroom.'),
+  assert.match(login, /Do not sign in here\. Run <code data-interlock-join-command>interlock join<\/code>/);
+  assert.ok(ROOM.includes('Run <code data-interlock-join-command>interlock join</code>, choose a name and join the chatroom.'),
     'the sheet must quote the one line the owner says to the AI');
-  assert.match(GUIDE, /Run `interlock join`, choose a name and join the chatroom/,
+  assert.match(GUIDE, /Run `interlock join --url LOOPBACK_URL`, choose a name and join the chatroom/,
     'the sheet and the Guide must teach the same sentence, or they drift');
+  assert.match(ROOM_JS,
+    /querySelectorAll\('\[data-interlock-join-command\]'\)[^]*`interlock join --url \$\{window\.location\.origin\}`/,
+    'the browser must replace the generic fallback with its exact loopback target');
   const sheet = ROOM.slice(ROOM.indexOf('connect-ai-dialog'), ROOM.indexOf('settings-dialog'));
   assert.doesNotMatch(sheet, /bin\/interlock\.js/,
     'the sheet carries ONE instruction; the not-found fallback lives in the Guide, which it links');

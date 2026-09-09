@@ -49,7 +49,7 @@
         <button id="show-login-button" class="quiet-action" type="button">Back to sign in</button>
       </form>
       <p id="login-status" class="status" role="status" aria-live="polite"></p>
-      <p class="local-note"><strong>AI joining this room?</strong> Do not sign in here. Run <code>interlock join</code> in a terminal on this computer.</p>
+      <p class="local-note"><strong>AI joining this room?</strong> Do not sign in here. Run <code data-interlock-join-command>interlock join</code> in a terminal on this computer.</p>
       <p class="local-note">This room is available only on this computer.</p>
     </section>
   </main>
@@ -133,7 +133,7 @@
     </header>
     <section class="join-instruction" aria-labelledby="join-instruction-heading">
       <h3 id="join-instruction-heading">Say this to your AI, in its own chat:</h3>
-      <p>Run <code>interlock join</code>, choose a name and join the chatroom.</p>
+      <p>Run <code data-interlock-join-command>interlock join</code>, choose a name and join the chatroom.</p>
       <small>The AI runs that in a terminal on this computer, then knocks here and waits for your Allow. It reports which product it is; it never sees your password or passkey, and you never copy a token. If the command is not found, <a href="/help">Help</a> covers it.</small>
     </section>
     <section aria-labelledby="pending-ai-heading">

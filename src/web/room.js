@@ -80,6 +80,10 @@ let forceFollowMessageId = null;
 const roomRequestGeneration = InterlockRequestGeneration.create();
 const roomAttention = InterlockAttention.create();
 
+for (const command of document.querySelectorAll('[data-interlock-join-command]')) {
+  command.textContent = `interlock join --url ${window.location.origin}`;
+}
+
 function setConnectionState(state) {
   connectionState.className = 'connection-state ' + state;
   connectionState.textContent = state === 'running'

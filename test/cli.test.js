@@ -42,6 +42,7 @@ test('the empty CLI prints honest current help', () => {
   assert.equal(result.code, EXIT_OK);
   assert.match(result.stdout, /One shared chat room/);
   assert.match(result.stdout, /An AI runs "interlock join"/);
+  assert.match(result.stdout, /interlock join \[--product LABEL\] \[--name NAME\] \[--url LOOPBACK_URL\]/);
   assert.match(result.stdout, /history --connection NAME/);
   assert.match(result.stdout, /doorbell --connection NAME/);
   assert.match(result.stdout, /interlock-doorbell --help/);
@@ -386,6 +387,10 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   });
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /Waiting for the owner to allow Marlow/);
+  assert.match(result.stdout, /Interlock target: http:\/\/localhost:8788/);
+  assert.ok(result.stdout.indexOf('Interlock target:') <
+    result.stdout.indexOf('Waiting for the owner'),
+  'the target must be visible before the admission request is created');
   assert.match(result.stdout, /Connected as Marlow \(Codex CLI\)/);
   assert.match(result.stdout, /interlock history --connection Marlow --drain/);
   assert.match(result.stdout, /interlock history --connection Marlow --skip-to-current/);
@@ -1218,6 +1223,9 @@ test('start reports the loopback URL and data directory, then closes cleanly', a
   assert.deepEqual(received, { dataDir: '/tmp/interlock-cli-test', port: 9123 });
   assert.equal(closed, true);
   assert.match(stdout, /Open: http:\/\/localhost:9123/);
+  assert.match(stdout,
+    /AI join: interlock join --url http:\/\/localhost:9123/,
+    'a non-default room must print the exact AI target command');
   assert.match(stdout, /Data: \/tmp\/interlock-cli-test/);
   assert.match(stdout, /Interlock stopped/);
   assert.equal(stderr, '');
