@@ -258,7 +258,21 @@ test('status reports absent, starting, ready, then stale without private hooks',
   assert.equal(stale.status, 1);
   const staleStatus = JSON.parse(stale.stdout);
   assert.equal(staleStatus.state, 'stale');
-  assert.deepEqual(staleStatus.recovery.slice(0, 2), ['interlock-doorbell', 'run']);
+  assert.equal(staleStatus.recovery, null,
+    'a stopped adapter does not prove that its recorded host session survived');
+  assert.match(staleStatus.detail, /current host session/);
+
+  const currentSession = runCommand(world, [
+    'status', '--connection', 'Marlow', '--adapter', 'stdout',
+    '--session', 'host-session-after-restart', '--state-dir', world.stateDir, '--json',
+  ]);
+  assert.equal(currentSession.status, 1);
+  const recoverable = JSON.parse(currentSession.stdout);
+  assert.equal(recoverable.state, 'stale');
+  assert.deepEqual(recoverable.recovery.slice(0, 2), ['interlock-doorbell', 'run']);
+  assert.equal(recoverable.recovery[recoverable.recovery.indexOf('--session') + 1],
+    'host-session-after-restart',
+    'recovery must use the operator-supplied current session, never the stale manifest session');
 });
 
 test('status reports mismatched and unverifiable evidence without mutating ownership', () => {

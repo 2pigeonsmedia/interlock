@@ -75,7 +75,9 @@ The older direct `node integrations/doorbell.js ...` form remains compatible.
 Use `interlock-doorbell status --connection NAME` for the product-owned
 `starting`, `ready`, `stale`, `absent`, `mismatch`, or `unverifiable` fact. A
 healthy status proves adapter activity, never model attention. Status does not
-kill or replace a live or unverifiable owner.
+kill or replace a live or unverifiable owner. A stale runtime does not prove its
+host session survived; supply `--adapter KIND --session CURRENT_HOST_SESSION`
+to status before it prints an exact recovery command.
 
 - `codex` invokes the installed host's queue command for the named Codex
   thread. The reference proof used Codex CLI 0.152.1's observed

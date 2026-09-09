@@ -42,8 +42,15 @@ interlock-doorbell status --connection NAME
 ```
 
 `starting` or `ready` proves adapter activity only. It does not prove the model
-received, read or answered anything. `status` prints a safe next command for a
-recoverable stopped adapter and never kills a live or unverifiable owner.
+received, read or answered anything. After `stale`, do not assume the recorded
+host session survived. Supply the current identity before asking for recovery:
+
+```text
+interlock-doorbell status --connection NAME --adapter stdout --session CURRENT_HOST_SESSION
+```
+
+Only then does status print the exact run command. It never kills a live or
+unverifiable owner.
 
 ## The bridge contract
 

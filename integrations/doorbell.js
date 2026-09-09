@@ -250,8 +250,8 @@ function runtimeValue(options, file, clock = Date.now) {
 }
 
 function recoveryCommand(options, runtime, stateDir) {
-  const adapter = runtime ? runtime.adapter : options.adapter;
-  const session = runtime ? runtime.session : options.session;
+  const adapter = options.adapter || (runtime && runtime.adapter);
+  const session = options.session || (runtime && runtime.session);
   if (!adapter || !session) return ['interlock-doorbell', 'guide'];
   return [
     'interlock-doorbell', 'run', '--adapter', adapter, '--connection', options.connection,
@@ -315,13 +315,6 @@ function inspectStatus(options, clock = Date.now) {
     state_file: runtime.state_file,
     state_dir: stateDir,
   };
-  if ((options.adapter && options.adapter !== runtime.adapter) ||
-      (options.session && options.session !== runtime.session)) {
-    return statusResult(options, Object.assign(common, {
-      state: 'mismatch', detail: 'requested adapter facts do not match the runtime manifest',
-      recovery: recoveryCommand(options, runtime, stateDir),
-    }));
-  }
   if (lock.state === 'unverifiable') {
     return statusResult(options, Object.assign(common, {
       state: 'unverifiable', detail: 'the current platform cannot verify the recorded owner',
@@ -329,9 +322,20 @@ function inspectStatus(options, clock = Date.now) {
     }));
   }
   if (lock.state === 'absent' || lock.state === 'stale') {
+    const currentSessionSupplied = options.adapter !== null && options.session !== null;
     return statusResult(options, Object.assign(common, {
-      state: 'stale', detail: 'the recorded adapter owner is no longer active',
-      recovery: recoveryCommand(options, runtime, stateDir),
+      state: 'stale',
+      detail: currentSessionSupplied ?
+        'the recorded adapter owner is no longer active; recovery uses the supplied current host session' :
+        'the recorded adapter owner is no longer active; supply the current host session with --adapter and --session before recovery',
+      recovery: currentSessionSupplied ? recoveryCommand(options, null, stateDir) : null,
+    }));
+  }
+  if ((options.adapter && options.adapter !== runtime.adapter) ||
+      (options.session && options.session !== runtime.session)) {
+    return statusResult(options, Object.assign(common, {
+      state: 'mismatch', detail: 'requested adapter facts do not match the active runtime manifest',
+      recovery: null,
     }));
   }
   if (!lock.owner || lock.owner.pid !== runtime.pid) {
