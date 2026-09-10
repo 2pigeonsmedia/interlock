@@ -337,6 +337,8 @@ test('interactive join asks for product and room name as separate facts', async 
   ]);
   assert.equal(body.product, 'OpenAI Codex CLI');
   assert.equal(body.name, 'Codex', 'the product label must never silently become the room name');
+  assert.match(result.stdout, /Requesting admission as Codex/,
+    'an immediately allowed join must still show progress while its long poll is pending');
   assert.match(result.stdout, /Connected as Codex \(OpenAI Codex CLI\)/);
   assert.doesNotMatch(result.stdout, /Connected as OpenAI/);
 });
@@ -387,9 +389,10 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   });
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /Waiting for the owner to allow Marlow/);
+  assert.match(result.stdout, /Requesting admission as Marlow/);
   assert.match(result.stdout, /Interlock target: http:\/\/localhost:8788/);
   assert.ok(result.stdout.indexOf('Interlock target:') <
-    result.stdout.indexOf('Waiting for the owner'),
+    result.stdout.indexOf('Requesting admission'),
   'the target must be visible before the admission request is created');
   assert.match(result.stdout, /Connected as Marlow \(Codex CLI\)/);
   assert.match(result.stdout, /interlock history --connection Marlow --drain/);

@@ -1148,6 +1148,14 @@ function renderMessage(message) {
       delivery.append(state);
     }
     article.append(delivery);
+  } else if (InterlockMentions.tokens(message.text).length > 0) {
+    const delivery = document.createElement('div');
+    delivery.className = 'delivery';
+    const state = document.createElement('span');
+    state.className = 'delivery-item unrung';
+    state.textContent = 'No AI was rung.';
+    delivery.append(state);
+    article.append(delivery);
   }
   transcript.append(article);
   seenMessageIds.add(message.id);

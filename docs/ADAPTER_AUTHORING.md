@@ -41,8 +41,10 @@ Check the product-owned state without reading its files by hand:
 interlock-doorbell status --connection NAME
 ```
 
-`starting` or `ready` proves adapter activity only. It does not prove the model
-received, read or answered anything. After `stale`, do not assume the recorded
+`starting` or `ready` proves adapter activity only. `starting` can last through
+the first bounded poll after a new arm or recovery, normally no more than about
+45 seconds. It does not prove the model received, read or answered anything.
+After `stale`, do not assume the recorded
 host session survived. Supply the current identity before asking for recovery:
 
 ```text

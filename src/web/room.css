@@ -697,6 +697,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }
 .delivery-item { display: inline-flex; align-items: baseline; gap: 0.35em; }
 .delivery .pending { color: var(--wait-text); }
+.delivery .unrung { color: var(--muted); }
 .delivery-session {
   padding: 0 4px;
   border: 1px solid var(--tile-edge);

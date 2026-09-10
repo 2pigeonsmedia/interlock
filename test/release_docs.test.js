@@ -100,6 +100,12 @@ test('the upgrade path backs up first and never teaches an in-place downgrade', 
 });
 
 test('the tested-on list and exact host surfaces retain their evidence boundaries', () => {
+  assert.match(README,
+    /v0\.1\.5 tested-on evidence[^]*Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked release-candidate tree[^\n]*408\/408/);
+  assert.match(README,
+    /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*isolated packed installation[^\n]*408\/408/);
+  assert.match(README,
+    /v0\.1\.5 makes[^]*public doorbell[^]*cold Claude Code CLI\/TUI operator[^]*forced adapter failure[^]*recovery warm-up[^]*No AI was rung[^]*focused live verification/);
   assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked candidate tree[^\n]*398\/398/);
   assert.match(README,
     /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*398\/398/);
@@ -125,7 +131,7 @@ test('the tested-on list and exact host surfaces retain their evidence boundarie
   assert.match(README, /native(?: Ubuntu)?\s+browser\/passkey journey/i);
   assert.match(README, /no\s+native macOS journey was run/i);
   assert.match(README, /post-v0\.1\s+evidence goals,\s+not claims made by this tested-on table/i);
-  assert.match(README, /cold-newcomer[\s\S]*journey[\s\S]*open evidence goal[\s\S]*discretion/i);
+  assert.doesNotMatch(README, /cold-newcomer[\s\S]*open evidence goal/i);
   assert.match(README,
     /Verified model-host surfaces[^]*Codex CLI\/TUI[^]*Claude Code CLI\/TUI[^]*Grok Build TUI 1\.0\.13 on WSL\/Linux/);
   assert.match(README,

@@ -275,6 +275,48 @@ test('status reports absent, starting, ready, then stale without private hooks',
     'recovery must use the operator-supplied current session, never the stale manifest session');
 });
 
+test('status reports immediate and aged recovery as starting during the first poll', async () => {
+  const world = fixture(ringPage());
+  const seeded = runCommand(world, [
+    'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir, '--once',
+  ]);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  const statePath = path.join(world.stateDir, onlyStateFile(world.stateDir));
+
+  async function proveStarting(label) {
+    world.delay = 500;
+    const child = childProcess.spawn(process.execPath, [
+      RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
+      '--session', 'host-session-1', '--state-dir', world.stateDir,
+    ], {
+      cwd: ROOT,
+      env: runnerEnv(world),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    await waitForAdapterLock(world.stateDir);
+    let currentRuntime = null;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      currentRuntime = JSON.parse(fs.readFileSync(runtimeFile(world.stateDir), 'utf8'));
+      if (currentRuntime.pid === child.pid) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(currentRuntime.pid, child.pid, `${label} runtime must belong to the new adapter`);
+    const recovering = runCommand(world, statusArgs(world));
+    assert.equal(recovering.status, 0, recovering.stderr);
+    assert.equal(JSON.parse(recovering.stdout).state, 'starting', label);
+    assert.match(JSON.parse(recovering.stdout).detail, /after recovery/);
+
+    child.kill();
+    await once(child, 'exit');
+  }
+
+  await proveStarting('fresh prior state');
+  const old = new Date(Date.now() - 5 * 60 * 1000);
+  fs.utimesSync(statePath, old, old);
+  await proveStarting('aged prior state');
+});
+
 test('status reports mismatched and unverifiable evidence without mutating ownership', () => {
   const world = fixture(ringPage());
   const completed = runCommand(world, [

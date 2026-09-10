@@ -1380,6 +1380,7 @@ async function runJoin(args, io, dependencies = {}) {
       let lastNetworkFailure = false;
       let honoredCooldown = false;
       let firstAttempt = resumed;
+      line(stdout, `Requesting admission as ${terminalSafe(profile.name)}…`);
 
       while (firstAttempt || clock() < deadline) {
         firstAttempt = false;

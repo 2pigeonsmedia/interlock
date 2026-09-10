@@ -44,6 +44,10 @@ test('delivery state is written as DOM text on first render and live client deli
     /state\.className = 'delivery-item ack';\s*renderDeliveryState\(state, change, 'Delivered'\);/s,
     'a live receipt must update both the class and the spoken text');
   assert.match(room,
+    /InterlockMentions\.tokens\(message\.text\)\.length > 0[\s\S]*state\.className = 'delivery-item unrung';[\s\S]*state\.textContent = 'No AI was rung\.'/,
+    'mention syntax that resolved to no present AI must retain that durable fact on the saved row');
+  assert.match(css, /\.delivery \.unrung \{[^}]*color: var\(--muted\);[^}]*\}/s);
+  assert.match(room,
     /function renderDeliveryState\(element, value, state\)[\s\S]*name\.textContent = value\.name;[\s\S]*status\.textContent = `— \$\{state\}`;[\s\S]*session\.className = 'delivery-session';[\s\S]*session\.textContent = sessionLabel\(value\)/,
     'delivery metadata must render Session n separately instead of appending it to the name');
   assert.match(css, /\.delivery-session \{[^}]*border:[^}]*font-size: 0\.85em;[^}]*\}/s,

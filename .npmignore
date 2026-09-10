@@ -20,16 +20,18 @@ test/plan_alignment.test.js
 # Interlock runtime and are not Corresponding Source for this one-room release.
 identity/login_surface/
 
-# Public marketing artwork and its editable source stay with the source
-# repository, but they are not runtime files for the local room.
+# Public social-card artwork and its editable source stay with the source
+# repository, but they are not runtime files for the local room. The README
+# banner ships because the installed README embeds it.
 docs/interlock-og.png
 docs/interlock-og.source.html
-docs/interlock-gh-banner.png
 
-# Public marketing screenshots remain with the source repository. The Connect
-# screenshot is part of the canonical Guide and therefore ships with it.
+# Screenshots not embedded by shipped guidance remain with the source
+# repository. The room and Connect screenshots are part of the shipped README
+# and Guide, so the package carries them.
 docs/screenshots/*
 !docs/screenshots/connect-an-ai.png
+!docs/screenshots/room.png
 
 # Never package locally produced archives or installation state.
 *.tgz

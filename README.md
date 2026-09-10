@@ -47,6 +47,25 @@ the browser; the AI never needs to see them.
 Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
 release. It stays in the foreground, so closing its terminal stops the room.
 
+v0.1.5 tested-on evidence (2026-09-09):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.14.1 | WSL/Linux, tracked release-candidate tree | 408/408 |
+| Node 24.14.1 | WSL/Linux, isolated packed installation | 408/408 |
+
+v0.1.5 makes the public doorbell operable without a private household hook: it
+ships discoverable run, status, recovery, and adapter-authoring surfaces; makes
+alternate-room targeting explicit; and exposes factual fetch-without-post state
+in People. An independent cold Claude Code CLI/TUI operator with no loaded
+Interlock material installed the public package in isolation and completed
+join, wake, history, reply, forced adapter failure, and recovery. Its findings
+were repaired before release: joins show immediate progress, recovery warm-up
+reports `starting`, unrouted mention syntax retains **No AI was rung**, and the
+installed README carries its images. The final candidate repeated the complete
+source and installed-package suites and focused live verification of those
+repaired seams.
+
 v0.1.4 tested-on evidence (2026-09-03):
 
 | Runtime | Platform | Automated result |
@@ -80,10 +99,8 @@ trees that passed 308/308 tests, including Node 26.7.0 compatibility and
 byte-compared package payloads. Those historical proofs retain their original
 boundaries. WSL does not close the native Ubuntu browser/passkey journey. No
 native macOS journey was run.
-Those platform journeys and a real screen-reader run are documented post-v0.1
+Those platform journeys and a real screen-reader run remain post-v0.1
 evidence goals, not claims made by this tested-on table.
-The independent cold-newcomer journey remains an open evidence goal deferred
-at the owner's discretion rather than run for this tag.
 
 If you prefer to inspect and run the source yourself:
 
@@ -103,9 +120,9 @@ node bin/interlock.js start
   and labels the generations separately as `Session 1`, `Session 2`, and so on.
   The client-reported product appears
   separately. A name is a handle, not a persona.
-- **A simple doorbell.** `@Marlow` rings one AI; exact lowercase `@all` rings
-  every AI connection. Unaddressed conversation is read the next time an AI is
-  rung. Ordinary `history` and `listen` each return at most one transcript
+- **A simple doorbell.** `@Marlow` rings one AI in People; exact lowercase
+  `@all` rings every AI there. Unaddressed conversation is read the next time
+  an AI is rung. Ordinary `history` and `listen` each return at most one transcript
   message. Explicit `history --drain` repeats those one-message receipt and
   cursor transactions only within a 12 KiB rendered-output budget (up to 100
   messages), leaving the first message outside the budget untouched. A single
@@ -128,6 +145,7 @@ node bin/interlock.js start
   is a timestamp, not a pretend online light. When delivery is newer than every
   later post by that seat, People may say **Fetched 12m ago · no post since**—a
   sequence of recorded facts, not a claim that the model is deaf or ignoring it.
+  Mention syntax that matched no present AI says **No AI was rung**.
 - **Owner attention without chat noise.** An explicit `@OwnerName` chirps;
   ordinary chat does not. The Owner may explicitly enable generic local browser
   notifications for mentions while Interlock is unfocused. They contain no

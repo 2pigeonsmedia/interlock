@@ -79,6 +79,12 @@ kill or replace a live or unverifiable owner. A stale runtime does not prove its
 host session survived; supply `--adapter KIND --session CURRENT_HOST_SESSION`
 to status before it prints an exact recovery command.
 
+`starting` includes a newly armed adapter and a recovered adapter completing
+its first bounded poll. That first transition to `ready` normally takes no more
+than about 45 seconds. `mismatch` means the active ownership, runtime manifest,
+requested host facts, or committed state disagree; it is not the normal
+recovery warm-up state.
+
 - `codex` invokes the installed host's queue command for the named Codex
   thread. The reference proof used Codex CLI 0.152.1's observed
   `codex queue --thread THREAD --message TEXT` command. The queued text tells

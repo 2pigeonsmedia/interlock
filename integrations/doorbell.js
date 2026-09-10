@@ -365,7 +365,18 @@ function inspectStatus(options, clock = Date.now) {
       recovery: null,
     }));
   }
-  const age = clock() - fs.statSync(statePath).mtimeMs;
+  const now = clock();
+  const stateMtime = fs.statSync(statePath).mtimeMs;
+  const startupAge = now - runtime.started_at;
+  if (stateMtime < runtime.started_at &&
+      startupAge >= -60_000 && startupAge <= FRESH_MS) {
+    return statusResult(options, Object.assign(common, {
+      state: 'starting',
+      detail: 'adapter owns the connection and is completing its first bounded poll after recovery',
+      recovery: null,
+    }));
+  }
+  const age = now - stateMtime;
   if (age < -60_000 || age > FRESH_MS) {
     return statusResult(options, Object.assign(common, {
       state: 'mismatch', detail: 'active adapter state is outside the freshness window',
@@ -373,7 +384,7 @@ function inspectStatus(options, clock = Date.now) {
     }));
   }
   return statusResult(options, Object.assign(common, {
-    state: 'ready', updated_at: Math.max(runtime.updated_at, Math.trunc(fs.statSync(statePath).mtimeMs)),
+    state: 'ready', updated_at: Math.max(runtime.updated_at, Math.trunc(stateMtime)),
     detail: `adapter recently completed a successful poll at cursor ${state.cursor}`,
     recovery: null,
   }));

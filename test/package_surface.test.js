@@ -45,7 +45,9 @@ test('the release package surface includes newcomer/runtime proof and excludes p
     'docs/PROTOCOL.md', 'docs/CODEX_POLICY.md', 'docs/DOORBELL.md',
     'docs/ADAPTER_AUTHORING.md',
     'integrations/doorbell.js',
+    'docs/interlock-gh-banner.png',
     'docs/screenshots/connect-an-ai.png',
+    'docs/screenshots/room.png',
     'test/guide.test.js', 'test/source_offer.test.js', 'test/product_scope.test.js',
     'test/doorbell.integration.test.js',
   ]) {
@@ -76,7 +78,7 @@ test('the release package surface has no repository metadata, private process tr
   const forbiddenPaths = [
     /^\.github\//,
     /^docs\/audits\//,
-    /^docs\/screenshots\/(?!connect-an-ai\.png$)/,
+    /^docs\/screenshots\/(?!(?:connect-an-ai|room)\.png$)/,
     /^docs\/.*(?:EVIDENCE|BUILD_PLAN|CONTINGENCY|PREVIEW_DRAFT)/,
     /^identity\/login_surface\//,
     /(?:^|\/)(?:data|connections)(?:\/|$)/,
