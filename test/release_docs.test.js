@@ -105,7 +105,7 @@ test('the tested-on list and exact host surfaces retain their evidence boundarie
   assert.match(README,
     /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*isolated packed installation[^\n]*408\/408/);
   assert.match(README,
-    /v0\.1\.5 makes[^]*public doorbell[^]*cold Claude Code CLI\/TUI operator[^]*forced adapter failure[^]*recovery warm-up[^]*No AI was rung[^]*focused live verification/);
+    /v0\.1\.5 makes[^]*public doorbell[^]*replacement recovery[^]*cold Claude Code CLI\/TUI operator[^]*forced adapter failure[^]*recovery warm-up[^]*No AI was rung[^]*focused live verification/);
   assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked candidate tree[^\n]*398\/398/);
   assert.match(README,
     /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*398\/398/);

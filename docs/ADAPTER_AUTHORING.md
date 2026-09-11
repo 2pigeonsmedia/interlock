@@ -54,6 +54,11 @@ interlock-doorbell status --connection NAME --adapter stdout --session CURRENT_H
 Only then does status print the exact run command. It never kills a live or
 unverifiable owner.
 
+If `run` refuses an old cursor because the Interlock connection was replaced,
+confirm the new admission was intentional and rerun the same command **once**
+with `--replace-connection`. It re-polls from the replacement seat's ordinary
+cursor and refuses if no replacement exists. Never retain that flag in a hook.
+
 ## The bridge contract
 
 If the reference runners do not fit, preserve all of these properties:
@@ -107,7 +112,8 @@ Then run negative controls:
 - a second adapter cannot steal the connection;
 - malformed Interlock output fails without advancing the cursor;
 - rejected host injection leaves the ring eligible;
-- replacing the Interlock connection refuses the old cursor;
+- replacing the Interlock connection refuses the old cursor until the explicit
+  one-shot recovery rebinds without losing a waiting ring;
 - ending the host or adapter becomes visible and can be recovered safely; and
 - a redirected output file does not count as model delivery.
 

@@ -19,12 +19,12 @@ const STATE_FILE = /^doorbell-[0-9a-f]{24}\.json$/;
 const HELP = `Interlock doorbell adapter
 
 Usage:
-  interlock-doorbell run --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--once]
+  interlock-doorbell run --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--replace-connection] [--once]
   interlock-doorbell status --connection NAME [--adapter codex|stdout --session HOST_SESSION] [--state-dir ABSOLUTE_PATH] [--json]
   interlock-doorbell guide
 
 The legacy direct form remains supported:
-  node integrations/doorbell.js --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--once]
+  node integrations/doorbell.js --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--replace-connection] [--once]
 `;
 
 function fail(message) {
@@ -45,14 +45,18 @@ function validAbsolutePath(value) {
 }
 
 function parseArgs(argv) {
-  const result = { adapter: null, connection: null, session: null, stateDir: null, once: false };
+  const result = {
+    adapter: null, connection: null, session: null, stateDir: null,
+    replaceConnection: false, once: false,
+  };
   const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
-    if (flag === '--once') {
+    if (flag === '--once' || flag === '--replace-connection') {
       if (seen.has(flag)) return null;
       seen.add(flag);
-      result.once = true;
+      if (flag === '--once') result.once = true;
+      else result.replaceConnection = true;
       continue;
     }
     if (!['--adapter', '--connection', '--session', '--state-dir'].includes(flag) ||
@@ -436,7 +440,7 @@ function runAdapter(argv) {
   const options = parseArgs(argv);
   if (!options) {
     fail('usage: interlock-doorbell run --adapter codex|stdout --connection NAME ' +
-      '--session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--once]');
+      '--session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--replace-connection] [--once]');
     return;
   }
   const file = stateFile(options);
@@ -444,7 +448,12 @@ function runAdapter(argv) {
   let state;
   try { state = loadState(file, options); }
   catch (error) { fail(error.message); return; }
-  let after = state === null ? null : state.cursor;
+  if (options.replaceConnection && state === null) {
+    fail('--replace-connection requires existing adapter state from the superseded connection');
+    return;
+  }
+  let replacementPending = options.replaceConnection;
+  let after = replacementPending || state === null ? null : state.cursor;
   const interlockOverride = process.env.INTERLOCK_DOORBELL_INTERLOCK;
   const interlock = interlockOverride || process.execPath;
   const interlockPrefix = interlockOverride
@@ -488,7 +497,18 @@ function runAdapter(argv) {
         return;
       }
       if (state !== null && page.connection_request_id !== state.connection_request_id) {
-        fail(`the Interlock connection was replaced; refusing to reuse the old adapter cursor at ${file}`);
+        if (!replacementPending) {
+          fail(`the Interlock connection was replaced; refusing to reuse the old adapter cursor at ${file}; confirm the new admission was intentional, then rerun this command once with --replace-connection`);
+          return;
+        }
+        // The explicit one-shot override discards no current-connection fact.
+        // This poll omitted the superseded cursor, so the authenticated new
+        // profile supplied its own ordinary cursor and any eligible rings.
+        replacementPending = false;
+        state = null;
+      }
+      if (replacementPending) {
+        fail('--replace-connection was supplied, but the current connection still matches the adapter state; rerun without the flag');
         return;
       }
       if (page.rings.length > 0) {

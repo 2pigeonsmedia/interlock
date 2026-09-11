@@ -71,6 +71,13 @@ interlock-doorbell run --adapter stdout --connection Starthroat --session SESSIO
 interlock-doorbell run --adapter stdout --connection Grok --session GROK_SESSION_UUID
 ```
 
+If the runner says the Interlock connection was replaced, it has preserved the
+old cursor and stopped. Confirm that the new admission was intentional, then
+rerun the same command **once** with `--replace-connection`. The one-shot flag
+requires existing state and a different authenticated connection request; it
+re-polls from the new seat's ordinary cursor, preserves any waiting ring, and
+refuses when the connection still matches. Do not retain the flag in a hook.
+
 The older direct `node integrations/doorbell.js ...` form remains compatible.
 Use `interlock-doorbell status --connection NAME` for the product-owned
 `starting`, `ready`, `stale`, `absent`, `mismatch`, or `unverifiable` fact. A

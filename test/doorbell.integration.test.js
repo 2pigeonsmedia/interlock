@@ -214,11 +214,13 @@ test('help and guide are public executable surfaces', () => {
   assert.match(help.stdout, /interlock-doorbell run/);
   assert.match(help.stdout, /interlock-doorbell status/);
   assert.match(help.stdout, /interlock-doorbell guide/);
+  assert.match(help.stdout, /--replace-connection/);
 
   const guide = runCommand(world, ['guide']);
   assert.equal(guide.status, 0, guide.stderr);
   assert.match(guide.stdout, /Build a host bridge/);
   assert.match(guide.stdout, /unsupported host/);
+  assert.match(guide.stdout, /once[^]*--replace-connection[^]*Never retain/);
 });
 
 test('status reports absent, starting, ready, then stale without private hooks', async () => {
@@ -382,20 +384,63 @@ test('malformed ring output is preserved and cannot advance adapter state', () =
 });
 
 test('an Interlock reconnect cannot inherit an old adapter cursor silently', () => {
+  const empty = fixture(ringPage({ rings: [], cursor: 5 }));
+  const meaningless = runCommand(empty, [
+    'run', '--adapter', 'codex', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', empty.stateDir,
+    '--replace-connection', '--once',
+  ]);
+  assert.equal(meaningless.status, 1);
+  assert.match(meaningless.stderr, /requires existing adapter state/);
+
   const world = fixture(ringPage({ rings: [], cursor: 5 }));
   const first = run(world);
   assert.equal(first.status, 0, first.stderr);
   fs.writeFileSync(world.pageFile, JSON.stringify(ringPage({
-    rings: [], cursor: 6, connection_request_id: REQUEST_B,
+    rings: [{ id: 6, ts: 1_788_379_260_000, byline: 'Ana', kind: 'person', session: null }],
+    cursor: 6, connection_request_id: REQUEST_B,
   })) + '\n');
   const second = run(world);
   assert.equal(second.status, 1);
   assert.match(second.stderr, /connection was replaced/);
+  assert.match(second.stderr, /once with --replace-connection/);
   const statePath = path.join(world.stateDir, onlyStateFile(world.stateDir));
   assert.equal(second.stderr.includes(statePath), true);
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.equal(state.connection_request_id, REQUEST_A);
   assert.equal(state.cursor, 5);
+
+  fs.writeFileSync(world.pageFile, JSON.stringify(ringPage({
+    rings: [{ id: 3, ts: 1_788_379_260_000, byline: 'Ana', kind: 'person', session: null }],
+    cursor: 3, connection_request_id: REQUEST_B,
+  })) + '\n');
+
+  const adopted = runCommand(world, [
+    'run', '--adapter', 'codex', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir,
+    '--replace-connection', '--once',
+  ]);
+  assert.equal(adopted.status, 0, adopted.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(world.interlockArgs, 'utf8')),
+    ['doorbell', '--connection', 'Marlow', '--json'],
+    'replacement recovery must re-poll from the new profile ordinary cursor, never the old cursor');
+  const host = JSON.parse(fs.readFileSync(world.hostArgs, 'utf8'));
+  assert.match(host[host.indexOf('--message') + 1], /message 3 from Ana/,
+    'a ring waiting on the replacement seat must survive explicit adoption');
+  const rebound = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.equal(rebound.connection_request_id, REQUEST_B);
+  assert.equal(rebound.cursor, 3,
+    'a different connection request may safely establish its own lower cursor');
+
+  const redundant = runCommand(world, [
+    'run', '--adapter', 'codex', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir,
+    '--replace-connection', '--once',
+  ]);
+  assert.equal(redundant.status, 1);
+  assert.match(redundant.stderr, /still matches[^]*rerun without the flag/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')), rebound,
+    'the one-shot replacement flag must not become a reusable cursor bypass');
 });
 
 test('a second live adapter cannot steal one connection from the first', async () => {

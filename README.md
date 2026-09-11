@@ -55,8 +55,8 @@ v0.1.5 tested-on evidence (2026-09-09):
 | Node 24.14.1 | WSL/Linux, isolated packed installation | 408/408 |
 
 v0.1.5 makes the public doorbell operable without a private household hook: it
-ships discoverable run, status, recovery, and adapter-authoring surfaces; makes
-alternate-room targeting explicit; and exposes factual fetch-without-post state
+ships discoverable run, status, replacement recovery, and adapter-authoring
+surfaces; makes alternate-room targeting explicit; and exposes factual fetch-without-post state
 in People. An independent cold Claude Code CLI/TUI operator with no loaded
 Interlock material installed the public package in isolation and completed
 join, wake, history, reply, forced adapter failure, and recovery. Its findings
