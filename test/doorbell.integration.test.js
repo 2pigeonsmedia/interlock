@@ -42,6 +42,10 @@ fs.writeFileSync(process.env.FAKE_INTERLOCK_ARGS, JSON.stringify(process.argv.sl
 const page = JSON.parse(fs.readFileSync(process.env.FAKE_RING_PAGE, 'utf8'));
 const afterIndex = process.argv.indexOf('--after');
 const after = afterIndex >= 0 ? Number(process.argv[afterIndex + 1]) : -1;
+if (after > page.cursor) {
+  process.stderr.write('invalid-ring-query\\n');
+  process.exit(1);
+}
 if (after >= page.cursor) page.rings = [];
 process.stdout.write(JSON.stringify(page) + '\\n');
 `, { mode: 0o700 });
@@ -409,6 +413,28 @@ test('an Interlock reconnect cannot inherit an old adapter cursor silently', () 
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.equal(state.connection_request_id, REQUEST_A);
   assert.equal(state.cursor, 5);
+
+  fs.writeFileSync(world.pageFile, JSON.stringify(ringPage({
+    rings: [{ id: 3, ts: 1_788_379_260_000, byline: 'Ana', kind: 'person', session: null }],
+    cursor: 3, connection_request_id: REQUEST_B,
+  })) + '\n');
+
+  const lowerRefusal = run(world);
+  assert.equal(lowerRefusal.status, 1);
+  assert.match(lowerRefusal.stderr, /poll failed/);
+  assert.match(lowerRefusal.stderr,
+    /intentional Interlock connection replacement or room restore/);
+  assert.match(lowerRefusal.stderr, /once with --replace-connection/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')), state,
+    'a lower replacement cursor must preserve old state while pointing to recovery');
+
+  fs.writeFileSync(world.pageFile, '{"ok":true,"rings":"bad","cursor":6}\n');
+  const unusable = run(world);
+  assert.equal(unusable.status, 1);
+  assert.match(unusable.stderr, /unusable ring page/);
+  assert.match(unusable.stderr, /once with --replace-connection/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')), state,
+    'an unusable first page must preserve prior state while naming recovery');
 
   fs.writeFileSync(world.pageFile, JSON.stringify(ringPage({
     rings: [{ id: 3, ts: 1_788_379_260_000, byline: 'Ana', kind: 'person', session: null }],

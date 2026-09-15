@@ -59,6 +59,13 @@ confirm the new admission was intentional and rerun the same command **once**
 with `--replace-connection`. It re-polls from the replacement seat's ordinary
 cursor and refuses if no replacement exists. Never retain that flag in a hook.
 
+If a replacement room or restored transcript has a lower cursor than the saved
+adapter state, the first ordinary poll can fail before request ids can be
+compared. The runner preserves state and prints a conditional replacement
+hint. Use the flag only after confirming that replacement or restore;
+otherwise diagnose the preserved poll failure. A matching connection still
+refuses the flag.
+
 ## The bridge contract
 
 If the reference runners do not fit, preserve all of these properties:

@@ -436,6 +436,14 @@ function nudge(options, rings) {
     `Run interlock history --connection ${options.connection} to read and acknowledge the room.`;
 }
 
+function replacementRecoveryHint(state, replacementPending, firstPoll) {
+  if (!firstPoll || state === null || replacementPending) return '';
+  return ' If this immediately follows an intentional Interlock connection ' +
+    'replacement or room restore, confirm that fact and rerun this command once ' +
+    'with --replace-connection. Otherwise diagnose the preserved poll failure; ' +
+    'the adapter state was not changed.';
+}
+
 function runAdapter(argv) {
   const options = parseArgs(argv);
   if (!options) {
@@ -454,6 +462,7 @@ function runAdapter(argv) {
   }
   let replacementPending = options.replaceConnection;
   let after = replacementPending || state === null ? null : state.cursor;
+  let firstPoll = true;
   const interlockOverride = process.env.INTERLOCK_DOORBELL_INTERLOCK;
   const interlock = interlockOverride || process.execPath;
   const interlockPrefix = interlockOverride
@@ -486,14 +495,16 @@ function runAdapter(argv) {
       if (polled.error || polled.status !== 0) {
         const saved = saveFailure(stateDir, polled.stdout || '',
           (polled.stderr || '') + (polled.error ? `\n${polled.error.message}` : ''));
-        fail(`Interlock poll failed; raw output preserved at ${saved}`);
+        fail(`Interlock poll failed; raw output preserved at ${saved}.` +
+          replacementRecoveryHint(state, replacementPending, firstPoll));
         return;
       }
       const minimum = after === null ? 0 : after;
       const page = parsePage(polled.stdout, minimum);
       if (!page) {
         const saved = saveFailure(stateDir, polled.stdout || '', polled.stderr || '');
-        fail(`Interlock returned an unusable ring page; raw output preserved at ${saved}`);
+        fail(`Interlock returned an unusable ring page; raw output preserved at ${saved}.` +
+          replacementRecoveryHint(state, replacementPending, firstPoll));
         return;
       }
       if (state !== null && page.connection_request_id !== state.connection_request_id) {
@@ -549,6 +560,7 @@ function runAdapter(argv) {
         return;
       }
       after = page.cursor;
+      firstPoll = false;
       if (options.once) return;
     }
   } finally {
