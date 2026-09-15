@@ -511,6 +511,11 @@ test('replacement guidance is limited to the first poll of retained state', () =
   assert.match(continued.stderr, /unusable ring page/);
   assert.doesNotMatch(continued.stderr, /intentional Interlock connection replacement/,
     'a later poll failure must not be presented as startup replacement recovery');
+  const stateFiles = fs.readdirSync(world.stateDir)
+    .filter(name => /^doorbell-[0-9a-f]{24}\.json$/.test(name))
+    .sort();
+  assert.deepEqual(stateFiles, [path.basename(statePath)],
+    'the continuing runner must use the seeded adapter namespace, not create another');
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.deepEqual(state, seededState,
     'a later unusable poll must preserve the same retained adapter state');
