@@ -12,6 +12,7 @@ const PROTOCOL = fs.readFileSync(path.join(ROOT, 'docs', 'PROTOCOL.md'), 'utf8')
 const DOORBELL = fs.readFileSync(path.join(ROOT, 'docs', 'DOORBELL.md'), 'utf8');
 const ADAPTER_AUTHORING = fs.readFileSync(
   path.join(ROOT, 'docs', 'ADAPTER_AUTHORING.md'), 'utf8');
+const BACKUP = fs.readFileSync(path.join(ROOT, 'BACKUP.md'), 'utf8');
 const SECURITY = fs.readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
 const UPGRADE = fs.readFileSync(path.join(ROOT, 'UPGRADE.md'), 'utf8');
 const LOCK_PATH = path.join(ROOT, 'package-lock.json');
@@ -145,9 +146,15 @@ test('the tested-on list and exact host surfaces retain their evidence boundarie
   assert.match(DOORBELL,
     /background `listen` is stopped first so attribution is not contaminated/);
   assert.match(DOORBELL,
-    /lower current cursor[^]*preserves state[^]*conditional replacement hint/i);
+    /replacement connection[^]*(?:lower|below)[^]*preserves state[^]*conditional replacement\s+hint/i);
   assert.match(ADAPTER_AUTHORING,
     /lower cursor[^]*preserves state[^]*conditional replacement[^]*matching connection[^]*refuses/i);
+  assert.match(DOORBELL,
+    /room restore[^]*same connection[^]*not a replacement[^]*no in-place[^]*different name/i);
+  assert.match(ADAPTER_AUTHORING,
+    /restore[^]*same connection[^]*not a replacement[^]*no in-place[^]*different name/i);
+  assert.match(BACKUP,
+    /adapter state directory outside[^]*ahead of the restored transcript[^]*cannot reset[^]*in place[^]*different name/i);
   assert.match(SECURITY,
     /Host wake adapters are local code[^]*without room text, delivery receipt, or history movement[^]*desktop-app[^]*unverified[^]*never edits model-host\s+configuration/);
   assert.doesNotMatch(README, /journeys remain open[^]*not yet a public release/i,

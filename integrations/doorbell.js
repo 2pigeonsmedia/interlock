@@ -438,8 +438,8 @@ function nudge(options, rings) {
 
 function replacementRecoveryHint(state, replacementPending, firstPoll) {
   if (!firstPoll || state === null || replacementPending) return '';
-  return ' If this immediately follows an intentional Interlock connection ' +
-    'replacement or room restore, confirm that fact and rerun this command once ' +
+  return '\nIf this immediately follows an intentional Interlock connection ' +
+    'replacement, confirm that fact and rerun this command once ' +
     'with --replace-connection. Otherwise diagnose the preserved poll failure; ' +
     'the adapter state was not changed.';
 }
@@ -495,7 +495,7 @@ function runAdapter(argv) {
       if (polled.error || polled.status !== 0) {
         const saved = saveFailure(stateDir, polled.stdout || '',
           (polled.stderr || '') + (polled.error ? `\n${polled.error.message}` : ''));
-        fail(`Interlock poll failed; raw output preserved at ${saved}.` +
+        fail(`Interlock poll failed; raw output preserved at ${saved}` +
           replacementRecoveryHint(state, replacementPending, firstPoll));
         return;
       }
@@ -503,7 +503,7 @@ function runAdapter(argv) {
       const page = parsePage(polled.stdout, minimum);
       if (!page) {
         const saved = saveFailure(stateDir, polled.stdout || '', polled.stderr || '');
-        fail(`Interlock returned an unusable ring page; raw output preserved at ${saved}.` +
+        fail(`Interlock returned an unusable ring page; raw output preserved at ${saved}` +
           replacementRecoveryHint(state, replacementPending, firstPoll));
         return;
       }

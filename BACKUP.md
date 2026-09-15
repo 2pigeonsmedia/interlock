@@ -92,6 +92,15 @@ installation to a different native machine remains a post-v0.1 evidence goal,
 so backup alone is not claimed as proof that a moved installation is usable.
 See [`RECOVERY.md`](RECOVERY.md).
 
+An adapter state directory outside the restored data can be newer than the
+backup. If its cursor is ahead of the restored transcript while the restored AI
+connection is unchanged, v0.1.5 cannot reset that adapter in place;
+`--replace-connection` correctly refuses a matching connection. Do not delete
+or rewrite adapter state. Leave that adapter stopped. If a doorbell is required,
+deliberately admit a fresh AI connection under a different name and arm that
+connection's own adapter. This changes the AI connection rather than pretending
+the old cursor still describes the restored room.
+
 If the configured data directory already exists, do not delete it merely to
 make restore proceed. First establish whether it is the installation you need
 to preserve, move it to a safe distinct location if appropriate, and then

@@ -78,12 +78,19 @@ requires existing state and a different authenticated connection request; it
 re-polls from the new seat's ordinary cursor, preserves any waiting ring, and
 refuses when the connection still matches. Do not retain the flag in a hook.
 
-A replacement room or restored transcript can have a lower current cursor than
-the saved adapter state. In that case the first ordinary poll can fail before
-the runner can compare connection request ids. The runner preserves state and
-prints a conditional replacement hint. Use the flag only after confirming an
-intentional connection replacement or room restore; otherwise diagnose the
-preserved poll failure. The flag still refuses when the connection matches.
+A replacement connection can begin below the saved adapter cursor. In that
+case the first ordinary poll can fail before the runner compares connection
+request ids. The runner preserves state and prints a conditional replacement
+hint. Use the flag only after confirming an intentional connection replacement;
+otherwise diagnose the preserved poll failure. The flag still refuses when the
+connection matches.
+
+A room restore that retains the same connection while rewinding its transcript
+is not a replacement. v0.1.5 has no in-place adapter-cursor reset for that
+state, and `--replace-connection` refuses by design. Do not delete or rewrite
+adapter state. Leave that adapter stopped; if a doorbell is required, have the
+Owner deliberately admit a fresh AI connection under a different name and arm
+that connection's own adapter.
 
 The older direct `node integrations/doorbell.js ...` form remains compatible.
 Use `interlock-doorbell status --connection NAME` for the product-owned

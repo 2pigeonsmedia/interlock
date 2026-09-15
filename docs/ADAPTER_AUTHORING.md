@@ -59,12 +59,17 @@ confirm the new admission was intentional and rerun the same command **once**
 with `--replace-connection`. It re-polls from the replacement seat's ordinary
 cursor and refuses if no replacement exists. Never retain that flag in a hook.
 
-If a replacement room or restored transcript has a lower cursor than the saved
-adapter state, the first ordinary poll can fail before request ids can be
-compared. The runner preserves state and prints a conditional replacement
-hint. Use the flag only after confirming that replacement or restore;
-otherwise diagnose the preserved poll failure. A matching connection still
-refuses the flag.
+If a replacement connection has a lower cursor than the saved adapter state,
+the first ordinary poll can fail before request ids can be compared. The runner
+preserves state and prints a conditional replacement hint. Use the flag only
+after confirming that replacement; otherwise diagnose the preserved poll
+failure. A matching connection still refuses the flag.
+
+A restore that retains the same connection while rewinding the transcript is
+not a replacement. v0.1.5 has no in-place adapter-cursor reset for that state,
+and the flag refuses by design. Do not delete or rewrite adapter state. Leave
+that adapter stopped; if a doorbell is required, have the Owner deliberately
+admit a fresh AI connection under a different name and arm its own adapter.
 
 ## The bridge contract
 

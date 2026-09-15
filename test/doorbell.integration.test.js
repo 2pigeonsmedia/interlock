@@ -29,6 +29,7 @@ function fixture(page, hostExit = 0) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-doorbell-adapter-'));
   const stateDir = path.join(root, 'state');
   const pageFile = path.join(root, 'page.json');
+  const interlockCount = path.join(root, 'interlock-count.txt');
   const interlockArgs = path.join(root, 'interlock-args.json');
   const hostArgs = path.join(root, 'host-args.json');
   const interlock = path.join(root, 'fake-interlock.js');
@@ -39,7 +40,12 @@ const fs = require('node:fs');
 const delay = Number(process.env.FAKE_INTERLOCK_DELAY || 0);
 if (delay > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
 fs.writeFileSync(process.env.FAKE_INTERLOCK_ARGS, JSON.stringify(process.argv.slice(2)));
-const page = JSON.parse(fs.readFileSync(process.env.FAKE_RING_PAGE, 'utf8'));
+let call = 0;
+try { call = Number(fs.readFileSync(process.env.FAKE_INTERLOCK_COUNT, 'utf8')); }
+catch (_) { /* first poll */ }
+fs.writeFileSync(process.env.FAKE_INTERLOCK_COUNT, String(call + 1));
+const source = JSON.parse(fs.readFileSync(process.env.FAKE_RING_PAGE, 'utf8'));
+const page = Array.isArray(source) ? source[Math.min(call, source.length - 1)] : source;
 const afterIndex = process.argv.indexOf('--after');
 const after = afterIndex >= 0 ? Number(process.argv[afterIndex + 1]) : -1;
 if (after > page.cursor) {
@@ -55,7 +61,7 @@ fs.writeFileSync(process.env.FAKE_HOST_ARGS, JSON.stringify(process.argv.slice(2
 process.exit(Number(process.env.FAKE_HOST_EXIT || 0));
 `, { mode: 0o700 });
   return {
-    root, stateDir, pageFile, interlockArgs, hostArgs, interlock, host,
+    root, stateDir, pageFile, interlockCount, interlockArgs, hostArgs, interlock, host,
     hostExit, delay: 0,
   };
 }
@@ -76,6 +82,7 @@ function runnerEnv(world) {
       INTERLOCK_DOORBELL_INTERLOCK: world.interlock,
       INTERLOCK_DOORBELL_CODEX: world.host,
       FAKE_RING_PAGE: world.pageFile,
+      FAKE_INTERLOCK_COUNT: world.interlockCount,
       FAKE_INTERLOCK_ARGS: world.interlockArgs,
       FAKE_HOST_ARGS: world.hostArgs,
       FAKE_HOST_EXIT: String(world.hostExit),
@@ -385,6 +392,8 @@ test('malformed ring output is preserved and cannot advance adapter state', () =
   const failed = fs.readdirSync(world.stateDir).find(name => name.startsWith('failed-'));
   assert.ok(failed);
   assert.match(fs.readFileSync(path.join(world.stateDir, failed), 'utf8'), /not-an-array/);
+  assert.doesNotMatch(result.stderr, /intentional Interlock connection replacement/,
+    'a first arm with no prior state must not suggest replacement recovery');
 });
 
 test('an Interlock reconnect cannot inherit an old adapter cursor silently', () => {
@@ -423,7 +432,8 @@ test('an Interlock reconnect cannot inherit an old adapter cursor silently', () 
   assert.equal(lowerRefusal.status, 1);
   assert.match(lowerRefusal.stderr, /poll failed/);
   assert.match(lowerRefusal.stderr,
-    /intentional Interlock connection replacement or room restore/);
+    /intentional Interlock connection replacement/);
+  assert.doesNotMatch(lowerRefusal.stderr, /room restore/);
   assert.match(lowerRefusal.stderr, /once with --replace-connection/);
   assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')), state,
     'a lower replacement cursor must preserve old state while pointing to recovery');
@@ -435,6 +445,16 @@ test('an Interlock reconnect cannot inherit an old adapter cursor silently', () 
   assert.match(unusable.stderr, /once with --replace-connection/);
   assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')), state,
     'an unusable first page must preserve prior state while naming recovery');
+
+  const flaggedFailure = runCommand(world, [
+    'run', '--adapter', 'codex', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir,
+    '--replace-connection', '--once',
+  ]);
+  assert.equal(flaggedFailure.status, 1);
+  assert.doesNotMatch(flaggedFailure.stderr, /intentional Interlock connection replacement/,
+    'a failed poll with the explicit flag must not advise retaining or re-adding it');
+  assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')), state);
 
   fs.writeFileSync(world.pageFile, JSON.stringify(ringPage({
     rings: [{ id: 3, ts: 1_788_379_260_000, byline: 'Ana', kind: 'person', session: null }],
@@ -467,6 +487,30 @@ test('an Interlock reconnect cannot inherit an old adapter cursor silently', () 
   assert.match(redundant.stderr, /still matches[^]*rerun without the flag/);
   assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')), rebound,
     'the one-shot replacement flag must not become a reusable cursor bypass');
+});
+
+test('replacement guidance is limited to the first poll of retained state', () => {
+  const world = fixture(ringPage({ rings: [], cursor: 5 }));
+  const seeded = run(world);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  fs.writeFileSync(world.pageFile, JSON.stringify([
+    ringPage({ rings: [], cursor: 5 }),
+    { ok: true, rings: 'bad', cursor: 5 },
+  ]) + '\n');
+  fs.writeFileSync(world.interlockCount, '0');
+
+  const continued = runCommand(world, [
+    'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir,
+  ]);
+  assert.equal(continued.status, 1);
+  assert.match(continued.stderr, /unusable ring page/);
+  assert.doesNotMatch(continued.stderr, /intentional Interlock connection replacement/,
+    'a later poll failure must not be presented as startup replacement recovery');
+  const state = JSON.parse(fs.readFileSync(path.join(world.stateDir,
+    onlyStateFile(world.stateDir)), 'utf8'));
+  assert.equal(state.connection_request_id, REQUEST_A);
+  assert.equal(state.cursor, 5);
 });
 
 test('a second live adapter cannot steal one connection from the first', async () => {
