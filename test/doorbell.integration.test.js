@@ -493,6 +493,10 @@ test('replacement guidance is limited to the first poll of retained state', () =
   const world = fixture(ringPage({ rings: [], cursor: 5 }));
   const seeded = run(world);
   assert.equal(seeded.status, 0, seeded.stderr);
+  const statePath = path.join(world.stateDir, onlyStateFile(world.stateDir));
+  const seededState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.equal(seededState.adapter, 'codex',
+    'arrangement must seed the same adapter namespace the continuing runner uses');
   fs.writeFileSync(world.pageFile, JSON.stringify([
     ringPage({ rings: [], cursor: 5 }),
     { ok: true, rings: 'bad', cursor: 5 },
@@ -500,17 +504,16 @@ test('replacement guidance is limited to the first poll of retained state', () =
   fs.writeFileSync(world.interlockCount, '0');
 
   const continued = runCommand(world, [
-    'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    'run', '--adapter', 'codex', '--connection', 'Marlow',
     '--session', 'host-session-1', '--state-dir', world.stateDir,
   ]);
   assert.equal(continued.status, 1);
   assert.match(continued.stderr, /unusable ring page/);
   assert.doesNotMatch(continued.stderr, /intentional Interlock connection replacement/,
     'a later poll failure must not be presented as startup replacement recovery');
-  const state = JSON.parse(fs.readFileSync(path.join(world.stateDir,
-    onlyStateFile(world.stateDir)), 'utf8'));
-  assert.equal(state.connection_request_id, REQUEST_A);
-  assert.equal(state.cursor, 5);
+  const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.deepEqual(state, seededState,
+    'a later unusable poll must preserve the same retained adapter state');
 });
 
 test('a second live adapter cannot steal one connection from the first', async () => {
