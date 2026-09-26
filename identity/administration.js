@@ -34,6 +34,7 @@ const WORKFLOWS = Object.freeze([
   'person.revoke',
   'participant.revoke',
   'transcript.clear',
+  'work.project',
   'authenticator.add',
   // W2 §1.1 — 'authenticator.revoke' is REMOVED, not aliased. Two revoke doors with
   // two threat models must be two workflow names, or the audit log cannot tell a
@@ -869,6 +870,17 @@ function createService(opts) {
       Object.freeze({ ok: true }));
   }
 
+  // One fresh step-up authorises one owner-only act on the Work record's
+  // project list (create or retire). Same envelope and consumption as a
+  // transcript clear; its own workflow name so the audit trail can tell them apart.
+  function confirmWorkProjectAct(optsIn) {
+    if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn) ||
+        Reflect.ownKeys(optsIn).some(key =>
+          typeof key !== 'string' || !TRANSCRIPT_CLEAR_KEYS.includes(key))) return FAIL;
+    return withFreshAdmin(optsIn, 'work.project', 'membership', () =>
+      Object.freeze({ ok: true }));
+  }
+
   // ── Authenticator self-management (R7 extends R6) ─────────────────────────
   async function beginAdditionalAuthenticator(optsIn) {
     // Requires L2 + at least one existing usable authenticator; uses R6 service.
@@ -1193,6 +1205,7 @@ function createService(opts) {
     revokePerson,
     revokeParticipant,
     confirmTranscriptClear,
+    confirmWorkProjectAct,
     beginAdditionalAuthenticator,
     finishAdditionalAuthenticator,
     revokeOwnAuthenticator,

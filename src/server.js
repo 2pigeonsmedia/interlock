@@ -12,6 +12,9 @@ const { createArchiveService } = require('./chat/archive.js');
 const { createChatService } = require('./chat/service.js');
 const { openStore } = require('./chat/store.js');
 const { createFirstOwnerHandler } = require('./first_owner.js');
+const { openWorkStore } = require('./work/store.js');
+const { createWorkService } = require('./work/service.js');
+const { createWorkRoutes } = require('./work/routes.js');
 const { releaseIdleSeats } = require('./idle.js');
 const { readRoomSettings } = require('./room_settings.js');
 const { renderGuidePage } = require('./guide.js');
@@ -319,6 +322,12 @@ async function startInterlockServer(options) {
       participants: meta => house.listParticipants(meta),
     });
     archive = createArchiveService({ dataDir, store: chatStore });
+    // The Work record shares the process, the identity house and the data
+    // directory; it has its own store file and survives a transcript clear.
+    const work = createWorkRoutes({
+      work: createWorkService({ store: openWorkStore({ dataDir }) }),
+      participants: meta => house.listParticipants(meta),
+    });
     let idleBusy = null;
     const releaseIdle = now => {
       if (idleBusy) return idleBusy;
@@ -327,7 +336,7 @@ async function startInterlockServer(options) {
       return idleBusy;
     };
     const handler = createFirstOwnerHandler({
-      house, origin, assets, chat, admission, archive, releaseIdle, dataDir,
+      house, origin, assets, chat, admission, archive, releaseIdle, dataDir, work,
     });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));

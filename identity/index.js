@@ -889,6 +889,20 @@ function create(config) {
     return Object.freeze({ ok: !!result && result.ok === true });
   }
 
+  function confirmWorkProjectAct(meta) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('confirmWorkProjectAct(meta) requires the trusted metadata object');
+    }
+    const result = service.confirmWorkProjectAct({
+      cookie_header: meta.cookie_header,
+      csrf_token: meta.csrf_token,
+      request_origin: meta.request_origin,
+      sec_fetch_site: meta.sec_fetch_site,
+      now: meta.now,
+    });
+    return Object.freeze({ ok: !!result && result.ok === true });
+  }
+
   const firstOwner = Object.freeze({
     status() {
       if (firstOwnerBootstrap) return firstOwnerBootstrap.status();
@@ -970,6 +984,7 @@ function create(config) {
     revokeParticipant,
     signOutOtherSessions,
     confirmTranscriptClear,
+    confirmWorkProjectAct,
     allowAiAdmission,
     firstOwner,
     // ── THE BOOT SURFACE ────────────────────────────────────────────────

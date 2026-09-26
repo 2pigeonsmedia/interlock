@@ -144,6 +144,20 @@ function idNumber(id) {
   return Number(id.slice(2));
 }
 
+// Strip opaque identity ids from anything that leaves the service boundary:
+// exports, and every API response. Participants are addressed by name.
+function stripIds(value) {
+  if (Array.isArray(value)) return value.map(stripIds);
+  if (!plainObject(value)) return value;
+  if (validRef(value)) return { name: value.name, kind: value.kind };
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === 'subject_id') continue;
+    out[key] = stripIds(entry);
+  }
+  return out;
+}
+
 function createWorkService(options) {
   const input = closedObject(options, ['store', 'clock']);
   const store = input && input.store;
@@ -725,22 +739,7 @@ function createWorkService(options) {
     return { ok: true, events: page, cursor: page.length ? page[page.length - 1].seq : after, total: remaining.length };
   }
 
-  function publicRef(value) {
-    return value ? { name: value.name, kind: value.kind } : null;
-  }
-
-  // Strip opaque identity ids from anything leaving as paper.
-  function withoutIds(value) {
-    if (Array.isArray(value)) return value.map(withoutIds);
-    if (!plainObject(value)) return value;
-    if (validRef(value)) return publicRef(value);
-    const out = {};
-    for (const [key, entry] of Object.entries(value)) {
-      if (key === 'subject_id') continue;
-      out[key] = withoutIds(entry);
-    }
-    return out;
-  }
+  const withoutIds = stripIds;
 
   function stamp(ms) {
     return new Date(ms).toISOString();
@@ -848,4 +847,4 @@ function createWorkService(options) {
   });
 }
 
-module.exports = Object.freeze({ KINDS, WORK_STATES, SEVERITIES, createWorkService });
+module.exports = Object.freeze({ KINDS, WORK_STATES, SEVERITIES, createWorkService, stripIds });
