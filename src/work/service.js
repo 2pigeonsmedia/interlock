@@ -671,20 +671,20 @@ function createWorkService(options) {
       (draft, body, now) => {
         const item = findDecision(draft, body.id);
         checkRevision(item, body.expected_revision);
+        if (actor.subject_id !== item.asked_by.subject_id && !actor.owner) fail('not-asker');
         const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
         if (decisionState(item) === 'awaiting') fail('invalid-state');
         const askedOf = optionalRef(body.asked_of, 'asked-of');
         if (askedOf === null) fail('invalid-asked-of');
-        if (askedOf !== undefined && askedOf.subject_id !== item.asked_of.subject_id &&
-            askedOf.subject_id !== actor.subject_id && !actor.owner) fail('owner-only');
         const previous = item.answer;
+        const previousAskedOf = clone(item.asked_of);
         item.answer = null;
         item.withdrawn = false;
         if (askedOf !== undefined) item.asked_of = askedOf;
         touch(item, now);
         appendEvent(draft, now, actor, {
           item: item.id, project: item.project, kind: 'reopened', reason,
-          asked_of: clone(item.asked_of), previous: clone(previous),
+          asked_of: clone(item.asked_of), previous_asked_of: previousAskedOf, previous: clone(previous),
         });
         return { ok: true, item: publicItem(item) };
       });

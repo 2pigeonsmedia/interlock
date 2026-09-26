@@ -351,27 +351,43 @@ test('withdrawal is the asker’s act or the owner’s, and an answered question
     'answer-recorded');
 });
 
-test('reopen restores the question to its answerer or to a new one, with the owner rule for third parties', () => {
+test('an unrelated participant cannot reopen or re-address another person\'s question', () => {
   const { work } = fresh();
-  const decision = newDecision(work, builder, owner);
+  const decision = newDecision(work, lead, owner);
+  work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No.' });
+  code(() => work.reopen(builder, { operation_id: uuid(), id: decision.id, expected_revision: 2, reason: 'New facts.' }),
+    'not-asker');
+  code(() => work.reopen(builder, { operation_id: uuid(), id: decision.id, expected_revision: 2, reason: 'Mine to make.', asked_of: ref(builder) }),
+    'not-asker');
+  assert.equal(work.get(owner, { id: decision.id }).item.state, 'answered');
+});
+
+test('the asker may reopen and re-address to a third party; the event keeps the previous recipient', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, lead, owner);
   code(() => work.reopen(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, reason: 'still open' }),
     'invalid-state');
   work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No.' });
-  const reopened = work.reopen(lead, { operation_id: uuid(), id: decision.id, expected_revision: 2, reason: 'New facts.' });
+  const reopened = work.reopen(lead, {
+    operation_id: uuid(), id: decision.id, expected_revision: 2, reason: 'Reviewer decides.', asked_of: ref(reviewer),
+  });
   assert.equal(reopened.item.state, 'awaiting');
-  assert.deepEqual(reopened.item.asked_of, ref(owner));
+  assert.deepEqual(reopened.item.asked_of, ref(reviewer));
   assert.equal(reopened.item.answer, null);
-  assert.deepEqual(work.list(owner, { needs_me: true }).items.map(row => row.id), [decision.id]);
-  work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 3, text: 'Still no.', reason: 'asked again' });
-  const toSelf = work.reopen(lead, { operation_id: uuid(), id: decision.id, expected_revision: 4, reason: 'Mine to make.', asked_of: ref(lead) });
-  assert.deepEqual(toSelf.item.asked_of, ref(lead));
-  work.answer(lead, { operation_id: uuid(), id: decision.id, expected_revision: 5, text: 'Unresolved rows stay.' });
-  code(() => work.reopen(builder, { operation_id: uuid(), id: decision.id, expected_revision: 6, reason: 'x', asked_of: ref(reviewer) }),
-    'owner-only');
-  const byOwner = work.reopen(owner, { operation_id: uuid(), id: decision.id, expected_revision: 6, reason: 'Reviewer decides.', asked_of: ref(reviewer) });
-  assert.deepEqual(byOwner.item.asked_of, ref(reviewer));
-  const history = work.get(owner, { id: decision.id }).history.filter(event => event.kind === 'reopened');
-  assert.deepEqual(history.map(event => event.asked_of.name), ['Ana', 'Lead', 'Reviewer']);
+  assert.deepEqual(work.list(reviewer, { needs_me: true }).items.map(row => row.id), [decision.id]);
+  const event = work.get(owner, { id: decision.id }).history.find(e => e.kind === 'reopened');
+  assert.deepEqual(event.previous_asked_of, ref(owner));
+  assert.deepEqual(event.asked_of, ref(reviewer));
+});
+
+test('the owner may reopen any decision', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, lead, builder);
+  work.answer(builder, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'Dates first.' });
+  const reopened = work.reopen(owner, { operation_id: uuid(), id: decision.id, expected_revision: 2, reason: 'New facts.' });
+  assert.equal(reopened.ok, true);
+  assert.equal(reopened.item.state, 'awaiting');
+  assert.deepEqual(reopened.item.asked_of, ref(builder));
 });
 
 test('the owner answering a question asked of someone else needs a reason and is recorded on whose behalf', () => {

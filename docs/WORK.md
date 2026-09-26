@@ -69,9 +69,8 @@ null), `links`, `parent`, `source`, `revision`.
   answer recorded here; it attaches as a conflict.
 - The person a report names may confirm it (it becomes a direct answer) or
   correct it (the earlier wording stays in history).
-- Withdrawing is the asker's act or the owner's. Reopening restores the
-  question to its answerer, or to a new answerer: anyone may re-address a
-  question to themselves; only the owner may re-address it to a third party.
+- Withdrawing, reopening and re-addressing are the asker's act or the owner's;
+  the previous recipient stays on the event. Anyone else adds a note.
 
 **Evidence** — an append-only entry on any item: `target`, `observed`,
 `reference`, `limits`, and an optional `relates_to` naming an earlier evidence
