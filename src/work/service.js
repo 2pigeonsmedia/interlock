@@ -761,9 +761,13 @@ function createWorkService(options) {
     if (event.conditions) parts.push('conditions: ' + event.conditions);
     if (event.reason) parts.push('reason: ' + event.reason);
     if (event.attributed_to) parts.push('attributed to ' + who(event.attributed_to));
+    if (event.kind === 'answer-reported' || event.kind === 'reported-conflict') parts.push('reported by ' + who(event.by) + ', not confirmed here');
     if (event.on_behalf) parts.push('on behalf of ' + who(event.asked_of));
     if (event.asked_of && event.kind === 'reopened') parts.push('asked of ' + who(event.asked_of));
-    if (event.previous) parts.push('previous (' + event.previous.kind + '): ' + event.previous.text);
+    if (event.previous) {
+      parts.push('previous (' + event.previous.kind +
+        (event.previous.kind === 'reported' ? ', reported by ' + who(event.previous.by) : '') + '): ' + event.previous.text);
+    }
     return '- ' + parts.join(' · ');
   }
 

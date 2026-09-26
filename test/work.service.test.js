@@ -470,6 +470,7 @@ test('export carries actors, states, conditions, limits and earlier answers in b
   work.attachEvidence(reviewer, {
     operation_id: uuid(), id: item.id, target: 'sha-a', observed: 'Suite green.', reference: 'run 12', limits: 'Unit tests only.',
   });
+  work.updateWork(builder, { operation_id: uuid(), id: item.id, expected_revision: 1, target: 'sha-b', note: 'repaired' });
   const decision = newDecision(work, builder, owner);
   work.reportAnswer(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'GO on everything.', source: 'terminal' });
   work.answer(owner, {
