@@ -189,7 +189,8 @@ test('a refusal from the local Interlock is reported with its reason', async () 
   const result = await captureCommand(['work', 'update', 'W-1', '--connection', 'Marlow', '--file', file], dependencies);
   assert.equal(result.code, EXIT_RUNTIME);
   assert.match(result.stderr, /refused the command: stale-revision \(current revision 3\)/);
-  assert.equal(result.stdout, '');
+  assert.match(result.stdout, /^Operation [0-9a-f-]{36} · to retry/);
+  assert.equal(result.stdout.split('\n').filter(Boolean).length, 1, 'only the operation line precedes a refusal');
 });
 
 test('a same-named participant renders with its session so two Builders never read as one', async () => {
@@ -199,4 +200,29 @@ test('a same-named participant renders with its session so two Builders never re
   const result = await captureCommand(['work', 'brief', '--connection', 'Marlow'], dependencies);
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /next: Builder \(session 2\) — Prepare a candidate\./);
+});
+
+test('an answer renders with its conditions, in the record and in its history', async () => {
+  const { dependencies } = world(() => ({ json: {
+    ok: true,
+    item: { id: 'D-4', kind: 'decision', project: 'finance', title: 'Go live?', body: 'Governs the import.', state: 'answered', revision: 2,
+      asked_of: { name: 'Ana', kind: 'person', session: null }, asked_by: { name: 'Lead', kind: 'seat', session: 1 }, proposal: 'Go.', scope: '',
+      answer: { kind: 'direct', text: 'GO', conditions: 'SAMPLE ONLY; NEVER LIVE DATA.', source: 'recorded here', by: { name: 'Ana', kind: 'person', session: null }, attributed_to: { name: 'Ana', kind: 'person', session: null }, at: 5, reason: '' } },
+    evidence: [],
+    history: [{ seq: 2, at: 5, by: { name: 'Ana', kind: 'person', session: null }, kind: 'answered', item: 'D-4', project: 'finance', text: 'GO', conditions: 'SAMPLE ONLY; NEVER LIVE DATA.', reason: '', on_behalf: false }],
+  } }));
+  const result = await captureCommand(['work', 'get', 'D-4', '--connection', 'Marlow'], dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /answer \(direct\): GO · conditions: SAMPLE ONLY; NEVER LIVE DATA\./);
+  assert.match(result.stdout, /2 · Ana · answered · D-4 · GO · conditions: SAMPLE ONLY; NEVER LIVE DATA\./);
+});
+
+test('a write prints its operation id before sending so a retry can reuse it', async () => {
+  const { dependencies } = world(() => ({ status: 201, json: { ok: true, item: { id: 'W-9', kind: 'work', project: 'finance', title: 'Once', state: 'open', revision: 1 } } }));
+  const file = tempJson({ kind: 'work', project: 'finance', title: 'Once', body: 'x' });
+  const result = await captureCommand(['work', 'create', '--connection', 'Marlow', '--file', file], dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  const lines = result.stdout.split('\n');
+  assert.match(lines[0], /^Operation [0-9a-f-]{36} · to retry this exact request, put "operation_id": "[0-9a-f-]{36}" in the file\.$/);
+  assert.match(lines[1], /^Created W-9/);
 });

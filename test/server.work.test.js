@@ -250,7 +250,7 @@ test('work records ride the existing identity and survive a clear, a restart and
     const list = await aiGet(runtime, '/api/ai/work/list?project=finance&needs_me=1', lead.token);
     assert.equal(list.status, 200, list.text);
     assert.deepEqual(list.json.items.map(row => row.id), ['W-1']);
-    const unknownQuery = await aiGet(runtime, '/api/ai/work/list?desk=finance', lead.token);
+    const unknownQuery = await aiGet(runtime, '/api/ai/work/list?lane=finance', lead.token);
     assert.equal(unknownQuery.status, 400, unknownQuery.text);
     const detail = await aiGet(runtime, '/api/ai/work/items/W-1', lead.token);
     assert.equal(detail.status, 200, detail.text);

@@ -147,7 +147,7 @@ test('done requires a completion account, clears the next actor, and reports whe
   }), 'invalid-done');
   const done = work.updateWork(lead, {
     operation_id: uuid(), id: item.id, expected_revision: 1, state: 'done',
-    done_account: 'Merged the candidate.', note: 'finished',
+    done_account: 'Merged the candidate.', no_evidence: true, note: 'finished',
   });
   assert.equal(done.item.state, 'done');
   assert.equal(done.item.next_to, null);
@@ -531,4 +531,93 @@ test('a ref keeps the session discriminator of the participant it names, through
   assert.deepEqual(json.items[0].next_to, { name: 'Builder', kind: 'seat', session: 2 });
   assert.deepEqual(json.items[0].created_by, { name: 'Lead', kind: 'seat', session: null });
   assert.ok(work.exportRecords(owner, { format: 'md' }).body.includes('Builder (session 2)'));
+});
+
+// ── second review (Codex) ─────────────────────────────────────────────────────
+
+test('history keeps the values a change replaced, and creation records the initial fields', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead, { body: 'Original requirement.' });
+  work.updateWork(builder, { operation_id: uuid(), id: item.id, expected_revision: 1, body: 'Rewritten.', note: 'rewrote' });
+  const history = work.get(lead, { id: item.id }).history;
+  assert.equal(history[0].kind, 'created');
+  assert.equal(history[0].body, 'Original requirement.');
+  assert.deepEqual(history[1].before, { body: 'Original requirement.' });
+  assert.deepEqual(history[1].after, { body: 'Rewritten.' });
+  assert.ok(work.exportRecords(owner, { format: 'md' }).body.includes('Original requirement.'));
+});
+
+test('a project filter never hides what needs me or what was reported to me', () => {
+  const { work } = fresh();
+  work.createProject(owner, { operation_id: uuid(), id: 'finance', display_name: 'Finance' });
+  const decision = newDecision(work, builder, owner, { project: 'finance' });
+  const reported = newDecision(work, builder, owner, { project: 'finance', title: 'Second' });
+  work.reportAnswer(lead, { operation_id: uuid(), id: reported.id, expected_revision: 1, text: 'No.', source: 'terminal' });
+  const brief = work.brief(owner, { project: 'ops' });
+  assert.deepEqual(brief.projects.map(p => p.id), ['ops']);
+  assert.deepEqual(brief.needs_me.map(row => row.id), [decision.id]);
+  assert.deepEqual(brief.reported_to_me.map(row => row.id), [reported.id]);
+  assert.deepEqual(brief.decisions, []);
+});
+
+test('markdown export renders evidence attached to a decision in full', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, owner);
+  work.attachEvidence(reviewer, {
+    operation_id: uuid(), id: decision.id, target: 'sample run 4', observed: 'Dates stayed unresolved.',
+    reference: 'run log 4', limits: 'Sample file only.',
+  });
+  const body = work.exportRecords(owner, { format: 'md' }).body;
+  for (const expected of ['sample run 4', 'run log 4', 'Sample file only.']) {
+    assert.ok(body.includes(expected), 'decision evidence is missing: ' + expected);
+  }
+});
+
+test('done needs an explicit evidence reference or an explicit no-evidence declaration', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead);
+  code(() => work.updateWork(lead, {
+    operation_id: uuid(), id: item.id, expected_revision: 1, state: 'done', done_account: 'Merged.', note: 'done',
+  }), 'invalid-done-evidence');
+  const bare = work.updateWork(lead, {
+    operation_id: uuid(), id: item.id, expected_revision: 1, state: 'done', done_account: 'Merged.',
+    no_evidence: true, note: 'done',
+  });
+  assert.equal(bare.item.done_evidence, null);
+  assert.equal(bare.item.done_without_evidence, true);
+  assert.ok(work.exportRecords(owner, { format: 'md' }).body.includes('no evidence attached'));
+  const second = newWork(work, lead, { title: 'Second' });
+  const evidence = work.attachEvidence(reviewer, {
+    operation_id: uuid(), id: second.id, target: 'sha-a', observed: 'Green.', reference: 'run 1', limits: 'Unit only.',
+  });
+  code(() => work.updateWork(lead, {
+    operation_id: uuid(), id: second.id, expected_revision: 1, state: 'done', done_account: 'Merged.',
+    done_evidence: 999, note: 'done',
+  }), 'invalid-done-evidence');
+  const cited = work.updateWork(lead, {
+    operation_id: uuid(), id: second.id, expected_revision: 1, state: 'done', done_account: 'Merged.',
+    done_evidence: evidence.event.seq, note: 'done',
+  });
+  assert.equal(cited.item.done_evidence, evidence.event.seq);
+  assert.equal(cited.item.done_without_evidence, false);
+});
+
+test('entering blocked keeps a next actor only when this request names both the unblocker and the act', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead, { next_to: ref(builder), next_action: 'Wait for review.' });
+  const entered = work.updateWork(builder, {
+    operation_id: uuid(), id: item.id, expected_revision: 1, state: 'blocked', block_reason: 'Needs the scope.',
+    next_to: ref(reviewer), note: 'blocked, recipient named but no act',
+  });
+  assert.equal(entered.item.next_to, null, 'an old waiting action is not an unblocking act');
+  assert.deepEqual(work.list(reviewer, { needs_me: true }).items, []);
+});
+
+test('parents are one level deep: no self-parenting, no chains, no cycles', () => {
+  const { work } = fresh();
+  const top = newWork(work, lead, { title: 'Top' });
+  const middle = newWork(work, lead, { title: 'Middle', parent: top.id });
+  code(() => work.updateWork(lead, { operation_id: uuid(), id: top.id, expected_revision: 1, parent: top.id, note: 'self' }), 'invalid-parent');
+  code(() => newWork(work, lead, { title: 'Deep', parent: middle.id }), 'invalid-parent');
+  code(() => work.updateWork(lead, { operation_id: uuid(), id: top.id, expected_revision: 1, parent: middle.id, note: 'cycle' }), 'invalid-parent');
 });

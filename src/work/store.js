@@ -26,12 +26,33 @@ function plainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const PROJECT_ID = /^[a-z][a-z0-9-]{1,31}$/;
+const ITEM_ID = /^[WD]-[1-9][0-9]*$/;
+const ITEM_KINDS = Object.freeze(['work', 'finding', 'decision']);
+
+function uniqueStrings(values) {
+  return new Set(values).size === values.length;
+}
+
+// The whole document, not just its container: every record has the shape
+// the service relies on, ids are unique, and the counters are ahead of them.
 function validStore(value) {
-  return plainObject(value) && value.schema === SCHEMA &&
+  if (!(plainObject(value) && value.schema === SCHEMA &&
     Number.isSafeInteger(value.next_id) && value.next_id >= 1 &&
     Number.isSafeInteger(value.next_event) && value.next_event >= 1 &&
     Array.isArray(value.projects) && Array.isArray(value.items) &&
-    Array.isArray(value.events) && plainObject(value.operations);
+    Array.isArray(value.events) && plainObject(value.operations))) return false;
+  if (!value.projects.every(row => plainObject(row) && typeof row.id === 'string' && PROJECT_ID.test(row.id) &&
+    typeof row.display_name === 'string')) return false;
+  if (!uniqueStrings(value.projects.map(row => row.id))) return false;
+  if (!value.items.every(row => plainObject(row) && typeof row.id === 'string' && ITEM_ID.test(row.id) &&
+    ITEM_KINDS.includes(row.kind))) return false;
+  if (!uniqueStrings(value.items.map(row => row.id))) return false;
+  if (value.items.some(row => Number(row.id.slice(2)) >= value.next_id)) return false;
+  if (!value.events.every(row => plainObject(row) && Number.isSafeInteger(row.seq) && row.seq >= 1)) return false;
+  if (!uniqueStrings(value.events.map(row => String(row.seq)))) return false;
+  if (value.events.some(row => row.seq >= value.next_event)) return false;
+  return true;
 }
 
 function deepFreeze(value) {
@@ -121,7 +142,19 @@ function openWorkStore(options) {
     const draft = structuredClone(current);
     const result = mutate(draft);
     if (!validStore(draft)) fail('invalid-store');
-    atomicWriteJson(filePath, draft);
+    try {
+      atomicWriteJson(filePath, draft);
+    } catch (error) {
+      // The failure may sit after the rename. Read the file back and let it
+      // decide what memory holds; if it matches neither side, stop writing.
+      let onDisk = null;
+      try { onDisk = fs.readFileSync(filePath, 'utf8'); } catch (_) { onDisk = null; }
+      const draftText = JSON.stringify(draft) + '\n';
+      const currentText = JSON.stringify(current) + '\n';
+      if (onDisk === draftText) current = deepFreeze(draft);
+      else if (onDisk !== currentText) { state = 'damaged'; reason = 'uncertain-commit'; }
+      throw error;
+    }
     current = deepFreeze(draft);
     return result;
   }
@@ -145,7 +178,10 @@ function openWorkStore(options) {
     closed = true;
   }
 
-  return Object.freeze({ state, reason, path: filePath, read, commit, nextId, nextEvent, close });
+  return Object.freeze({
+    get state() { return state; }, get reason() { return reason; },
+    path: filePath, read, commit, nextId, nextEvent, close,
+  });
 }
 
 module.exports = Object.freeze({ DEFAULT_PROJECT, SCHEMA, openWorkStore });

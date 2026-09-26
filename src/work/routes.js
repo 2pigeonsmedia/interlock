@@ -80,6 +80,14 @@ function createWorkRoutes(options) {
     const roster = participants({ now });
     let hits = roster.filter(row => row.subject_id === value);
     if (hits.length === 0) hits = roster.filter(row => row.name === value);
+    if (hits.length === 0) {
+      // "Name (session N)" picks one of several same-named seats.
+      const selector = /^(.+) \(session ([^()]+)\)$/.exec(value);
+      if (selector) {
+        hits = roster.filter(row => row.name === selector[1] && row.session !== null &&
+          row.session !== undefined && String(row.session) === selector[2]);
+      }
+    }
     if (hits.length !== 1) {
       const error = new Error('work.routes: ' + (hits.length ? 'ambiguous-participant' : 'invalid-participant'));
       error.code = hits.length ? 'ambiguous-participant' : 'invalid-participant';

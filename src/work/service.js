@@ -34,7 +34,7 @@ const WORK_ONLY_KEYS = Object.freeze([
 const DECISION_ONLY_KEYS = Object.freeze(['asked_of', 'proposal', 'rationale', 'scope', 'conditions']);
 const UPDATE_KEYS = Object.freeze([
   'id', 'expected_revision', 'note', 'state', 'responsible', 'next_to', 'next_action',
-  'target', 'block_reason', 'done_account', 'links', 'parent', 'title', 'body',
+  'target', 'block_reason', 'done_account', 'done_evidence', 'no_evidence', 'links', 'parent', 'title', 'body',
   'consequence', 'severity',
 ]);
 
@@ -242,11 +242,15 @@ function createWorkService(options) {
     return [...new Set(links)];
   }
 
-  function validParent(draft, parent) {
+  // Parents are one level deep: a parent is a work or finding item that has no
+  // parent of its own, never the item itself, and an item that already has
+  // children cannot take a parent.
+  function validParent(draft, parent, selfId) {
     if (parent === undefined) return undefined;
     if (parent === null) return null;
     const item = typeof parent === 'string' && ITEM_ID.test(parent) && draft.items.find(row => row.id === parent);
-    if (!item || item.kind === 'decision') fail('invalid-parent');
+    if (!item || item.kind === 'decision' || item.parent !== null || parent === selfId ||
+        (selfId && draft.items.some(row => row.parent === selfId))) fail('invalid-parent');
     return parent;
   }
 
@@ -378,7 +382,7 @@ function createWorkService(options) {
         body: requiredText(body.body, BODY_BYTES, 'body'),
         source: optionalText(body.source, SHORT_BYTES, 'source') ?? null,
         links: validLinks(draft, body.links) ?? [],
-        parent: validParent(draft, body.parent) ?? null,
+        parent: validParent(draft, body.parent, id) ?? null,
         revision: 1,
         created_at: now,
         created_by: refOf(actor),
@@ -405,13 +409,17 @@ function createWorkService(options) {
           target: optionalText(body.target, SHORT_BYTES, 'target') ?? '',
           block_reason: '',
           done_account: '',
+          done_evidence: null,
+          done_without_evidence: false,
           consequence: optionalText(body.consequence, BODY_BYTES, 'consequence') ?? '',
           severity: validSeverity(body.severity) ?? null,
         });
         if (item.next_to && item.next_action.trim() === '') fail('invalid-next-action');
       }
       draft.items.push(item);
-      appendEvent(draft, now, actor, { item: id, project: project.id, kind: 'created', title: item.title });
+      const initial = clone(item);
+      for (const key of ['id', 'kind', 'project', 'revision', 'created_at', 'created_by', 'updated_at']) delete initial[key];
+      appendEvent(draft, now, actor, { item: id, project: project.id, kind: 'created', title: item.title, body: item.body, fields: initial });
       return { ok: true, item: publicItem(item) };
     });
   }
@@ -433,7 +441,7 @@ function createWorkService(options) {
       apply('title', optionalText(body.title, TITLE_BYTES, 'title'));
       apply('body', optionalText(body.body, BODY_BYTES, 'body'));
       apply('links', validLinks(draft, body.links));
-      apply('parent', validParent(draft, body.parent));
+      apply('parent', validParent(draft, body.parent, item.id));
       apply('responsible', optionalRef(body.responsible, 'responsible'));
       apply('next_to', optionalRef(body.next_to, 'next-to'));
       apply('next_action', optionalText(body.next_action, SHORT_BYTES, 'next-action'));
@@ -448,28 +456,53 @@ function createWorkService(options) {
       if (next.state === 'ready' && !next.next_to) fail('invalid-ready');
       if (next.state === 'blocked') {
         if (next.block_reason.trim() === '') fail('invalid-blocked');
-        // Entering Blocked drops the next actor unless this request names the
-        // unblocker and the unblocking act. An ordinary edit to an item that is
-        // already blocked leaves its unblocker where it is.
+        // Entering Blocked drops the next actor unless THIS request names both
+        // the unblocker and the unblocking act. An ordinary edit to an item that
+        // is already blocked leaves its unblocker where it is.
         if (item.state !== 'blocked') {
-          const named = body.next_to !== undefined && body.next_to !== null && next.next_action.trim() !== '';
+          const named = body.next_to !== undefined && body.next_to !== null &&
+            typeof body.next_action === 'string' && body.next_action.trim() !== '';
           if (!named && next.next_to !== null) { next.next_to = null; changed.push('next_to'); }
         }
       }
       if (next.state === 'done') {
         if (next.done_account.trim() === '') fail('invalid-done');
+        if (item.state !== 'done') {
+          // Done declares its evidence: one entry by sequence, or an explicit
+          // "no evidence attached". Never blank, never derived.
+          const cited = body.done_evidence;
+          const none = body.no_evidence === true;
+          if (cited !== undefined && cited !== null) {
+            if (none || !Number.isSafeInteger(cited) ||
+                !draft.events.some(event => event.seq === cited && event.item === item.id && event.kind === 'evidence')) fail('invalid-done-evidence');
+            next.done_evidence = cited;
+            next.done_without_evidence = false;
+          } else if (none) {
+            next.done_evidence = null;
+            next.done_without_evidence = true;
+          } else fail('invalid-done-evidence');
+          changed.push('done_evidence', 'done_without_evidence');
+        }
         if (next.next_to !== null) { next.next_to = null; changed.push('next_to'); }
+      } else if (item.state === 'done' && next.state !== 'done') {
+        next.done_evidence = null;
+        next.done_without_evidence = false;
+        changed.push('done_evidence', 'done_without_evidence');
       }
       if (next.next_to && next.next_action.trim() === '') fail('invalid-next-action');
       next.revision = item.revision + 1;
       next.updated_at = now;
+      const fields = [...new Set(changed)].filter(field => canonical(item[field]) !== canonical(next[field]));
+      const before = {};
+      const after = {};
+      for (const field of fields) { before[field] = clone(item[field]); after[field] = clone(next[field]); }
       if (next.target !== item.target) {
         appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'target-changed', from: item.target, to: next.target });
       }
       if (next.state !== item.state) {
-        appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'state-changed', from: item.state, to: next.state, note });
+        appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'state-changed', from: item.state, to: next.state, note, changed: fields, before, after });
       } else {
-        appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'updated', note, changed: [...new Set(changed)] });
+        appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'updated', note, changed: fields, before, after });
       }
       draft.items[draft.items.indexOf(item)] = next;
       return { ok: true, item: publicItem(next) };
@@ -724,15 +757,19 @@ function createWorkService(options) {
     const named = query.project === undefined ? null : findProject(draft, query.project);
     const projects = named ? [named] : draft.projects.filter(row => row.retired_at === null);
     const visible = new Set(projects.map(row => row.id));
-    const items = draft.items.filter(item => visible.has(item.project))
-      .sort((a, b) => idNumber(a.id) - idNumber(b.id));
+    const byId = (a, b) => idNumber(a.id) - idNumber(b.id);
+    const items = draft.items.filter(item => visible.has(item.project)).sort(byId);
+    // What needs me is never narrowed by a project filter: it spans every
+    // active project (a retired project is the owner's deliberate exception).
+    const active = new Set(draft.projects.filter(row => row.retired_at === null).map(row => row.id));
+    const mine = draft.items.filter(item => active.has(item.project)).sort(byId);
     const me = actor.subject_id;
     return {
       ok: true,
       cursor: draft.next_event - 1,
       projects: projects.map(publicProject),
-      needs_me: items.filter(item => needsMe(item, me)).map(item => row(draft, item)),
-      reported_to_me: items.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&
+      needs_me: mine.filter(item => needsMe(item, me)).map(item => row(draft, item)),
+      reported_to_me: mine.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&
         item.answer.kind === 'reported' && item.answer.attributed_to.subject_id === me).map(item => row(draft, item)),
       open: items.filter(item => item.kind !== 'decision' && item.state !== 'done').map(item => row(draft, item)),
       decisions: items.filter(item => item.kind === 'decision' && !item.withdrawn).map(item => row(draft, item)),
@@ -782,6 +819,11 @@ function createWorkService(options) {
       parts.push('previous (' + event.previous.kind +
         (event.previous.kind === 'reported' ? ', reported by ' + who(event.previous.by) : '') + '): ' + event.previous.text);
     }
+    if (event.before && event.after) {
+      for (const field of Object.keys(event.before)) {
+        parts.push(field + ': ' + JSON.stringify(event.before[field]) + ' → ' + JSON.stringify(event.after[field]));
+      }
+    }
     return '- ' + parts.join(' · ');
   }
 
@@ -815,16 +857,17 @@ function createWorkService(options) {
       } else {
         lines.push('- responsible: ' + who(item.responsible) + ' · next: ' + (item.next_to ? who(item.next_to) + ' — ' + item.next_action : 'nobody') +
           ' · target: ' + (item.target || 'none') + (item.block_reason ? ' · blocked: ' + item.block_reason : '') +
-          (item.done_account ? ' · done: ' + item.done_account : '') +
+          (item.done_account ? ' · done: ' + item.done_account +
+            (item.state === 'done' ? (item.done_without_evidence ? ' · no evidence attached' : ' · evidence entry ' + item.done_evidence) : '') : '') +
           (item.consequence ? ' · consequence: ' + item.consequence : '') + (item.severity ? ' · severity: ' + item.severity : ''));
-        const evidence = evidenceRows(draft, item);
-        if (evidence.length) {
-          lines.push('', '#### Evidence', '');
-          for (const e of evidence) {
-            lines.push('- ' + stamp(e.at) + ' · ' + who(e.by) + ' · target ' + e.target + ' (matches current target: ' + (e.target_matches ? 'yes' : 'no') + ')' +
-              ' · observed: ' + e.observed + ' · reference: ' + e.reference + ' · limits: ' + e.limits +
-              (e.relates_to ? ' · relates to event ' + e.relates_to : ''));
-          }
+      }
+      const evidence = evidenceRows(draft, item);
+      if (evidence.length) {
+        lines.push('', '#### Evidence', '');
+        for (const e of evidence) {
+          lines.push('- ' + stamp(e.at) + ' · ' + who(e.by) + ' · target ' + e.target + ' (matches current target: ' + (e.target_matches ? 'yes' : 'no') + ')' +
+            ' · observed: ' + e.observed + ' · reference: ' + e.reference + ' · limits: ' + e.limits +
+            (e.relates_to ? ' · relates to event ' + e.relates_to : ''));
         }
       }
       lines.push('', '#### History', '');

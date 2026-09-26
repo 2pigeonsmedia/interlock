@@ -46,3 +46,14 @@ test('a participant name resolves to a ref carrying the roster session; ambiguit
   assert.equal(object.body.error, 'invalid-participant');
   assert.equal(service.calls.length, 2, 'refused names never reach the service');
 });
+
+test('a same-named seat is selectable by "Name (session N)" without exposing subject ids', () => {
+  const service = fakeService();
+  const routes = createWorkRoutes({ work: service, participants: roster });
+  const picked = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder (session 2)' });
+  assert.equal(picked.status, 201, JSON.stringify(picked.body));
+  assert.deepEqual(service.calls[0][1].next_to, { subject_id: 's-9', name: 'Builder', kind: 'seat', session: 2 });
+  const wrongSession = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder (session 7)' });
+  assert.equal(wrongSession.status, 400);
+  assert.equal(wrongSession.body.error, 'invalid-participant');
+});

@@ -39,7 +39,7 @@ test('commit writes atomically, leaves no temporary file, and survives reopen', 
   const store = openWorkStore({ dataDir });
   const result = store.commit(draft => {
     const id = store.nextId(draft, 'W');
-    draft.items.push({ id, title: 'first' });
+    draft.items.push({ id, kind: 'work', title: 'first' });
     return { id };
   });
   assert.deepEqual(result, { id: 'W-1' });
@@ -47,7 +47,7 @@ test('commit writes atomically, leaves no temporary file, and survives reopen', 
   assert.equal(Object.isFrozen(store.read()), true);
   store.close();
   const reopened = openWorkStore({ dataDir });
-  assert.deepEqual(reopened.read().items, [{ id: 'W-1', title: 'first' }]);
+  assert.deepEqual(reopened.read().items, [{ id: 'W-1', kind: 'work', title: 'first' }]);
   assert.equal(reopened.read().next_id, 2);
   reopened.close();
 });
@@ -95,11 +95,11 @@ test('a store that is not JSON opens damaged and is never rewritten', () => {
 test('a failed commit keeps the previous committed store', () => {
   const dataDir = freshDir();
   const store = openWorkStore({ dataDir });
-  store.commit(draft => { draft.items.push({ id: store.nextId(draft, 'W'), title: 'kept' }); });
+  store.commit(draft => { draft.items.push({ id: store.nextId(draft, 'W'), kind: 'work', title: 'kept' }); });
   const realRename = fs.renameSync;
   fs.renameSync = () => { throw new Error('disk full'); };
   try {
-    assert.throws(() => store.commit(draft => { draft.items.push({ id: 'W-2', title: 'lost' }); }),
+    assert.throws(() => store.commit(draft => { draft.items.push({ id: store.nextId(draft, 'W'), kind: 'work', title: 'lost' }); }),
       /disk full/);
   } finally {
     fs.renameSync = realRename;
@@ -118,4 +118,40 @@ test('a mutation that leaves the draft invalid is refused before anything is wri
     error => error.code === 'invalid-store');
   assert.equal(store.read().next_id, 1);
   store.close();
+});
+
+test('a failure after the rename reconciles memory with the file instead of diverging', () => {
+  const dataDir = freshDir();
+  const store = openWorkStore({ dataDir });
+  const realRename = fs.renameSync;
+  fs.renameSync = (from, to) => { realRename(from, to); throw new Error('directory flush failed'); };
+  try {
+    assert.throws(() => store.commit(draft => { draft.items.push({ id: store.nextId(draft, 'W'), kind: 'work', title: 'landed' }); }),
+      /directory flush failed/);
+  } finally {
+    fs.renameSync = realRename;
+  }
+  assert.deepEqual(store.read().items.map(item => item.id), ['W-1'], 'the file holds W-1, so memory must too');
+  store.close();
+  assert.deepEqual(openWorkStore({ dataDir }).read().items.map(item => item.id), ['W-1']);
+});
+
+test('a store whose records are malformed opens damaged', () => {
+  for (const [label, doc] of [
+    ['null item', { schema: 1, next_id: 2, next_event: 1, projects: [{ id: 'ops', display_name: 'Operations' }], items: [null], events: [], operations: {} }],
+    ['duplicate ids', { schema: 1, next_id: 3, next_event: 1, projects: [{ id: 'ops', display_name: 'Operations' }],
+      items: [{ id: 'W-1', kind: 'work' }, { id: 'W-1', kind: 'work' }], events: [], operations: {} }],
+    ['counter behind the ids', { schema: 1, next_id: 1, next_event: 1, projects: [{ id: 'ops', display_name: 'Operations' }],
+      items: [{ id: 'W-4', kind: 'work' }], events: [], operations: {} }],
+    ['event without a sequence', { schema: 1, next_id: 1, next_event: 1, projects: [{ id: 'ops', display_name: 'Operations' }],
+      items: [], events: [{ kind: 'note' }], operations: {} }],
+  ]) {
+    const dataDir = freshDir();
+    fs.mkdirSync(path.join(dataDir, 'work'), { recursive: true });
+    fs.writeFileSync(storePath(dataDir), JSON.stringify(doc) + '\n');
+    const store = openWorkStore({ dataDir });
+    assert.equal(store.state, 'damaged', label);
+    assert.equal(store.reason, 'invalid-store', label);
+    store.close();
+  }
 });

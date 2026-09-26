@@ -22,8 +22,8 @@ entry is a claim about what someone observed at a named target.
   renders as `{ "name": ..., "kind": "person" | "seat", "session": ... }`; the
   session discriminator (null for people) is what tells two same-named seats
   apart on paper. A name that matches more than one active participant is
-  refused as `ambiguous-participant`; address that seat by its rendered
-  session instead of creating a second one with the same name.
+  refused as `ambiguous-participant`; address that seat as
+  `"Builder (session 2)"`, the form every rendering shows.
 - Routine changes to the record do not post to the room, do not move anyone's
   chat cursor, and do not wake any AI. Sharing a change into the conversation
   is a deliberate, ordinary message by its author.
@@ -48,7 +48,9 @@ null), `links`, `parent`, `source`, `revision`.
 - `ready` requires a `next_to`; entering `blocked` requires a `block_reason`
   and drops `next_to` unless the request names both the unblocker and the
   unblocking act (a later ordinary edit to a blocked item leaves its unblocker
-  in place); `done` requires a `done_account` and drops `next_to`.
+  in place); `done` requires a `done_account` and a declaration of evidence:
+  either `done_evidence` (the `seq` of an evidence entry on this item) or
+  `no_evidence: true`. Never blank, never derived. Leaving `done` clears both.
 - Changing `target` records the change; earlier evidence stays pinned to the
   target it examined and is reported as not matching the current one.
 
@@ -77,7 +79,10 @@ entry it corrects or extends. Interlock displays it as attached; it never
 derives "verified".
 
 **Events** — every change is an append-only event with `seq`, `at`, `by`, and
-`kind`; nothing is edited or deleted. `changes?after=N` pages through them.
+`kind`; nothing is edited or deleted. A `created` event carries the initial
+fields; an `updated` or `state-changed` event carries `before` and `after`
+for every field it changed, so a replaced body or target is never lost.
+`changes?after=N` pages through them.
 
 ## Personal queue
 
@@ -102,7 +107,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | Operation | Body (besides `operation_id`) |
 |---|---|
 | `items/create` | `kind`, `project`, `title`, `body`, optional `source`, `links`, `parent`; work: `responsible`, `next_to`, `next_action`, `target`, `consequence`, `severity`; decision: `asked_of`, `proposal`, `rationale`, `scope`, `conditions` |
-| `items/update` | `id`, `expected_revision`, `note`, any work field above, `state`, `block_reason`, `done_account`, `title`, `body` |
+| `items/update` | `id`, `expected_revision`, `note`, any work field above, `state`, `block_reason`, `done_account`, `done_evidence` or `no_evidence`, `title`, `body` |
 | `items/evidence` | `id`, `target`, `observed`, `reference`, `limits`, optional `relates_to` |
 | `items/note` | `id`, `text` |
 | `decisions/answer` | `id`, `expected_revision`, `text`, optional `conditions`, `reason` (required when replacing an answer or answering for someone else) |
@@ -156,6 +161,8 @@ interlock work export --connection NAME --format json|md
 ```
 
 Request bodies travel in a JSON file, never in arguments. The CLI adds an
-`operation_id` when the file has none; keep the file and rerun it to retry
-safely. `report-answer` prints the exposure draft and the `interlock say`
-command that sends it.
+`operation_id` when the file has none and prints it before sending. Rerunning
+the file as it is sends a *new* operation; to retry the exact request after a
+timeout, put the printed id in the file as `operation_id`, then the server
+replays the original result. `report-answer` prints the exposure draft and the
+`interlock say` command that sends it.

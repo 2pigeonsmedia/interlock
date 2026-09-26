@@ -2123,7 +2123,8 @@ function renderBrief(stdout, brief, connection) {
 
 function renderEvents(stdout, events) {
   for (const event of events) {
-    line(stdout, `${event.seq} · ${who(event.by)} · ${event.kind} · ${event.item || event.project || '-'} · ${workDetail(event)}`);
+    const conditions = typeof event.conditions === 'string' && event.conditions !== '' ? ` · conditions: ${terminalSafe(event.conditions)}` : '';
+    line(stdout, `${event.seq} · ${who(event.by)} · ${event.kind} · ${event.item || event.project || '-'} · ${workDetail(event)}${conditions}`);
   }
 }
 
@@ -2137,7 +2138,8 @@ function renderGet(stdout, result) {
     if (item.answer) {
       const a = item.answer;
       const relay = a.kind === 'reported' ? ` · attributed to ${who(a.attributed_to)}, reported by ${who(a.by)}, not confirmed here` : '';
-      line(stdout, `  answer (${a.kind}): ${terminalSafe(a.text)} · by ${who(a.by)}${relay} · source: ${terminalSafe(a.source || '')}`);
+      const conditions = a.conditions ? ` · conditions: ${terminalSafe(a.conditions)}` : '';
+      line(stdout, `  answer (${a.kind}): ${terminalSafe(a.text)}${conditions} · by ${who(a.by)}${relay} · source: ${terminalSafe(a.source || '')}`);
     }
   } else {
     const next = item.next_to ? `${who(item.next_to)} — ${terminalSafe(item.next_action || '')}` : 'nobody';
@@ -2209,7 +2211,13 @@ async function runWork(args, io, dependencies = {}) {
     }
     body = Object.assign({}, body);
     if (spec.id) body.id = parsed.id;
-    if (typeof body.operation_id !== 'string') body.operation_id = crypto.randomUUID();
+    const fromFile = typeof body.operation_id === 'string';
+    if (!fromFile) body.operation_id = crypto.randomUUID();
+    // Printed before the request leaves, so a timed-out send still leaves the
+    // id a retry must reuse.
+    line(io.stdout, fromFile
+      ? `Operation ${terminalSafe(body.operation_id)} · from the file.`
+      : `Operation ${body.operation_id} · to retry this exact request, put "operation_id": "${body.operation_id}" in the file.`);
     requestOptions.body = body;
   } else {
     const query = WORK_QUERY_ORDER.filter(key => parsed.query[key] !== undefined)
