@@ -408,3 +408,99 @@ test('name reuse does not inherit a pending question', () => {
     'not-answerer');
   assert.deepEqual(work.list(builder, { needs_me: true }).items.map(row => row.id), [decision.id]);
 });
+
+// ── brief, changes, pagination, export ────────────────────────────────────────
+
+test('brief returns projects, what needs me, what was reported to me, open work and decisions, with the cursor changes continue from', () => {
+  const { work } = fresh();
+  work.updateProject(lead, { operation_id: uuid(), id: 'ops', expected_revision: 1, objective: 'Keep the room useful.', today: 'Open questions.' });
+  const item = newWork(work, lead, { next_to: ref(builder), next_action: 'Prepare a candidate.' });
+  const reported = newDecision(work, builder, owner);
+  work.reportAnswer(lead, { operation_id: uuid(), id: reported.id, expected_revision: 1, text: 'No guessing.', source: 'terminal' });
+  const pending = newDecision(work, lead, owner, { title: 'Retain the open question?' });
+  const brief = work.brief(owner, {});
+  assert.deepEqual(brief.projects.map(p => [p.id, p.objective, p.today]), [['ops', 'Keep the room useful.', 'Open questions.']]);
+  assert.deepEqual(brief.needs_me.map(row => row.id), [pending.id]);
+  assert.deepEqual(brief.reported_to_me.map(row => row.id), [reported.id]);
+  assert.deepEqual(brief.open.map(row => row.id), [item.id]);
+  assert.deepEqual(brief.decisions.map(row => [row.id, row.state]), [[reported.id, 'reported'], [pending.id, 'awaiting']]);
+  assert.deepEqual(work.changes(owner, { after: brief.cursor }).events, []);
+  work.addNote(builder, { operation_id: uuid(), id: item.id, text: 'Starting.' });
+  const since = work.changes(owner, { after: brief.cursor });
+  assert.deepEqual(since.events.map(event => event.kind), ['note']);
+  assert.equal(since.cursor, brief.cursor + 1);
+  assert.deepEqual(work.brief(builder, {}).needs_me.map(row => row.id), [item.id]);
+});
+
+test('changes returns events after a cursor in order, with the total remaining and the cursor reached', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead);
+  for (const text of ['one', 'two', 'three', 'four']) {
+    work.addNote(lead, { operation_id: uuid(), id: item.id, text });
+  }
+  const all = work.changes(lead, { after: 0 });
+  assert.deepEqual(all.events.map(event => event.seq), [1, 2, 3, 4, 5]);
+  assert.equal(all.cursor, 5);
+  assert.equal(all.total, 5);
+  const page = work.changes(lead, { after: 1, limit: 2 });
+  assert.deepEqual(page.events.map(event => event.kind), ['note', 'note']);
+  assert.equal(page.cursor, 3);
+  assert.equal(page.total, 4);
+  code(() => work.changes(lead, { after: -1 }), 'invalid-query');
+});
+
+test('list paginates with a total and a continuation, never a silent cap', () => {
+  const { work } = fresh();
+  for (let i = 0; i < 5; i += 1) newWork(work, lead, { title: 'Item ' + i });
+  const first = work.list(lead, { limit: 2 });
+  assert.deepEqual(first.items.map(row => row.id), ['W-1', 'W-2']);
+  assert.equal(first.total, 5);
+  assert.equal(first.next, 2);
+  const second = work.list(lead, { after: first.next, limit: 2 });
+  assert.deepEqual(second.items.map(row => row.id), ['W-3', 'W-4']);
+  assert.equal(second.next, 4);
+  const last = work.list(lead, { after: second.next, limit: 2 });
+  assert.deepEqual(last.items.map(row => row.id), ['W-5']);
+  assert.equal(last.next, null);
+});
+
+test('export carries actors, states, conditions, limits and earlier answers in both formats, without opaque ids', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead, { target: 'sha-a' });
+  work.attachEvidence(reviewer, {
+    operation_id: uuid(), id: item.id, target: 'sha-a', observed: 'Suite green.', reference: 'run 12', limits: 'Unit tests only.',
+  });
+  const decision = newDecision(work, builder, owner);
+  work.reportAnswer(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'GO on everything.', source: 'terminal' });
+  work.answer(owner, {
+    operation_id: uuid(), id: decision.id, expected_revision: 2, text: 'GO on the sample only.',
+    conditions: 'Sample file only.', reason: 'The relay dropped my scope.',
+  });
+  const json = work.exportRecords(owner, { format: 'json' });
+  assert.equal(json.content_type, 'application/json; charset=utf-8');
+  const parsed = JSON.parse(json.body);
+  assert.deepEqual(Object.keys(parsed).sort(), ['events', 'exported_at', 'items', 'projects', 'schema']);
+  assert.equal(parsed.items.find(row => row.id === decision.id).state, 'answered');
+  assert.equal(json.body.includes('subject_id'), false);
+  assert.equal(json.body.includes('operations'), false);
+  const markdown = work.exportRecords(owner, { format: 'md' });
+  assert.equal(markdown.content_type, 'text/markdown; charset=utf-8');
+  for (const expected of ['GO on the sample only.', 'GO on everything.', 'Sample file only.', 'Unit tests only.',
+    'The relay dropped my scope.', 'Reviewer', 'Ana', 'answered', 'reported by Lead', 'matches current target: no']) {
+    assert.ok(markdown.body.includes(expected), 'markdown export is missing: ' + expected);
+  }
+  assert.equal(markdown.body.includes('subject_id'), false);
+  code(() => work.exportRecords(owner, { format: 'xml' }), 'invalid-format');
+});
+
+test('retired projects drop out of the default list and brief but their records stay readable', () => {
+  const { work } = fresh();
+  work.createProject(owner, { operation_id: uuid(), id: 'finance', display_name: 'Finance' });
+  const item = newWork(work, lead, { project: 'finance', next_to: ref(builder), next_action: 'Prepare.' });
+  work.retireProject(owner, { operation_id: uuid(), id: 'finance' });
+  assert.deepEqual(work.list(lead, {}).items, []);
+  assert.deepEqual(work.list(lead, { project: 'finance' }).items.map(row => row.id), [item.id]);
+  assert.equal(work.get(lead, { id: item.id }).item.project, 'finance');
+  assert.deepEqual(work.brief(builder, {}).projects.map(p => p.id), ['ops']);
+  assert.deepEqual(work.brief(builder, { project: 'finance' }).projects.map(p => p.id), ['finance']);
+});

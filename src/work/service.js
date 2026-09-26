@@ -685,11 +685,161 @@ function createWorkService(options) {
     };
   }
 
+  const CHANGES_LIMIT = 100;
+  const CHANGES_LIMIT_MAX = 500;
+
+  function brief(actor, rawQuery) {
+    requireActor(actor);
+    const query = closedObject(rawQuery === undefined ? {} : rawQuery, ['project']);
+    if (!query) fail('invalid-query');
+    const draft = snapshot();
+    const named = query.project === undefined ? null : findProject(draft, query.project);
+    const projects = named ? [named] : draft.projects.filter(row => row.retired_at === null);
+    const visible = new Set(projects.map(row => row.id));
+    const items = draft.items.filter(item => visible.has(item.project))
+      .sort((a, b) => idNumber(a.id) - idNumber(b.id));
+    const me = actor.subject_id;
+    return {
+      ok: true,
+      cursor: draft.next_event - 1,
+      projects: projects.map(publicProject),
+      needs_me: items.filter(item => needsMe(item, me)).map(item => row(draft, item)),
+      reported_to_me: items.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&
+        item.answer.kind === 'reported' && item.answer.attributed_to.subject_id === me).map(item => row(draft, item)),
+      open: items.filter(item => item.kind !== 'decision' && item.state !== 'done').map(item => row(draft, item)),
+      decisions: items.filter(item => item.kind === 'decision' && !item.withdrawn).map(item => row(draft, item)),
+    };
+  }
+
+  function changes(actor, rawQuery) {
+    requireActor(actor);
+    const query = closedObject(rawQuery, ['after', 'limit']);
+    if (!query) fail('invalid-query');
+    const after = query.after;
+    if (!Number.isSafeInteger(after) || after < 0) fail('invalid-query');
+    const limit = query.limit === undefined ? CHANGES_LIMIT : query.limit;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > CHANGES_LIMIT_MAX) fail('invalid-query');
+    const draft = snapshot();
+    const remaining = draft.events.filter(event => event.seq > after);
+    const page = remaining.slice(0, limit).map(clone);
+    return { ok: true, events: page, cursor: page.length ? page[page.length - 1].seq : after, total: remaining.length };
+  }
+
+  function publicRef(value) {
+    return value ? { name: value.name, kind: value.kind } : null;
+  }
+
+  // Strip opaque identity ids from anything leaving as paper.
+  function withoutIds(value) {
+    if (Array.isArray(value)) return value.map(withoutIds);
+    if (!plainObject(value)) return value;
+    if (validRef(value)) return publicRef(value);
+    const out = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === 'subject_id') continue;
+      out[key] = withoutIds(entry);
+    }
+    return out;
+  }
+
+  function stamp(ms) {
+    return new Date(ms).toISOString();
+  }
+
+  function who(value) {
+    return value ? value.name : 'nobody';
+  }
+
+  function eventLine(event) {
+    const parts = [stamp(event.at), who(event.by), event.kind];
+    if (event.title !== undefined) parts.push(event.title);
+    if (event.from !== undefined) parts.push(String(event.from) + ' → ' + String(event.to));
+    if (event.note !== undefined) parts.push(event.note);
+    if (event.text !== undefined) parts.push(event.text);
+    if (event.observed !== undefined) parts.push(event.observed);
+    if (event.source !== undefined) parts.push('source: ' + event.source);
+    if (event.conditions) parts.push('conditions: ' + event.conditions);
+    if (event.reason) parts.push('reason: ' + event.reason);
+    if (event.attributed_to) parts.push('attributed to ' + who(event.attributed_to));
+    if (event.on_behalf) parts.push('on behalf of ' + who(event.asked_of));
+    if (event.asked_of && event.kind === 'reopened') parts.push('asked of ' + who(event.asked_of));
+    if (event.previous) parts.push('previous (' + event.previous.kind + '): ' + event.previous.text);
+    return '- ' + parts.join(' · ');
+  }
+
+  function markdownExport(draft, exportedAt) {
+    const lines = ['# Work record', '', 'Exported ' + stamp(exportedAt) + '. Every line is a claim with a byline; nothing here was verified by the export.', ''];
+    lines.push('## Projects', '');
+    for (const project of draft.projects) {
+      lines.push('- **' + project.id + '** ' + project.display_name + (project.retired_at ? ' (retired ' + stamp(project.retired_at) + ')' : '') +
+        ' — objective: ' + (project.objective || 'none') + ' · today: ' + (project.today || 'none') +
+        ' · updated by ' + who(project.updated_by) + ' at ' + stamp(project.updated_at));
+    }
+    lines.push('', '## Items', '');
+    for (const item of [...draft.items].sort((a, b) => idNumber(a.id) - idNumber(b.id))) {
+      const state = item.kind === 'decision' ? decisionState(item) : item.state;
+      lines.push('### ' + item.id + ' · ' + item.title + ' (' + item.kind + ' · ' + item.project + ' · ' + state + ')', '');
+      lines.push('- created by ' + who(item.created_by) + ' at ' + stamp(item.created_at) + ' · revision ' + item.revision +
+        (item.source ? ' · source: ' + item.source : '') + (item.parent ? ' · parent ' + item.parent : '') +
+        (item.links.length ? ' · links ' + item.links.join(', ') : ''));
+      lines.push('- ' + item.body);
+      if (item.kind === 'decision') {
+        lines.push('- asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by) +
+          (item.proposal ? ' · proposal: ' + item.proposal : '') + (item.scope ? ' · scope: ' + item.scope : '') +
+          (item.conditions ? ' · conditions: ' + item.conditions : ''));
+        if (item.answer) {
+          const a = item.answer;
+          lines.push('- answer (' + a.kind + '): ' + a.text + ' · by ' + who(a.by) +
+            (a.kind === 'reported' ? ' · attributed to ' + who(a.attributed_to) + ' · reported by ' + who(a.by) + ', not confirmed here' : '') +
+            ' · at ' + stamp(a.at) + (a.conditions ? ' · conditions: ' + a.conditions : '') + ' · source: ' + a.source +
+            (a.reason ? ' · reason: ' + a.reason : ''));
+        }
+      } else {
+        lines.push('- responsible: ' + who(item.responsible) + ' · next: ' + (item.next_to ? who(item.next_to) + ' — ' + item.next_action : 'nobody') +
+          ' · target: ' + (item.target || 'none') + (item.block_reason ? ' · blocked: ' + item.block_reason : '') +
+          (item.done_account ? ' · done: ' + item.done_account : '') +
+          (item.consequence ? ' · consequence: ' + item.consequence : '') + (item.severity ? ' · severity: ' + item.severity : ''));
+        const evidence = evidenceRows(draft, item);
+        if (evidence.length) {
+          lines.push('', '#### Evidence', '');
+          for (const e of evidence) {
+            lines.push('- ' + stamp(e.at) + ' · ' + who(e.by) + ' · target ' + e.target + ' (matches current target: ' + (e.target_matches ? 'yes' : 'no') + ')' +
+              ' · observed: ' + e.observed + ' · reference: ' + e.reference + ' · limits: ' + e.limits +
+              (e.relates_to ? ' · relates to event ' + e.relates_to : ''));
+          }
+        }
+      }
+      lines.push('', '#### History', '');
+      for (const event of draft.events.filter(event => event.item === item.id)) lines.push(eventLine(event));
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+
+  function exportRecords(actor, rawQuery) {
+    requireActor(actor);
+    const query = closedObject(rawQuery, ['format']);
+    if (!query || (query.format !== 'json' && query.format !== 'md')) fail('invalid-format');
+    const draft = snapshot();
+    const exportedAt = clock();
+    if (query.format === 'md') {
+      return { ok: true, body: markdownExport(draft, exportedAt), content_type: 'text/markdown; charset=utf-8' };
+    }
+    const document = withoutIds({
+      schema: draft.schema,
+      exported_at: exportedAt,
+      projects: draft.projects.map(publicProject),
+      items: draft.items.map(publicItem),
+      events: draft.events.map(clone),
+    });
+    return { ok: true, body: JSON.stringify(document, null, 2) + '\n', content_type: 'application/json; charset=utf-8' };
+  }
+
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote,
     answer, reportAnswer, confirmReported, reopen, withdraw,
-    list, get,
+    list, get, brief, changes, exportRecords,
     needsMe,
   });
 }
