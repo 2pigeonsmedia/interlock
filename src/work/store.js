@@ -50,6 +50,7 @@ function emptyStore(now) {
       display_name: DEFAULT_PROJECT.display_name,
       objective: '',
       today: '',
+      revision: 1,
       updated_by: null,
       updated_at: now,
       created_at: now,
