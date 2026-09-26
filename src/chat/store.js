@@ -52,7 +52,9 @@ const TRUSTED_KEYS = Object.freeze([
 const CLEAR_KEYS = Object.freeze([
   'archive_id', 'exported_at', 'json_sha256', 'markdown_sha256',
 ]);
-const DIRECTORY_SYNC_SUPPORTED = process.platform !== 'win32';
+const {
+  DIRECTORY_SYNC_SUPPORTED, atomicWriteJson, fsyncDirectory, fsyncFile,
+} = require('../atomic_json.js');
 const APPEND_FLAGS = fs.constants.O_WRONLY | fs.constants.O_APPEND;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OWN_CODES = Object.freeze([
@@ -116,17 +118,6 @@ function validProduct(value) {
     Array.from(value).length <= 40 && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
 }
 
-function fsyncFile(filePath) {
-  const fd = fs.openSync(filePath, 'r+');
-  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-}
-
-function fsyncDirectory(dirPath) {
-  if (!DIRECTORY_SYNC_SUPPORTED) return;
-  const fd = fs.openSync(dirPath, 'r');
-  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-}
-
 function writeAllSync(fd, buffer) {
   let offset = 0;
   while (offset < buffer.length) {
@@ -134,15 +125,6 @@ function writeAllSync(fd, buffer) {
     if (!Number.isInteger(n) || n <= 0) fail('store-fatal');
     offset += n;
   }
-}
-
-function atomicWriteJson(filePath, value) {
-  const tmp = filePath + '.tmp';
-  const encoded = JSON.stringify(value) + '\n';
-  fs.writeFileSync(tmp, encoded, { encoding: 'utf8', mode: 0o600, flag: 'w' });
-  fsyncFile(tmp);
-  fs.renameSync(tmp, filePath);
-  fsyncDirectory(path.dirname(filePath));
 }
 
 function appendLineExisting(filePath, line) {
