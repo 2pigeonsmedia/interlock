@@ -9,6 +9,7 @@ const test = require('node:test');
 const { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, run } = require('../src/cli.js');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TEST_TOKEN = 'test-bearer-not-a-real-credential';
 
 async function captureCommand(argv, dependencies = {}) {
   let stdout = '';
@@ -24,7 +25,7 @@ function world(responder) {
   const profile = Object.freeze({
     schema: 2, name: 'Marlow', product: 'Codex CLI', product_provenance: 'client-reported',
     server_url: 'http://localhost:8788', request_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-    token: 'test-bearer-not-a-real-credential', selector: 'selectorselectorselecto', digest: 'a'.repeat(64),
+    token: TEST_TOKEN, selector: 'selectorselectorselecto', digest: 'a'.repeat(64),
     state: 'admitted', created_at: 1, admitted_at: 2, subject_id: 'seat-1', expires_at: 99_999, cursor: 0,
   });
   const calls = [];
@@ -79,7 +80,7 @@ test('work brief fetches the brief for the connection and renders what needs me 
   const result = await captureCommand(['work', 'brief', '--connection', 'Marlow'], dependencies);
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.deepEqual(calls.map(call => [call.method, call.url]), [['GET', 'http://localhost:8788/api/ai/work/brief']]);
-  assert.equal(calls[0].headers.authorization, 'Bearer test-bearer-not-a-real-credential');
+  assert.equal(calls[0].headers.authorization, `Bearer ${TEST_TOKEN}`);
   assert.match(result.stdout, /^Needs you \(1\)/);
   assert.match(result.stdout, /finance · W-3 · Try the sample import — Open the sample\. \(ready, awaiting D-4\)/);
   assert.match(result.stdout, /Finance — Make imports checkable\. · Today: One import path\. \(Lead\)/);
