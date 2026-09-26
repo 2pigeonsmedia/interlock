@@ -378,6 +378,7 @@ test('the asker may reopen and re-address to a third party; the event keeps the 
   const event = work.get(owner, { id: decision.id }).history.find(e => e.kind === 'reopened');
   assert.deepEqual(event.previous_asked_of, ref(owner));
   assert.deepEqual(event.asked_of, ref(reviewer));
+  assert.match(work.exportRecords(owner, { format: 'md' }).body, /asked of Reviewer · previously asked of Ana/);
 });
 
 test('the owner may reopen any decision', () => {

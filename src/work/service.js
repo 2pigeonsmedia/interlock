@@ -815,6 +815,7 @@ function createWorkService(options) {
     if (event.kind === 'answer-reported' || event.kind === 'reported-conflict') parts.push('reported by ' + who(event.by) + ', not confirmed here');
     if (event.on_behalf) parts.push('on behalf of ' + who(event.asked_of));
     if (event.asked_of && event.kind === 'reopened') parts.push('asked of ' + who(event.asked_of));
+    if (event.previous_asked_of) parts.push('previously asked of ' + who(event.previous_asked_of));
     if (event.previous) {
       parts.push('previous (' + event.previous.kind +
         (event.previous.kind === 'reported' ? ', reported by ' + who(event.previous.by) : '') + '): ' + event.previous.text);
