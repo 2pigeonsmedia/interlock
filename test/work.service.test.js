@@ -239,3 +239,172 @@ test('an operation id replays its original result and refuses a different body',
   code(() => work.createItem(lead, Object.assign({}, input, { title: 'Twice' })), 'operation-conflict');
   code(() => work.createItem(lead, Object.assign({}, input, { operation_id: 'not-a-uuid', title: 'x' })), 'invalid-operation');
 });
+
+// ── decisions ─────────────────────────────────────────────────────────────────
+
+function newDecision(work, actor, askedOf, extra = {}) {
+  return work.createItem(actor, Object.assign({
+    operation_id: uuid(), kind: 'decision', project: 'ops',
+    title: 'What should happen to ambiguous dates?',
+    body: 'This choice governs the import flow.',
+    asked_of: ref(askedOf),
+    proposal: 'Keep the row unresolved and ask the person. Do not guess.',
+    scope: 'The statement-import flow',
+  }, extra)).item;
+}
+
+test('a decision asked of the owner enters her queue; a seat cannot answer it; an answer of no is answered', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, owner);
+  assert.equal(decision.state, 'awaiting');
+  assert.deepEqual(work.list(owner, { needs_me: true }).items.map(row => row.id), [decision.id]);
+  code(() => work.answer(builder, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'Yes.' }),
+    'not-answerer');
+  const answered = work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No.' });
+  assert.equal(answered.item.state, 'answered');
+  assert.equal(answered.item.answer.kind, 'direct');
+  assert.equal(answered.item.answer.text, 'No.');
+  assert.deepEqual(answered.item.answer.by, ref(owner));
+  assert.deepEqual(answered.item.answer.attributed_to, ref(owner));
+  assert.deepEqual(work.list(owner, { needs_me: true }).items, []);
+});
+
+test('a reported answer leaves the queue, stays visibly reported, and drafts an exposure message to the person it is attributed to', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, owner);
+  const reported = work.reportAnswer(lead, {
+    operation_id: uuid(), id: decision.id, expected_revision: 1,
+    text: 'No automatic guessing. Keep ambiguous rows unresolved.',
+    source: 'Terminal exchange with Ana, 14:02', conditions: 'For this import path only.',
+  });
+  assert.equal(reported.item.state, 'reported');
+  assert.deepEqual(reported.item.answer.by, ref(lead));
+  assert.deepEqual(reported.item.answer.attributed_to, ref(owner));
+  assert.equal(reported.exposure.to, 'Ana');
+  assert.match(reported.exposure.text, /reported by Lead, not confirmed here/);
+  assert.match(reported.exposure.text, /No automatic guessing/);
+  assert.match(reported.exposure.text, /For this import path only/);
+  assert.deepEqual(work.list(owner, { needs_me: true }).items, []);
+  const detail = work.get(owner, { id: decision.id });
+  assert.deepEqual(detail.history.map(event => event.kind), ['created', 'answer-reported']);
+  code(() => work.reportAnswer(owner, {
+    operation_id: uuid(), id: decision.id, expected_revision: 2, text: 'me', source: 'me',
+  }), 'not-a-relay');
+});
+
+test('confirming a reported answer creates a direct answer and keeps the reported event', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, owner);
+  work.reportAnswer(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No guessing.', source: 'terminal' });
+  code(() => work.confirmReported(builder, { operation_id: uuid(), id: decision.id, expected_revision: 2 }), 'not-answerer');
+  const confirmed = work.confirmReported(owner, { operation_id: uuid(), id: decision.id, expected_revision: 2 });
+  assert.equal(confirmed.item.state, 'answered');
+  assert.equal(confirmed.item.answer.kind, 'direct');
+  assert.equal(confirmed.item.answer.text, 'No guessing.');
+  assert.deepEqual(confirmed.item.answer.by, ref(owner));
+  assert.deepEqual(work.get(owner, { id: decision.id }).history.map(event => event.kind),
+    ['created', 'answer-reported', 'confirmed']);
+});
+
+test('correcting a reported answer requires a reason, replaces it, and keeps the earlier wording', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, owner);
+  work.reportAnswer(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'GO on everything.', source: 'terminal' });
+  code(() => work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 2, text: 'GO on the sample only.' }),
+    'invalid-reason');
+  const corrected = work.answer(owner, {
+    operation_id: uuid(), id: decision.id, expected_revision: 2,
+    text: 'GO on the sample only.', reason: 'The relay dropped my scope.',
+  });
+  assert.equal(corrected.item.answer.text, 'GO on the sample only.');
+  const replaced = work.get(owner, { id: decision.id }).history.find(event => event.kind === 'answer-replaced');
+  assert.equal(replaced.previous.kind, 'reported');
+  assert.equal(replaced.previous.text, 'GO on everything.');
+  assert.equal(replaced.reason, 'The relay dropped my scope.');
+  assert.equal(corrected.exposure.to, 'Lead');
+});
+
+test('a report against a recorded answer is attached as a conflict and changes nothing', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, owner);
+  work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No.' });
+  const conflict = work.reportAnswer(lead, {
+    operation_id: uuid(), id: decision.id, expected_revision: 2, text: 'She said yes.', source: 'hallway',
+  });
+  assert.equal(conflict.conflict, true);
+  assert.equal(conflict.item.answer.text, 'No.');
+  assert.equal(conflict.item.answer.kind, 'direct');
+  assert.equal(work.get(owner, { id: decision.id }).history.at(-1).kind, 'reported-conflict');
+});
+
+test('withdrawal is the asker’s act or the owner’s, and an answered question is not withdrawable', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, owner);
+  code(() => work.withdraw(reviewer, { operation_id: uuid(), id: decision.id, expected_revision: 1, reason: 'noise' }),
+    'not-asker');
+  const withdrawn = work.withdraw(builder, { operation_id: uuid(), id: decision.id, expected_revision: 1, reason: 'Answered in W-1.' });
+  assert.equal(withdrawn.item.state, 'withdrawn');
+  assert.deepEqual(work.list(owner, { needs_me: true }).items, []);
+  const second = newDecision(work, builder, owner);
+  work.answer(owner, { operation_id: uuid(), id: second.id, expected_revision: 1, text: 'No.' });
+  code(() => work.withdraw(owner, { operation_id: uuid(), id: second.id, expected_revision: 2, reason: 'late' }),
+    'answer-recorded');
+});
+
+test('reopen restores the question to its answerer or to a new one, with the owner rule for third parties', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, owner);
+  code(() => work.reopen(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, reason: 'still open' }),
+    'invalid-state');
+  work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No.' });
+  const reopened = work.reopen(lead, { operation_id: uuid(), id: decision.id, expected_revision: 2, reason: 'New facts.' });
+  assert.equal(reopened.item.state, 'awaiting');
+  assert.deepEqual(reopened.item.asked_of, ref(owner));
+  assert.equal(reopened.item.answer, null);
+  assert.deepEqual(work.list(owner, { needs_me: true }).items.map(row => row.id), [decision.id]);
+  work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 3, text: 'Still no.', reason: 'asked again' });
+  const toSelf = work.reopen(lead, { operation_id: uuid(), id: decision.id, expected_revision: 4, reason: 'Mine to make.', asked_of: ref(lead) });
+  assert.deepEqual(toSelf.item.asked_of, ref(lead));
+  work.answer(lead, { operation_id: uuid(), id: decision.id, expected_revision: 5, text: 'Unresolved rows stay.' });
+  code(() => work.reopen(builder, { operation_id: uuid(), id: decision.id, expected_revision: 6, reason: 'x', asked_of: ref(reviewer) }),
+    'owner-only');
+  const byOwner = work.reopen(owner, { operation_id: uuid(), id: decision.id, expected_revision: 6, reason: 'Reviewer decides.', asked_of: ref(reviewer) });
+  assert.deepEqual(byOwner.item.asked_of, ref(reviewer));
+  const history = work.get(owner, { id: decision.id }).history.filter(event => event.kind === 'reopened');
+  assert.deepEqual(history.map(event => event.asked_of.name), ['Ana', 'Lead', 'Reviewer']);
+});
+
+test('the owner answering a question asked of someone else needs a reason and is recorded on whose behalf', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, builder, lead);
+  code(() => work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'Start with dates.' }),
+    'invalid-reason');
+  const answered = work.answer(owner, {
+    operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'Start with dates.', reason: 'Lead is offline.',
+  });
+  assert.deepEqual(answered.item.asked_of, ref(lead));
+  assert.deepEqual(answered.item.answer.by, ref(owner));
+  const event = work.get(owner, { id: decision.id }).history.find(e => e.kind === 'answered');
+  assert.equal(event.on_behalf, true);
+  assert.deepEqual(event.asked_of, ref(lead));
+});
+
+test('a lead records its own choice as a decision asked of itself, and the owner never sees it as hers', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, lead, lead, { title: 'Which check runs first?' });
+  assert.deepEqual(work.list(owner, { needs_me: true }).items, []);
+  assert.deepEqual(work.list(lead, { needs_me: true }).items.map(row => row.id), [decision.id]);
+  const answered = work.answer(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'Dates first.' });
+  assert.equal(answered.item.state, 'answered');
+  assert.deepEqual(answered.item.answer.by, ref(lead));
+  assert.equal(work.get(owner, { id: decision.id }).history.find(e => e.kind === 'answered').on_behalf, false);
+});
+
+test('name reuse does not inherit a pending question', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, lead, builder);
+  assert.deepEqual(work.list(sameName, { needs_me: true }).items, []);
+  code(() => work.answer(sameName, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'mine?' }),
+    'not-answerer');
+  assert.deepEqual(work.list(builder, { needs_me: true }).items.map(row => row.id), [decision.id]);
+});

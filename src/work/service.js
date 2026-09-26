@@ -479,6 +479,172 @@ function createWorkService(options) {
     });
   }
 
+  // ── decisions ─────────────────────────────────────────────────────────────
+
+  function findDecision(draft, id) {
+    const item = findItem(draft, id);
+    if (item.kind !== 'decision') fail('invalid-kind');
+    return item;
+  }
+
+  function conditionsLine(conditions) {
+    return 'Conditions: ' + (conditions.trim() === '' ? 'none stated' : conditions);
+  }
+
+  function reportExposure(item, actor, text, source, conditions) {
+    return {
+      to: item.asked_of.name,
+      text: item.id + ' · ' + item.title + '\n' +
+        'Reported answer attributed to ' + item.asked_of.name +
+        ' (reported by ' + actor.name + ', not confirmed here): ' + text + '\n' +
+        'Source: ' + source + '\n' + conditionsLine(conditions),
+    };
+  }
+
+  function correctionExposure(item, actor, previous, text, reason, conditions) {
+    return {
+      to: previous.by.name,
+      text: item.id + ' · ' + item.title + '\n' +
+        'Corrected answer by ' + actor.name + ', replacing the answer ' + previous.by.name +
+        ' reported: ' + text + '\n' + 'Reason: ' + reason + '\n' + conditionsLine(conditions),
+    };
+  }
+
+  function touch(item, now) {
+    item.revision += 1;
+    item.updated_at = now;
+  }
+
+  function answer(actor, rawInput) {
+    return operation(actor, 'decisions.answer', rawInput, ['id', 'expected_revision', 'text', 'conditions', 'reason'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        checkRevision(item, body.expected_revision);
+        if (item.withdrawn) fail('invalid-state');
+        const text = requiredText(body.text, BODY_BYTES, 'text');
+        const conditions = optionalText(body.conditions, SHORT_BYTES, 'conditions') ?? '';
+        const reason = optionalText(body.reason, SHORT_BYTES, 'reason') ?? '';
+        const isAnswerer = actor.subject_id === item.asked_of.subject_id;
+        if (!isAnswerer && !actor.owner) fail('not-answerer');
+        const onBehalf = !isAnswerer;
+        const previous = item.answer;
+        if ((onBehalf || previous !== null) && reason.trim() === '') fail('invalid-reason');
+        item.answer = {
+          kind: 'direct', text, conditions, source: 'recorded here',
+          by: refOf(actor), attributed_to: refOf(actor), at: now, reason,
+        };
+        touch(item, now);
+        if (previous) {
+          appendEvent(draft, now, actor, {
+            item: item.id, project: item.project, kind: 'answer-replaced', text, conditions, reason, previous: clone(previous),
+          });
+        } else {
+          appendEvent(draft, now, actor, {
+            item: item.id, project: item.project, kind: 'answered', text, conditions, reason,
+            on_behalf: onBehalf, asked_of: clone(item.asked_of),
+          });
+        }
+        const result = { ok: true, item: publicItem(item) };
+        if (previous && previous.kind === 'reported') {
+          result.exposure = correctionExposure(item, actor, previous, text, reason, conditions);
+        }
+        return result;
+      });
+  }
+
+  function reportAnswer(actor, rawInput) {
+    return operation(actor, 'decisions.report', rawInput, ['id', 'expected_revision', 'text', 'source', 'conditions'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        checkRevision(item, body.expected_revision);
+        if (item.withdrawn) fail('invalid-state');
+        if (actor.subject_id === item.asked_of.subject_id) fail('not-a-relay');
+        const text = requiredText(body.text, BODY_BYTES, 'text');
+        const source = requiredText(body.source, SHORT_BYTES, 'source');
+        const conditions = optionalText(body.conditions, SHORT_BYTES, 'conditions') ?? '';
+        const exposure = reportExposure(item, actor, text, source, conditions);
+        if (item.answer && item.answer.kind === 'direct') {
+          touch(item, now);
+          appendEvent(draft, now, actor, {
+            item: item.id, project: item.project, kind: 'reported-conflict', text, source, conditions,
+            attributed_to: clone(item.asked_of),
+          });
+          return { ok: true, item: publicItem(item), conflict: true, exposure };
+        }
+        item.answer = {
+          kind: 'reported', text, conditions, source,
+          by: refOf(actor), attributed_to: clone(item.asked_of), at: now, reason: '',
+        };
+        touch(item, now);
+        appendEvent(draft, now, actor, {
+          item: item.id, project: item.project, kind: 'answer-reported', text, source, conditions,
+          attributed_to: clone(item.asked_of),
+        });
+        return { ok: true, item: publicItem(item), conflict: false, exposure };
+      });
+  }
+
+  function confirmReported(actor, rawInput) {
+    return operation(actor, 'decisions.confirm', rawInput, ['id', 'expected_revision', 'reason'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        checkRevision(item, body.expected_revision);
+        if (item.withdrawn || !item.answer || item.answer.kind !== 'reported') fail('invalid-state');
+        if (actor.subject_id !== item.answer.attributed_to.subject_id) fail('not-answerer');
+        const reason = optionalText(body.reason, SHORT_BYTES, 'reason') ?? '';
+        const previous = item.answer;
+        item.answer = {
+          kind: 'direct', text: previous.text, conditions: previous.conditions, source: 'confirmed here',
+          by: refOf(actor), attributed_to: refOf(actor), at: now, reason,
+        };
+        touch(item, now);
+        appendEvent(draft, now, actor, {
+          item: item.id, project: item.project, kind: 'confirmed', text: previous.text, reason, previous: clone(previous),
+        });
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
+  function reopen(actor, rawInput) {
+    return operation(actor, 'decisions.reopen', rawInput, ['id', 'expected_revision', 'reason', 'asked_of'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        checkRevision(item, body.expected_revision);
+        const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
+        if (decisionState(item) === 'awaiting') fail('invalid-state');
+        const askedOf = optionalRef(body.asked_of, 'asked-of');
+        if (askedOf === null) fail('invalid-asked-of');
+        if (askedOf !== undefined && askedOf.subject_id !== item.asked_of.subject_id &&
+            askedOf.subject_id !== actor.subject_id && !actor.owner) fail('owner-only');
+        const previous = item.answer;
+        item.answer = null;
+        item.withdrawn = false;
+        if (askedOf !== undefined) item.asked_of = askedOf;
+        touch(item, now);
+        appendEvent(draft, now, actor, {
+          item: item.id, project: item.project, kind: 'reopened', reason,
+          asked_of: clone(item.asked_of), previous: clone(previous),
+        });
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
+  function withdraw(actor, rawInput) {
+    return operation(actor, 'decisions.withdraw', rawInput, ['id', 'expected_revision', 'reason'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        checkRevision(item, body.expected_revision);
+        const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
+        if (item.withdrawn) fail('invalid-state');
+        if (item.answer && item.answer.kind === 'direct') fail('answer-recorded');
+        if (actor.subject_id !== item.asked_by.subject_id && !actor.owner) fail('not-asker');
+        item.withdrawn = true;
+        touch(item, now);
+        appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'withdrawn', reason });
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
   // ── reads ─────────────────────────────────────────────────────────────────
 
   function list(actor, rawQuery) {
@@ -522,6 +688,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote,
+    answer, reportAnswer, confirmReported, reopen, withdraw,
     list, get,
     needsMe,
   });
