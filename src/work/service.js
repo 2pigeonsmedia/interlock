@@ -94,15 +94,23 @@ function optionalText(value, maxBytes, field) {
   return value;
 }
 
+function validSession(value) {
+  return value === undefined || value === null || Number.isSafeInteger(value) ||
+    (typeof value === 'string' && value.length > 0 && value.length <= 64 && cleanText(value));
+}
+
+// A ref names a participant: the opaque subject id (kept inside the service),
+// the display name, the kind, and the session discriminator that tells two
+// same-named seats apart on paper (null for people).
 function validRef(value) {
-  return plainObject(value) && Reflect.ownKeys(value).every(key => ['subject_id', 'name', 'kind'].includes(key)) &&
+  return plainObject(value) && Reflect.ownKeys(value).every(key => ['subject_id', 'name', 'kind', 'session'].includes(key)) &&
     typeof value.subject_id === 'string' && value.subject_id.length > 0 && value.subject_id.length <= 128 &&
     typeof value.name === 'string' && value.name.length > 0 && Buffer.byteLength(value.name, 'utf8') <= 256 &&
-    cleanText(value.name) && (value.kind === 'person' || value.kind === 'seat');
+    cleanText(value.name) && (value.kind === 'person' || value.kind === 'seat') && validSession(value.session);
 }
 
 function refOf(value) {
-  return Object.freeze({ subject_id: value.subject_id, name: value.name, kind: value.kind });
+  return Object.freeze({ subject_id: value.subject_id, name: value.name, kind: value.kind, session: value.session ?? null });
 }
 
 // Absent → undefined; null → null (clear); a ref → frozen snapshot.
@@ -114,7 +122,8 @@ function optionalRef(value, field) {
 }
 
 function validActor(actor) {
-  return plainObject(actor) && validRef({ subject_id: actor.subject_id, name: actor.name, kind: actor.kind }) &&
+  return plainObject(actor) &&
+    validRef({ subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: actor.session }) &&
     typeof actor.owner === 'boolean';
 }
 
@@ -149,7 +158,7 @@ function idNumber(id) {
 function stripIds(value) {
   if (Array.isArray(value)) return value.map(stripIds);
   if (!plainObject(value)) return value;
-  if (validRef(value)) return { name: value.name, kind: value.kind };
+  if (validRef(value)) return { name: value.name, kind: value.kind, session: value.session ?? null };
   const out = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key === 'subject_id') continue;
@@ -439,8 +448,13 @@ function createWorkService(options) {
       if (next.state === 'ready' && !next.next_to) fail('invalid-ready');
       if (next.state === 'blocked') {
         if (next.block_reason.trim() === '') fail('invalid-blocked');
-        const named = body.next_to !== undefined && body.next_to !== null && next.next_action.trim() !== '';
-        if (!named && next.next_to !== null) { next.next_to = null; changed.push('next_to'); }
+        // Entering Blocked drops the next actor unless this request names the
+        // unblocker and the unblocking act. An ordinary edit to an item that is
+        // already blocked leaves its unblocker where it is.
+        if (item.state !== 'blocked') {
+          const named = body.next_to !== undefined && body.next_to !== null && next.next_action.trim() !== '';
+          if (!named && next.next_to !== null) { next.next_to = null; changed.push('next_to'); }
+        }
       }
       if (next.state === 'done') {
         if (next.done_account.trim() === '') fail('invalid-done');
@@ -746,7 +760,8 @@ function createWorkService(options) {
   }
 
   function who(value) {
-    return value ? value.name : 'nobody';
+    if (!value) return 'nobody';
+    return value.session === null || value.session === undefined ? value.name : value.name + ' (session ' + value.session + ')';
   }
 
   function eventLine(event) {

@@ -191,3 +191,12 @@ test('a refusal from the local Interlock is reported with its reason', async () 
   assert.match(result.stderr, /refused the command: stale-revision \(current revision 3\)/);
   assert.equal(result.stdout, '');
 });
+
+test('a same-named participant renders with its session so two Builders never read as one', async () => {
+  const brief = JSON.parse(JSON.stringify(BRIEF));
+  brief.open[0].next_to = { name: 'Builder', kind: 'seat', session: 2 };
+  const { dependencies } = world(() => ({ json: brief }));
+  const result = await captureCommand(['work', 'brief', '--connection', 'Marlow'], dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /next: Builder \(session 2\) — Prepare a candidate\./);
+});

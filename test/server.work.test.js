@@ -188,8 +188,10 @@ test('work records ride the existing identity and survive a clear, a restart and
     }, lead.token);
     assert.equal(w1.status, 201, w1.text);
     assert.equal(w1.json.item.id, 'W-1');
-    assert.deepEqual(w1.json.item.created_by, { name: 'Lead', kind: 'seat' });
-    assert.deepEqual(w1.json.item.next_to, { name: 'Lead', kind: 'seat' });
+    assert.equal(w1.json.item.created_by.name, 'Lead');
+    assert.equal(w1.json.item.created_by.kind, 'seat');
+    assert.notEqual(w1.json.item.created_by.session, undefined, 'a seat ref carries its session discriminator');
+    assert.deepEqual(w1.json.item.next_to, w1.json.item.created_by);
     assert.equal(w1.text.includes('subject_id'), false, 'opaque identity ids stay behind the API boundary');
 
     for (const extra of [{ subject_id: 'p-1' }, { by: 'Ana' }, { created_by: { name: 'Ana', kind: 'person' } }, { kind_of: 'x' }]) {
@@ -223,7 +225,7 @@ test('work records ride the existing identity and survive a clear, a restart and
     }, lead.token);
     assert.equal(d2.status, 201, d2.text);
     assert.equal(d2.json.item.id, 'D-2');
-    assert.deepEqual(d2.json.item.asked_of, { name: 'Ana', kind: 'person' });
+    assert.deepEqual(d2.json.item.asked_of, { name: 'Ana', kind: 'person', session: null });
     const forged = await aiPost(runtime, '/api/ai/work/decisions/answer',
       { operation_id: uuid(), id: 'D-2', expected_revision: 1, text: 'Yes.' }, lead.token);
     assert.equal(forged.status, 403, forged.text);
@@ -237,7 +239,7 @@ test('work records ride the existing identity and survive a clear, a restart and
       { operation_id: uuid(), id: 'D-2', expected_revision: 1, text: 'No.' }, owner);
     assert.equal(answered.status, 200, answered.text);
     assert.equal(answered.json.item.state, 'answered');
-    assert.deepEqual(answered.json.item.answer.by, { name: 'Ana', kind: 'person' });
+    assert.deepEqual(answered.json.item.answer.by, { name: 'Ana', kind: 'person', session: null });
 
     const leadBrief = await aiGet(runtime, '/api/ai/work/brief', lead.token);
     assert.equal(leadBrief.status, 200, leadBrief.text);

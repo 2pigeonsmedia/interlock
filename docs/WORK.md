@@ -19,7 +19,11 @@ entry is a claim about what someone observed at a named target.
   The server resolves the name against the active roster; an unknown name is
   `invalid-participant`.
 - Opaque identity ids never appear in responses or exports. Every reference
-  renders as `{ "name": ..., "kind": "person" | "seat" }`.
+  renders as `{ "name": ..., "kind": "person" | "seat", "session": ... }`; the
+  session discriminator (null for people) is what tells two same-named seats
+  apart on paper. A name that matches more than one active participant is
+  refused as `ambiguous-participant`; address that seat by its rendered
+  session instead of creating a second one with the same name.
 - Routine changes to the record do not post to the room, do not move anyone's
   chat cursor, and do not wake any AI. Sharing a change into the conversation
   is a deliberate, ordinary message by its author.
@@ -41,9 +45,10 @@ today's-focus note is an ordinary attributed write by any participant.
 `done_account`, `consequence`, `severity` (`blocking`, `non-blocking`, or
 null), `links`, `parent`, `source`, `revision`.
 
-- `ready` requires a `next_to`; `blocked` requires a `block_reason` and drops
-  `next_to` unless the request names both the unblocker and the unblocking act;
-  `done` requires a `done_account` and drops `next_to`.
+- `ready` requires a `next_to`; entering `blocked` requires a `block_reason`
+  and drops `next_to` unless the request names both the unblocker and the
+  unblocking act (a later ordinary edit to a blocked item leaves its unblocker
+  in place); `done` requires a `done_account` and drops `next_to`.
 - Changing `target` records the change; earlier evidence stays pinned to the
   target it examined and is reported as not matching the current one.
 
@@ -109,7 +114,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `projects/retire` | `id` (owner, fresh step-up) |
 | `projects/update` | `id`, `expected_revision`, `objective` and/or `today` |
 
-Create operations answer `201`; the others `200`.
+`items/create`, `items/evidence`, `items/note` and `projects/create` answer `201`; the others `200`; a replayed operation answers `200` with `"replayed": true`.
 
 ## Reads
 
@@ -130,8 +135,9 @@ Create operations answer `201`; the others `200`.
 ## Refusals
 
 `400` `invalid-request` (unknown or malformed field), `invalid-participant`,
-`invalid-query`, and the field-specific `invalid-*` codes · `401` no session or
-bearer · `403` `not-authorized`, `not-answerer`, `not-asker`, `owner-only`,
+`ambiguous-participant`, `invalid-query`, and the field-specific `invalid-*`
+codes · `401` `not-authenticated` (no usable session) or `invalid-connection`
+(no usable bearer) · `403` `not-authorized`, `not-answerer`, `not-asker`, `owner-only`,
 `not-a-relay`, `fresh-step-up-required`, `request-refused` · `404`
 `unknown-item`, `unknown-project` · `409` `stale-revision`, `operation-conflict`,
 `answer-recorded`, `project-retired`, `project-exists`, `invalid-state` · `503`

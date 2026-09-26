@@ -26,6 +26,7 @@ const REF_KEYS = Object.freeze(['next_to', 'responsible', 'asked_of']);
 const READS = Object.freeze(['brief', 'list', 'get', 'changes', 'export']);
 const STATUS = Object.freeze({
   'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-a-relay': 403,
+  'ambiguous-participant': 400,
   'unknown-item': 404, 'unknown-project': 404,
   'stale-revision': 409, 'operation-conflict': 409, 'answer-recorded': 409, 'project-retired': 409,
   'project-exists': 409, 'invalid-state': 409,
@@ -84,7 +85,7 @@ function createWorkRoutes(options) {
       error.code = hits.length ? 'ambiguous-participant' : 'invalid-participant';
       throw error;
     }
-    return { subject_id: hits[0].subject_id, name: hits[0].name, kind: hits[0].kind };
+    return { subject_id: hits[0].subject_id, name: hits[0].name, kind: hits[0].kind, session: hits[0].session ?? null };
   }
 
   function mutate(op, actor, body, now = Date.now()) {

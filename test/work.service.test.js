@@ -17,7 +17,7 @@ const reviewer = Object.freeze({ subject_id: 's-3', name: 'Reviewer', kind: 'sea
 const sameName = Object.freeze({ subject_id: 's-9', name: 'Builder', kind: 'seat', owner: false });
 
 function ref(actor) {
-  return { subject_id: actor.subject_id, name: actor.name, kind: actor.kind };
+  return { subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: actor.session ?? null };
 }
 
 function uuid() {
@@ -504,4 +504,31 @@ test('retired projects drop out of the default list and brief but their records 
   assert.equal(work.get(lead, { id: item.id }).item.project, 'finance');
   assert.deepEqual(work.brief(builder, {}).projects.map(p => p.id), ['ops']);
   assert.deepEqual(work.brief(builder, { project: 'finance' }).projects.map(p => p.id), ['finance']);
+});
+
+// ── review fixes ──────────────────────────────────────────────────────────────
+
+test('an ordinary edit to a blocked item keeps its unblocker in the queue', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead);
+  work.updateWork(builder, {
+    operation_id: uuid(), id: item.id, expected_revision: 1, state: 'blocked', block_reason: 'Needs the scope.',
+    next_to: ref(reviewer), next_action: 'Name the scope you will check.', note: 'asked the reviewer',
+  });
+  const edited = work.updateWork(lead, {
+    operation_id: uuid(), id: item.id, expected_revision: 2, title: 'Import rows (typo fixed)', note: 'typo',
+  });
+  assert.deepEqual(edited.item.next_to, ref(reviewer));
+  assert.deepEqual(work.list(reviewer, { needs_me: true }).items.map(row => row.id), [item.id]);
+});
+
+test('a ref keeps the session discriminator of the participant it names, through export', () => {
+  const { work } = fresh();
+  const second = { subject_id: 's-9', name: 'Builder', kind: 'seat', session: 2 };
+  const item = newWork(work, lead, { next_to: second, next_action: 'Prepare.' });
+  assert.deepEqual(item.next_to, second);
+  const json = JSON.parse(work.exportRecords(owner, { format: 'json' }).body);
+  assert.deepEqual(json.items[0].next_to, { name: 'Builder', kind: 'seat', session: 2 });
+  assert.deepEqual(json.items[0].created_by, { name: 'Lead', kind: 'seat', session: null });
+  assert.ok(work.exportRecords(owner, { format: 'md' }).body.includes('Builder (session 2)'));
 });

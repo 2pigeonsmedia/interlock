@@ -2074,7 +2074,9 @@ function reportWorkError(stderr, error, profile) {
 }
 
 function who(value) {
-  return value && typeof value.name === 'string' ? terminalSafe(value.name) : 'nobody';
+  if (!value || typeof value.name !== 'string') return 'nobody';
+  const session = value.session === null || value.session === undefined ? '' : ` (session ${terminalSafe(String(value.session))})`;
+  return terminalSafe(value.name) + session;
 }
 
 function workDetail(event) {

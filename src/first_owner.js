@@ -1217,7 +1217,7 @@ function createFirstOwnerHandler(options) {
       return null;
     }
     return Object.freeze({
-      subject_id: actor.subject_id, name: actor.name, kind: actor.kind,
+      subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null,
       owner: workOwnerFlag(request, authorized, now), now,
     });
   }
@@ -1229,7 +1229,12 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
       return null;
     }
-    return Object.freeze({ subject_id: actor.subject_id, name: actor.name, kind: 'seat', owner: false, now: Date.now() });
+    const discriminator = house.aiSessionDiscriminator(actor.subject_id);
+    return Object.freeze({
+      subject_id: actor.subject_id, name: actor.name, kind: 'seat',
+      session: discriminator && discriminator.session !== undefined ? discriminator.session : null,
+      owner: false, now: Date.now(),
+    });
   }
 
   function queryObject(target) {
