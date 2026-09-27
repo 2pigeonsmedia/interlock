@@ -75,7 +75,7 @@
   // The tile lists whose rows open the drawer. A poll rebuilds them, so the
   // row that opened the drawer is remembered by list and record id, not as a
   // node, and found again when the drawer closes.
-  const OPENER_LISTS = Object.freeze(['needs-you-list', 'reported-list', 'project-list']);
+  const OPENER_LISTS = Object.freeze(['needs-you-list', 'reported-list', 'actions-list', 'project-list']);
 
   function openButton(className, text, label, onClick, id) {
     const button = make('button', className, text);
@@ -155,6 +155,28 @@
     }));
   }
 
+  // Everyone's view of who holds what: every open action, grouped by the
+  // person or seat it is addressed to. A status only — it writes nothing,
+  // rings nobody and never changes who a request is addressed to.
+  function renderActions(brief) {
+    const actions = model().actionsByPerson(brief);
+    element('actions-count').textContent = String(actions.count);
+    element('actions-list').replaceChildren(...actions.groups.map(group => {
+      const block = make('div', 'work-group');
+      block.append(make('h4', 'work-state', group.who + ' · ' + group.rows.length));
+      for (const row of group.rows) {
+        const card = make('div', 'work-row');
+        card.append(
+          openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id), row.id),
+          make('p', 'work-state', row.id),
+          make('p', '', row.line),
+        );
+        block.append(card);
+      }
+      return block;
+    }));
+  }
+
   function renderProjects(brief) {
     element('project-list').replaceChildren(...model().projectSummaries(brief).map(project => {
       const card = make('div', 'work-row');
@@ -177,6 +199,7 @@
     state.brief = brief;
     renderNeedsYou(brief);
     renderReported(brief);
+    renderActions(brief);
     renderProjects(brief);
   }
 
@@ -267,6 +290,13 @@
     const expanded = toggle.getAttribute('aria-expanded') !== 'false';
     toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
     element('needs-you-list').hidden = expanded;
+  }
+
+  function toggleActions() {
+    const toggle = element('actions-toggle');
+    const expanded = toggle.getAttribute('aria-expanded') !== 'false';
+    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    element('actions-list').hidden = expanded;
   }
 
   function showNeedsYou() {
@@ -1181,13 +1211,16 @@
 
   // A signed-out page keeps nothing of the last viewer's record on screen.
   function resetTile() {
-    for (const id of ['needs-you-list', 'reported-list', 'project-list', 'changes-list']) element(id).replaceChildren();
+    for (const id of ['needs-you-list', 'reported-list', 'actions-list', 'project-list', 'changes-list']) element(id).replaceChildren();
     element('needs-you-count').textContent = '0';
+    element('actions-count').textContent = '0';
     element('work-count-button').textContent = 'Needs you · 0';
     element('changes-total').textContent = '0';
     element('changes-more').hidden = true;
     element('needs-you-toggle').setAttribute('aria-expanded', 'true');
     element('needs-you-list').hidden = false;
+    element('actions-toggle').setAttribute('aria-expanded', 'true');
+    element('actions-list').hidden = false;
     element('settings-project-list').replaceChildren();
     hideShare();
     setStatus('');
@@ -1205,6 +1238,7 @@
     session = state;
     const signal = state.listeners.signal;
     element('needs-you-toggle').addEventListener('click', toggleNeedsYou, { signal });
+    element('actions-toggle').addEventListener('click', toggleActions, { signal });
     element('work-count-button').addEventListener('click', showNeedsYou, { signal });
     element('changes-more').addEventListener('click', showMoreChanges, { signal });
     element('work-drawer').addEventListener('close', scheduleOpenerFocus, { signal });

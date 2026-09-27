@@ -295,3 +295,22 @@ test('a project drawer row carries a line of the record\'s own facts under its t
   assert.match(rule[1], /color: var\(--ink-3\)/);
   assert.doesNotMatch(rule[1], /#[0-9a-f]{3,8}\b|rgb|hsl|--wait|--ember|--signal|--ai\b|--owner/i);
 });
+
+test('an Actions section every participant sees, between Reported to you and Projects, collapsing like Needs you', () => {
+  for (const id of ['actions-heading', 'actions-toggle', 'actions-count', 'actions-list']) {
+    assert.equal(ROOM.split(`id="${id}"`).length, 2, `${id} must be present exactly once`);
+  }
+  assert.match(ROOM, /<button id="actions-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="actions-list">Actions <span id="actions-count" class="work-count">0<\/span><\/button>/);
+  assert.ok(ROOM.indexOf('id="reported-list"') < ROOM.indexOf('id="actions-list"') &&
+    ROOM.indexOf('id="actions-list"') < ROOM.indexOf('id="project-list"'), 'Actions sits between Reported to you and Projects');
+  assert.match(WORK_PANEL_JS, /function renderActions\(brief\)[\s\S]*?model\(\)\.actionsByPerson\(brief\)/);
+  assert.match(WORK_PANEL_JS, /function loadBrief[\s\S]*?renderActions\(brief\)/);
+  assert.match(WORK_PANEL_JS, /'Open ' \+ row\.id \+ ': ' \+ row\.title/);
+  assert.match(WORK_PANEL_JS, /element\('actions-toggle'\)\.addEventListener\('click', toggleActions/);
+  assert.match(WORK_PANEL_JS, /function toggleActions[\s\S]*?setAttribute\('aria-expanded'[\s\S]*?element\('actions-list'\)\.hidden = expanded/);
+  // Actions is a status: rendering it writes nothing and sends nothing.
+  const body = /function renderActions\(brief\) \{([\s\S]*?)\n  \}\n/.exec(WORK_PANEL_JS);
+  assert.ok(body, 'renderActions must exist');
+  assert.doesNotMatch(body[1], /mutate|deps\.|fetch\(|notify|share/i);
+  assert.match(WORK_PANEL_JS, /const OPENER_LISTS = Object\.freeze\(\[[^\]]*'actions-list'/);
+});

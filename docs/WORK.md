@@ -202,7 +202,7 @@ never from message text.
 
 ### The tile
 
-Four sections, in this order:
+Five sections, in this order:
 
 - **Needs you** — every record whose next action is addressed to the viewer,
   or a decision awaiting their answer, oldest change first. It counts
@@ -217,6 +217,18 @@ Four sections, in this order:
   it jumps to the tile and focuses this section.
 - **Reported to you** — decisions where someone else reported an answer as
   yours, each reading `Reported by X · attributed to Y · not confirmed here`.
+- **Actions** — beside the personal queue, one section every participant
+  sees the same way: every open action in the room, grouped by the person or
+  seat it is addressed to. Each open work item shows its next action
+  (`next: Lead — complete 717 · Operations · Open`), and each decision
+  awaiting an answer shows `asked of Ana by Builder`, with project and state;
+  an *unassigned* group holds work with a next action and no recipient. A
+  blocked item counts only when its next action names someone, as in Needs
+  you. It shows the count of distinct records and collapses like Needs you.
+  It is a status of who holds what, not a second queue: it never rings anyone
+  and it does not change who a request is addressed to. It is built from the
+  same brief the personal queue uses, so the two can never disagree: a
+  viewer's group here holds exactly the records in their Needs you.
 - **Projects** — each active project's open, blocked, ready and awaiting
   counts, its objective, today's-focus note, and who last changed it. Opening
   a project lists its records (up to 200, with `Showing N of total`) as a

@@ -9,6 +9,7 @@
   const HOUR = 60 * MINUTE;
   const DAY = 24 * HOUR;
   const TITLE_LIMIT = 120;
+  const UNASSIGNED = 'unassigned';
 
   function who(ref) {
     if (!ref) return 'nobody';
@@ -69,6 +70,56 @@
       };
     });
     return { count: rows.length, rows };
+  }
+
+  // Work that is someone's action: a next action in a state that waits on
+  // its recipient. A blocked item is an action only when it names one — the
+  // same rule the service's needs_me uses — so a blocked wait with no
+  // recipient is nobody's action.
+  function isWorkAction(row) {
+    if (!row.next_action) return false;
+    if (row.state === 'open' || row.state === 'active' || row.state === 'ready') return true;
+    return row.state === 'blocked' && Boolean(row.next_to);
+  }
+
+  // Every open action in the room, grouped by the person or seat it is
+  // addressed to, the same for every viewer. Built from the brief Needs you
+  // reads, so a viewer's group here and their Needs you are the same records.
+  // A status of who holds what: it never addresses or rings anyone.
+  function actionsByPerson(brief) {
+    const names = projectNames(brief);
+    const seen = new Set();
+    const entries = [];
+    const add = (row, recipient, line, ask) => {
+      if (seen.has(row.id)) return;
+      seen.add(row.id);
+      const projectName = names.has(row.project) ? names.get(row.project) : row.project;
+      entries.push({
+        who: recipient, updated_at: row.updated_at, order: idNumber(row.id),
+        row: {
+          id: row.id, kind: row.kind, projectName, title: row.title, state: row.state, ask,
+          line: line + ' · ' + projectName + ' · ' + stateLabel(row),
+        },
+      });
+    };
+    for (const row of brief.open) {
+      if (!isWorkAction(row)) continue;
+      const recipient = row.next_to ? who(row.next_to) : UNASSIGNED;
+      add(row, recipient, 'next: ' + recipient + ' — ' + oneLine(row.next_action), row.next_action);
+    }
+    for (const row of brief.decisions) {
+      if (row.state !== 'awaiting') continue;
+      add(row, who(row.asked_of), 'asked of ' + who(row.asked_of) + ' by ' + who(row.asked_by), row.proposal || row.title);
+    }
+    entries.sort((a, b) => a.updated_at - b.updated_at || a.order - b.order);
+    const groups = new Map();
+    for (const entry of entries) {
+      if (!groups.has(entry.who)) groups.set(entry.who, []);
+      groups.get(entry.who).push(entry.row);
+    }
+    const ordered = [...groups.keys()].sort((a, b) =>
+      (a === UNASSIGNED) - (b === UNASSIGNED) || a.localeCompare(b));
+    return { count: seen.size, groups: ordered.map(name => ({ who: name, rows: groups.get(name) })) };
   }
 
   function reportedToYou(brief) {
@@ -382,7 +433,7 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, projectRowLine, doneLine,
+    who, waitingLabel, stateLabel, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, doneLine,
     reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines,
   });

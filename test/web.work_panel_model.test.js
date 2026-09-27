@@ -8,7 +8,7 @@ const model = require('../src/web/work_panel_model.js');
 const {
   who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
-  errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine,
+  errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson,
 } = model;
 
 const MINUTE = 60_000;
@@ -266,6 +266,123 @@ test('a real service row addressed to Lead reads next: Lead — the action', () 
     const [node] = projectTree(rows);
     assert.equal(node.row.id, item.id);
     assert.equal(projectRowLine(node.row), 'next: Lead — complete 717');
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+const BO = Object.freeze({ subject_id: 'u-bo', name: 'Bo', kind: 'person', session: null });
+
+function workRow(id, fields) {
+  return Object.assign({ id, kind: 'work', project: 'ops', title: 'Title ' + id, state: 'open', responsible: null,
+    next_to: null, next_action: '', target: '', updated_at: NOW - HOUR, evidence_attached: false, awaiting: null,
+    created_by: LEAD }, fields);
+}
+
+// A blocked item that names its recipient is still that person's action.
+const BLOCKED_FOR_ANA = workRow('W-14', { state: 'blocked', next_to: ANA, next_action: 'Send the keys', updated_at: NOW - 4 * HOUR });
+
+const ACTIONS_BRIEF = Object.freeze(Object.assign({}, BRIEF, {
+  needs_me: [WORK_ROW, DECISION_ROW, BLOCKED_FOR_ANA],
+  open: [
+    WORK_ROW,
+    BLOCKED_FOR_ANA,
+    workRow('W-6', { next_to: BO, next_action: 'Sign the form', updated_at: NOW - 5 * HOUR }),
+    workRow('W-7', { state: 'blocked', next_to: BUILDER_2, next_action: 'Wait for keys' }),
+    workRow('W-8', { state: 'blocked', next_to: null, next_action: 'Waiting on the vendor' }),
+    workRow('W-9', { kind: 'finding', project: 'finance', state: 'ready', next_action: 'Pick an owner' }),
+    workRow('W-11', { state: 'done', next_to: ANA, next_action: 'Nothing' }),
+    workRow('W-12', { state: 'active', next_to: BUILDER_1, next_action: 'Review\nthe patch' }),
+    workRow('W-13', { next_to: null, next_action: '' }),
+  ],
+  decisions: [
+    DECISION_ROW,
+    REPORTED_ROW,
+    Object.assign({}, DECISION_ROW, { id: 'W-10', asked_of: BUILDER_2, asked_by: ANA, proposal: '', title: 'Which region' }),
+  ],
+}));
+
+test('actions group every open action by the person or seat it is addressed to, unassigned last', () => {
+  const actions = actionsByPerson(ACTIONS_BRIEF);
+  assert.deepEqual(actions.groups.map(group => [group.who, group.rows.map(row => row.id)]), [
+    ['Ana', ['W-1', 'W-14', 'W-3']],
+    ['Bo', ['W-6']],
+    ['Builder (session 1)', ['W-12']],
+    ['Builder (session 2)', ['W-10', 'W-7']],
+    ['unassigned', ['W-9']],
+  ]);
+  assert.equal(actions.count, 8);
+  const rows = new Map(actions.groups.flatMap(group => group.rows).map(row => [row.id, row]));
+  assert.deepEqual(rows.get('W-1'), { id: 'W-1', kind: 'work', projectName: 'Operations', title: 'Rotate the keys',
+    state: 'active', ask: 'Approve the rotation window',
+    line: 'next: Ana — Approve the rotation window · Operations · Active' });
+  assert.equal(rows.get('W-3').line, 'asked of Ana by Lead · Finance · Awaiting answer');
+  assert.equal(rows.get('W-3').ask, 'Use the credit union');
+  assert.equal(rows.get('W-10').line, 'asked of Builder (session 2) by Ana · Finance · Awaiting answer');
+  assert.equal(rows.get('W-10').ask, 'Which region');
+  assert.equal(rows.get('W-7').line, 'next: Builder (session 2) — Wait for keys · Operations · Blocked');
+  assert.equal(rows.get('W-9').line, 'next: unassigned — Pick an owner · Finance · Ready');
+  assert.equal(rows.get('W-12').line, 'next: Builder (session 1) — Review ⏎ the patch · Operations · Active');
+  // A blocked wait with no recipient is nobody's action; done, reported and action-less rows are not actions.
+  for (const id of ['W-8', 'W-11', 'W-4', 'W-2', 'W-5', 'W-13']) assert.equal(rows.has(id), false, id);
+});
+
+test('the actions count is distinct records, and an empty brief has no groups', () => {
+  const doubled = Object.assign({}, ACTIONS_BRIEF, { open: [WORK_ROW, ...ACTIONS_BRIEF.open] });
+  const actions = actionsByPerson(doubled);
+  assert.equal(actions.count, 8);
+  assert.deepEqual(actions.groups[0].rows.map(row => row.id), ['W-1', 'W-14', 'W-3']);
+  assert.deepEqual(actionsByPerson(Object.assign({}, BRIEF, { open: [], decisions: [] })), { count: 0, groups: [] });
+});
+
+function viewerGroup(brief, name) {
+  const group = actionsByPerson(brief).groups.find(entry => entry.who === name);
+  return group ? group.rows.map(row => [row.id, row.ask]) : [];
+}
+
+test('a viewer\'s Needs you equals their group in Actions for the same brief', () => {
+  assert.deepEqual(needsYou(BRIEF, NOW).rows.map(row => [row.id, row.ask]), viewerGroup(BRIEF, 'Ana'));
+  assert.equal(needsYou(ACTIONS_BRIEF, NOW).count, 3);
+  assert.deepEqual(needsYou(ACTIONS_BRIEF, NOW).rows.map(row => [row.id, row.ask]), viewerGroup(ACTIONS_BRIEF, 'Ana'));
+});
+
+test('on real service briefs, every viewer\'s Needs you equals their Actions group, and Actions reads the same for all', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const crypto = require('node:crypto');
+  const { openWorkStore } = require('../src/work/store.js');
+  const { createWorkService, stripIds } = require('../src/work/service.js');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-work-panel-actions-'));
+  try {
+    let clock = NOW;
+    const work = createWorkService({ store: openWorkStore({ dataDir }), clock: () => (clock += 1000) });
+    const ana = { subject_id: 'p-1', name: 'Ana', kind: 'person', owner: true };
+    const lead = { subject_id: 's-1', name: 'Lead', kind: 'seat', session: null, owner: false };
+    const builder = { subject_id: 's-2', name: 'Builder', kind: 'seat', session: 2, owner: false };
+    const refOf = actor => ({ subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: actor.session ?? null });
+    const op = () => crypto.randomUUID();
+    work.createItem(ana, { operation_id: op(), kind: 'work', project: 'ops', title: 'Item 717', body: 'Why',
+      next_to: refOf(lead), next_action: 'complete 717' });
+    work.createItem(lead, { operation_id: op(), kind: 'decision', project: 'ops', title: 'Pick', body: 'Which',
+      asked_of: refOf(ana) });
+    work.createItem(ana, { operation_id: op(), kind: 'work', project: 'ops', title: 'Patch', body: 'Why',
+      next_to: refOf(builder), next_action: 'Patch it' });
+    work.createItem(ana, { operation_id: op(), kind: 'finding', project: 'ops', title: 'Drift', body: 'Seen',
+      next_action: 'Find an owner' });
+    const briefs = new Map([ana, lead, builder].map(actor => [actor, stripIds(work.brief(actor))]));
+    const views = [];
+    for (const [actor, brief] of briefs) {
+      const name = actor.session ? actor.name + ' (session ' + actor.session + ')' : actor.name;
+      assert.equal(needsYou(brief, clock).count, 1, name);
+      assert.deepEqual(needsYou(brief, clock).rows.map(row => [row.id, row.ask]), viewerGroup(brief, name), name);
+      views.push(actionsByPerson(brief));
+    }
+    assert.deepEqual(views[1], views[0]);
+    assert.deepEqual(views[2], views[0]);
+    assert.equal(views[0].count, 4);
+    assert.deepEqual(views[0].groups.map(group => group.who), ['Ana', 'Builder (session 2)', 'Lead', 'unassigned']);
+    assert.equal(views[0].groups[2].rows[0].line, 'next: Lead — complete 717 · Operations · Open');
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
@@ -565,7 +682,7 @@ test('an answer reads who gave it, and an owner answering for someone names both
 
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['answerLines', 'doneLine', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'doneLine', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
     'needsYou', 'notifyText', 'projectRowLine', 'projectSummaries', 'projectTree', 'recentChanges', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
 });
