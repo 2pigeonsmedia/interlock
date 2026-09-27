@@ -60,7 +60,10 @@
         projectName: names.has(row.project) ? names.get(row.project) : row.project,
         title: row.title,
         ask: decision ? row.proposal || row.title : row.next_action,
-        by: decision ? 'asked by ' + who(row.asked_by) : 'responsible: ' + (row.responsible ? who(row.responsible) : 'unassigned'),
+        // In the viewer's own queue a work row names who asked, then who is
+        // responsible when someone is.
+        by: decision ? 'asked by ' + who(row.asked_by)
+          : 'asked by ' + who(row.created_by) + (row.responsible ? ' · responsible: ' + who(row.responsible) : ''),
         waiting: waitingLabel(row.updated_at, now),
         action: decision ? 'Answer' : 'Open work',
       };

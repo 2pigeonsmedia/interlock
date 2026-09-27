@@ -24,12 +24,12 @@ const BUILDER_2 = Object.freeze({ subject_id: 'u-b2', name: 'Builder', kind: 'se
 const DECISION_ROW = Object.freeze({
   id: 'W-3', kind: 'decision', project: 'finance', title: 'Pick the bank', state: 'awaiting',
   asked_of: ANA, asked_by: LEAD, proposal: 'Use the credit union', answer_summary: null,
-  updated_at: NOW - 3 * HOUR,
+  updated_at: NOW - 3 * HOUR, created_by: LEAD,
 });
 const WORK_ROW = Object.freeze({
   id: 'W-1', kind: 'work', project: 'ops', title: 'Rotate the keys', state: 'active',
   responsible: BUILDER_2, next_to: ANA, next_action: 'Approve the rotation window',
-  target: 'keys v2', updated_at: NOW - 2 * DAY, evidence_attached: false, awaiting: null,
+  target: 'keys v2', updated_at: NOW - 2 * DAY, evidence_attached: false, awaiting: null, created_by: LEAD,
 });
 const REPORTED_ROW = Object.freeze({
   id: 'W-4', kind: 'decision', project: 'finance', title: 'Budget cap', state: 'reported',
@@ -68,7 +68,7 @@ test('who renders a session only when one is present, and nobody for none', () =
 
 test('same-named seats render with their session everywhere', () => {
   const rows = needsYou(BRIEF, NOW).rows;
-  assert.equal(rows.find(row => row.id === 'W-1').by, 'responsible: Builder (session 2)');
+  assert.equal(rows.find(row => row.id === 'W-1').by, 'asked by Lead · responsible: Builder (session 2)');
   assert.equal(who({ name: 'Builder', kind: 'seat', session: null }), 'Builder');
   assert.deepEqual(reportedToYou(BRIEF).map(row => row.reportedBy), ['Builder (session 1)']);
 });
@@ -97,7 +97,7 @@ test('needs you lists decisions to answer and work to open, oldest first', () =>
   assert.equal(result.count, 2);
   assert.deepEqual(result.rows, [
     { id: 'W-1', kind: 'work', projectName: 'Operations', title: 'Rotate the keys',
-      ask: 'Approve the rotation window', by: 'responsible: Builder (session 2)', waiting: 'waiting 2d', action: 'Open work' },
+      ask: 'Approve the rotation window', by: 'asked by Lead · responsible: Builder (session 2)', waiting: 'waiting 2d', action: 'Open work' },
     { id: 'W-3', kind: 'decision', projectName: 'Finance', title: 'Pick the bank',
       ask: 'Use the credit union', by: 'asked by Lead', waiting: 'waiting 3h', action: 'Answer' },
   ]);
@@ -105,7 +105,14 @@ test('needs you lists decisions to answer and work to open, oldest first', () =>
     needs_me: [Object.assign({}, DECISION_ROW, { proposal: '' }), Object.assign({}, WORK_ROW, { responsible: null })],
   }), NOW);
   assert.equal(bare.rows.find(row => row.id === 'W-3').ask, 'Pick the bank');
-  assert.equal(bare.rows.find(row => row.id === 'W-1').by, 'responsible: unassigned');
+  assert.equal(bare.rows.find(row => row.id === 'W-1').by, 'asked by Lead');
+  // In the addressee's own queue the row names who asked; a decision still names its asker, not its creator.
+  const relayed = needsYou(Object.assign({}, BRIEF, {
+    needs_me: [Object.assign({}, WORK_ROW, { created_by: BUILDER_1 }), Object.assign({}, DECISION_ROW, { created_by: BUILDER_1 })],
+  }), NOW);
+  assert.equal(relayed.rows.find(row => row.id === 'W-1').by, 'asked by Builder (session 1) · responsible: Builder (session 2)');
+  assert.equal(relayed.rows.find(row => row.id === 'W-3').by, 'asked by Lead');
+  for (const row of relayed.rows) assert.doesNotMatch(row.by, /unassigned/);
 });
 
 test('needs you is never narrowed by a project filter', () => {

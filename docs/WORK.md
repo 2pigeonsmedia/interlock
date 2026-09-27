@@ -151,6 +151,10 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 - `list[?project=ID&needs_me=1&after=N&limit=N]` — rows with a `total` and a
   `next` continuation; never a silent cap. Retired projects are omitted unless
   named.
+
+`list` and `brief` rows of every kind carry `created_by`, the participant
+who recorded the item (a name, kind and session, like every participant in a
+response).
 - `items/<id>` — the item, its evidence (each with `target_matches`), and its
   history.
 - `changes?after=N[&limit=N]` — events after a cursor, with `total` and the
@@ -204,8 +208,9 @@ Four sections, in this order:
   or a decision awaiting their answer, oldest change first. It counts
   distinct records across every active project; a project filter never hides
   it (the brief's `needs_me` is not narrowed by `project`). Each row names the
-  project, the id, how long it has waited, the ask, and `asked by <name>`
-  (for a decision) or `responsible: <name>` (for a work item). Rows are
+  project, the id, how long it has waited, the ask, and `asked by <name>`:
+  for a decision the person who asked it, for a work item the person who
+  recorded it, followed by ` · responsible: <name>` when someone is. Rows are
   buttons whose accessible name is `<action> <id>: <title>`: `Answer D-7: …`
   for a decision, `Open work W-12: …` for work. The heading collapses the
   list. The header button reads `Needs you · N` at every width, and choosing
@@ -215,7 +220,12 @@ Four sections, in this order:
 - **Projects** — each active project's open, blocked, ready and awaiting
   counts, its objective, today's-focus note, and who last changed it. Opening
   a project lists its records (up to 200, with `Showing N of total`) as a
-  tree of parents and follow-ups, and a form for the objective and the
+  tree of parents and follow-ups. Under each row's title, id and state, one
+  line gives the row's own facts: for work, `next: <name> — <action>`,
+  `responsible: <name>`, `target: …`, `awaiting D-n` and `evidence attached`,
+  each only when set; for a decision, `asked of <name> by <name>` and, once
+  answered, `answered by <name>` or `reported by <name> · attributed to
+  <name>`. Then a form for the objective and the
   today's-focus note. Any participant may edit those two.
 - **Recent changes** — the record's events, newest first, with the record's
   total event count beside the heading. It shows the latest 20; **Show more**

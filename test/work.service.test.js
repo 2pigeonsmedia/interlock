@@ -8,7 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { openWorkStore } = require('../src/work/store.js');
-const { createWorkService } = require('../src/work/service.js');
+const { createWorkService, stripIds } = require('../src/work/service.js');
 
 const owner = Object.freeze({ subject_id: 'p-1', name: 'Ana', kind: 'person', owner: true });
 const lead = Object.freeze({ subject_id: 's-1', name: 'Lead', kind: 'seat', owner: false });
@@ -281,6 +281,22 @@ test('list and brief rows carry the parent link', () => {
   assert.equal(rows.get(decision.id).parent, parent.id);
   assert.equal(rows.get(finding.id).parent, parent.id);
   assert.equal(work.brief(owner).decisions.find(row => row.id === decision.id).parent, parent.id);
+});
+
+test('list and brief rows carry who created the record, with ids stripped on the way out', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead, { next_to: ref(owner), next_action: 'Approve the import.' });
+  const decision = newDecision(work, builder, owner);
+  const rows = new Map(work.list(owner, {}).items.map(row => [row.id, row]));
+  assert.deepEqual(rows.get(item.id).created_by, ref(lead));
+  assert.deepEqual(rows.get(decision.id).created_by, ref(builder));
+  const brief = work.brief(owner);
+  assert.deepEqual(brief.needs_me.find(row => row.id === item.id).created_by, ref(lead));
+  assert.deepEqual(brief.open.find(row => row.id === item.id).created_by, ref(lead));
+  assert.deepEqual(brief.decisions.find(row => row.id === decision.id).created_by, ref(builder));
+  const stripped = stripIds(work.list(owner, { needs_me: true })).items;
+  assert.deepEqual(stripped.find(row => row.id === item.id).created_by, { name: 'Lead', kind: 'seat', session: null });
+  assert.equal(JSON.stringify(stripIds(brief)).includes('subject_id'), false);
 });
 
 test('a decision asked of the owner enters her queue; a seat cannot answer it; an answer of no is answered', () => {

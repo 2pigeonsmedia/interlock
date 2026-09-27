@@ -343,13 +343,13 @@ function createWorkService(options) {
           kind: item.answer.kind, by: clone(item.answer.by),
           attributed_to: clone(item.answer.attributed_to), at: item.answer.at,
         } : null,
-        updated_at: item.updated_at,
+        created_by: clone(item.created_by), updated_at: item.updated_at,
       };
     }
     return {
       id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: item.state,
       responsible: clone(item.responsible), next_to: clone(item.next_to), next_action: item.next_action,
-      target: item.target, updated_at: item.updated_at,
+      target: item.target, created_by: clone(item.created_by), updated_at: item.updated_at,
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),
       awaiting: awaitingDecision(draft, item),
     };
