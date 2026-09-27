@@ -191,7 +191,8 @@ Four sections, in this order:
   or a decision awaiting their answer, oldest change first. It counts
   distinct records across every active project; a project filter never hides
   it (the brief's `needs_me` is not narrowed by `project`). Each row names the
-  project, the id, how long it has waited, the ask and who asked. Rows are
+  project, the id, how long it has waited, the ask, and who asked (for a
+  decision) or who is responsible (for a work item). Rows are
   buttons whose accessible name is `<action> <id>: <title>`: `Answer D-7: …`
   for a decision, `Open work W-12: …` for work. The heading collapses the
   list. The header button reads `Needs you · N` at every width, and choosing
@@ -234,7 +235,9 @@ Choosing a row opens the record in a drawer, in this order:
 ### Who may do what
 
 Each act is a button whose accessible name is `<act> <id>: <title>`; it
-reveals a form, and the write takes a second, deliberate click.
+reveals a form, and the write takes a second, deliberate click. Notify is the
+exception: it opens no form and records nothing itself; its outcome is
+recorded when the draft is sent or declined.
 
 - **Answer** — shown to the person asked. It shows the proposal as written,
   then a form whose button reads **Record answer**. Nothing is parsed from
@@ -249,13 +252,16 @@ reveals a form, and the write takes a second, deliberate click.
   A correction needs a reason; the reported wording stays in the history.
 - **Withdraw** and **Reopen** — the asker's or the owner's, each with a
   reason; Reopen may ask someone else.
-- **Update** — state and the fields that state needs, marked required in the
+- **Update** — on work and finding records, offered to any signed-in
+  participant: state and the fields that state needs, marked required in the
   form: **Ready** needs who acts next and the next action; **Blocked** needs
   what it waits on; **Done** needs an account of what was done plus one
   evidence entry or **No evidence attached**, not both. The service's refusal
   stays the backstop.
-- **Attach evidence** — target examined, what was observed, a reference, and
-  what it does not show. **Add note** — on any record.
+- **Attach evidence** — on work and finding records, offered to any
+  signed-in participant: target examined, what was observed, a reference, and
+  what it does not show. **Add note** — on any record, offered to any
+  signed-in participant.
 - **Notify** — shown when the record's next step is addressed to someone other
   than the viewer (or a decision awaits someone else's answer).
 
@@ -266,10 +272,11 @@ session returns to sign-in.
 ### Sharing through the composer
 
 Exposure and Notify use the ordinary composer; nothing is posted for the
-viewer. Recording a reported answer, or a correction of one, puts the exposure
-draft in the composer, addressed to the person the words are attributed to
-(with an `@` mention when that person is an AI), and a share bar under it says
-what the draft is for. Notify does the same for the person the record waits
+viewer. Recording a reported answer puts the exposure draft in the composer,
+addressed to the person the words are attributed to; recording a correction of
+a reported answer addresses the draft to the person who reported the replaced
+answer. The draft carries an `@` mention when its recipient is an AI, and a
+share bar under the composer says what the draft is for. Notify does the same for the person the record waits
 on. The viewer sends, edits or declines the draft:
 
 - **Sent** — the viewer's ordinary Send; the outcome is recorded with the new
@@ -309,5 +316,8 @@ edited from the project view, by any participant.
   retry: sending a failed draft again creates a new message.
 - **A send receipt is not proof of reading.** `sent` records that the message
   was saved to the room, not that anyone read it.
+- **A signed-out send records no outcome.** A send refused because the
+  session ended returns the page to sign-in; no failure is recorded for a
+  pending share.
 - **Evidence attached is not verified.** The browser shows what was observed
   and against which target, never a verdict.

@@ -2,7 +2,8 @@
 
 **Status:** v0.1.1 visual contract ("Signal Box"), implemented by
 `src/web/room.html`, `src/web/room.js`, `src/web/room.css`,
-`src/web/work_panel.js`, `src/web/setup.css`, and `src/web/recovery.css`. This document governs colour,
+`src/web/work_panel.js`, `src/web/work_panel_model.js` (which supplies
+every word the Work tile renders), `src/web/setup.css`, and `src/web/recovery.css`. This document governs colour,
 type, responsive behavior, and transcript markup. It supersedes the v0.1
 grey-frame contract.
 
@@ -233,8 +234,8 @@ trimmed to the section headings and lists; `work_panel.js` fills the lists:
 ```
 
 The header carries `#work-count-button` (`Needs you · N`), the composer
-carries `#work-share-bar`, and every message's meta row carries a `Work…`
-button beside Reply.
+carries `#work-share-bar`, and every message's actions row
+(`.message-actions`) carries a `Work…` button beside Reply.
 
 Rules the CSS relies on:
 

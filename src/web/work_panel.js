@@ -594,11 +594,12 @@
     field.label.firstChild.textContent = required ? text + ' (required)' : text;
   }
 
-  function requireByState(stateField, blockReason, nextTo, nextAction) {
+  function requireByState(stateField, blockReason, nextTo, nextAction, doneAccount) {
     const chosen = stateField.node.value;
     requireFor(blockReason, 'What it is waiting on', chosen === 'blocked');
     requireFor(nextTo, 'Next action for', chosen === 'ready');
     requireFor(nextAction, 'Next action', chosen === 'ready');
+    requireFor(doneAccount, 'What was done', chosen === 'done');
   }
 
   function updateForm(item, evidence) {
@@ -623,7 +624,7 @@
     const groups = { blocked: [blockReason], done: item.state === 'done' ? [doneAccount] : doneFields };
     const byState = () => {
       showStateFields(state, groups);
-      requireByState(state, blockReason, nextTo, nextAction);
+      requireByState(state, blockReason, nextTo, nextAction, doneAccount);
     };
     state.node.addEventListener('change', byState);
     byState();
