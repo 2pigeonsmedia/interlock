@@ -177,7 +177,9 @@
     const roots = new Map(ordered.map(row => [row.id, topAncestor(row, byId)]));
     return ordered.filter(row => roots.get(row.id) === row).map(row => ({
       row,
-      label: row.title + (row.awaiting ? ' · awaiting ' + row.awaiting : ''),
+      // The bare title: an open question the row waits on is named once, in
+      // its facts line (projectRowLine).
+      label: row.title,
       children: ordered.filter(child => child !== row && roots.get(child.id) === row),
     }));
   }

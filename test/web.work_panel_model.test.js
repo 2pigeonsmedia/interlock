@@ -150,7 +150,9 @@ test('the project tree nests children under their parent in id order', () => {
   ];
   const tree = projectTree(rows);
   assert.deepEqual(tree.map(node => node.row.id), ['W-2', 'W-9', 'W-11']);
-  assert.equal(tree[0].label, 'Parent · awaiting W-7');
+  // The title stands alone; the open question it waits on is in the row's facts line only.
+  assert.equal(tree[0].label, 'Parent');
+  assert.equal(projectRowLine(tree[0].row), 'awaiting W-7');
   assert.equal(tree[1].label, 'Orphan');
   assert.equal(tree[2].label, 'Loose decision');
   assert.deepEqual(tree[0].children.map(row => row.id), ['W-3', 'W-7', 'W-10']);
@@ -213,7 +215,8 @@ test('the project tree nests real service rows under their parent', () => {
     const tree = projectTree(work.list(owner, { project: 'ops' }).items);
     assert.deepEqual(tree.map(node => node.row.id), [parent.id, loose.id]);
     assert.match(decision.id, /^D-/);
-    assert.equal(tree[0].label, 'Rotate · awaiting ' + decision.id);
+    assert.equal(tree[0].label, 'Rotate');
+    assert.equal(projectRowLine(tree[0].row), 'awaiting ' + decision.id);
     assert.deepEqual(tree[0].children.map(row => row.id).sort(), [decision.id, finding.id].sort());
     assert.deepEqual(tree[1].children, []);
     assert.equal(tree[1].label, 'Other');
