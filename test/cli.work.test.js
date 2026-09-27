@@ -134,6 +134,31 @@ test('work report-answer takes the id from argv, prints the exposure draft and h
   assert.match(result.stdout, /Send it with: interlock say --connection Marlow --file <the file you save it to>/);
 });
 
+test('work share posts the file body with a generated operation id', async () => {
+  const { calls, dependencies } = world(({ body }) => ({
+    status: 201,
+    json: { ok: true, event: { seq: 12, at: 1300, by: { name: 'Marlow', kind: 'seat' }, kind: 'shared', item: body.id, project: 'finance',
+      purpose: body.purpose, outcome: body.outcome, to: body.to, message_id: body.message_id ?? null, detail: '' } },
+  }));
+  const file = tempJson({ purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 });
+  const result = await captureCommand(['work', 'share', 'D-4', '--connection', 'Marlow', '--file', file], dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.equal(calls[0].url, 'http://localhost:8788/api/ai/work/items/share');
+  assert.equal(calls[0].method, 'POST');
+  assert.match(calls[0].body.operation_id, UUID);
+  assert.equal(calls[0].body.id, 'D-4');
+  assert.equal(calls[0].body.purpose, 'exposure');
+  assert.equal(calls[0].body.outcome, 'sent');
+  assert.equal(calls[0].body.to, 'Ana');
+  assert.equal(calls[0].body.message_id, 57);
+  assert.match(result.stdout, /^Recorded: exposure sent as #57\.$/m);
+
+  const declined = tempJson({ purpose: 'notify', outcome: 'declined', to: 'Ana' });
+  const second = await captureCommand(['work', 'share', 'D-4', '--connection', 'Marlow', '--file', declined], dependencies);
+  assert.equal(second.code, EXIT_OK, second.stderr);
+  assert.match(second.stdout, /^Recorded: notify declined\.$/m);
+});
+
 test('work get, list, changes and export build the right requests', async () => {
   const { calls, dependencies } = world(({ url }) => {
     if (url.includes('/export')) return { headers: { 'content-type': 'text/markdown; charset=utf-8' }, text: '# Work record\n\nExported.\n' };

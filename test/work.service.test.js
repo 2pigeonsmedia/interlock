@@ -292,6 +292,73 @@ test('a reported answer leaves the queue, stays visibly reported, and drafts an 
   }), 'not-a-relay');
 });
 
+function reportedDecision(work) {
+  const decision = newDecision(work, builder, owner);
+  work.reportAnswer(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No guessing.', source: 'terminal' });
+  return decision;
+}
+
+test('a share outcome is an append that records purpose, outcome and the message id', () => {
+  const { work } = fresh();
+  const decision = reportedDecision(work);
+  const before = work.get(lead, { id: decision.id }).item.revision;
+  const shared = work.share(lead, {
+    operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57,
+  });
+  assert.equal(shared.ok, true);
+  assert.equal(shared.event.kind, 'shared');
+  assert.deepEqual(shared.event.by, ref(lead));
+  const detail = work.get(lead, { id: decision.id });
+  const last = detail.history.at(-1);
+  assert.equal(last.kind, 'shared');
+  assert.equal(last.purpose, 'exposure');
+  assert.equal(last.outcome, 'sent');
+  assert.equal(last.to, 'Ana');
+  assert.equal(last.message_id, 57);
+  assert.equal(last.detail, '');
+  assert.equal(detail.item.revision, before);
+  const declined = work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'notify', outcome: 'declined', to: 'Ana' });
+  assert.equal(declined.event.message_id, null);
+  code(() => work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'broadcast', outcome: 'declined', to: 'Ana' }), 'invalid-purpose');
+  code(() => work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'notify', outcome: 'delivered', to: 'Ana' }), 'invalid-outcome');
+  code(() => work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'notify', outcome: 'declined', to: ' ' }), 'invalid-to');
+  code(() => work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'notify', outcome: 'declined', to: 'Ana', expected_revision: 2 }), 'invalid-input');
+});
+
+test('a sent share requires a message id and a declined or failed one refuses it', () => {
+  const { work } = fresh();
+  const decision = reportedDecision(work);
+  code(() => work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'sent', to: 'Ana' }), 'invalid-message-id');
+  for (const bad of [0, -3, 1.5, '57', Number.MAX_SAFE_INTEGER + 1, null]) {
+    code(() => work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: bad }), 'invalid-message-id');
+  }
+  code(() => work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'declined', to: 'Ana', message_id: 57 }), 'invalid-message-id');
+  code(() => work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'failed', to: 'Ana', message_id: 57 }), 'invalid-message-id');
+  assert.equal(work.get(lead, { id: decision.id }).history.at(-1).kind, 'answer-reported', 'a refused share appends nothing');
+});
+
+test('a failed exposure leaves the reported answer standing', () => {
+  const { work } = fresh();
+  const decision = reportedDecision(work);
+  work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'failed', to: 'Ana', detail: 'The room was unreachable.' });
+  const detail = work.get(owner, { id: decision.id });
+  assert.equal(detail.item.answer.kind, 'reported');
+  assert.equal(detail.item.state, 'reported');
+  assert.equal(detail.history.at(-1).detail, 'The room was unreachable.');
+});
+
+test('markdown export renders a share outcome with its message id', () => {
+  const { work } = fresh();
+  const decision = reportedDecision(work);
+  work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 });
+  work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'notify', outcome: 'declined', to: 'Ana' });
+  work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'failed', to: 'Ana', detail: 'The room was unreachable.' });
+  const body = work.exportRecords(owner, { format: 'md' }).body;
+  assert.match(body, /· Lead · shared · exposure · sent as #57 to Ana · a send receipt is not proof of reading\n/);
+  assert.match(body, /· Lead · shared · notify · declined\n/);
+  assert.match(body, /· Lead · shared · exposure · failed · The room was unreachable\.\n/);
+});
+
 test('confirming a reported answer creates a direct answer and keeps the reported event', () => {
   const { work } = fresh();
   const decision = newDecision(work, builder, owner);

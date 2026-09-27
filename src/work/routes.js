@@ -12,6 +12,7 @@ const MUTATIONS = Object.freeze({
   'items/update': Object.freeze(['updateWork', 200]),
   'items/evidence': Object.freeze(['attachEvidence', 201]),
   'items/note': Object.freeze(['addNote', 201]),
+  'items/share': Object.freeze(['share', 201]),
   'decisions/answer': Object.freeze(['answer', 200]),
   'decisions/report': Object.freeze(['reportAnswer', 200]),
   'decisions/confirm': Object.freeze(['confirmReported', 200]),

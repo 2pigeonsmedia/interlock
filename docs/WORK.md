@@ -97,7 +97,12 @@ Retrying the same operation with the same body returns the original result
 with `"replayed": true`; the same id with a different body is refused
 (`operation-conflict`). Writes that change state or fields carry
 `expected_revision`; a stale value is refused (`stale-revision`, with the
-current `revision`). Evidence and notes are appends and carry no revision.
+current `revision`). Evidence, notes and share outcomes are appends and carry
+no revision.
+
+A share outcome records what happened to the ordinary message a participant
+composed to expose a change or notify a recipient: sent (with the message id),
+declined, or failed. A send receipt is not proof of reading.
 
 Browser sessions: `POST /api/work/<operation>` with the usual mutation
 envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
@@ -109,6 +114,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `items/update` | `id`, `expected_revision`, `note`, any work field above, `state`, `block_reason`, `done_account`, `done_evidence` or `no_evidence`, `title`, `body` |
 | `items/evidence` | `id`, `target`, `observed`, `reference`, `limits`, optional `relates_to` |
 | `items/note` | `id`, `text` |
+| `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (a positive integer, required when `sent` and refused otherwise), optional `detail` |
 | `decisions/answer` | `id`, `expected_revision`, `text`, optional `conditions`, `reason` (required when replacing an answer or answering for someone else) |
 | `decisions/report` | `id`, `expected_revision`, `text`, `source`, optional `conditions` |
 | `decisions/confirm` | `id`, `expected_revision`, optional `reason` |
@@ -118,7 +124,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `projects/retire` | `id` (owner, fresh step-up) |
 | `projects/update` | `id`, `expected_revision`, `objective` and/or `today` |
 
-`items/create`, `items/evidence`, `items/note` and `projects/create` answer `201`; the others `200`; a replayed operation answers `200` with `"replayed": true`.
+`items/create`, `items/evidence`, `items/note`, `items/share` and `projects/create` answer `201`; the others `200`; a replayed operation answers `200` with `"replayed": true`.
 
 ## Reads
 
@@ -155,7 +161,7 @@ interlock work list --connection NAME [--project ID] [--needs-me] [--after N] [-
 interlock work get ID --connection NAME [--json]
 interlock work changes --connection NAME --after N [--limit N] [--json]
 interlock work create --connection NAME --file PATH [--json]
-interlock work update|evidence|note|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
 interlock work export --connection NAME --format json|md
 ```
 

@@ -13,6 +13,10 @@ function fakeService() {
       calls.push([actor, input]);
       return { ok: true, item: { id: 'W-1', next_to: input.next_to, created_by: { subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null } } };
     },
+    share(actor, input) {
+      calls.push([actor, input, 'share']);
+      return { ok: true, event: { seq: 4, kind: 'shared', item: input.id, by: { subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null } } };
+    },
   };
 }
 
@@ -56,4 +60,15 @@ test('a same-named seat is selectable by "Name (session N)" without exposing sub
   const wrongSession = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder (session 7)' });
   assert.equal(wrongSession.status, 400);
   assert.equal(wrongSession.body.error, 'invalid-participant');
+});
+
+test('items/share maps to share with 201', () => {
+  const service = fakeService();
+  const routes = createWorkRoutes({ work: service, participants: roster });
+  const body = { operation_id: 'x', id: 'D-1', purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 };
+  const shared = routes.mutate('items/share', actor, body);
+  assert.equal(shared.status, 201, JSON.stringify(shared.body));
+  assert.deepEqual(service.calls, [[actor, body, 'share']]);
+  assert.equal(shared.body.event.kind, 'shared');
+  assert.deepEqual(shared.body.event.by, { name: 'Lead', kind: 'seat', session: null });
 });

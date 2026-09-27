@@ -14,6 +14,8 @@ const crypto = require('node:crypto');
 const KINDS = Object.freeze(['work', 'finding', 'decision']);
 const WORK_STATES = Object.freeze(['open', 'active', 'blocked', 'ready', 'done']);
 const SEVERITIES = Object.freeze(['blocking', 'non-blocking']);
+const SHARE_PURPOSES = Object.freeze(['exposure', 'notify']);
+const SHARE_OUTCOMES = Object.freeze(['sent', 'declined', 'failed']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROJECT_ID = /^[a-z][a-z0-9-]{1,31}$/;
 const ITEM_ID = /^[WD]-[1-9][0-9]*$/;
@@ -540,6 +542,31 @@ function createWorkService(options) {
     });
   }
 
+  // A share outcome records what happened to the ordinary message a
+  // participant composed: sent (with its message id), declined or failed.
+  // An append like a note: no revision, and no state changes.
+  function share(actor, rawInput) {
+    return operation(actor, 'items.share', rawInput, ['id', 'purpose', 'outcome', 'to', 'message_id', 'detail'],
+      (draft, body, now) => {
+        const item = findItem(draft, body.id);
+        if (!SHARE_PURPOSES.includes(body.purpose)) fail('invalid-purpose');
+        if (!SHARE_OUTCOMES.includes(body.outcome)) fail('invalid-outcome');
+        const to = requiredText(body.to, SHORT_BYTES, 'to');
+        let messageId = null;
+        if (body.outcome === 'sent') {
+          if (!Number.isSafeInteger(body.message_id) || body.message_id < 1) fail('invalid-message-id');
+          messageId = body.message_id;
+        } else if (body.message_id !== undefined) {
+          fail('invalid-message-id');
+        }
+        const detail = optionalText(body.detail, SHORT_BYTES, 'detail') ?? '';
+        const event = appendEvent(draft, now, actor, {
+          item: item.id, project: item.project, kind: 'shared', purpose: body.purpose, outcome: body.outcome, to, message_id: messageId, detail,
+        });
+        return { ok: true, event: clone(event) };
+      });
+  }
+
   // ── decisions ─────────────────────────────────────────────────────────────
 
   function findDecision(draft, id) {
@@ -803,6 +830,13 @@ function createWorkService(options) {
 
   function eventLine(event) {
     const parts = [stamp(event.at), who(event.by), event.kind];
+    if (event.kind === 'shared') {
+      parts.push(event.purpose);
+      if (event.outcome === 'sent') parts.push('sent as #' + event.message_id + ' to ' + event.to, 'a send receipt is not proof of reading');
+      else parts.push(event.outcome);
+      if (event.detail) parts.push(event.detail);
+      return '- ' + parts.join(' · ');
+    }
     if (event.title !== undefined) parts.push(event.title);
     if (event.from !== undefined) parts.push(String(event.from) + ' → ' + String(event.to));
     if (event.note !== undefined) parts.push(event.note);
@@ -899,7 +933,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, attachEvidence, addNote,
+    createItem, updateWork, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw,
     list, get, brief, changes, exportRecords,
     needsMe,

@@ -53,7 +53,7 @@ Usage:
   interlock work get ID --connection NAME [--json]
   interlock work changes --connection NAME --after N [--limit N] [--json]
   interlock work create --connection NAME --file PATH [--json]
-  interlock work update|evidence|note|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+  interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
   interlock work export --connection NAME --format json|md
 
 Persistent model wake setup:
@@ -1966,6 +1966,7 @@ const WORK_VERBS = Object.freeze({
   update: Object.freeze({ path: '/api/ai/work/items/update', method: 'POST', id: true }),
   evidence: Object.freeze({ path: '/api/ai/work/items/evidence', method: 'POST', id: true }),
   note: Object.freeze({ path: '/api/ai/work/items/note', method: 'POST', id: true }),
+  share: Object.freeze({ path: '/api/ai/work/items/share', method: 'POST', id: true }),
   answer: Object.freeze({ path: '/api/ai/work/decisions/answer', method: 'POST', id: true }),
   'report-answer': Object.freeze({ path: '/api/ai/work/decisions/report', method: 'POST', id: true }),
   confirm: Object.freeze({ path: '/api/ai/work/decisions/confirm', method: 'POST', id: true }),
@@ -2161,6 +2162,7 @@ function renderWrite(stdout, verb, result, connection) {
   else if (verb === 'update') line(stdout, `Updated ${item.id} (${item.state}).`);
   else if (verb === 'evidence') line(stdout, `Attached evidence to ${event.item} (event ${event.seq}).`);
   else if (verb === 'note') line(stdout, `Added a note to ${event.item} (event ${event.seq}).`);
+  else if (verb === 'share') line(stdout, `Recorded: ${terminalSafe(String(event.purpose))} ${terminalSafe(String(event.outcome))}${event.message_id ? ' as #' + terminalSafe(String(event.message_id)) : ''}.`);
   else if (verb === 'answer') line(stdout, `Recorded an answer on ${item.id} (${item.state}).`);
   else if (verb === 'report-answer') {
     if (result.conflict === true) line(stdout, `Recorded a conflicting report on ${item.id}; the answer recorded here stands.`);
