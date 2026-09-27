@@ -142,11 +142,44 @@ test('the project tree nests children under their parent in id order', () => {
     { id: 'W-11', kind: 'decision', title: 'Loose decision', parent: null },
   ];
   const tree = projectTree(rows);
-  assert.deepEqual(tree.map(node => node.row.id), ['W-2', 'W-9']);
+  assert.deepEqual(tree.map(node => node.row.id), ['W-2', 'W-9', 'W-11']);
   assert.equal(tree[0].label, 'Parent · awaiting W-7');
   assert.equal(tree[1].label, 'Orphan');
+  assert.equal(tree[2].label, 'Loose decision');
   assert.deepEqual(tree[0].children.map(row => row.id), ['W-3', 'W-7', 'W-10']);
   assert.deepEqual(tree[1].children, []);
+  assert.deepEqual(tree[2].children, []);
+});
+
+function treeIds(tree) {
+  return tree.flatMap(node => [node.row.id, ...node.children.map(row => row.id)]).sort();
+}
+
+test('the project tree keeps a decision whose parent is not in the rows at top level', () => {
+  const rows = [
+    { id: 'W-1', kind: 'work', title: 'Work', parent: null, awaiting: null },
+    { id: 'D-2', kind: 'decision', title: 'Orphaned ask', parent: 'W-40' },
+  ];
+  const tree = projectTree(rows);
+  assert.deepEqual(tree.map(node => node.row.id), ['W-1', 'D-2']);
+  assert.equal(tree[1].label, 'Orphaned ask');
+  assert.deepEqual(treeIds(tree), rows.map(row => row.id).sort());
+});
+
+test('a row whose parent is itself a child attaches under the nearest top-level ancestor', () => {
+  const rows = [
+    { id: 'W-1', kind: 'work', title: 'Root', parent: null, awaiting: null },
+    { id: 'W-2', kind: 'work', title: 'Middle', parent: 'W-1', awaiting: null },
+    { id: 'W-3', kind: 'finding', title: 'Leaf', parent: 'W-2', awaiting: null },
+    { id: 'D-4', kind: 'decision', title: 'Leaf ask', parent: 'W-3' },
+    { id: 'W-5', kind: 'work', title: 'Loop a', parent: 'W-6', awaiting: null },
+    { id: 'W-6', kind: 'work', title: 'Loop b', parent: 'W-5', awaiting: null },
+  ];
+  const tree = projectTree(rows);
+  assert.equal(tree[0].row.id, 'W-1');
+  assert.deepEqual(tree[0].children.map(row => row.id), ['W-2', 'W-3', 'D-4']);
+  // Every row appears exactly once, even a parent cycle the service cannot produce.
+  assert.deepEqual(treeIds(tree), rows.map(row => row.id).sort());
 });
 
 test('the project tree nests real service rows under their parent', () => {
@@ -289,6 +322,9 @@ test('recent changes shows its total and whether more exist', () => {
   assert.equal(some.more, true);
   const all = recentChanges({ events: EVENTS.slice(0, 2), total: 2, cursor: 6 }, 20);
   assert.deepEqual(all, { lines: historyLines(EVENTS.slice(0, 2)), total: 2, shown: 2, more: false });
+  const short = recentChanges({ events: EVENTS.slice(0, 2), total: 3, cursor: 6 }, 3);
+  assert.equal(short.shown, 2);
+  assert.equal(short.more, true);
 });
 
 const MESSAGE = Object.freeze({
@@ -317,6 +353,9 @@ test('a message prefill keeps the speaker words and the message id', () => {
 test('an exposure to an AI is prefixed with its handle; to a person it is not', () => {
   assert.equal(exposureText({ to: 'Marlow', text: 'W-1 · Rotate the keys' }, ['Marlow']), '@Marlow W-1 · Rotate the keys');
   assert.equal(exposureText({ to: 'Ana', text: 'W-1 · Rotate the keys' }, ['Marlow']), 'W-1 · Rotate the keys');
+  assert.equal(exposureText({ to: 'marlow', text: 'W-1 · Rotate the keys' }, ['Marlow']), '@Marlow W-1 · Rotate the keys');
+  assert.equal(notifyText({ id: 'W-1', kind: 'work', title: 'Rotate', next_action: 'Go',
+    next_to: { name: 'MARLOW', kind: 'seat', session: null } }, ['Marlow']), '@Marlow W-1 · Rotate — Go');
 });
 
 test('a notify text addresses the next person or the asked person', () => {

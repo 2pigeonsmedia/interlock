@@ -97,15 +97,29 @@
     return Number(String(id).slice(2));
   }
 
+  // Every row appears exactly once. A row whose parent is null or not among
+  // the rows is top level, whatever its kind; any other row sits under its
+  // nearest top-level ancestor. The service keeps parents one level deep, so a
+  // deeper chain or a cycle is a safety net: a row in a cycle is top level.
+  function topAncestor(row, byId) {
+    const seen = new Set([row.id]);
+    let current = row;
+    while (current.parent !== null && current.parent !== undefined && byId.has(current.parent)) {
+      if (seen.has(current.parent)) return row;
+      seen.add(current.parent);
+      current = byId.get(current.parent);
+    }
+    return current;
+  }
+
   function projectTree(rows) {
-    const present = new Set(rows.map(row => row.id));
     const ordered = [...rows].sort((a, b) => idNumber(a.id) - idNumber(b.id));
-    const isTop = row => (row.kind === 'work' || row.kind === 'finding') &&
-      (row.parent === null || row.parent === undefined || !present.has(row.parent));
-    return ordered.filter(isTop).map(row => ({
+    const byId = new Map(ordered.map(row => [row.id, row]));
+    const roots = new Map(ordered.map(row => [row.id, topAncestor(row, byId)]));
+    return ordered.filter(row => roots.get(row.id) === row).map(row => ({
       row,
       label: row.title + (row.awaiting ? ' · awaiting ' + row.awaiting : ''),
-      children: ordered.filter(child => child.parent === row.id),
+      children: ordered.filter(child => child !== row && roots.get(child.id) === row),
     }));
   }
 
@@ -170,11 +184,12 @@
   }
 
   function recentChanges(changes, shown) {
+    const count = Math.min(shown, changes.events.length);
     return {
-      lines: historyLines(changes.events).slice(0, shown),
+      lines: historyLines(changes.events).slice(0, count),
       total: changes.total,
-      shown: Math.min(shown, changes.events.length),
-      more: changes.total > shown,
+      shown: count,
+      more: changes.total > count,
     };
   }
 
@@ -195,8 +210,13 @@
     };
   }
 
+  // Handles match the roster case-insensitively, as room mentions do, and the
+  // prefix uses the roster's spelling of the name.
   function addressed(name, text, aiNames) {
-    return typeof name === 'string' && aiNames.includes(name) ? '@' + name + ' ' + text : text;
+    if (typeof name !== 'string') return text;
+    const folded = name.toLowerCase();
+    const handle = aiNames.find(ai => typeof ai === 'string' && ai.toLowerCase() === folded);
+    return handle === undefined ? text : '@' + handle + ' ' + text;
   }
 
   function exposureText(exposure, aiNames) {
