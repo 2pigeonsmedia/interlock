@@ -9,6 +9,9 @@ function fakeService() {
   const calls = [];
   return {
     calls,
+    replay() {
+      return null;
+    },
     createItem(actor, input) {
       calls.push([actor, input]);
       return { ok: true, item: { id: 'W-1', next_to: input.next_to, created_by: { subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null } } };
@@ -68,7 +71,61 @@ test('items/share maps to share with 201', () => {
   const body = { operation_id: 'x', id: 'D-1', purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 };
   const shared = routes.mutate('items/share', actor, body);
   assert.equal(shared.status, 201, JSON.stringify(shared.body));
-  assert.deepEqual(service.calls, [[actor, body, 'share']]);
+  assert.equal(service.calls.length, 1);
+  const [calledActor, calledInput, calledOp] = service.calls[0];
+  assert.deepEqual([calledActor, calledOp], [actor, 'share']);
+  assert.match(calledInput.raw_digest, /^[0-9a-f]{64}$/);
+  assert.deepEqual(Object.assign({}, calledInput, { raw_digest: undefined }), Object.assign({}, body, { raw_digest: undefined }));
   assert.equal(shared.body.event.kind, 'shared');
   assert.deepEqual(shared.body.event.by, { name: 'Lead', kind: 'seat', session: null });
+});
+
+test('a retry whose recipient has since left the room replays the original result', () => {
+  const lists = [
+    [
+      { subject_id: 'p-1', name: 'Ana', kind: 'person', session: null },
+      { subject_id: 's-1', name: 'Lead', kind: 'seat', session: 3 },
+      { subject_id: 's-2', name: 'Builder', kind: 'seat', session: 1 },
+    ],
+    [
+      { subject_id: 'p-1', name: 'Ana', kind: 'person', session: null },
+      { subject_id: 's-1', name: 'Lead', kind: 'seat', session: 3 },
+    ],
+  ];
+  let rosterCalls = 0;
+  const changingRoster = () => lists[Math.min(rosterCalls++, lists.length - 1)];
+  const stored = new Map();
+  const created = [];
+  const service = {
+    replay(who, operationId, rawDigest) {
+      const prior = stored.get(operationId.toLowerCase());
+      if (!prior) return null;
+      if (prior.raw_digest !== rawDigest) {
+        const error = new Error('operation-conflict');
+        error.code = 'operation-conflict';
+        throw error;
+      }
+      return Object.assign({}, prior.result, { replayed: true });
+    },
+    createItem(who, input) {
+      created.push(input);
+      const result = { ok: true, item: { id: 'W-1', next_to: input.next_to } };
+      stored.set(input.operation_id.toLowerCase(), { raw_digest: input.raw_digest, result });
+      return result;
+    },
+  };
+  const routes = createWorkRoutes({ work: service, participants: changingRoster });
+  const body = { operation_id: '9b2f6c1e-4d3a-4b5c-8e7f-0a1b2c3d4e5f', kind: 'work', project: 'ops', title: 'Hand over', body: 'To Builder.', next_to: 'Builder' };
+  const first = routes.mutate('items/create', actor, body);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  assert.match(created[0].raw_digest, /^[0-9a-f]{64}$/);
+  const retry = routes.mutate('items/create', actor, Object.assign({}, body));
+  assert.equal(retry.status, 200, JSON.stringify(retry.body));
+  assert.equal(retry.body.replayed, true);
+  assert.deepEqual(retry.body.item.next_to, { name: 'Builder', kind: 'seat', session: 1 });
+  assert.equal(created.length, 1, 'the retry never reaches createItem');
+  assert.equal(rosterCalls, 1, 'the retry never consults the roster');
+  const changed = routes.mutate('items/create', actor, Object.assign({}, body, { title: 'Something else' }));
+  assert.equal(changed.status, 409);
+  assert.equal(changed.body.error, 'operation-conflict');
 });

@@ -240,6 +240,22 @@ test('an operation id replays its original result and refuses a different body',
   code(() => work.createItem(lead, Object.assign({}, input, { operation_id: 'not-a-uuid', title: 'x' })), 'invalid-operation');
 });
 
+test('replay returns the stored result for a known operation and raw digest, and refuses a different one', () => {
+  const { work } = fresh();
+  const operationId = uuid();
+  const first = work.createItem(lead, {
+    operation_id: operationId, kind: 'work', project: 'ops', title: 'Once', body: 'Only once.', raw_digest: 'a',
+  });
+  assert.deepEqual(work.replay(lead, operationId, 'a'), Object.assign({}, first, { replayed: true }));
+  assert.deepEqual(work.replay(lead, operationId.toUpperCase(), 'a'), Object.assign({}, first, { replayed: true }));
+  code(() => work.replay(lead, operationId, 'b'), 'operation-conflict');
+  assert.equal(work.replay(lead, uuid(), 'a'), null);
+  const unmarked = uuid();
+  work.createItem(lead, { operation_id: unmarked, kind: 'work', project: 'ops', title: 'Older', body: 'No raw digest.' });
+  assert.equal(work.replay(lead, unmarked, 'a'), null, 'an entry without a raw digest is left to the resolved-digest check');
+  assert.equal(work.list(lead, {}).items.length, 2);
+});
+
 // ── decisions ─────────────────────────────────────────────────────────────────
 
 function newDecision(work, actor, askedOf, extra = {}) {

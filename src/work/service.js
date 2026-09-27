@@ -190,9 +190,18 @@ function createWorkService(options) {
   }
 
   // Every mutation: closed input, a UUID operation id, one commit, and the
-  // operation's digest recorded so a retry replays and a reuse refuses.
+  // operation's digest recorded so a retry replays and a reuse refuses. A
+  // caller may add raw_digest, its digest of the request as sent; it is kept
+  // beside the resolved digest so replay() can recognise a retry early.
   function operation(actor, op, rawInput, keys, handler) {
     requireActor(actor);
+    let rawDigest;
+    if (plainObject(rawInput) && Object.prototype.hasOwnProperty.call(rawInput, 'raw_digest')) {
+      rawDigest = rawInput.raw_digest;
+      if (typeof rawDigest !== 'string' || !/^[0-9a-f]{1,64}$/.test(rawDigest)) fail('invalid-input');
+      rawInput = Object.assign({}, rawInput);
+      delete rawInput.raw_digest;
+    }
     const body = closedObject(rawInput, ['operation_id', ...keys]);
     if (!body) fail('invalid-input');
     if (typeof body.operation_id !== 'string' || !UUID.test(body.operation_id)) fail('invalid-operation');
@@ -207,9 +216,25 @@ function createWorkService(options) {
         fail('operation-conflict');
       }
       const result = handler(draft, rest, clock());
-      draft.operations[operationId] = { digest, result: clone(result) };
+      draft.operations[operationId] = rawDigest === undefined
+        ? { digest, result: clone(result) }
+        : { digest, raw_digest: rawDigest, result: clone(result) };
       return result;
     });
+  }
+
+  // A retry recognised from the request as sent, before any participant name
+  // is resolved: the stored result when the raw digest matches, null when the
+  // operation is unknown or was recorded without a raw digest, and a refusal
+  // when the same id arrives with a different request.
+  function replay(actor, operationId, rawDigest) {
+    requireActor(actor);
+    if (typeof operationId !== 'string' || !UUID.test(operationId)) return null;
+    if (typeof rawDigest !== 'string') return null;
+    const prior = snapshot().operations[operationId.toLowerCase()];
+    if (!prior || typeof prior.raw_digest !== 'string') return null;
+    if (prior.raw_digest !== rawDigest) fail('operation-conflict');
+    return Object.assign({}, clone(prior.result), { replayed: true });
   }
 
   function findProject(draft, id) {
@@ -936,8 +961,8 @@ function createWorkService(options) {
     createItem, updateWork, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw,
     list, get, brief, changes, exportRecords,
-    needsMe,
+    needsMe, replay,
   });
 }
 
-module.exports = Object.freeze({ KINDS, WORK_STATES, SEVERITIES, createWorkService, stripIds });
+module.exports = Object.freeze({ KINDS, WORK_STATES, SEVERITIES, canonical, createWorkService, stripIds });

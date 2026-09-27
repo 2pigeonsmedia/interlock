@@ -5,7 +5,9 @@
 // refs, and opaque identity ids stripped from every response. It takes a
 // trusted actor from the host; it never reads identity from a body.
 
-const { stripIds } = require('./service.js');
+const crypto = require('node:crypto');
+
+const { canonical, stripIds } = require('./service.js');
 
 const MUTATIONS = Object.freeze({
   'items/create': Object.freeze(['createItem', 201]),
@@ -103,10 +105,18 @@ function createWorkRoutes(options) {
     if (!plainObject(body)) return refusal(400, 'invalid-request');
     const input = Object.assign({}, body);
     try {
+      // Recognise a retry from the request as sent, before names resolve, so
+      // a recipient who has since left the room cannot turn it into a refusal.
+      const sent = Object.assign({}, body);
+      delete sent.operation_id;
+      const rawDigest = crypto.createHash('sha256')
+        .update(canonical({ actor: actor && actor.subject_id, op, body: sent })).digest('hex');
+      const prior = work.replay(actor, body.operation_id, rawDigest);
+      if (prior) return Object.freeze({ status: 200, body: stripIds(prior) });
       for (const key of REF_KEYS) {
         if (Object.prototype.hasOwnProperty.call(input, key)) input[key] = resolveRef(input[key], now);
       }
-      const result = work[entry[0]](actor, input);
+      const result = work[entry[0]](actor, Object.assign(input, { raw_digest: rawDigest }));
       return Object.freeze({ status: result.replayed === true ? 200 : entry[1], body: stripIds(result) });
     } catch (error) {
       return errorResponse(error);

@@ -95,10 +95,12 @@ whose next step is a wait is in nobody's queue.
 Every write is a JSON object with a client-chosen `operation_id` (UUID v4).
 Retrying the same operation with the same body returns the original result
 with `"replayed": true`; the same id with a different body is refused
-(`operation-conflict`). Writes that change state or fields carry
-`expected_revision`; a stale value is refused (`stale-revision`, with the
-current `revision`). Evidence, notes and share outcomes are appends and carry
-no revision.
+(`operation-conflict`). A retry is recognised from the request as sent,
+before participant names are resolved, so a recipient who has since left the
+room does not turn a replay into a refusal. Writes that change state or
+fields carry `expected_revision`; a stale value is refused (`stale-revision`,
+with the current `revision`). Evidence, notes and share outcomes are appends
+and carry no revision.
 
 A share outcome records what happened to the ordinary message a participant
 composed to expose a change or notify a recipient: sent (with the message id),
