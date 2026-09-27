@@ -723,3 +723,38 @@ test('parents are one level deep: no self-parenting, no chains, no cycles', () =
   code(() => newWork(work, lead, { title: 'Deep', parent: middle.id }), 'invalid-parent');
   code(() => work.updateWork(lead, { operation_id: uuid(), id: top.id, expected_revision: 1, parent: middle.id, note: 'cycle' }), 'invalid-parent');
 });
+
+test('a captured source is stored, derives the source text, and survives in get and export', () => {
+  const { work } = fresh();
+  const capture = { message_id: 42, ts: 1700000000000, byline: 'Marlow', kind: 'seat', session: 2, quote: 'after the check' };
+  const item = newWork(work, lead, { source_message: capture });
+  const derived = 'room message #42 · Marlow (session 2) · 2023-11-14T22:13:20.000Z';
+  assert.equal(item.source, derived);
+  assert.deepEqual(item.source_message, capture);
+  assert.deepEqual(item.created_by, ref(lead), 'the recording participant stays separate from the speaker');
+  const got = work.get(lead, { id: item.id });
+  assert.deepEqual(got.item.source_message, capture);
+  assert.equal(got.item.source, derived);
+  assert.deepEqual(got.history[0].fields.source_message, capture, 'the created event carries the capture');
+  const md = work.exportRecords(owner, { format: 'md' }).body;
+  assert.match(md, /from room message #42 by Marlow \(session 2\): “after the check”/);
+
+  const explicit = newWork(work, lead, { source: 'terminal', source_message: Object.assign({}, capture, { kind: 'person', session: null, byline: 'Ana' }) });
+  assert.equal(explicit.source, 'terminal', 'an explicit source is kept');
+  assert.equal(explicit.source_message.byline, 'Ana');
+  assert.equal(newWork(work, lead).source_message, null);
+
+  for (const bad of [
+    { message_id: 42, ts: 1700000000000, byline: 'Marlow', kind: 'seat', session: 2 },
+    Object.assign({}, capture, { extra: 1 }),
+    Object.assign({}, capture, { message_id: 0 }),
+    Object.assign({}, capture, { ts: -1 }),
+    Object.assign({}, capture, { byline: '' }),
+    Object.assign({}, capture, { kind: 'system' }),
+    Object.assign({}, capture, { quote: '' }),
+    Object.assign({}, capture, { quote: 'x'.repeat(4097) }),
+    'room message #42',
+  ]) {
+    code(() => newWork(work, lead, { source_message: bad }), 'invalid-source');
+  }
+});

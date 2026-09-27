@@ -72,6 +72,8 @@ null), `links`, `parent`, `source`, `revision`.
 - Withdrawing, reopening and re-addressing are the asker's act or the owner's;
   the previous recipient stays on the event. Anyone else adds a note.
 
+A record created from a room message carries `source_message`: the message id, time, speaker and the quoted words, checked by the server against the room at creation. The speaker and the recording participant are separate fields. A message that no longer exists in the room (archived by a transcript clear) cannot be cited; the copy on an earlier record survives the clear.
+
 **Evidence** — an append-only entry on any item: `target`, `observed`,
 `reference`, `limits`, and an optional `relates_to` naming an earlier evidence
 entry it corrects or extends. Interlock displays it as attached; it never
@@ -112,7 +114,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 
 | Operation | Body (besides `operation_id`) |
 |---|---|
-| `items/create` | `kind`, `project`, `title`, `body`, optional `source`, `links`, `parent`; work: `responsible`, `next_to`, `next_action`, `target`, `consequence`, `severity`; decision: `asked_of`, `proposal`, `rationale`, `scope`, `conditions` |
+| `items/create` | `kind`, `project`, `title`, `body`, optional `source`, `source_message` (`{ message_id, quote }`), `links`, `parent`; work: `responsible`, `next_to`, `next_action`, `target`, `consequence`, `severity`; decision: `asked_of`, `proposal`, `rationale`, `scope`, `conditions` |
 | `items/update` | `id`, `expected_revision`, `note`, any work field above, `state`, `block_reason`, `done_account`, `done_evidence` or `no_evidence`, `title`, `body` |
 | `items/evidence` | `id`, `target`, `observed`, `reference`, `limits`, optional `relates_to` |
 | `items/note` | `id`, `text` |

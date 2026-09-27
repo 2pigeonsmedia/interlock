@@ -1315,7 +1315,7 @@ function createFirstOwnerHandler(options) {
         return;
       }
     }
-    sendWorkResult(request, response, work.mutate(op, actor, body, actor.now));
+    sendWorkResult(request, response, await work.mutate(op, actor, body, actor.now));
   }
 
   async function readAiPeek(request, response, target) {

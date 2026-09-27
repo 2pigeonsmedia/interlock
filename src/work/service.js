@@ -28,8 +28,9 @@ const LIST_LIMIT_MAX = 200;
 const CREATE_KEYS = Object.freeze([
   'kind', 'project', 'title', 'body', 'source', 'links', 'parent',
   'responsible', 'next_to', 'next_action', 'target', 'consequence', 'severity',
-  'asked_of', 'proposal', 'rationale', 'scope', 'conditions',
+  'asked_of', 'proposal', 'rationale', 'scope', 'conditions', 'source_message',
 ]);
+const SOURCE_MESSAGE_KEYS = Object.freeze(['message_id', 'ts', 'byline', 'kind', 'session', 'quote']);
 const WORK_ONLY_KEYS = Object.freeze([
   'responsible', 'next_to', 'next_action', 'target', 'consequence', 'severity',
 ]);
@@ -121,6 +122,23 @@ function optionalRef(value, field) {
   if (value === null) return null;
   if (!validRef(value)) fail('invalid-' + field);
   return refOf(value);
+}
+
+// A room message a record was created from, as the route verified it: the
+// message id, its time and speaker from the room, and the quoted words.
+// Absent → null; anything but the exact six-key shape refuses.
+function sourceMessage(value) {
+  if (value === undefined) return null;
+  const body = closedObject(value, SOURCE_MESSAGE_KEYS);
+  if (!body || Reflect.ownKeys(body).length !== SOURCE_MESSAGE_KEYS.length ||
+      !Number.isSafeInteger(body.message_id) || body.message_id < 1 ||
+      !Number.isSafeInteger(body.ts) || body.ts < 0 ||
+      typeof body.byline !== 'string' || body.byline.length === 0 || !textOk(body.byline, 256) ||
+      (body.kind !== 'person' && body.kind !== 'seat') || body.session === undefined || !validSession(body.session) ||
+      !textOk(body.quote, SHORT_BYTES) || body.quote.trim() === '') fail('invalid-source');
+  return Object.freeze({
+    message_id: body.message_id, ts: body.ts, byline: body.byline, kind: body.kind, session: body.session, quote: body.quote,
+  });
 }
 
 function validActor(actor) {
@@ -400,6 +418,7 @@ function createWorkService(options) {
       const decision = body.kind === 'decision';
       const forbidden = decision ? WORK_ONLY_KEYS : DECISION_ONLY_KEYS;
       if (forbidden.some(key => body[key] !== undefined)) fail('invalid-input');
+      const captured = sourceMessage(body.source_message);
       const id = store.nextId(draft, decision ? 'D' : 'W');
       const item = {
         id,
@@ -407,7 +426,10 @@ function createWorkService(options) {
         project: project.id,
         title: requiredText(body.title, TITLE_BYTES, 'title'),
         body: requiredText(body.body, BODY_BYTES, 'body'),
-        source: optionalText(body.source, SHORT_BYTES, 'source') ?? null,
+        source: optionalText(body.source, SHORT_BYTES, 'source') ??
+          (captured ? 'room message #' + captured.message_id + ' · ' + who({ name: captured.byline, session: captured.session }) +
+            ' · ' + stamp(captured.ts) : null),
+        source_message: captured,
         links: validLinks(draft, body.links) ?? [],
         parent: validParent(draft, body.parent, id) ?? null,
         revision: 1,
@@ -901,7 +923,9 @@ function createWorkService(options) {
       lines.push('### ' + item.id + ' · ' + item.title + ' (' + item.kind + ' · ' + item.project + ' · ' + state + ')', '');
       lines.push('- created by ' + who(item.created_by) + ' at ' + stamp(item.created_at) + ' · revision ' + item.revision +
         (item.source ? ' · source: ' + item.source : '') + (item.parent ? ' · parent ' + item.parent : '') +
-        (item.links.length ? ' · links ' + item.links.join(', ') : ''));
+        (item.links.length ? ' · links ' + item.links.join(', ') : '') +
+        (item.source_message ? ' · from room message #' + item.source_message.message_id + ' by ' +
+          who({ name: item.source_message.byline, session: item.source_message.session }) + ': “' + item.source_message.quote + '”' : ''));
       lines.push('- ' + item.body);
       if (item.kind === 'decision') {
         lines.push('- asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by) +

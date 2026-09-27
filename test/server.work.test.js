@@ -286,6 +286,33 @@ test('work records ride the existing identity and survive a clear, a restart and
     assert.equal(conflict.status, 409, conflict.text);
     assert.equal(conflict.json.error, 'operation-conflict');
 
+    const said = await post(runtime, '/api/messages', { text: 'Use the March cut-off.' }, owner);
+    assert.equal(said.status, 201, said.text);
+    const m = said.json.message.id;
+    const cited = await aiPost(runtime, '/api/ai/work/items/create', {
+      operation_id: uuid(), kind: 'decision', project: 'finance', title: 'Which cut-off applies?',
+      body: 'The owner named one in the room.', asked_of: 'Ana', source_message: { message_id: m, quote: 'March cut-off' },
+    }, lead.token);
+    assert.equal(cited.status, 201, cited.text);
+    const citedId = cited.json.item.id;
+    assert.equal(cited.json.item.source_message.byline, 'Ana', 'the speaker is the room message author');
+    assert.equal(cited.json.item.source_message.kind, 'person');
+    assert.equal(cited.json.item.source_message.message_id, m);
+    assert.equal(cited.json.item.source_message.quote, 'March cut-off');
+    assert.equal(cited.json.item.created_by.name, 'Lead', 'the recording participant is the seat');
+    const misquoted = await aiPost(runtime, '/api/ai/work/items/create', {
+      operation_id: uuid(), kind: 'work', project: 'finance', title: 'x', body: 'y',
+      source_message: { message_id: m, quote: 'April cut-off' },
+    }, lead.token);
+    assert.equal(misquoted.status, 400, misquoted.text);
+    assert.equal(misquoted.json.error, 'invalid-source');
+    const forgedSpeaker = await aiPost(runtime, '/api/ai/work/items/create', {
+      operation_id: uuid(), kind: 'work', project: 'finance', title: 'x', body: 'y',
+      source_message: { message_id: m, quote: 'March cut-off', byline: 'Lead' },
+    }, lead.token);
+    assert.equal(forgedSpeaker.status, 400, forgedSpeaker.text);
+    assert.equal(forgedSpeaker.json.error, 'invalid-request');
+
     const left = await aiPost(runtime, '/api/ai/leave', {}, lead.token);
     assert.equal(left.status, 200, left.text);
     const afterLeave = await aiGet(runtime, '/api/ai/work/brief', lead.token);
@@ -297,6 +324,15 @@ test('work records ride the existing identity and survive a clear, a restart and
     const afterClear = await get(runtime, '/api/work/items/W-1', owner);
     assert.equal(afterClear.status, 200, afterClear.text);
     assert.equal(afterClear.json.item.title, 'Import rows without guessing dates');
+    const citedAfterClear = await get(runtime, `/api/work/items/${citedId}`, owner);
+    assert.equal(citedAfterClear.status, 200, citedAfterClear.text);
+    assert.deepEqual(citedAfterClear.json.item.source_message, cited.json.item.source_message, 'the copy survives the clear');
+    const archivedCite = await post(runtime, '/api/work/items/create', {
+      operation_id: uuid(), kind: 'work', project: 'finance', title: 'x', body: 'y',
+      source_message: { message_id: m, quote: 'March cut-off' },
+    }, owner);
+    assert.equal(archivedCite.status, 400, archivedCite.text);
+    assert.equal(archivedCite.json.error, 'invalid-source', 'an archived message cannot be cited');
     await runtime.close();
     runtime = await startInterlockServer({ port, dataDir });
     owner = await login(runtime, password);
@@ -312,5 +348,5 @@ test('work records ride the existing identity and survive a clear, a restart and
   const restored = restoreInstallation({ backup: backupDir, dataDir: restoreDir });
   assert.equal(restored.files, backedUp.files);
   const store = JSON.parse(fs.readFileSync(path.join(restoreDir, 'work', 'store.json'), 'utf8'));
-  assert.deepEqual(store.items.map(item => item.id), ['W-1', 'D-2']);
+  assert.deepEqual(store.items.map(item => item.id), ['W-1', 'D-2', 'D-3']);
 });

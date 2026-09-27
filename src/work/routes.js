@@ -27,6 +27,7 @@ const MUTATIONS = Object.freeze({
 const OWNER_STEP_UP = Object.freeze(['projects/create', 'projects/retire']);
 const REF_KEYS = Object.freeze(['next_to', 'responsible', 'asked_of']);
 const READS = Object.freeze(['brief', 'list', 'get', 'changes', 'export']);
+const QUOTE_BYTES = 4 * 1024;
 const STATUS = Object.freeze({
   'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-a-relay': 403,
   'ambiguous-participant': 400,
@@ -57,6 +58,18 @@ function errorResponse(error) {
   return refusal(503, 'work-unavailable');
 }
 
+// A citation as the client sends it: the room message id and the quoted
+// words, nothing else. Time and speaker come from the room, never the body.
+function citation(value) {
+  if (!plainObject(value)) return null;
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== 2 || !keys.includes('message_id') || !keys.includes('quote')) return null;
+  const { message_id: messageId, quote } = value;
+  if (!Number.isSafeInteger(messageId) || messageId < 1) return null;
+  if (typeof quote !== 'string' || quote.trim() === '' || Buffer.byteLength(quote, 'utf8') > QUOTE_BYTES) return null;
+  return { message_id: messageId, quote };
+}
+
 function parseInteger(value) {
   return typeof value === 'string' && /^(?:0|[1-9][0-9]{0,15})$/.test(value) ? Number(value) : null;
 }
@@ -71,7 +84,24 @@ function createWorkRoutes(options) {
   if (!plainObject(options) || !options.work || typeof options.participants !== 'function') {
     throw new TypeError('work routes: a work service and a participants roster are required');
   }
-  const { work, participants } = options;
+  if (options.messageById !== undefined && typeof options.messageById !== 'function') {
+    throw new TypeError('work routes: messageById must be a function');
+  }
+  const { work, participants, messageById } = options;
+
+  // Look the cited message up in the room and check the quote is in it; the
+  // capture takes time and speaker from the room. Null when it cannot be
+  // verified: no room lookup, no such message (or archived), or a misquote.
+  async function verifiedSource(cited) {
+    if (!messageById) return null;
+    const message = await messageById(cited.message_id);
+    if (!message || message.id !== cited.message_id || typeof message.text !== 'string' ||
+        !message.text.includes(cited.quote)) return null;
+    return {
+      message_id: cited.message_id, ts: message.ts, byline: message.byline, kind: message.kind,
+      session: message.session ?? null, quote: cited.quote,
+    };
+  }
 
   function resolveRef(value, now) {
     if (value === null) return null;
@@ -99,7 +129,7 @@ function createWorkRoutes(options) {
     return { subject_id: hits[0].subject_id, name: hits[0].name, kind: hits[0].kind, session: hits[0].session ?? null };
   }
 
-  function mutate(op, actor, body, now = Date.now()) {
+  async function mutate(op, actor, body, now = Date.now()) {
     const entry = MUTATIONS[op];
     if (!entry) return refusal(404, 'not-found');
     if (!plainObject(body)) return refusal(400, 'invalid-request');
@@ -115,6 +145,15 @@ function createWorkRoutes(options) {
         .update(canonical({ actor: actor && actor.subject_id, op, body: sent })).digest('hex');
       const prior = work.replay(actor, body.operation_id, rawDigest);
       if (prior) return Object.freeze({ status: 200, body: stripIds(prior) });
+      // Verified after replay, so a retry whose message was since archived
+      // still returns its original result.
+      if (Object.prototype.hasOwnProperty.call(body, 'source_message')) {
+        const cited = op === 'items/create' ? citation(body.source_message) : null;
+        if (!cited) return refusal(400, 'invalid-request');
+        const captured = await verifiedSource(cited);
+        if (!captured) return refusal(400, 'invalid-source');
+        input.source_message = captured;
+      }
       for (const key of REF_KEYS) {
         if (Object.prototype.hasOwnProperty.call(input, key)) input[key] = resolveRef(input[key], now);
       }

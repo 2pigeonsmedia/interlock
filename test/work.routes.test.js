@@ -37,45 +37,45 @@ const roster = () => [
 ];
 const actor = Object.freeze({ subject_id: 's-1', name: 'Lead', kind: 'seat', owner: false });
 
-test('a participant name resolves to a ref carrying the roster session; ambiguity and unknown names refuse with 400', () => {
+test('a participant name resolves to a ref carrying the roster session; ambiguity and unknown names refuse with 400', async () => {
   const service = fakeService();
   const routes = createWorkRoutes({ work: service, participants: roster });
-  const byName = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Lead' });
+  const byName = await routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Lead' });
   assert.equal(byName.status, 201, JSON.stringify(byName.body));
   assert.deepEqual(service.calls[0][1].next_to, { subject_id: 's-1', name: 'Lead', kind: 'seat', session: 3 });
   assert.deepEqual(byName.body.item.next_to, { name: 'Lead', kind: 'seat', session: 3 });
   assert.deepEqual(byName.body.item.created_by, { name: 'Lead', kind: 'seat', session: null });
-  const byId = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 's-9' });
+  const byId = await routes.mutate('items/create', actor, { operation_id: 'x', next_to: 's-9' });
   assert.equal(byId.status, 201);
   assert.equal(service.calls[1][1].next_to.subject_id, 's-9');
-  const ambiguous = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder' });
+  const ambiguous = await routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder' });
   assert.equal(ambiguous.status, 400);
   assert.equal(ambiguous.body.error, 'ambiguous-participant');
-  const unknown = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Nobody' });
+  const unknown = await routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Nobody' });
   assert.equal(unknown.status, 400);
   assert.equal(unknown.body.error, 'invalid-participant');
-  const object = routes.mutate('items/create', actor, { operation_id: 'x', next_to: { subject_id: 'p-1', name: 'Ana', kind: 'person' } });
+  const object = await routes.mutate('items/create', actor, { operation_id: 'x', next_to: { subject_id: 'p-1', name: 'Ana', kind: 'person' } });
   assert.equal(object.status, 400);
   assert.equal(object.body.error, 'invalid-participant');
   assert.equal(service.calls.length, 2, 'refused names never reach the service');
 });
 
-test('a same-named seat is selectable by "Name (session N)" without exposing subject ids', () => {
+test('a same-named seat is selectable by "Name (session N)" without exposing subject ids', async () => {
   const service = fakeService();
   const routes = createWorkRoutes({ work: service, participants: roster });
-  const picked = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder (session 2)' });
+  const picked = await routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder (session 2)' });
   assert.equal(picked.status, 201, JSON.stringify(picked.body));
   assert.deepEqual(service.calls[0][1].next_to, { subject_id: 's-9', name: 'Builder', kind: 'seat', session: 2 });
-  const wrongSession = routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder (session 7)' });
+  const wrongSession = await routes.mutate('items/create', actor, { operation_id: 'x', next_to: 'Builder (session 7)' });
   assert.equal(wrongSession.status, 400);
   assert.equal(wrongSession.body.error, 'invalid-participant');
 });
 
-test('items/share maps to share with 201', () => {
+test('items/share maps to share with 201', async () => {
   const service = fakeService();
   const routes = createWorkRoutes({ work: service, participants: roster });
   const body = { operation_id: 'x', id: 'D-1', purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 };
-  const shared = routes.mutate('items/share', actor, body);
+  const shared = await routes.mutate('items/share', actor, body);
   assert.equal(shared.status, 201, JSON.stringify(shared.body));
   assert.equal(service.calls.length, 1);
   const [calledActor, calledInput, calledOp] = service.calls[0];
@@ -86,7 +86,7 @@ test('items/share maps to share with 201', () => {
   assert.deepEqual(shared.body.event.by, { name: 'Lead', kind: 'seat', session: null });
 });
 
-test('a retry whose recipient has since left the room replays the original result', () => {
+test('a retry whose recipient has since left the room replays the original result', async () => {
   const lists = [
     [
       { subject_id: 'p-1', name: 'Ana', kind: 'person', session: null },
@@ -122,28 +122,28 @@ test('a retry whose recipient has since left the room replays the original resul
   };
   const routes = createWorkRoutes({ work: service, participants: changingRoster });
   const body = { operation_id: '9b2f6c1e-4d3a-4b5c-8e7f-0a1b2c3d4e5f', kind: 'work', project: 'ops', title: 'Hand over', body: 'To Builder.', next_to: 'Builder' };
-  const first = routes.mutate('items/create', actor, body);
+  const first = await routes.mutate('items/create', actor, body);
   assert.equal(first.status, 201, JSON.stringify(first.body));
   assert.match(created[0].raw_digest, /^[0-9a-f]{64}$/);
-  const retry = routes.mutate('items/create', actor, Object.assign({}, body));
+  const retry = await routes.mutate('items/create', actor, Object.assign({}, body));
   assert.equal(retry.status, 200, JSON.stringify(retry.body));
   assert.equal(retry.body.replayed, true);
   assert.deepEqual(retry.body.item.next_to, { name: 'Builder', kind: 'seat', session: 1 });
   assert.equal(created.length, 1, 'the retry never reaches createItem');
   assert.equal(rosterCalls, 1, 'the retry never consults the roster');
-  const changed = routes.mutate('items/create', actor, Object.assign({}, body, { title: 'Something else' }));
+  const changed = await routes.mutate('items/create', actor, Object.assign({}, body, { title: 'Something else' }));
   assert.equal(changed.status, 409);
   assert.equal(changed.body.error, 'operation-conflict');
 });
 
-test('a body carrying raw_digest is refused before any digest or resolution', () => {
+test('a body carrying raw_digest is refused before any digest or resolution', async () => {
   let rosterCalls = 0;
   const counted = () => { rosterCalls += 1; return roster(); };
   let replays = 0;
   const service = fakeService();
   service.replay = () => { replays += 1; return null; };
   const routes = createWorkRoutes({ work: service, participants: counted });
-  const smuggled = routes.mutate('items/create', actor, {
+  const smuggled = await routes.mutate('items/create', actor, {
     operation_id: '9b2f6c1e-4d3a-4b5c-8e7f-0a1b2c3d4e5f', kind: 'work', project: 'ops',
     title: 'Hand over', body: 'To Lead.', next_to: 'Lead', raw_digest: 'SMUGGLED',
   });
@@ -154,7 +154,7 @@ test('a body carrying raw_digest is refused before any digest or resolution', ()
   assert.equal(service.calls.length, 0, 'the service op is not called');
 });
 
-test('over the real service, a retry whose recipient has left the room replays the stored result', () => {
+test('over the real service, a retry whose recipient has left the room replays the stored result', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-work-routes-'));
   const store = openWorkStore({ dataDir });
   const lists = [
@@ -176,20 +176,101 @@ test('over the real service, a retry whose recipient has left the room replays t
     operation_id: operationId, kind: 'work', project: 'ops', title: 'Hand over', body: 'To Builder.',
     next_to: 'Builder', next_action: 'Pick up the import.',
   };
-  const first = routes.mutate('items/create', actor, body);
+  const first = await routes.mutate('items/create', actor, body);
   assert.equal(first.status, 201, JSON.stringify(first.body));
   const entry = store.read().operations[operationId];
   assert.match(entry.raw_digest, /^[0-9a-f]{64}$/, 'the route digest is stored beside the resolved one');
   assert.match(entry.digest, /^[0-9a-f]{64}$/);
-  const retry = routes.mutate('items/create', actor, Object.assign({}, body));
+  const retry = await routes.mutate('items/create', actor, Object.assign({}, body));
   assert.equal(retry.status, 200, JSON.stringify(retry.body));
   assert.deepEqual(retry.body, Object.assign({}, first.body, { replayed: true }));
   assert.deepEqual(retry.body.item.next_to, { name: 'Builder', kind: 'seat', session: 1 });
   assert.equal(rosterCalls, 1, 'the retry never consults the roster');
-  const changed = routes.mutate('items/create', actor, Object.assign({}, body, { title: 'Something else' }));
+  const changed = await routes.mutate('items/create', actor, Object.assign({}, body, { title: 'Something else' }));
   assert.equal(changed.status, 409);
   assert.equal(changed.body.error, 'operation-conflict');
   const listed = routes.read('list', actor, {});
   assert.equal(listed.body.items.length, 1);
   fs.rmSync(dataDir, { recursive: true, force: true });
+});
+
+test('a source message is verified against the room and captured with its speaker, never from the body', async () => {
+  const room = new Map([[42, { id: 42, ts: 1700000000000, byline: 'Marlow', kind: 'seat', session: 2, text: 'Ship it after the check.' }]]);
+  const looked = [];
+  const messageById = async id => { looked.push(id); return room.get(id) || null; };
+  const service = fakeService();
+  const routes = createWorkRoutes({ work: service, participants: roster, messageById });
+  const base = { operation_id: 'x', kind: 'work', project: 'ops', title: 'Ship', body: 'After the check.' };
+
+  const cited = await routes.mutate('items/create', actor, Object.assign({}, base, {
+    source_message: { message_id: 42, quote: 'after the check' },
+  }));
+  assert.equal(cited.status, 201, JSON.stringify(cited.body));
+  assert.equal(service.calls.length, 1);
+  assert.deepEqual(service.calls[0][1].source_message, {
+    message_id: 42, ts: 1700000000000, byline: 'Marlow', kind: 'seat', session: 2, quote: 'after the check',
+  });
+  assert.equal(service.calls[0][1].source_message.byline, 'Marlow', 'the speaker comes from the room, not the actor');
+
+  const refusals = [
+    [{ message_id: 42, quote: 'not there' }, 'invalid-source'],
+    [{ message_id: 43, quote: 'after the check' }, 'invalid-source'],
+    [{ message_id: 42, quote: 'after the check', ts: 1 }, 'invalid-request'],
+    [{ message_id: 42, quote: 'after the check', byline: 'Ana' }, 'invalid-request'],
+    [{ message_id: 0, quote: 'after the check' }, 'invalid-request'],
+    [{ message_id: '42', quote: 'after the check' }, 'invalid-request'],
+    [{ message_id: 42, quote: '' }, 'invalid-request'],
+    [{ message_id: 42, quote: 'x'.repeat(4097) }, 'invalid-request'],
+    [{ message_id: 42 }, 'invalid-request'],
+    ['#42', 'invalid-request'],
+  ];
+  for (const [source, error] of refusals) {
+    const refused = await routes.mutate('items/create', actor, Object.assign({}, base, { source_message: source }));
+    assert.equal(refused.status, 400, JSON.stringify([source, refused.body]));
+    assert.equal(refused.body.error, error, JSON.stringify(source));
+  }
+  const otherOp = await routes.mutate('items/note', actor, { operation_id: 'x', id: 'W-1', text: 'x', source_message: { message_id: 42, quote: 'after the check' } });
+  assert.equal(otherOp.status, 400, JSON.stringify(otherOp.body));
+  assert.equal(otherOp.body.error, 'invalid-request');
+  assert.equal(service.calls.length, 1, 'the service was not called for any refusal');
+  assert.deepEqual(looked, [42, 42, 43], 'only well-formed citations reach the room');
+
+  const noRoom = createWorkRoutes({ work: fakeService(), participants: roster });
+  const unverifiable = await noRoom.mutate('items/create', actor, Object.assign({}, base, {
+    source_message: { message_id: 42, quote: 'after the check' },
+  }));
+  assert.equal(unverifiable.status, 400);
+  assert.equal(unverifiable.body.error, 'invalid-source', 'without a room to check against nothing can be cited');
+});
+
+test('a retry of a cited create replays before the room is consulted, even once the message is gone', async () => {
+  const room = new Map([[42, { id: 42, ts: 1700000000000, byline: 'Marlow', kind: 'seat', session: 2, text: 'Ship it after the check.' }]]);
+  let lookups = 0;
+  const messageById = async id => { lookups += 1; return room.get(id) || null; };
+  const stored = new Map();
+  const service = {
+    replay(who, operationId, rawDigest) {
+      const prior = stored.get(operationId);
+      return prior && prior.raw_digest === rawDigest ? Object.assign({}, prior.result, { replayed: true }) : null;
+    },
+    createItem(who, input) {
+      const result = { ok: true, item: { id: 'W-1', source_message: input.source_message } };
+      stored.set(input.operation_id, { raw_digest: input.raw_digest, result });
+      return result;
+    },
+  };
+  const routes = createWorkRoutes({ work: service, participants: roster, messageById });
+  const body = {
+    operation_id: '9b2f6c1e-4d3a-4b5c-8e7f-0a1b2c3d4e5f', kind: 'work', project: 'ops', title: 'Ship', body: 'Later.',
+    source_message: { message_id: 42, quote: 'after the check' },
+  };
+  const first = await routes.mutate('items/create', actor, body);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  assert.equal(lookups, 1);
+  room.clear();
+  const retry = await routes.mutate('items/create', actor, structuredClone(body));
+  assert.equal(retry.status, 200, JSON.stringify(retry.body));
+  assert.equal(retry.body.replayed, true);
+  assert.equal(retry.body.item.source_message.byline, 'Marlow');
+  assert.equal(lookups, 1, 'the retry never consults the room');
 });

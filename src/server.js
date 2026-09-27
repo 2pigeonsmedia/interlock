@@ -327,6 +327,17 @@ async function startInterlockServer(options) {
     const work = createWorkRoutes({
       work: createWorkService({ store: openWorkStore({ dataDir }) }),
       participants: meta => house.listParticipants(meta),
+      // A cited room message, looked up by id; null when it is not in the
+      // room (never posted, or archived by a transcript clear).
+      messageById: async id => {
+        try {
+          const page = await chat.read({ after: id - 1, limit: 1 });
+          const m = page.messages[0];
+          return m && m.id === id ? m : null;
+        } catch (_) {
+          return null;
+        }
+      },
     });
     let idleBusy = null;
     const releaseIdle = now => {
