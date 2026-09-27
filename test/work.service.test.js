@@ -353,10 +353,12 @@ test('markdown export renders a share outcome with its message id', () => {
   work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 });
   work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'notify', outcome: 'declined', to: 'Ana' });
   work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'exposure', outcome: 'failed', to: 'Ana', detail: 'The room was unreachable.' });
+  work.share(lead, { operation_id: uuid(), id: decision.id, purpose: 'notify', outcome: 'failed', to: 'Reviewer' });
   const body = work.exportRecords(owner, { format: 'md' }).body;
   assert.match(body, /· Lead · shared · exposure · sent as #57 to Ana · a send receipt is not proof of reading\n/);
-  assert.match(body, /· Lead · shared · notify · declined\n/);
-  assert.match(body, /· Lead · shared · exposure · failed · The room was unreachable\.\n/);
+  assert.match(body, /· Lead · shared · notify · declined · to Ana\n/);
+  assert.match(body, /· Lead · shared · exposure · failed · to Ana · The room was unreachable\.\n/);
+  assert.match(body, /· Lead · shared · notify · failed · to Reviewer\n/);
 });
 
 test('confirming a reported answer creates a direct answer and keeps the reported event', () => {

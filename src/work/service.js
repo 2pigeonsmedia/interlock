@@ -833,7 +833,7 @@ function createWorkService(options) {
     if (event.kind === 'shared') {
       parts.push(event.purpose);
       if (event.outcome === 'sent') parts.push('sent as #' + event.message_id + ' to ' + event.to, 'a send receipt is not proof of reading');
-      else parts.push(event.outcome);
+      else parts.push(event.outcome, 'to ' + event.to);
       if (event.detail) parts.push(event.detail);
       return '- ' + parts.join(' · ');
     }
