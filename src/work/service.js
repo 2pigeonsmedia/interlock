@@ -331,7 +331,7 @@ function createWorkService(options) {
   function row(draft, item) {
     if (item.kind === 'decision') {
       return {
-        id: item.id, kind: item.kind, project: item.project, title: item.title, state: decisionState(item),
+        id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: decisionState(item),
         asked_of: clone(item.asked_of), asked_by: clone(item.asked_by), proposal: item.proposal,
         answer_summary: item.answer ? {
           kind: item.answer.kind, by: clone(item.answer.by),
@@ -341,7 +341,7 @@ function createWorkService(options) {
       };
     }
     return {
-      id: item.id, kind: item.kind, project: item.project, title: item.title, state: item.state,
+      id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: item.state,
       responsible: clone(item.responsible), next_to: clone(item.next_to), next_action: item.next_action,
       target: item.target, updated_at: item.updated_at,
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),

@@ -149,6 +149,39 @@ test('the project tree nests children under their parent in id order', () => {
   assert.deepEqual(tree[1].children, []);
 });
 
+test('the project tree nests real service rows under their parent', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const crypto = require('node:crypto');
+  const { openWorkStore } = require('../src/work/store.js');
+  const { createWorkService } = require('../src/work/service.js');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-work-panel-tree-'));
+  try {
+    let clock = NOW;
+    const work = createWorkService({ store: openWorkStore({ dataDir }), clock: () => (clock += 1000) });
+    const owner = { subject_id: 'p-1', name: 'Ana', kind: 'person', owner: true };
+    const lead = { subject_id: 's-1', name: 'Lead', kind: 'seat', session: 1, owner: false };
+    const op = () => crypto.randomUUID();
+    const parent = work.createItem(lead, { operation_id: op(), kind: 'work', project: 'ops', title: 'Rotate', body: 'Why' }).item;
+    const decision = work.createItem(lead, { operation_id: op(), kind: 'decision', project: 'ops', title: 'Pick',
+      body: 'Which', asked_of: { subject_id: 'p-1', name: 'Ana', kind: 'person', session: null }, parent: parent.id }).item;
+    const finding = work.createItem(lead, { operation_id: op(), kind: 'finding', project: 'ops', title: 'Drift',
+      body: 'Seen', parent: parent.id }).item;
+    const loose = work.createItem(lead, { operation_id: op(), kind: 'work', project: 'ops', title: 'Other', body: 'Why' }).item;
+
+    const tree = projectTree(work.list(owner, { project: 'ops' }).items);
+    assert.deepEqual(tree.map(node => node.row.id), [parent.id, loose.id]);
+    assert.match(decision.id, /^D-/);
+    assert.equal(tree[0].label, 'Rotate · awaiting ' + decision.id);
+    assert.deepEqual(tree[0].children.map(row => row.id).sort(), [decision.id, finding.id].sort());
+    assert.deepEqual(tree[1].children, []);
+    assert.equal(tree[1].label, 'Other');
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('the done line names the closer, the disposition, the evidence or its absence, and open follow-ups', () => {
   const withEvidence = { kind: 'work', state: 'done', done_account: 'Keys rotated', done_evidence: 14,
     done_without_evidence: false };

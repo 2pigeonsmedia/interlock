@@ -269,6 +269,20 @@ function newDecision(work, actor, askedOf, extra = {}) {
   }, extra)).item;
 }
 
+test('list and brief rows carry the parent link', () => {
+  const { work } = fresh();
+  const parent = newWork(work, lead);
+  const decision = newDecision(work, builder, owner, { parent: parent.id });
+  const finding = work.createItem(lead, {
+    operation_id: uuid(), kind: 'finding', project: 'ops', title: 'Dates drift', body: 'Seen in March.', parent: parent.id,
+  }).item;
+  const rows = new Map(work.list(owner, {}).items.map(row => [row.id, row]));
+  assert.equal(rows.get(parent.id).parent, null);
+  assert.equal(rows.get(decision.id).parent, parent.id);
+  assert.equal(rows.get(finding.id).parent, parent.id);
+  assert.equal(work.brief(owner).decisions.find(row => row.id === decision.id).parent, parent.id);
+});
+
 test('a decision asked of the owner enters her queue; a seat cannot answer it; an answer of no is answered', () => {
   const { work } = fresh();
   const decision = newDecision(work, builder, owner);
