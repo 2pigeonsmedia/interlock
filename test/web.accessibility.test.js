@@ -264,10 +264,15 @@ test('the tile says who is responsible, the drawer says whom an owner answered f
 });
 
 test('closing the drawer returns focus to the row that opened it, even after a poll rebuilt the list', () => {
-  assert.match(WORK_PANEL_JS, /element\('work-drawer'\)\.addEventListener\('close', restoreOpenerFocus/);
   assert.match(WORK_PANEL_JS, /button\.dataset\.id = id/);
   assert.match(WORK_PANEL_JS, /querySelectorAll\('button\[data-id\]'\)/);
   assert.match(WORK_PANEL_JS, /function restoreOpenerFocus[\s\S]*?element\('needs-you-toggle'\)\.focus\(\)/);
+  // The check waits for the browser's own focus return, which may leave focus
+  // on the drawer's Close button; focus inside the drawer is restored too.
+  assert.match(WORK_PANEL_JS, /function scheduleOpenerFocus[\s\S]*?state\.focusTimer = setTimeout\(\(\) => restoreOpenerFocus\(state\), 0\)/);
+  assert.match(WORK_PANEL_JS, /element\('work-drawer'\)\.addEventListener\('close', scheduleOpenerFocus/);
+  assert.match(WORK_PANEL_JS, /function restoreOpenerFocus[\s\S]*?drawer\.contains\(active\)/);
+  assert.match(WORK_PANEL_JS, /function stop\(\)[\s\S]*?clearTimeout\(state\.focusTimer\)/);
 });
 
 test('between 761 and 1000 px the header wraps and the tiles stay three columns, Conversation wider than Work', () => {

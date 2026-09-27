@@ -100,13 +100,26 @@
   }
 
   // The dialog returns focus to the button that opened it; when a poll has
-  // replaced that button, focus would fall to the page. Find the current row
-  // for the same record in the same list, else the Needs you toggle.
-  function restoreOpenerFocus() {
+  // replaced that button, focus falls to the page. When the close event fires
+  // focus may still sit on the drawer's own Close button, so the check waits
+  // one task for the browser's focus return to finish.
+  function scheduleOpenerFocus() {
     const state = session;
     if (!state) return;
+    clearTimeout(state.focusTimer);
+    state.focusTimer = setTimeout(() => restoreOpenerFocus(state), 0);
+  }
+
+  // Focus on the page, on a detached node, or still inside the closed drawer
+  // moves to the current row for the same record in the same list, else the
+  // Needs you toggle. Focus on a connected control outside the drawer stays.
+  function restoreOpenerFocus(state) {
+    state.focusTimer = null;
+    if (!current(state)) return;
+    const drawer = element('work-drawer');
+    if (drawer.open) return;
     const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
+    if (active && active !== document.body && active.isConnected && !drawer.contains(active)) return;
     const opener = state.opener;
     const list = opener ? element(opener.list) : null;
     const match = list ? Array.from(list.querySelectorAll('button[data-id]')).find(button => button.dataset.id === opener.id) : null;
@@ -1183,7 +1196,7 @@
     const state = {
       user, deps, brief: null, projectRows: null,
       changes: [], changesTotal: 0, changesBusy: false,
-      refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, timer: null, listeners: new AbortController(),
+      refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },
     };
@@ -1192,7 +1205,7 @@
     element('needs-you-toggle').addEventListener('click', toggleNeedsYou, { signal });
     element('work-count-button').addEventListener('click', showNeedsYou, { signal });
     element('changes-more').addEventListener('click', showMoreChanges, { signal });
-    element('work-drawer').addEventListener('close', restoreOpenerFocus, { signal });
+    element('work-drawer').addEventListener('close', scheduleOpenerFocus, { signal });
     element('work-share-decline').addEventListener('click', declineShare, { signal });
     element('work-create-form').addEventListener('submit', submitCreate, { signal });
     element('work-create-form').addEventListener('change', createChanged, { signal });
@@ -1213,6 +1226,7 @@
     session = null;
     if (!state) return;
     clearInterval(state.timer);
+    clearTimeout(state.focusTimer);
     state.listeners.abort();
     resetTile();
     for (const id of ['work-drawer', 'work-create-dialog']) {
