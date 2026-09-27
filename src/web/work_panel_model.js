@@ -201,20 +201,55 @@
     };
   }
 
-  function firstLineTitle(text) {
-    const line = Array.from(text.split('\n')[0]);
-    return line.length <= TITLE_LIMIT ? line.join('') : line.slice(0, TITLE_LIMIT - 1).join('') + '…';
+  // The server's limits, in UTF-8 bytes.
+  const TITLE_BYTES = 256;
+  const QUOTE_BYTES = 4096;
+  const BODY_BYTES = 16384;
+
+  function codePointBytes(char) {
+    const code = char.codePointAt(0);
+    return code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
   }
 
+  // The longest prefix of whole code points within maxBytes; a prefix is still
+  // a substring, so a cut quote passes the room's check.
+  function prefixBytes(text, maxBytes) {
+    let used = 0;
+    let end = 0;
+    for (const char of text) {
+      const size = codePointBytes(char);
+      if (used + size > maxBytes) break;
+      used += size;
+      end += char.length;
+    }
+    return text.slice(0, end);
+  }
+
+  function firstLineTitle(text) {
+    const lines = text.split(/\r?\n/);
+    const first = lines.find(line => line.trim() !== '');
+    const line = Array.from(first === undefined ? lines[0] : first);
+    let title = line.length <= TITLE_LIMIT ? line.join('') : line.slice(0, TITLE_LIMIT - 1).join('') + '…';
+    if (prefixBytes(title, TITLE_BYTES) !== title) title = prefixBytes(title, TITLE_BYTES - codePointBytes('…')) + '…';
+    return title;
+  }
+
+  // The words a record starts from, cut to the server's limits: title 256
+  // bytes, quote 4 KiB, details 16 KiB. quote_truncated says the quote is only
+  // the start of the message.
   function messagePrefill(message, kind) {
+    const quote = prefixBytes(message.text, QUOTE_BYTES);
+    const body = prefixBytes(message.text, BODY_BYTES);
+    const truncated = quote !== message.text;
     if (kind === 'evidence') {
-      return { kind, target: '', observed: message.text, reference: 'room message #' + message.id };
+      return { kind, target: '', observed: body, reference: 'room message #' + message.id, quote_truncated: truncated };
     }
     return {
       kind,
       title: firstLineTitle(message.text),
-      body: message.text,
-      source_message: { message_id: message.id, quote: message.text },
+      body,
+      source_message: { message_id: message.id, quote },
+      quote_truncated: truncated,
     };
   }
 

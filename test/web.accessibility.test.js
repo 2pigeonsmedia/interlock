@@ -213,6 +213,8 @@ test('exposure and notify travel through the ordinary composer, and a message ca
   assert.match(WORK_PANEL_JS, /notify: 'Message not sent\. Sending again creates a new message\.'/,
     'a failed Notify saved no update, so its notice does not say one was saved');
   assert.match(WORK_PANEL_JS, /source_message/);
+  assert.match(WORK_PANEL_JS, /quote_truncated \? '\. Quoted the first 4 KB of message #' \+ message\.id/,
+    'a cut quote says so in the dialog');
 });
 
 test('the owner may answer for the person asked, and the update form says what each state requires', () => {

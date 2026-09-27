@@ -360,11 +360,11 @@ const MESSAGE = Object.freeze({
 test('a message prefill keeps the speaker words and the message id', () => {
   assert.deepEqual(messagePrefill(MESSAGE, 'work'), {
     kind: 'work', title: 'We should rotate the keys before Friday.', body: MESSAGE.text,
-    source_message: { message_id: 42, quote: MESSAGE.text },
+    source_message: { message_id: 42, quote: MESSAGE.text }, quote_truncated: false,
   });
   assert.equal(messagePrefill(MESSAGE, 'decision').kind, 'decision');
   assert.deepEqual(messagePrefill(MESSAGE, 'evidence'), {
-    kind: 'evidence', target: '', observed: MESSAGE.text, reference: 'room message #42',
+    kind: 'evidence', target: '', observed: MESSAGE.text, reference: 'room message #42', quote_truncated: false,
   });
   const long = messagePrefill(Object.assign({}, MESSAGE, { text: 'x'.repeat(200) }), 'work');
   assert.equal(Array.from(long.title).length, 120);
@@ -372,6 +372,46 @@ test('a message prefill keeps the speaker words and the message id', () => {
   assert.equal(long.body, 'x'.repeat(200));
   const exact = messagePrefill(Object.assign({}, MESSAGE, { text: 'y'.repeat(120) }), 'work');
   assert.equal(exact.title, 'y'.repeat(120));
+});
+
+const bytes = text => Buffer.byteLength(text, 'utf8');
+const noLoneSurrogate = text => !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text);
+
+test('a long message is quoted to the server limits: a prefix, cut on a code point, and flagged', () => {
+  const text = 'Start. ' + 'x'.repeat(4993);
+  assert.equal(bytes(text), 5000);
+  const prefill = messagePrefill(Object.assign({}, MESSAGE, { text }), 'work');
+  assert.equal(bytes(prefill.source_message.quote), 4096);
+  assert.ok(text.startsWith(prefill.source_message.quote), 'the quote is a prefix, so the room check passes');
+  assert.equal(prefill.quote_truncated, true);
+  assert.equal(prefill.body, text, 'a 5000-byte body is within the details limit');
+  const huge = 'y'.repeat(20000);
+  const big = messagePrefill(Object.assign({}, MESSAGE, { text: huge }), 'decision');
+  assert.equal(bytes(big.body), 16384);
+  assert.ok(huge.startsWith(big.body));
+  assert.ok(bytes(big.title) <= 256);
+});
+
+test('the prefill title is the first non-blank line, within 256 bytes even in CJK', () => {
+  const cjk = '鍵'.repeat(100);
+  assert.equal(bytes(cjk), 300);
+  const prefill = messagePrefill(Object.assign({}, MESSAGE, { text: cjk + '\nmore' }), 'work');
+  assert.ok(bytes(prefill.title) <= 256, String(bytes(prefill.title)));
+  assert.ok(prefill.title.endsWith('…'));
+  assert.ok(cjk.startsWith(prefill.title.slice(0, -1)));
+  assert.equal(prefill.quote_truncated, false);
+  const blankFirst = messagePrefill(Object.assign({}, MESSAGE, { text: '\r\n   \r\nReal title\r\nbody' }), 'work');
+  assert.equal(blankFirst.title, 'Real title');
+});
+
+test('an emoji at the quote cut is dropped whole, never split into half a pair', () => {
+  const text = 'a'.repeat(4094) + '😀' + 'tail';
+  const prefill = messagePrefill(Object.assign({}, MESSAGE, { text }), 'work');
+  assert.equal(prefill.source_message.quote, 'a'.repeat(4094));
+  assert.ok(noLoneSurrogate(prefill.source_message.quote));
+  assert.equal(prefill.quote_truncated, true);
+  const fits = 'a'.repeat(4092) + '😀' + 'tail';
+  assert.equal(messagePrefill(Object.assign({}, MESSAGE, { text: fits }), 'work').source_message.quote, 'a'.repeat(4092) + '😀');
 });
 
 test('an exposure to an AI is prefixed with its handle; to a person it is not', () => {

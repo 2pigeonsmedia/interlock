@@ -870,7 +870,8 @@
     const speakerSession = message.session;
     element('work-create-from').textContent = 'From message #' + message.id + ' by ' + message.byline +
       (speakerSession !== null && speakerSession !== undefined ? ' (session ' + speakerSession + ')' : '') +
-      ' · recording as ' + state.user.name;
+      ' · recording as ' + state.user.name +
+      (model().messagePrefill(message, 'work').quote_truncated ? '. Quoted the first 4 KB of message #' + message.id + '.' : '');
     const projects = brief ? brief.projects : [];
     fillSelect(element('work-create-project'), projects.map(project => ({ value: project.id, text: project.display_name })),
       projects.some(project => project.id === 'ops') ? 'ops' : (projects[0] && projects[0].id));

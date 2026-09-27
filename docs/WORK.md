@@ -108,6 +108,15 @@ A share outcome records what happened to the ordinary message a participant
 composed to expose a change or notify a recipient: sent (with the message id),
 declined, or failed. A send receipt is not proof of reading.
 
+A `source_message` cites a room message as `{ message_id, quote }` and
+nothing else. The server looks the message up and checks that `quote`
+appears in its text exactly as written — case and whitespace count. A quote
+is at most 4 KiB (UTF-8); a longer one, a blank one or any other key is
+`400 invalid-request`. When the message is not in the room (never posted, or
+archived by a transcript clear) or the words are not in it, the write is
+refused `400 invalid-source`. The record takes the message's time and speaker
+from the room, never from the body.
+
 Browser sessions: `POST /api/work/<operation>` with the usual mutation
 envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 `POST /api/ai/work/<operation>` with the bearer credential.
@@ -295,10 +304,13 @@ on. The viewer sends, edits or declines the draft:
 
 Every message has a **Work…** button beside Reply. It opens a dialog,
 *Record from a message*, prefilled with the message's words: **Create work**
-(the title is the first line, the details are the whole message), **Ask a
+(the title is the first non-blank line, the details are the message up to
+16 KiB), **Ask a
 decision** (who to ask is required), or **Attach as evidence** to an open
 work item (the message is what was observed, cited as `room message #N`). The
-dialog names the message's speaker and the person recording separately. For
+dialog names the message's speaker and the person recording separately. The
+quote is the start of the message, up to 4 KiB; when the message is longer
+the dialog says "Quoted the first 4 KB of message #N". For
 work and decisions the server checks the quoted words against the room before
 it creates the record. There is no answer field: promoting someone's message
 never creates an answer.
