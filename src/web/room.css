@@ -997,6 +997,25 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
 .work-create-form textarea[readonly] { color: var(--ink-3); }
 .work-create-from { font-size: 0.85rem; color: var(--ink-3); }
 .work-create-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.work-row > * { grid-column: 1 / -1; min-width: 0; }
+.work-open, .work-open-project {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--tile-edge);
+  border-radius: var(--radius);
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.work-tree { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.work-tree .work-tree { margin: 6px 0 0 10px; padding-left: 12px; border-left: 1px solid var(--line); }
+.work-tree .work-open { display: inline-block; width: auto; max-width: 100%; }
+.work-change { padding: 4px 0; font-size: 0.8rem; color: var(--ink-2); overflow-wrap: anywhere; }
 
 @media (max-width: 760px) {
   .room-layout { grid-template-columns: 1fr; }

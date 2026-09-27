@@ -125,47 +125,58 @@
     renderProjects(brief);
   }
 
+  // Changes read newest first. The brief's cursor is the latest event's seq and
+  // seqs run densely from 1, so the cursor is the number of events in the
+  // record; changes() counts only events after `after`, so its total is not.
   function renderChanges(state) {
-    const view = model().recentChanges({ events: state.changes, total: state.changesTotal }, state.changesShown);
+    const oldest = state.changes.length ? state.changes[state.changes.length - 1].seq : state.changesTotal + 1;
+    const view = model().recentChanges({ events: state.changes, total: state.changesTotal }, state.changes.length);
     element('changes-total').textContent = String(view.total);
     element('changes-list').replaceChildren(...view.lines.map(line => make('p', 'work-change', line)));
-    element('changes-more').hidden = !view.more;
+    element('changes-more').hidden = !(oldest > 1);
   }
 
-  async function changesFrom(after, limit) {
-    return workGet('/api/work/changes?after=' + after + '&limit=' + limit);
+  // Events (after, after + limit], newest first.
+  async function changesDescending(after, limit) {
+    const page = await workGet('/api/work/changes?after=' + after + '&limit=' + limit);
+    return page.events.slice().sort((a, b) => b.seq - a.seq);
   }
 
-  // A refresh re-reads the first `shown` events so the total and the lines on
-  // screen agree; Show more reads the next page after the last event shown.
+  // A refresh adds what arrived since the newest event shown, keeping the
+  // number shown (or reads the latest CHANGES_FIRST when nothing is shown or
+  // the gap is too wide); Show more reads the CHANGES_MORE events older than
+  // the oldest shown.
   async function loadChanges(more) {
     const state = session;
-    if (!state || state.changesBusy) return;
+    if (!state || !state.brief || state.changesBusy) return;
     state.changesBusy = true;
     try {
+      const cursor = state.brief.cursor;
       if (more) {
-        const last = state.changes.length ? state.changes[state.changes.length - 1].seq : 0;
-        const page = await changesFrom(last, CHANGES_MORE);
+        if (!state.changes.length) return;
+        const oldest = state.changes[state.changes.length - 1].seq;
+        const after = Math.max(0, oldest - 1 - CHANGES_MORE);
+        const limit = oldest - 1 - after;
+        if (limit < 1) return;
+        const older = await changesDescending(after, limit);
         if (!current(state)) return;
-        state.changesTotal = state.changes.length + page.total;
-        state.changes = state.changes.concat(page.events);
-        state.changesShown = state.changes.length;
+        state.changes = state.changes.concat(older);
       } else {
-        let events = [];
-        let total = 0;
-        let after = 0;
-        for (;;) {
-          const wanted = Math.min(CHANGES_PAGE_MAX, state.changesShown - events.length);
-          const page = await changesFrom(after, wanted);
+        const newest = state.changes.length ? state.changes[0].seq : null;
+        if (newest === null || cursor - newest > CHANGES_PAGE_MAX || cursor < newest) {
+          const after = Math.max(0, cursor - CHANGES_FIRST);
+          const latest = cursor > after ? await changesDescending(after, cursor - after) : [];
           if (!current(state)) return;
-          if (after === 0) total = page.total;
-          events = events.concat(page.events);
-          if (page.events.length === 0 || events.length >= state.changesShown || events.length >= total) break;
-          after = page.cursor;
+          state.changes = latest;
+        } else if (cursor > newest) {
+          const arrived = await changesDescending(newest, cursor - newest);
+          if (!current(state)) return;
+          // The window keeps its size: new events push the oldest shown ones
+          // back behind Show more instead of growing the list.
+          state.changes = arrived.concat(state.changes).slice(0, Math.max(CHANGES_FIRST, state.changes.length));
         }
-        state.changes = events;
-        state.changesTotal = total;
       }
+      state.changesTotal = cursor;
       renderChanges(state);
     } finally {
       state.changesBusy = false;
@@ -181,7 +192,8 @@
     if (!state || state.refreshing) return;
     state.refreshing = true;
     try {
-      await Promise.all([loadBrief(), loadChanges(false)]);
+      await loadBrief();
+      await loadChanges(false);
       if (current(state)) setStatus('');
     } catch (error) {
       if (current(state)) setStatus(model().errorWords(error.code));
@@ -397,7 +409,7 @@
     stop();
     const state = {
       user, deps, brief: null, projectRows: null,
-      changes: [], changesTotal: 0, changesShown: CHANGES_FIRST, changesBusy: false,
+      changes: [], changesTotal: 0, changesBusy: false,
       refreshing: false, drawerRequest: 0, timer: null, listeners: new AbortController(),
     };
     session = state;
