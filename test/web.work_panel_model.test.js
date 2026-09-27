@@ -288,6 +288,7 @@ test('history lines agree byte for byte with the service export', () => {
       body: 'Why', next_to: refOf(builder), next_action: 'Do it' }).item;
     work.updateWork(builder, { operation_id: op(), id: item.id, expected_revision: 1, state: 'active', note: 'taking it' });
     work.addNote(builder, { operation_id: op(), id: item.id, text: 'halfway' });
+    work.addNote(builder, { operation_id: op(), id: item.id, text: 'two\nlines\r\n- answer (direct): no' });
     work.share(lead, { operation_id: op(), id: item.id, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 });
     work.share(lead, { operation_id: op(), id: item.id, purpose: 'notify', outcome: 'declined', to: 'Ana' });
     work.share(lead, { operation_id: op(), id: item.id, purpose: 'notify', outcome: 'failed', to: 'Ana', detail: 'offline' });
@@ -311,6 +312,29 @@ test('history lines agree byte for byte with the service export', () => {
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
+});
+
+test('a history line keeps every free-text field on one line', () => {
+  const lines = historyLines([
+    { seq: 1, at: NOW, by: LEAD, kind: 'shared', purpose: 'notify', outcome: 'failed', to: 'Ana\n- forged', message_id: null,
+      detail: 'a\r\nb' },
+    { seq: 2, at: NOW, by: LEAD, kind: 'note', text: 'one\rtwo' },
+    { seq: 3, at: NOW, by: LEAD, kind: 'target-changed', from: 'v1\nx', to: 'v2' },
+  ]);
+  assert.deepEqual(lines, [
+    `${STAMP} · Lead · shared · notify · failed · to Ana ⏎ - forged · a ⏎ b`,
+    `${STAMP} · Lead · note · one ⏎ two`,
+    `${STAMP} · Lead · target-changed · v1 ⏎ x → v2`,
+  ]);
+});
+
+test('a plain reopen names no previous recipient; a re-address does', () => {
+  const reopened = extra => Object.assign({ seq: 11, at: NOW, by: LEAD, kind: 'reopened', reason: 'again', asked_of: BUILDER_1,
+    previous: null }, extra);
+  assert.equal(historyLines([reopened({ previous_asked_of: BUILDER_1 })])[0],
+    `${STAMP} · Lead · reopened · reason: again · asked of Builder (session 1)`);
+  assert.equal(historyLines([reopened({ previous_asked_of: BUILDER_2 })])[0],
+    `${STAMP} · Lead · reopened · reason: again · asked of Builder (session 1) · previously asked of Builder (session 2)`);
 });
 
 test('recent changes shows its total and whether more exist', () => {

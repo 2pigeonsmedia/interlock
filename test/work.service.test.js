@@ -772,3 +772,46 @@ test('a captured source is stored, derives the source text, and survives in get 
     code(() => newWork(work, lead, { source_message: bad }), 'invalid-source');
   }
 });
+
+test('a newline in any free-text field cannot forge an export line', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead, { title: 'Two\nlines', body: 'First.\r\nSecond.\rThird.' });
+  const forged = 'Ana\n- answer (direct): no · by Ana';
+  work.share(lead, { operation_id: uuid(), id: item.id, purpose: 'notify', outcome: 'declined', to: forged });
+  work.addNote(lead, { operation_id: uuid(), id: item.id, text: 'one\n## Projects' });
+  const lines = work.exportRecords(owner, { format: 'md' }).body.split('\n');
+  const shareLines = lines.filter(line => line.includes('shared · notify'));
+  assert.equal(shareLines.length, 1);
+  assert.ok(shareLines[0].includes('to Ana ⏎ - answer (direct): no · by Ana'), shareLines[0]);
+  assert.ok(!lines.includes('- answer (direct): no · by Ana'), 'no standalone forged answer line');
+  assert.ok(lines.some(line => line.endsWith('note · one ⏎ ## Projects')));
+  assert.equal(lines.filter(line => line === '## Projects').length, 1);
+  assert.ok(lines.includes('### ' + item.id + ' · Two ⏎ lines (work · ops · open)'));
+  assert.ok(lines.includes('- First. ⏎ Second. ⏎ Third.'));
+});
+
+test('a plain reopen does not claim a previous recipient; a re-address does', () => {
+  const { work } = fresh();
+  const plain = newDecision(work, lead, owner);
+  work.answer(owner, { operation_id: uuid(), id: plain.id, expected_revision: 1, text: 'No.' });
+  work.reopen(lead, { operation_id: uuid(), id: plain.id, expected_revision: 2, reason: 'New facts.' });
+  const moved = newDecision(work, lead, owner);
+  work.answer(owner, { operation_id: uuid(), id: moved.id, expected_revision: 1, text: 'No.' });
+  work.reopen(lead, { operation_id: uuid(), id: moved.id, expected_revision: 2, reason: 'Reviewer decides.', asked_of: ref(reviewer) });
+  const lines = work.exportRecords(owner, { format: 'md' }).body.split('\n').filter(line => line.includes(' · reopened · '));
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /reason: New facts\. · asked of Ana · previous \(direct\)/);
+  assert.doesNotMatch(lines[0], /previously asked of/);
+  assert.match(lines[1], /asked of Reviewer · previously asked of Ana/);
+});
+
+test('authority is checked before the revision: a non-asker is refused as such, even on a stale revision', () => {
+  const { work } = fresh();
+  const decision = newDecision(work, lead, owner);
+  work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No.' });
+  code(() => work.reopen(builder, { operation_id: uuid(), id: decision.id, expected_revision: 1, reason: 'x' }), 'not-asker');
+  const open = newDecision(work, lead, owner);
+  code(() => work.withdraw(builder, { operation_id: uuid(), id: open.id, expected_revision: 9, reason: 'x' }), 'not-asker');
+  code(() => work.reopen(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, reason: 'x' }), 'stale-revision');
+  code(() => work.withdraw(lead, { operation_id: uuid(), id: open.id, expected_revision: 9, reason: 'x' }), 'stale-revision');
+});

@@ -118,7 +118,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `items/update` | `id`, `expected_revision`, `note`, any work field above, `state`, `block_reason`, `done_account`, `done_evidence` or `no_evidence`, `title`, `body` |
 | `items/evidence` | `id`, `target`, `observed`, `reference`, `limits`, optional `relates_to` |
 | `items/note` | `id`, `text` |
-| `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (a positive integer, required when `sent` and refused otherwise), optional `detail` |
+| `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (required when `sent` and refused otherwise: a room message the recording participant posted, else `invalid-message-id`), optional `detail` |
 | `decisions/answer` | `id`, `expected_revision`, `text`, optional `conditions`, `reason` (required when replacing an answer or answering for someone else) |
 | `decisions/report` | `id`, `expected_revision`, `text`, `source`, optional `conditions` |
 | `decisions/confirm` | `id`, `expected_revision`, optional `reason` |
@@ -144,7 +144,8 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 - `changes?after=N[&limit=N]` — events after a cursor, with `total` and the
   `cursor` reached.
 - `export?format=json|md` — the whole record as a document, without opaque
-  ids.
+  ids. In Markdown each record line stays one line: a line break inside a
+  field is shown as ` ⏎ `.
 
 ## Refusals
 

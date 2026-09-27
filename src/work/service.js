@@ -159,6 +159,12 @@ function digestOf(actor, op, input) {
   return crypto.createHash('sha256').update(canonical({ actor: actor.subject_id, op, input })).digest('hex');
 }
 
+// One export line per record line: a line break inside free text is shown as
+// ' ⏎ ', so no field can start a line of its own in the export.
+function oneLine(text) {
+  return String(text).replace(/\r\n|\r|\n/g, ' ⏎ ');
+}
+
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
@@ -744,8 +750,8 @@ function createWorkService(options) {
     return operation(actor, 'decisions.reopen', rawInput, ['id', 'expected_revision', 'reason', 'asked_of'],
       (draft, body, now) => {
         const item = findDecision(draft, body.id);
-        checkRevision(item, body.expected_revision);
         if (actor.subject_id !== item.asked_by.subject_id && !actor.owner) fail('not-asker');
+        checkRevision(item, body.expected_revision);
         const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
         if (decisionState(item) === 'awaiting') fail('invalid-state');
         const askedOf = optionalRef(body.asked_of, 'asked-of');
@@ -768,11 +774,11 @@ function createWorkService(options) {
     return operation(actor, 'decisions.withdraw', rawInput, ['id', 'expected_revision', 'reason'],
       (draft, body, now) => {
         const item = findDecision(draft, body.id);
+        if (actor.subject_id !== item.asked_by.subject_id && !actor.owner) fail('not-asker');
         checkRevision(item, body.expected_revision);
         const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
         if (item.withdrawn) fail('invalid-state');
         if (item.answer && item.answer.kind === 'direct') fail('answer-recorded');
-        if (actor.subject_id !== item.asked_by.subject_id && !actor.owner) fail('not-asker');
         item.withdrawn = true;
         touch(item, now);
         appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'withdrawn', reason });
@@ -879,27 +885,31 @@ function createWorkService(options) {
     const parts = [stamp(event.at), who(event.by), event.kind];
     if (event.kind === 'shared') {
       parts.push(event.purpose);
-      if (event.outcome === 'sent') parts.push('sent as #' + event.message_id + ' to ' + event.to, 'a send receipt is not proof of reading');
-      else parts.push(event.outcome, 'to ' + event.to);
-      if (event.detail) parts.push(event.detail);
+      if (event.outcome === 'sent') parts.push('sent as #' + event.message_id + ' to ' + oneLine(event.to), 'a send receipt is not proof of reading');
+      else parts.push(event.outcome, 'to ' + oneLine(event.to));
+      if (event.detail) parts.push(oneLine(event.detail));
       return '- ' + parts.join(' · ');
     }
-    if (event.title !== undefined) parts.push(event.title);
-    if (event.from !== undefined) parts.push(String(event.from) + ' → ' + String(event.to));
-    if (event.note !== undefined) parts.push(event.note);
-    if (event.text !== undefined) parts.push(event.text);
-    if (event.observed !== undefined) parts.push(event.observed);
-    if (event.source !== undefined) parts.push('source: ' + event.source);
-    if (event.conditions) parts.push('conditions: ' + event.conditions);
-    if (event.reason) parts.push('reason: ' + event.reason);
+    if (event.title !== undefined) parts.push(oneLine(event.title));
+    if (event.from !== undefined) parts.push(oneLine(event.from) + ' → ' + oneLine(event.to));
+    if (event.note !== undefined) parts.push(oneLine(event.note));
+    if (event.text !== undefined) parts.push(oneLine(event.text));
+    if (event.observed !== undefined) parts.push(oneLine(event.observed));
+    if (event.source !== undefined) parts.push('source: ' + oneLine(event.source));
+    if (event.conditions) parts.push('conditions: ' + oneLine(event.conditions));
+    if (event.reason) parts.push('reason: ' + oneLine(event.reason));
     if (event.attributed_to) parts.push('attributed to ' + who(event.attributed_to));
     if (event.kind === 'answer-reported' || event.kind === 'reported-conflict') parts.push('reported by ' + who(event.by) + ', not confirmed here');
     if (event.on_behalf) parts.push('on behalf of ' + who(event.asked_of));
     if (event.asked_of && event.kind === 'reopened') parts.push('asked of ' + who(event.asked_of));
-    if (event.previous_asked_of) parts.push('previously asked of ' + who(event.previous_asked_of));
+    // A plain reopen keeps the same recipient; only a re-address names the
+    // one it moved from.
+    if (event.previous_asked_of && (!event.asked_of || event.previous_asked_of.subject_id !== event.asked_of.subject_id)) {
+      parts.push('previously asked of ' + who(event.previous_asked_of));
+    }
     if (event.previous) {
       parts.push('previous (' + event.previous.kind +
-        (event.previous.kind === 'reported' ? ', reported by ' + who(event.previous.by) : '') + '): ' + event.previous.text);
+        (event.previous.kind === 'reported' ? ', reported by ' + who(event.previous.by) : '') + '): ' + oneLine(event.previous.text));
     }
     if (event.before && event.after) {
       for (const field of Object.keys(event.before)) {
@@ -913,44 +923,44 @@ function createWorkService(options) {
     const lines = ['# Work record', '', 'Exported ' + stamp(exportedAt) + '. Every line is a claim with a byline; nothing here was verified by the export.', ''];
     lines.push('## Projects', '');
     for (const project of draft.projects) {
-      lines.push('- **' + project.id + '** ' + project.display_name + (project.retired_at ? ' (retired ' + stamp(project.retired_at) + ')' : '') +
-        ' — objective: ' + (project.objective || 'none') + ' · today: ' + (project.today || 'none') +
+      lines.push('- **' + project.id + '** ' + oneLine(project.display_name) + (project.retired_at ? ' (retired ' + stamp(project.retired_at) + ')' : '') +
+        ' — objective: ' + (oneLine(project.objective) || 'none') + ' · today: ' + (oneLine(project.today) || 'none') +
         ' · updated by ' + who(project.updated_by) + ' at ' + stamp(project.updated_at));
     }
     lines.push('', '## Items', '');
     for (const item of [...draft.items].sort((a, b) => idNumber(a.id) - idNumber(b.id))) {
       const state = item.kind === 'decision' ? decisionState(item) : item.state;
-      lines.push('### ' + item.id + ' · ' + item.title + ' (' + item.kind + ' · ' + item.project + ' · ' + state + ')', '');
+      lines.push('### ' + item.id + ' · ' + oneLine(item.title) + ' (' + item.kind + ' · ' + item.project + ' · ' + state + ')', '');
       lines.push('- created by ' + who(item.created_by) + ' at ' + stamp(item.created_at) + ' · revision ' + item.revision +
-        (item.source ? ' · source: ' + item.source : '') + (item.parent ? ' · parent ' + item.parent : '') +
+        (item.source ? ' · source: ' + oneLine(item.source) : '') + (item.parent ? ' · parent ' + item.parent : '') +
         (item.links.length ? ' · links ' + item.links.join(', ') : '') +
         (item.source_message ? ' · from room message #' + item.source_message.message_id + ' by ' +
-          who({ name: item.source_message.byline, session: item.source_message.session }) + ': “' + item.source_message.quote + '”' : ''));
-      lines.push('- ' + item.body);
+          who({ name: item.source_message.byline, session: item.source_message.session }) + ': “' + oneLine(item.source_message.quote) + '”' : ''));
+      lines.push('- ' + oneLine(item.body));
       if (item.kind === 'decision') {
         lines.push('- asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by) +
-          (item.proposal ? ' · proposal: ' + item.proposal : '') + (item.scope ? ' · scope: ' + item.scope : '') +
-          (item.conditions ? ' · conditions: ' + item.conditions : ''));
+          (item.proposal ? ' · proposal: ' + oneLine(item.proposal) : '') + (item.scope ? ' · scope: ' + oneLine(item.scope) : '') +
+          (item.conditions ? ' · conditions: ' + oneLine(item.conditions) : ''));
         if (item.answer) {
           const a = item.answer;
-          lines.push('- answer (' + a.kind + '): ' + a.text + ' · by ' + who(a.by) +
+          lines.push('- answer (' + a.kind + '): ' + oneLine(a.text) + ' · by ' + who(a.by) +
             (a.kind === 'reported' ? ' · attributed to ' + who(a.attributed_to) + ' · reported by ' + who(a.by) + ', not confirmed here' : '') +
-            ' · at ' + stamp(a.at) + (a.conditions ? ' · conditions: ' + a.conditions : '') + ' · source: ' + a.source +
-            (a.reason ? ' · reason: ' + a.reason : ''));
+            ' · at ' + stamp(a.at) + (a.conditions ? ' · conditions: ' + oneLine(a.conditions) : '') + ' · source: ' + oneLine(a.source) +
+            (a.reason ? ' · reason: ' + oneLine(a.reason) : ''));
         }
       } else {
-        lines.push('- responsible: ' + who(item.responsible) + ' · next: ' + (item.next_to ? who(item.next_to) + ' — ' + item.next_action : 'nobody') +
-          ' · target: ' + (item.target || 'none') + (item.block_reason ? ' · blocked: ' + item.block_reason : '') +
-          (item.done_account ? ' · done: ' + item.done_account +
+        lines.push('- responsible: ' + who(item.responsible) + ' · next: ' + (item.next_to ? who(item.next_to) + ' — ' + oneLine(item.next_action) : 'nobody') +
+          ' · target: ' + (oneLine(item.target) || 'none') + (item.block_reason ? ' · blocked: ' + oneLine(item.block_reason) : '') +
+          (item.done_account ? ' · done: ' + oneLine(item.done_account) +
             (item.state === 'done' ? (item.done_without_evidence ? ' · no evidence attached' : ' · evidence entry ' + item.done_evidence) : '') : '') +
-          (item.consequence ? ' · consequence: ' + item.consequence : '') + (item.severity ? ' · severity: ' + item.severity : ''));
+          (item.consequence ? ' · consequence: ' + oneLine(item.consequence) : '') + (item.severity ? ' · severity: ' + item.severity : ''));
       }
       const evidence = evidenceRows(draft, item);
       if (evidence.length) {
         lines.push('', '#### Evidence', '');
         for (const e of evidence) {
-          lines.push('- ' + stamp(e.at) + ' · ' + who(e.by) + ' · target ' + e.target + ' (matches current target: ' + (e.target_matches ? 'yes' : 'no') + ')' +
-            ' · observed: ' + e.observed + ' · reference: ' + e.reference + ' · limits: ' + e.limits +
+          lines.push('- ' + stamp(e.at) + ' · ' + who(e.by) + ' · target ' + oneLine(e.target) + ' (matches current target: ' + (e.target_matches ? 'yes' : 'no') + ')' +
+            ' · observed: ' + oneLine(e.observed) + ' · reference: ' + oneLine(e.reference) + ' · limits: ' + oneLine(e.limits) +
             (e.relates_to ? ' · relates to event ' + e.relates_to : ''));
         }
       }

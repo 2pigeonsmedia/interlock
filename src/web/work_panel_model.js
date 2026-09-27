@@ -15,6 +15,11 @@
     return ref.session === null || ref.session === undefined ? ref.name : ref.name + ' (session ' + ref.session + ')';
   }
 
+  // The work service's oneLine: a line break in free text shows as ' ⏎ '.
+  function oneLine(text) {
+    return String(text).replace(/\r\n|\r|\n/g, ' ⏎ ');
+  }
+
   function stamp(ms) {
     return new Date(ms).toISOString();
   }
@@ -149,27 +154,30 @@
     const parts = [stamp(event.at), who(event.by), event.kind];
     if (event.kind === 'shared') {
       parts.push(event.purpose);
-      if (event.outcome === 'sent') parts.push('sent as #' + event.message_id + ' to ' + event.to, 'a send receipt is not proof of reading');
-      else parts.push(event.outcome, 'to ' + event.to);
-      if (event.detail) parts.push(event.detail);
+      if (event.outcome === 'sent') parts.push('sent as #' + event.message_id + ' to ' + oneLine(event.to), 'a send receipt is not proof of reading');
+      else parts.push(event.outcome, 'to ' + oneLine(event.to));
+      if (event.detail) parts.push(oneLine(event.detail));
       return parts.join(' · ');
     }
-    if (event.title !== undefined) parts.push(event.title);
-    if (event.from !== undefined) parts.push(String(event.from) + ' → ' + String(event.to));
-    if (event.note !== undefined) parts.push(event.note);
-    if (event.text !== undefined) parts.push(event.text);
-    if (event.observed !== undefined) parts.push(event.observed);
-    if (event.source !== undefined) parts.push('source: ' + event.source);
-    if (event.conditions) parts.push('conditions: ' + event.conditions);
-    if (event.reason) parts.push('reason: ' + event.reason);
+    if (event.title !== undefined) parts.push(oneLine(event.title));
+    if (event.from !== undefined) parts.push(oneLine(event.from) + ' → ' + oneLine(event.to));
+    if (event.note !== undefined) parts.push(oneLine(event.note));
+    if (event.text !== undefined) parts.push(oneLine(event.text));
+    if (event.observed !== undefined) parts.push(oneLine(event.observed));
+    if (event.source !== undefined) parts.push('source: ' + oneLine(event.source));
+    if (event.conditions) parts.push('conditions: ' + oneLine(event.conditions));
+    if (event.reason) parts.push('reason: ' + oneLine(event.reason));
     if (event.attributed_to) parts.push('attributed to ' + who(event.attributed_to));
     if (event.kind === 'answer-reported' || event.kind === 'reported-conflict') parts.push('reported by ' + who(event.by) + ', not confirmed here');
     if (event.on_behalf) parts.push('on behalf of ' + who(event.asked_of));
     if (event.asked_of && event.kind === 'reopened') parts.push('asked of ' + who(event.asked_of));
-    if (event.previous_asked_of) parts.push('previously asked of ' + who(event.previous_asked_of));
+    // Refs here carry no subject id, so the recipient is compared as rendered.
+    if (event.previous_asked_of && (!event.asked_of || who(event.previous_asked_of) !== who(event.asked_of))) {
+      parts.push('previously asked of ' + who(event.previous_asked_of));
+    }
     if (event.previous) {
       parts.push('previous (' + event.previous.kind +
-        (event.previous.kind === 'reported' ? ', reported by ' + who(event.previous.by) : '') + '): ' + event.previous.text);
+        (event.previous.kind === 'reported' ? ', reported by ' + who(event.previous.by) : '') + '): ' + oneLine(event.previous.text));
     }
     if (event.before && event.after) {
       for (const field of Object.keys(event.before)) {

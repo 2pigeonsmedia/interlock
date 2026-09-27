@@ -103,6 +103,14 @@ function createWorkRoutes(options) {
     };
   }
 
+  // True when the id names a message in the room that this actor posted.
+  async function sentBy(actor, messageId) {
+    if (!messageById || !Number.isSafeInteger(messageId) || messageId < 1) return false;
+    const message = await messageById(messageId);
+    return !!(message && message.id === messageId && actor && typeof actor.subject_id === 'string' &&
+      message.subject_id === actor.subject_id);
+  }
+
   function resolveRef(value, now) {
     if (value === null) return null;
     if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
@@ -153,6 +161,10 @@ function createWorkRoutes(options) {
         const captured = await verifiedSource(cited);
         if (!captured) return refusal(400, 'invalid-source');
         input.source_message = captured;
+      }
+      // A share recorded as sent names a room message the actor posted.
+      if (op === 'items/share' && body.outcome === 'sent' && !(await sentBy(actor, body.message_id))) {
+        return refusal(400, 'invalid-message-id');
       }
       for (const key of REF_KEYS) {
         if (Object.prototype.hasOwnProperty.call(input, key)) input[key] = resolveRef(input[key], now);

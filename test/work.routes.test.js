@@ -73,7 +73,8 @@ test('a same-named seat is selectable by "Name (session N)" without exposing sub
 
 test('items/share maps to share with 201', async () => {
   const service = fakeService();
-  const routes = createWorkRoutes({ work: service, participants: roster });
+  const messageById = async id => (id === 57 ? { id: 57, subject_id: 's-1', byline: 'Lead', kind: 'seat', text: 'hi' } : null);
+  const routes = createWorkRoutes({ work: service, participants: roster, messageById });
   const body = { operation_id: 'x', id: 'D-1', purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 };
   const shared = await routes.mutate('items/share', actor, body);
   assert.equal(shared.status, 201, JSON.stringify(shared.body));
@@ -273,4 +274,66 @@ test('a retry of a cited create replays before the room is consulted, even once 
   assert.equal(retry.body.replayed, true);
   assert.equal(retry.body.item.source_message.byline, 'Marlow');
   assert.equal(lookups, 1, 'the retry never consults the room');
+});
+
+test('a sent share must name a message the actor sent; the room is asked after replay, the service only on a match', async () => {
+  const room = new Map([
+    [57, { id: 57, ts: 1, subject_id: 's-1', byline: 'Lead', kind: 'seat', session: 3, text: 'W-1 · Rotate' }],
+    [58, { id: 58, ts: 2, subject_id: 'p-1', byline: 'Ana', kind: 'person', session: null, text: 'Not Lead\'s' }],
+  ]);
+  const looked = [];
+  const messageById = async id => { looked.push(id); return room.get(id) || null; };
+  const service = fakeService();
+  const routes = createWorkRoutes({ work: service, participants: roster, messageById });
+  const base = { operation_id: 'x', id: 'W-1', purpose: 'notify', outcome: 'sent', to: 'Ana' };
+  for (const messageId of [58, 999999, 0, '57']) {
+    const refused = await routes.mutate('items/share', actor, Object.assign({}, base, { message_id: messageId }));
+    assert.equal(refused.status, 400, JSON.stringify([messageId, refused.body]));
+    assert.equal(refused.body.error, 'invalid-message-id', String(messageId));
+  }
+  assert.equal(service.calls.length, 0, 'the service is not called for a foreign or missing message');
+  assert.deepEqual(looked, [58, 999999], 'only well-formed ids reach the room');
+  const own = await routes.mutate('items/share', actor, Object.assign({}, base, { message_id: 57 }));
+  assert.equal(own.status, 201, JSON.stringify(own.body));
+  assert.equal(service.calls.length, 1);
+  const declined = await routes.mutate('items/share', actor, { operation_id: 'x', id: 'W-1', purpose: 'notify', outcome: 'declined', to: 'Ana' });
+  assert.equal(declined.status, 201, JSON.stringify(declined.body));
+  assert.deepEqual(looked, [58, 999999, 57], 'a declined share names no message and asks the room nothing');
+  const noRoom = createWorkRoutes({ work: fakeService(), participants: roster });
+  const unverifiable = await noRoom.mutate('items/share', actor, Object.assign({}, base, { message_id: 57 }));
+  assert.equal(unverifiable.status, 400);
+  assert.equal(unverifiable.body.error, 'invalid-message-id');
+});
+
+test('over the real service, a share lands on a work item, refuses an unknown item and replays a retry', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-work-routes-share-'));
+  try {
+    const room = new Map([[57, { id: 57, ts: 1, subject_id: 's-1', byline: 'Lead', kind: 'seat', session: 3, text: 'W-1' }]]);
+    const routes = createWorkRoutes({
+      work: createWorkService({ store: openWorkStore({ dataDir }) }), participants: roster,
+      messageById: async id => room.get(id) || null,
+    });
+    const created = await routes.mutate('items/create', actor, {
+      operation_id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d', kind: 'work', project: 'ops', title: 'Rotate', body: 'Why',
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const body = { operation_id: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e', id: created.body.item.id, purpose: 'notify',
+      outcome: 'sent', to: 'Ana', message_id: 57 };
+    const shared = await routes.mutate('items/share', actor, body);
+    assert.equal(shared.status, 201, JSON.stringify(shared.body));
+    assert.equal(shared.body.event.message_id, 57);
+    const retry = await routes.mutate('items/share', actor, structuredClone(body));
+    assert.equal(retry.status, 200, JSON.stringify(retry.body));
+    assert.equal(retry.body.replayed, true);
+    assert.equal(retry.body.event.seq, shared.body.event.seq);
+    const unknown = await routes.mutate('items/share', actor, Object.assign({}, body, {
+      operation_id: '3c4d5e6f-7a8b-4c9d-8e0f-2a3b4c5d6e7f', id: 'W-99',
+    }));
+    assert.equal(unknown.status, 404, JSON.stringify(unknown.body));
+    assert.equal(unknown.body.error, 'unknown-item');
+    const history = routes.read('get', actor, { id: created.body.item.id }).body.history;
+    assert.equal(history.filter(event => event.kind === 'shared').length, 1);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
 });

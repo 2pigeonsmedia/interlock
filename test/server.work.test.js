@@ -343,6 +343,13 @@ test('work records ride the existing identity and survive a clear, a restart and
       operation_id: uuid(), id: promotedId, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: exposureId,
     }, lead.token);
     assert.equal(shared.status, 201, shared.text);
+    for (const foreign of [m, exposureId + 1000]) {
+      const claimed = await aiPost(runtime, '/api/ai/work/items/share', {
+        operation_id: uuid(), id: promotedId, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: foreign,
+      }, lead.token);
+      assert.equal(claimed.status, 400, claimed.text);
+      assert.equal(claimed.json.error, 'invalid-message-id', 'a seat cannot record a message it did not send');
+    }
     const promotedDetail = await get(runtime, `/api/work/items/${promotedId}`, owner);
     assert.equal(promotedDetail.status, 200, promotedDetail.text);
     assert.ok(promotedDetail.json.history.some(event => event.kind === 'shared' && event.message_id === exposureId),
