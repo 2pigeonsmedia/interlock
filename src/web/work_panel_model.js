@@ -128,6 +128,32 @@
     }));
   }
 
+  // The line under a row in the project drawer, from the row's own fields:
+  // for work, who acts next and on what, who is responsible, the target, an
+  // open question it waits on, and whether evidence is attached; for a
+  // decision, who asked whom and how it was answered. Empty when there is
+  // nothing to say. An attached entry is never called verified.
+  function projectRowLine(row) {
+    const parts = [];
+    if (row.kind === 'decision') {
+      parts.push('asked of ' + who(row.asked_of) + ' by ' + who(row.asked_by));
+      const answer = row.answer_summary;
+      if (answer) {
+        parts.push(answer.kind === 'reported'
+          ? 'reported by ' + who(answer.by) + ' · attributed to ' + who(answer.attributed_to)
+          : 'answered by ' + who(answer.by));
+      }
+      return parts.join(' · ');
+    }
+    const action = row.next_action ? oneLine(row.next_action) : '';
+    if (row.next_to || action) parts.push('next: ' + who(row.next_to) + (action ? ' — ' + action : ''));
+    if (row.responsible) parts.push('responsible: ' + who(row.responsible));
+    if (row.target) parts.push('target: ' + oneLine(row.target));
+    if (row.awaiting) parts.push('awaiting ' + row.awaiting);
+    if (row.evidence_attached) parts.push('evidence attached');
+    return parts.join(' · ');
+  }
+
   function isOpenFollowUp(row) {
     return row.kind === 'decision' ? row.state === 'awaiting' : row.state !== 'done';
   }
@@ -353,7 +379,7 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
+    who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, projectRowLine, doneLine,
     reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines,
   });

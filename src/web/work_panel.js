@@ -1133,6 +1133,8 @@
     const entry = make('li');
     entry.append(openButton('work-open', label, 'Open ' + row.id + ': ' + label, () => openItem(row.id)));
     entry.append(make('span', 'work-state', ' ' + row.id + ' · ' + model().stateLabel(row)));
+    const facts = model().projectRowLine(row);
+    if (facts) entry.append(make('p', 'work-tree-facts', facts));
     return entry;
   }
 

@@ -8,7 +8,7 @@ const model = require('../src/web/work_panel_model.js');
 const {
   who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
-  errorWords, sourceLine, evidenceSourceLine, answerLines,
+  errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine,
 } = model;
 
 const MINUTE = 60_000;
@@ -210,6 +210,55 @@ test('the project tree nests real service rows under their parent', () => {
     assert.deepEqual(tree[0].children.map(row => row.id).sort(), [decision.id, finding.id].sort());
     assert.deepEqual(tree[1].children, []);
     assert.equal(tree[1].label, 'Other');
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('a project row line carries the work record\'s own facts', () => {
+  assert.equal(projectRowLine(WORK_ROW),
+    'next: Ana — Approve the rotation window · responsible: Builder (session 2) · target: keys v2');
+  assert.equal(projectRowLine(BRIEF.open[1]), 'responsible: Builder (session 1)');
+  assert.equal(projectRowLine(BRIEF.open[2]), 'awaiting W-3');
+  const bare = { id: 'W-8', kind: 'work', state: 'open', responsible: null, next_to: null, next_action: '',
+    target: '', evidence_attached: false, awaiting: null };
+  assert.equal(projectRowLine(bare), '');
+  // An action addressed to nobody still shows the action.
+  assert.equal(projectRowLine(Object.assign({}, bare, { next_action: 'Pick an owner' })), 'next: nobody — Pick an owner');
+  assert.equal(projectRowLine(Object.assign({}, bare, { next_to: LEAD })), 'next: Lead');
+  assert.equal(projectRowLine(Object.assign({}, bare, { kind: 'finding', next_to: LEAD, next_action: 'complete 717',
+    target: 'line\ntwo', evidence_attached: true, awaiting: 'D-4' })),
+  'next: Lead — complete 717 · target: line ⏎ two · awaiting D-4 · evidence attached');
+});
+
+test('a project row line for a decision names who asked whom and how it was answered, never verified', () => {
+  assert.equal(projectRowLine(DECISION_ROW), 'asked of Ana by Lead');
+  assert.equal(projectRowLine(REPORTED_ROW), 'asked of Ana by Builder (session 1) · reported by Builder (session 1) · attributed to Ana');
+  const answered = Object.assign({}, DECISION_ROW, { state: 'answered',
+    answer_summary: { kind: 'direct', by: ANA, attributed_to: null, at: NOW } });
+  assert.equal(projectRowLine(answered), 'asked of Ana by Lead · answered by Ana');
+  for (const row of [DECISION_ROW, REPORTED_ROW, answered, WORK_ROW]) assert.doesNotMatch(projectRowLine(row), /verified/i);
+});
+
+test('a real service row addressed to Lead reads next: Lead — the action', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const crypto = require('node:crypto');
+  const { openWorkStore } = require('../src/work/store.js');
+  const { createWorkService, stripIds } = require('../src/work/service.js');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-work-panel-rowline-'));
+  try {
+    let clock = NOW;
+    const work = createWorkService({ store: openWorkStore({ dataDir }), clock: () => (clock += 1000) });
+    const owner = { subject_id: 'p-1', name: 'Ana', kind: 'person', owner: true };
+    const lead = { subject_id: 's-1', name: 'Lead', kind: 'seat', session: null };
+    const item = work.createItem(owner, { operation_id: crypto.randomUUID(), kind: 'work', project: 'ops',
+      title: 'Item 717 is ready for the last step.', body: 'Why', next_to: lead, next_action: 'complete 717' }).item;
+    const rows = stripIds(work.list(owner, { project: 'ops' })).items;
+    const [node] = projectTree(rows);
+    assert.equal(node.row.id, item.id);
+    assert.equal(projectRowLine(node.row), 'next: Lead — complete 717');
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
@@ -510,6 +559,6 @@ test('an answer reads who gave it, and an owner answering for someone names both
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
   assert.deepEqual(Object.keys(model).sort(), ['answerLines', 'doneLine', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
-    'needsYou', 'notifyText', 'projectSummaries', 'projectTree', 'recentChanges', 'reportedLabel', 'reportedToYou',
+    'needsYou', 'notifyText', 'projectRowLine', 'projectSummaries', 'projectTree', 'recentChanges', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
 });

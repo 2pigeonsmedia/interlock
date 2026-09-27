@@ -287,3 +287,11 @@ test('between 761 and 1000 px the header wraps and the tiles stay three columns,
     'the 760 px one-column rule must follow the 1000 px block');
   assert.match(ROOM_CSS.slice(ROOM_CSS.lastIndexOf('@media (max-width: 760px)')), /\.room-layout \{ grid-template-columns: 1fr; \}/);
 });
+
+test('a project drawer row carries a line of the record\'s own facts under its title', () => {
+  assert.match(WORK_PANEL_JS, /function renderTreeRow[\s\S]*?const facts = model\(\)\.projectRowLine\(row\)[\s\S]*?if \(facts\) entry\.append\(make\('p', 'work-tree-facts', facts\)\)/);
+  const rule = /\.work-tree-facts \{([^}]*)\}/.exec(ROOM_CSS);
+  assert.ok(rule, 'the facts line has its own rule');
+  assert.match(rule[1], /color: var\(--ink-3\)/);
+  assert.doesNotMatch(rule[1], /#[0-9a-f]{3,8}\b|rgb|hsl|--wait|--ember|--signal|--ai\b|--owner/i);
+});
