@@ -8,7 +8,7 @@ const model = require('../src/web/work_panel_model.js');
 const {
   who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
-  errorWords, sourceLine, evidenceSourceLine,
+  errorWords, sourceLine, evidenceSourceLine, answerLines,
 } = model;
 
 const MINUTE = 60_000;
@@ -68,7 +68,7 @@ test('who renders a session only when one is present, and nobody for none', () =
 
 test('same-named seats render with their session everywhere', () => {
   const rows = needsYou(BRIEF, NOW).rows;
-  assert.equal(rows.find(row => row.id === 'W-1').askedBy, 'Builder (session 2)');
+  assert.equal(rows.find(row => row.id === 'W-1').by, 'responsible: Builder (session 2)');
   assert.equal(who({ name: 'Builder', kind: 'seat', session: null }), 'Builder');
   assert.deepEqual(reportedToYou(BRIEF).map(row => row.reportedBy), ['Builder (session 1)']);
 });
@@ -97,15 +97,15 @@ test('needs you lists decisions to answer and work to open, oldest first', () =>
   assert.equal(result.count, 2);
   assert.deepEqual(result.rows, [
     { id: 'W-1', kind: 'work', projectName: 'Operations', title: 'Rotate the keys',
-      ask: 'Approve the rotation window', askedBy: 'Builder (session 2)', waiting: 'waiting 2d', action: 'Open work' },
+      ask: 'Approve the rotation window', by: 'responsible: Builder (session 2)', waiting: 'waiting 2d', action: 'Open work' },
     { id: 'W-3', kind: 'decision', projectName: 'Finance', title: 'Pick the bank',
-      ask: 'Use the credit union', askedBy: 'Lead', waiting: 'waiting 3h', action: 'Answer' },
+      ask: 'Use the credit union', by: 'asked by Lead', waiting: 'waiting 3h', action: 'Answer' },
   ]);
   const bare = needsYou(Object.assign({}, BRIEF, {
     needs_me: [Object.assign({}, DECISION_ROW, { proposal: '' }), Object.assign({}, WORK_ROW, { responsible: null })],
   }), NOW);
   assert.equal(bare.rows.find(row => row.id === 'W-3').ask, 'Pick the bank');
-  assert.equal(bare.rows.find(row => row.id === 'W-1').askedBy, 'unassigned');
+  assert.equal(bare.rows.find(row => row.id === 'W-1').by, 'responsible: unassigned');
 });
 
 test('needs you is never narrowed by a project filter', () => {
@@ -485,9 +485,26 @@ test('an evidence row names the room message and its speaker, apart from the rec
   'from room message #7 by Ana');
 });
 
+test('an answer reads who gave it, and an owner answering for someone names both and the reason', () => {
+  assert.deepEqual(answerLines({ answer: null }, []), []);
+  const reported = { kind: 'reported', text: 'Yes', by: BUILDER_1, attributed_to: ANA, at: NOW, reason: '' };
+  assert.deepEqual(answerLines({ answer: reported, asked_of: ANA }, []), [reportedLabel(reported)]);
+  const direct = { kind: 'direct', text: 'No', by: ANA, attributed_to: ANA, at: NOW, reason: '' };
+  const answered = { seq: 3, at: NOW, by: ANA, kind: 'answered', text: 'No', on_behalf: false, asked_of: ANA };
+  assert.deepEqual(answerLines({ answer: direct, asked_of: ANA }, [answered]), ['Answered here by Ana']);
+  const forLead = Object.assign({}, direct, { reason: 'Lead is offline.' });
+  const onBehalf = Object.assign({}, answered, { on_behalf: true, asked_of: LEAD, reason: 'Lead is offline.' });
+  assert.deepEqual(answerLines({ answer: forLead, asked_of: LEAD }, [onBehalf]),
+    ['Answered by Ana · asked of Lead', 'Reason: Lead is offline.']);
+  // A later answer event decides: after a reopen and a direct answer, the old on-behalf flag no longer applies.
+  const later = [onBehalf, { seq: 4, at: NOW, by: ANA, kind: 'reopened', reason: 'x', asked_of: LEAD },
+    { seq: 5, at: NOW, by: LEAD, kind: 'answered', text: 'Yes', on_behalf: false, asked_of: LEAD }];
+  assert.deepEqual(answerLines({ answer: Object.assign({}, direct, { by: LEAD }), asked_of: LEAD }, later), ['Answered here by Lead']);
+});
+
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['doneLine', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['answerLines', 'doneLine', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
     'needsYou', 'notifyText', 'projectSummaries', 'projectTree', 'recentChanges', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
 });

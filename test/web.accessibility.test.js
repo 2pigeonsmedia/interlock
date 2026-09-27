@@ -249,3 +249,16 @@ test('a write with no error code reads as unavailable, and an open form keeps on
   assert.match(WORK_PANEL_JS, /write\(op, body, element\('work-create-status'\), state\.createOperation\)/);
   assert.match(WORK_PANEL_JS, /addEventListener\('input', renewCreateOperation/);
 });
+
+test('the tile says who is responsible, the drawer says whom an owner answered for, and the project id pattern is valid', () => {
+  assert.match(WORK_PANEL_JS, /row\.ask \+ ' — ' \+ row\.by/);
+  assert.doesNotMatch(WORK_PANEL_JS, /asked by ' \+ row\.askedBy/);
+  assert.match(WORK_PANEL_JS, /model\(\)\.answerLines\(item, history\)/);
+  assert.doesNotMatch(WORK_PANEL_JS, /Every number and\s*\/\/ every sentence comes from/);
+  const pattern = /<input id="project-id" pattern="([^"]+)"/.exec(ROOM)[1];
+  // Browsers compile the pattern attribute with the v flag.
+  const compiled = new RegExp('^(?:' + pattern + ')$', 'v');
+  assert.ok(compiled.test('ops-2'));
+  assert.ok(!compiled.test('Ops'));
+  assert.ok(!compiled.test('o'));
+});

@@ -204,8 +204,8 @@ Four sections, in this order:
   or a decision awaiting their answer, oldest change first. It counts
   distinct records across every active project; a project filter never hides
   it (the brief's `needs_me` is not narrowed by `project`). Each row names the
-  project, the id, how long it has waited, the ask, and who asked (for a
-  decision) or who is responsible (for a work item). Rows are
+  project, the id, how long it has waited, the ask, and `asked by <name>`
+  (for a decision) or `responsible: <name>` (for a work item). Rows are
   buttons whose accessible name is `<action> <id>: <title>`: `Answer D-7: …`
   for a decision, `Open work W-12: …` for work. The heading collapses the
   list. The header button reads `Needs you · N` at every width, and choosing
@@ -232,7 +232,9 @@ Choosing a row opens the record in a drawer, in this order:
    `Answer reported`, `Withdrawn`), then who is responsible, who acts next and
    the next action, the target and what a blocked item waits on. A decision
    shows whom it asks and who asked, the proposal and the answer; a reported
-   answer reads `Reported by X · attributed to Y · not confirmed here`. A
+   answer reads `Reported by X · attributed to Y · not confirmed here`, and
+   an answer the owner gave for the person asked reads `Answered by <owner> ·
+   asked of <person>` with `Reason: …`. A
    Done item adds one line: who closed it · the account of what was done ·
    `evidence entry N` or `no evidence attached` · its open follow-ups.
 2. **Actions** — the acts this viewer may take (below).

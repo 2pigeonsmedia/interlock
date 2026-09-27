@@ -2,9 +2,10 @@
 
 // The work panel renders the work record beside the conversation: what needs
 // the viewer, answers reported on their behalf, each project's summary, the
-// record's changes, and a drawer for one item or one project. Every number and
-// every sentence comes from InterlockWorkPanelModel; this file only fetches,
-// renders with textContent, and wires the controls.
+// record's changes, and a drawer for one item or one project.
+// InterlockWorkPanelModel supplies the rows, labels and lines; this file
+// fetches, assembles them into the page with textContent, and wires the
+// controls and their forms.
 (function exposeWorkPanel(root) {
   const WORK_POLL_MS = 5_000;
   const CHANGES_FIRST = 20;
@@ -88,7 +89,7 @@
       card.append(
         openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, () => openItem(row.id)),
         make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting),
-        make('p', '', row.ask + ' — asked by ' + row.askedBy),
+        make('p', '', row.ask + ' — ' + row.by),
       );
       return card;
     }));
@@ -281,13 +282,9 @@
     return [...rows.values()].filter(row => row.parent === item.id);
   }
 
-  function renderDrawerDecision(section, item) {
+  function renderDrawerDecision(section, item, history) {
     section.append(make('p', '', 'Asked of ' + model().who(item.asked_of) + ' by ' + model().who(item.asked_by)));
-    if (item.answer) {
-      section.append(make('p', '', item.answer.kind === 'reported'
-        ? model().reportedLabel(item.answer)
-        : 'Answered here by ' + model().who(item.answer.by)));
-    }
+    for (const line of model().answerLines(item, history)) section.append(make('p', '', line));
     if (item.proposal) section.append(make('p', '', 'Proposal: ' + item.proposal));
     if (item.answer) section.append(make('p', '', 'Answer: ' + item.answer.text));
   }
@@ -306,7 +303,7 @@
     const item = result.item;
     const section = element('work-drawer-state');
     section.append(make('p', 'work-state', model().stateLabel(item)));
-    if (item.kind === 'decision') renderDrawerDecision(section, item);
+    if (item.kind === 'decision') renderDrawerDecision(section, item, result.history);
     else renderDrawerWork(state, section, item, result.evidence, result.history);
   }
 

@@ -199,7 +199,7 @@
       <h3 id="settings-projects-heading">Projects</h3>
       <form id="project-create-form" class="settings-form">
         <label for="project-id">Short id</label>
-        <input id="project-id" pattern="[a-z][a-z0-9-]{1,31}" maxlength="32" required>
+        <input id="project-id" pattern="[a-z][a-z0-9\-]{1,31}" maxlength="32" required>
         <label for="project-name">Name</label>
         <input id="project-name" maxlength="256" required>
         <button id="project-create-button" class="quiet-action" type="submit">Create project</button>

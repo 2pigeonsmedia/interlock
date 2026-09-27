@@ -60,7 +60,7 @@
         projectName: names.has(row.project) ? names.get(row.project) : row.project,
         title: row.title,
         ask: decision ? row.proposal || row.title : row.next_action,
-        askedBy: decision ? who(row.asked_by) : (row.responsible ? who(row.responsible) : 'unassigned'),
+        by: decision ? 'asked by ' + who(row.asked_by) : 'responsible: ' + (row.responsible ? who(row.responsible) : 'unassigned'),
         waiting: waitingLabel(row.updated_at, now),
         action: decision ? 'Answer' : 'Open work',
       };
@@ -147,6 +147,24 @@
 
   function reportedLabel(answer) {
     return 'Reported by ' + who(answer.by) + ' · attributed to ' + who(answer.attributed_to) + ' · not confirmed here';
+  }
+
+  // The events that set or clear a decision's answer; the last one says how
+  // the current answer came to be.
+  const ANSWER_EVENTS = Object.freeze(['answered', 'answer-replaced', 'answer-reported', 'confirmed', 'reopened']);
+
+  // The drawer's answer lines. An answer the owner gave for the person asked
+  // names both, and the reason she recorded.
+  function answerLines(item, history) {
+    const answer = item.answer;
+    if (!answer) return [];
+    if (answer.kind === 'reported') return [reportedLabel(answer)];
+    const last = history.filter(event => ANSWER_EVENTS.includes(event.kind)).pop();
+    if (last && last.kind === 'answered' && last.on_behalf) {
+      return ['Answered by ' + who(answer.by) + ' · asked of ' + who(last.asked_of)]
+        .concat(answer.reason ? ['Reason: ' + answer.reason] : []);
+    }
+    return ['Answered here by ' + who(answer.by)];
   }
 
   // The work service's eventLine, field for field, without its leading '- '.
@@ -324,7 +342,7 @@
   const contract = Object.freeze({
     who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
     reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
-    errorWords, sourceLine, evidenceSourceLine,
+    errorWords, sourceLine, evidenceSourceLine, answerLines,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockWorkPanelModel', {
