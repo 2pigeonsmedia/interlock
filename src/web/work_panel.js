@@ -13,7 +13,10 @@
   const PROJECT_LIMIT = 200;
   const UNKNOWN_ITEM = "This record is not in the room's work record (unknown-item).";
   const WORK_STATE_CHOICES = Object.freeze(['open', 'active', 'blocked', 'ready', 'done']);
-  const SHARE_FAILED = 'Update saved; message not sent. Sending again creates a new message.';
+  const SHARE_FAILED = Object.freeze({
+    exposure: 'Update saved; message not sent. Sending again creates a new message.',
+    notify: 'Message not sent. Sending again creates a new message.',
+  });
 
   let session = null;
 
@@ -480,19 +483,21 @@
     }
   }
 
-  function answerFields(withReason) {
+  function answerFields(reasonLabel) {
     const fields = [control('textarea', 'text', 'Answer', { required: true })];
     fields.push(control('input', 'conditions', 'Conditions (optional)'));
-    if (withReason) fields.push(control('input', 'reason', 'Reason for the correction', { required: true }));
+    if (reasonLabel) fields.push(control('input', 'reason', reasonLabel, { required: true }));
     return fields;
   }
 
-  function answerForm(item, withReason) {
-    const fields = answerFields(withReason);
+  // The person asked answers without a reason; a correction, or the owner
+  // answering for the person asked, carries a required reason.
+  function answerForm(item, reasonLabel, submitText) {
+    const fields = answerFields(reasonLabel);
     const [text, conditions, reason] = fields;
     const parts = [];
     parts.push(make('p', 'work-proposal', item.proposal ? 'Proposal: ' + item.proposal : 'No proposal was written.'));
-    parts.push(actionForm('work-answer', fields, withReason ? 'Record corrected answer' : 'Record answer', async () => {
+    parts.push(actionForm('work-answer', fields, submitText, async () => {
       const body = { id: item.id, expected_revision: item.revision, text: text.node.value };
       if (optionalValue(conditions.node.value) !== undefined) body.conditions = conditions.node.value;
       if (reason) body.reason = reason.node.value;
@@ -549,13 +554,19 @@
 
   function renderDecisionActions(buttons, slot, item) {
     if (item.state === 'awaiting') {
-      if (isMe(item.asked_of)) actionButton(buttons, slot, 'Answer', item, () => answerForm(item, false));
-      else actionButton(buttons, slot, 'Report an answer given elsewhere', item, () => reportForm(item));
+      if (isMe(item.asked_of)) actionButton(buttons, slot, 'Answer', item, () => answerForm(item, null, 'Record answer'));
+      else {
+        if (isOwner()) {
+          actionButton(buttons, slot, 'Answer for ' + model().who(item.asked_of), item,
+            () => answerForm(item, 'Why you are answering for them', 'Record answer'));
+        }
+        actionButton(buttons, slot, 'Report an answer given elsewhere', item, () => reportForm(item));
+      }
     }
     if (item.state === 'reported' && isMe(item.answer.attributed_to)) {
       buttons.before(make('p', '', 'An answer was reported for you and is not confirmed here until you confirm or correct it.'));
       actionButton(buttons, slot, 'Confirm as my answer', item, () => confirmForm(item));
-      actionButton(buttons, slot, 'Correct', item, () => answerForm(item, true));
+      actionButton(buttons, slot, 'Correct', item, () => answerForm(item, 'Reason for the correction', 'Record corrected answer'));
     }
     if (isMe(item.asked_by) || isOwner()) {
       if (item.state === 'awaiting' || item.state === 'reported') {
@@ -574,6 +585,20 @@
     for (const [name, fields] of Object.entries(groups)) {
       for (const field of fields) field.label.hidden = stateField.node.value !== name;
     }
+  }
+
+  // Marks a field required for the chosen state, in the control and in its
+  // label; the service's refusal stays the backstop.
+  function requireFor(field, text, required) {
+    field.node.required = required;
+    field.label.firstChild.textContent = required ? text + ' (required)' : text;
+  }
+
+  function requireByState(stateField, blockReason, nextTo, nextAction) {
+    const chosen = stateField.node.value;
+    requireFor(blockReason, 'What it is waiting on', chosen === 'blocked');
+    requireFor(nextTo, 'Next action for', chosen === 'ready');
+    requireFor(nextAction, 'Next action', chosen === 'ready');
   }
 
   function updateForm(item, evidence) {
@@ -596,8 +621,12 @@
     const note = control('input', 'note', 'Note on this change', { required: true });
     const doneFields = evidence.length ? [doneAccount, doneEvidence, noEvidence] : [doneAccount, noEvidence];
     const groups = { blocked: [blockReason], done: item.state === 'done' ? [doneAccount] : doneFields };
-    state.node.addEventListener('change', () => showStateFields(state, groups));
-    showStateFields(state, groups);
+    const byState = () => {
+      showStateFields(state, groups);
+      requireByState(state, blockReason, nextTo, nextAction);
+    };
+    state.node.addEventListener('change', byState);
+    byState();
     const fields = [state, blockReason, nextTo, nextAction].concat(doneFields, [target, title, bodyField, note]);
     if (item.state === 'done') { doneEvidence.label.hidden = true; noEvidence.label.hidden = true; }
     return [actionForm('work-update', fields, 'Save update', async () => {
@@ -750,8 +779,8 @@
     const state = session;
     const share = state && state.share;
     if (!share) return;
-    state.notice = SHARE_FAILED;
-    setStatus(SHARE_FAILED);
+    state.notice = SHARE_FAILED[share.purpose];
+    setStatus(state.notice);
     const result = await recordShare(share, 'failed', { detail: String(event.detail.code) });
     if (result && current(state)) setStatus(state.notice);
   }

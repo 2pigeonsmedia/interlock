@@ -210,5 +210,15 @@ test('exposure and notify travel through the ordinary composer, and a message ca
   assert.match(ROOM_JS, /Create work from message #\$\{message\.id\}/);
   assert.match(WORK_PANEL_JS, /Update saved; message not sent\./);
   assert.match(WORK_PANEL_JS, /Sending again creates a new message\./);
+  assert.match(WORK_PANEL_JS, /notify: 'Message not sent\. Sending again creates a new message\.'/,
+    'a failed Notify saved no update, so its notice does not say one was saved');
   assert.match(WORK_PANEL_JS, /source_message/);
+});
+
+test('the owner may answer for the person asked, and the update form says what each state requires', () => {
+  assert.match(WORK_PANEL_JS, /'Answer for ' \+ model\(\)\.who\(item\.asked_of\)/);
+  assert.match(WORK_PANEL_JS, /Why you are answering for them/);
+  assert.match(WORK_PANEL_JS, /requireFor\(blockReason, 'What it is waiting on', chosen === 'blocked'\)/);
+  assert.match(WORK_PANEL_JS, /requireFor\(nextTo, 'Next action for', chosen === 'ready'\)/);
+  assert.match(WORK_PANEL_JS, /requireFor\(nextAction, 'Next action', chosen === 'ready'\)/);
 });
