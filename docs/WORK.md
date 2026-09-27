@@ -175,3 +175,139 @@ the file as it is sends a *new* operation; to retry the exact request after a
 timeout, put the printed id in the file as `operation_id`, then the server
 replays the original result. `report-answer` prints the exposure draft and the
 `interlock say` command that sends it.
+
+## In the browser
+
+The room page shows the record in a Work tile beside the conversation. It
+reads `brief` and `changes` every five seconds and writes through the browser
+routes above; every state, count and name it shows comes from the record,
+never from message text.
+
+### The tile
+
+Four sections, in this order:
+
+- **Needs you** — every record whose next action is addressed to the viewer,
+  or a decision awaiting their answer, oldest change first. It counts
+  distinct records across every active project; a project filter never hides
+  it (the brief's `needs_me` is not narrowed by `project`). Each row names the
+  project, the id, how long it has waited, the ask and who asked. Rows are
+  buttons whose accessible name is `<action> <id>: <title>`: `Answer D-7: …`
+  for a decision, `Open work W-12: …` for work. The heading collapses the
+  list. The header button reads `Needs you · N` at every width, and choosing
+  it jumps to the tile and focuses this section.
+- **Reported to you** — decisions where someone else reported an answer as
+  yours, each reading `Reported by X · attributed to Y · not confirmed here`.
+- **Projects** — each active project's open, blocked, ready and awaiting
+  counts, its objective, today's-focus note, and who last changed it. Opening
+  a project lists its records (up to 200, with `Showing N of total`) as a
+  tree of parents and follow-ups, and a form for the objective and the
+  today's-focus note. Any participant may edit those two.
+- **Recent changes** — the record's events, newest first, with the record's
+  total event count beside the heading. It shows the latest 20; **Show more**
+  loads the 50 events before the oldest one shown, and stays while older
+  events exist. New events push the oldest shown ones back behind Show more;
+  the list never caps silently.
+
+### One record
+
+Choosing a row opens the record in a drawer, in this order:
+
+1. **Current state** — the state as a word (`Open`, `Active`, `Blocked`,
+   `Ready`, `Done`; for a decision `Awaiting answer`, `Answered here`,
+   `Answer reported`, `Withdrawn`), then who is responsible, who acts next and
+   the next action, the target and what a blocked item waits on. A decision
+   shows whom it asks and who asked, the proposal and the answer; a reported
+   answer reads `Reported by X · attributed to Y · not confirmed here`. A
+   Done item adds one line: who closed it · the account of what was done ·
+   `evidence entry N` or `no evidence attached` · its open follow-ups.
+2. **Actions** — the acts this viewer may take (below).
+3. **Source** — the free-text source, then, for a record created from a room
+   message, `From room message #42 by <speaker> · “quote” · recorded by
+   <recorder>`: the speaker and the person who recorded it are separate
+   names. Each evidence entry reads `Evidence attached`, who attached it and
+   when, and whether it `examined the current target` or `examined an earlier
+   target`. The browser never says "Verified".
+4. **More detail** — the full history, closed until opened, one line per
+   event in the same form as the export.
+
+### Who may do what
+
+Each act is a button whose accessible name is `<act> <id>: <title>`; it
+reveals a form, and the write takes a second, deliberate click.
+
+- **Answer** — shown to the person asked. It shows the proposal as written,
+  then a form whose button reads **Record answer**. Nothing is parsed from
+  the proposal.
+- **Answer for \<person\>** — shown to the owner when someone else was asked.
+  It needs a reason: *Why you are answering for them*.
+- **Report an answer given elsewhere** — shown to anyone else while a
+  decision awaits an answer: the exact words, where they were given, and any
+  conditions. The form says the record will show the reporter, the person the
+  words are attributed to, and that it is not confirmed here.
+- **Confirm as my answer** / **Correct** — shown to the person a report names.
+  A correction needs a reason; the reported wording stays in the history.
+- **Withdraw** and **Reopen** — the asker's or the owner's, each with a
+  reason; Reopen may ask someone else.
+- **Update** — state and the fields that state needs, marked required in the
+  form: **Ready** needs who acts next and the next action; **Blocked** needs
+  what it waits on; **Done** needs an account of what was done plus one
+  evidence entry or **No evidence attached**, not both. The service's refusal
+  stays the backstop.
+- **Attach evidence** — target examined, what was observed, a reference, and
+  what it does not show. **Add note** — on any record.
+- **Notify** — shown when the record's next step is addressed to someone other
+  than the viewer (or a decision awaits someone else's answer).
+
+Every write sends a fresh `operation_id`. A stale revision re-reads the record
+and says which revision it is now; other refusals read in words; a signed-out
+session returns to sign-in.
+
+### Sharing through the composer
+
+Exposure and Notify use the ordinary composer; nothing is posted for the
+viewer. Recording a reported answer, or a correction of one, puts the exposure
+draft in the composer, addressed to the person the words are attributed to
+(with an `@` mention when that person is an AI), and a share bar under it says
+what the draft is for. Notify does the same for the person the record waits
+on. The viewer sends, edits or declines the draft:
+
+- **Sent** — the viewer's ordinary Send; the outcome is recorded with the new
+  message id.
+- **Declined** — the bar's **Decline**; the draft is cleared only if it is
+  unchanged. Opening another share while one is pending records the first as
+  declined: one share is pending at a time.
+- **Failed** — a send the room did not save. The outcome is recorded with the
+  refusal code, and the notice reads "Update saved; message not sent. Sending
+  again creates a new message." (for Notify: "Message not sent. Sending again
+  creates a new message."). The share stays pending, so a later send that
+  succeeds is recorded as sent.
+
+### Create from a message
+
+Every message has a **Work…** button beside Reply. It opens a dialog,
+*Record from a message*, prefilled with the message's words: **Create work**
+(the title is the first line, the details are the whole message), **Ask a
+decision** (who to ask is required), or **Attach as evidence** to an open
+work item (the message is what was observed, cited as `room message #N`). The
+dialog names the message's speaker and the person recording separately. For
+work and decisions the server checks the quoted words against the room before
+it creates the record. There is no answer field: promoting someone's message
+never creates an answer.
+
+### Projects in Settings
+
+Settings → Projects is the owner's: it lists the projects and creates
+(short id and name) or retires one. Each create and each retire asks for a
+fresh passkey step-up first. A project's objective and today's-focus note are
+edited from the project view, by any participant.
+
+### What the browser does not promise
+
+- **A retry is a new message.** The browser's send carries no client message
+  id and never reuses one, so the room cannot recognise a second send as a
+  retry: sending a failed draft again creates a new message.
+- **A send receipt is not proof of reading.** `sent` records that the message
+  was saved to the room, not that anyone read it.
+- **Evidence attached is not verified.** The browser shows what was observed
+  and against which target, never a verdict.

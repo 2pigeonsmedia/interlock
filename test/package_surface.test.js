@@ -43,7 +43,7 @@ test('the release package surface includes newcomer/runtime proof and excludes p
     'LICENSE', 'README.md', 'package.json', 'bin/interlock.js',
     'src/server.js', 'src/codex_policy.js', 'src/web/source.html', 'identity/index.js',
     'docs/PROTOCOL.md', 'docs/CODEX_POLICY.md', 'docs/DOORBELL.md',
-    'docs/ADAPTER_AUTHORING.md',
+    'docs/ADAPTER_AUTHORING.md', 'docs/WORK.md',
     'integrations/doorbell.js',
     'docs/interlock-gh-banner.png',
     'docs/screenshots/connect-an-ai.png',
