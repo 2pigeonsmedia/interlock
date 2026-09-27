@@ -564,13 +564,22 @@ function createWorkService(options) {
     });
   }
 
+  // Evidence may cite the room message it was observed in: the capture the
+  // route verified is kept on the event, and when no reference is given it
+  // names the message and its speaker. The recorder is the event's `by`.
   function attachEvidence(actor, rawInput) {
-    return operation(actor, 'items.evidence', rawInput, ['id', 'target', 'observed', 'reference', 'limits', 'relates_to'],
+    return operation(actor, 'items.evidence', rawInput,
+      ['id', 'target', 'observed', 'reference', 'limits', 'relates_to', 'source_message'],
       (draft, body, now) => {
         const item = findItem(draft, body.id);
         const target = requiredText(body.target, SHORT_BYTES, 'target');
         const observed = requiredText(body.observed, BODY_BYTES, 'observed');
-        const reference = requiredText(body.reference, SHORT_BYTES, 'reference');
+        const captured = sourceMessage(body.source_message);
+        let reference = optionalText(body.reference, SHORT_BYTES, 'reference') ?? '';
+        if (reference.trim() === '') {
+          if (!captured) fail('invalid-reference');
+          reference = 'room message #' + captured.message_id + ' · ' + who({ name: captured.byline, session: captured.session });
+        }
         const limits = requiredText(body.limits, BODY_BYTES, 'limits');
         let relatesTo = null;
         if (body.relates_to !== undefined && body.relates_to !== null) {
@@ -581,6 +590,7 @@ function createWorkService(options) {
         }
         const event = appendEvent(draft, now, actor, {
           item: item.id, project: item.project, kind: 'evidence', target, observed, reference, limits, relates_to: relatesTo,
+          source_message: captured,
         });
         return { ok: true, event: clone(event) };
       });
@@ -961,7 +971,9 @@ function createWorkService(options) {
         for (const e of evidence) {
           lines.push('- ' + stamp(e.at) + ' · ' + who(e.by) + ' · target ' + oneLine(e.target) + ' (matches current target: ' + (e.target_matches ? 'yes' : 'no') + ')' +
             ' · observed: ' + oneLine(e.observed) + ' · reference: ' + oneLine(e.reference) + ' · limits: ' + oneLine(e.limits) +
-            (e.relates_to ? ' · relates to event ' + e.relates_to : ''));
+            (e.relates_to ? ' · relates to event ' + e.relates_to : '') +
+            (e.source_message ? ' · from room message #' + e.source_message.message_id + ' by ' +
+              who({ name: e.source_message.byline, session: e.source_message.session }) + ': “' + oneLine(e.source_message.quote) + '”' : ''));
         }
       }
       lines.push('', '#### History', '');

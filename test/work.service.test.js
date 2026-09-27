@@ -815,3 +815,37 @@ test('authority is checked before the revision: a non-asker is refused as such, 
   code(() => work.reopen(lead, { operation_id: uuid(), id: decision.id, expected_revision: 1, reason: 'x' }), 'stale-revision');
   code(() => work.withdraw(lead, { operation_id: uuid(), id: open.id, expected_revision: 9, reason: 'x' }), 'stale-revision');
 });
+
+test('evidence from a room message keeps the capture, credits the speaker in the reference, and exports both', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead, { target: 'sha-a' });
+  const capture = { message_id: 42, ts: 1700000000000, byline: 'Marlow', kind: 'seat', session: 2, quote: 'the import passed' };
+  const attached = work.attachEvidence(reviewer, {
+    operation_id: uuid(), id: item.id, target: 'sha-a', observed: 'the import passed', limits: 'one run only',
+    source_message: capture,
+  });
+  assert.deepEqual(attached.event.source_message, capture);
+  assert.equal(attached.event.reference, 'room message #42 · Marlow (session 2)');
+  assert.deepEqual(attached.event.by, ref(reviewer), 'the recorder stays separate from the speaker');
+  const got = work.get(owner, { id: item.id });
+  assert.deepEqual(got.evidence[0].source_message, capture);
+  const md = work.exportRecords(owner, { format: 'md' }).body;
+  assert.match(md, /reference: room message #42 · Marlow \(session 2\) · limits: one run only · from room message #42 by Marlow \(session 2\): “the import passed”/);
+
+  const explicit = work.attachEvidence(reviewer, {
+    operation_id: uuid(), id: item.id, target: 'sha-a', observed: 'x', reference: 'CI run 7', limits: 'z', source_message: capture,
+  });
+  assert.equal(explicit.event.reference, 'CI run 7', 'an explicit reference is kept');
+  const plain = work.attachEvidence(reviewer, {
+    operation_id: uuid(), id: item.id, target: 'sha-a', observed: 'x', reference: 'y', limits: 'z',
+  });
+  assert.equal(plain.event.source_message, null);
+  code(() => work.attachEvidence(reviewer, {
+    operation_id: uuid(), id: item.id, target: 'sha-a', observed: 'x', limits: 'z',
+  }), 'invalid-reference');
+  for (const bad of [Object.assign({}, capture, { extra: 1 }), { message_id: 42, quote: 'the import passed' }, 'room message #42']) {
+    code(() => work.attachEvidence(reviewer, {
+      operation_id: uuid(), id: item.id, target: 'sha-a', observed: 'x', limits: 'z', source_message: bad,
+    }), 'invalid-source');
+  }
+});

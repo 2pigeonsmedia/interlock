@@ -358,6 +358,16 @@ test('work records ride the existing identity and survive a clear, a restart and
     assert.equal(sharedExport.status, 200, sharedExport.text);
     assert.ok(sharedExport.text.includes('sent as #' + exposureId), 'the export names the sent message');
 
+    const evidenceFromRoom = await aiPost(runtime, '/api/ai/work/items/evidence', {
+      operation_id: uuid(), id: 'W-1', target: 'the cut-off', observed: 'March cut-off', limits: 'said, not checked',
+      source_message: { message_id: m, quote: 'March cut-off' },
+    }, lead.token);
+    assert.equal(evidenceFromRoom.status, 201, evidenceFromRoom.text);
+    assert.equal(evidenceFromRoom.json.event.source_message.byline, 'Ana', 'the speaker is the room message author');
+    assert.equal(evidenceFromRoom.json.event.reference, 'room message #' + m + ' · Ana');
+    assert.equal(evidenceFromRoom.json.event.by.name, 'Lead', 'the recorder is the seat');
+    assert.equal(Object.hasOwn(evidenceFromRoom.json.event.source_message, 'subject_id'), false);
+
     const left = await aiPost(runtime, '/api/ai/leave', {}, lead.token);
     assert.equal(left.status, 200, left.text);
     const afterLeave = await aiGet(runtime, '/api/ai/work/brief', lead.token);

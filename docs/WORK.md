@@ -115,7 +115,10 @@ is at most 4 KiB (UTF-8); a longer one, a blank one or any other key is
 `400 invalid-request`. When the message is not in the room (never posted, or
 archived by a transcript clear) or the words are not in it, the write is
 refused `400 invalid-source`. The record takes the message's time and speaker
-from the room, never from the body.
+from the room, never from the body. `items/create` and `items/evidence` may
+carry one, verified the same way. On evidence the capture is kept on the
+entry, and a missing reference becomes `room message #N · <speaker>`: the
+speaker is who said it in the room, the entry's `by` is who recorded it.
 
 Browser sessions: `POST /api/work/<operation>` with the usual mutation
 envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
@@ -125,7 +128,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 |---|---|
 | `items/create` | `kind`, `project`, `title`, `body`, optional `source`, `source_message` (`{ message_id, quote }`), `links`, `parent`; work: `responsible`, `next_to`, `next_action`, `target`, `consequence`, `severity`; decision: `asked_of`, `proposal`, `rationale`, `scope`, `conditions` |
 | `items/update` | `id`, `expected_revision`, `note`, any work field above, `state`, `block_reason`, `done_account`, `done_evidence` or `no_evidence`, `title`, `body` |
-| `items/evidence` | `id`, `target`, `observed`, `reference`, `limits`, optional `relates_to` |
+| `items/evidence` | `id`, `target`, `observed`, `limits`, `reference` (optional when `source_message` is given), optional `relates_to`, `source_message` (`{ message_id, quote }`) |
 | `items/note` | `id`, `text` |
 | `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (required when `sent` and refused otherwise: a room message the recording participant posted, else `invalid-message-id`), optional `detail` |
 | `decisions/answer` | `id`, `expected_revision`, `text`, optional `conditions`, `reason` (required when replacing an answer or answering for someone else) |
@@ -236,8 +239,9 @@ Choosing a row opens the record in a drawer, in this order:
 3. **Source** — the free-text source, then, for a record created from a room
    message, `From room message #42 by <speaker> · “quote” · recorded by
    <recorder>`: the speaker and the person who recorded it are separate
-   names. Each evidence entry reads `Evidence attached`, who attached it and
-   when, and whether it `examined the current target` or `examined an earlier
+   names. Each evidence entry reads `Evidence attached`, then, for evidence
+   taken from a room message, `from room message #N by <speaker>`, then
+   `recorded by <recorder>` and when, and whether it `examined the current target` or `examined an earlier
    target`. The browser never says "Verified".
 4. **More detail** — the full history, closed until opened, one line per
    event in the same form as the export.
@@ -307,7 +311,8 @@ Every message has a **Work…** button beside Reply. It opens a dialog,
 (the title is the first non-blank line, the details are the message up to
 16 KiB), **Ask a
 decision** (who to ask is required), or **Attach as evidence** to an open
-work item (the message is what was observed, cited as `room message #N`). The
+work item (the quoted words are what was observed; the server checks them
+against the message and credits its speaker). The
 dialog names the message's speaker and the person recording separately. The
 quote is the start of the message, up to 4 KiB; when the message is longer
 the dialog says "Quoted the first 4 KB of message #N". For

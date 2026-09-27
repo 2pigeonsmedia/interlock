@@ -337,3 +337,38 @@ test('over the real service, a share lands on a work item, refuses an unknown it
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('evidence may cite a room message through the same verification as a create', async () => {
+  const room = new Map([[42, { id: 42, ts: 1700000000000, subject_id: 's-7', byline: 'Marlow', kind: 'seat', session: 2, text: 'The import passed on sha-a.' }]]);
+  const messageById = async id => room.get(id) || null;
+  const calls = [];
+  const service = {
+    replay: () => null,
+    attachEvidence(who, input) {
+      calls.push(input);
+      return { ok: true, event: { seq: 3, kind: 'evidence', item: input.id, source_message: input.source_message } };
+    },
+  };
+  const routes = createWorkRoutes({ work: service, participants: roster, messageById });
+  const base = { operation_id: 'x', id: 'W-1', target: 'sha-a', observed: 'The import passed', limits: 'one run' };
+  const cited = await routes.mutate('items/evidence', actor, Object.assign({}, base, {
+    source_message: { message_id: 42, quote: 'The import passed' },
+  }));
+  assert.equal(cited.status, 201, JSON.stringify(cited.body));
+  assert.deepEqual(calls[0].source_message, {
+    message_id: 42, ts: 1700000000000, byline: 'Marlow', kind: 'seat', session: 2, quote: 'The import passed',
+  });
+  assert.equal(Object.hasOwn(calls[0].source_message, 'subject_id'), false, 'the capture never copies the speaker id');
+  assert.deepEqual(cited.body.event.source_message, calls[0].source_message);
+  const misquoted = await routes.mutate('items/evidence', actor, Object.assign({}, base, {
+    source_message: { message_id: 42, quote: 'the import passed' },
+  }));
+  assert.equal(misquoted.status, 400);
+  assert.equal(misquoted.body.error, 'invalid-source', 'the check is case-sensitive');
+  const smuggled = await routes.mutate('items/evidence', actor, Object.assign({}, base, {
+    source_message: { message_id: 42, quote: 'The import passed', ts: 1 },
+  }));
+  assert.equal(smuggled.status, 400);
+  assert.equal(smuggled.body.error, 'invalid-request');
+  assert.equal(calls.length, 1, 'the service is not called for a refusal');
+});

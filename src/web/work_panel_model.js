@@ -236,19 +236,18 @@
 
   // The words a record starts from, cut to the server's limits: title 256
   // bytes, quote 4 KiB, details 16 KiB. quote_truncated says the quote is only
-  // the start of the message.
+  // the start of the message. Evidence observes the quote itself and cites the
+  // message, so the server checks it and names the speaker.
   function messagePrefill(message, kind) {
     const quote = prefixBytes(message.text, QUOTE_BYTES);
-    const body = prefixBytes(message.text, BODY_BYTES);
     const truncated = quote !== message.text;
-    if (kind === 'evidence') {
-      return { kind, target: '', observed: body, reference: 'room message #' + message.id, quote_truncated: truncated };
-    }
+    const source = { message_id: message.id, quote };
+    if (kind === 'evidence') return { kind, target: '', observed: quote, source_message: source, quote_truncated: truncated };
     return {
       kind,
       title: firstLineTitle(message.text),
-      body,
-      source_message: { message_id: message.id, quote },
+      body: prefixBytes(message.text, BODY_BYTES),
+      source_message: source,
       quote_truncated: truncated,
     };
   }
@@ -314,10 +313,18 @@
       who(item.created_by);
   }
 
+  // An evidence entry observed in a room message: the message and its
+  // speaker. The recorder is the entry's `by`, named separately.
+  function evidenceSourceLine(entry) {
+    const source = entry.source_message;
+    if (!source) return null;
+    return 'from room message #' + source.message_id + ' by ' + who({ name: source.byline, kind: source.kind, session: source.session });
+  }
+
   const contract = Object.freeze({
     who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
     reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
-    errorWords, sourceLine,
+    errorWords, sourceLine, evidenceSourceLine,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockWorkPanelModel', {

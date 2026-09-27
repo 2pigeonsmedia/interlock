@@ -27,6 +27,8 @@ const MUTATIONS = Object.freeze({
 const OWNER_STEP_UP = Object.freeze(['projects/create', 'projects/retire']);
 const REF_KEYS = Object.freeze(['next_to', 'responsible', 'asked_of']);
 const READS = Object.freeze(['brief', 'list', 'get', 'changes', 'export']);
+// The writes that may cite a room message as their source.
+const CITING_OPS = Object.freeze(['items/create', 'items/evidence']);
 const QUOTE_BYTES = 4 * 1024;
 const STATUS = Object.freeze({
   'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-a-relay': 403,
@@ -156,7 +158,7 @@ function createWorkRoutes(options) {
       // Verified after replay, so a retry whose message was since archived
       // still returns its original result.
       if (Object.prototype.hasOwnProperty.call(body, 'source_message')) {
-        const cited = op === 'items/create' ? citation(body.source_message) : null;
+        const cited = CITING_OPS.includes(op) ? citation(body.source_message) : null;
         if (!cited) return refusal(400, 'invalid-request');
         const captured = await verifiedSource(cited);
         if (!captured) return refusal(400, 'invalid-source');

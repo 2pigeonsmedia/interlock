@@ -8,7 +8,7 @@ const model = require('../src/web/work_panel_model.js');
 const {
   who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
-  errorWords, sourceLine,
+  errorWords, sourceLine, evidenceSourceLine,
 } = model;
 
 const MINUTE = 60_000;
@@ -364,8 +364,13 @@ test('a message prefill keeps the speaker words and the message id', () => {
   });
   assert.equal(messagePrefill(MESSAGE, 'decision').kind, 'decision');
   assert.deepEqual(messagePrefill(MESSAGE, 'evidence'), {
-    kind: 'evidence', target: '', observed: MESSAGE.text, reference: 'room message #42', quote_truncated: false,
+    kind: 'evidence', target: '', observed: MESSAGE.text,
+    source_message: { message_id: 42, quote: MESSAGE.text }, quote_truncated: false,
   });
+  const longEvidence = messagePrefill(Object.assign({}, MESSAGE, { text: 'z'.repeat(5000) }), 'evidence');
+  assert.equal(longEvidence.observed, 'z'.repeat(4096), 'what was observed is the verified quote');
+  assert.equal(longEvidence.source_message.quote, longEvidence.observed);
+  assert.equal(longEvidence.quote_truncated, true);
   const long = messagePrefill(Object.assign({}, MESSAGE, { text: 'x'.repeat(200) }), 'work');
   assert.equal(Array.from(long.title).length, 120);
   assert.ok(long.title.endsWith('…'));
@@ -469,9 +474,20 @@ test('a source line names the room message, its speaker and who recorded it', ()
   assert.equal(sourceLine(person), 'From room message #7 by Ana · “yes” · recorded by Builder (session 1)');
 });
 
+test('an evidence row names the room message and its speaker, apart from the recorder', () => {
+  assert.equal(evidenceSourceLine({ by: ANA, source_message: null }), null);
+  assert.equal(evidenceSourceLine({ by: ANA }), null);
+  assert.equal(evidenceSourceLine({ by: ANA, source_message: {
+    message_id: 42, ts: NOW, byline: 'Marlow', kind: 'seat', session: 2, quote: 'passed' } }),
+  'from room message #42 by Marlow (session 2)');
+  assert.equal(evidenceSourceLine({ by: BUILDER_1, source_message: {
+    message_id: 7, ts: NOW, byline: 'Ana', kind: 'person', session: null, quote: 'yes' } }),
+  'from room message #7 by Ana');
+});
+
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['doneLine', 'errorWords', 'exposureText', 'historyLines', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['doneLine', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
     'needsYou', 'notifyText', 'projectSummaries', 'projectTree', 'recentChanges', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
 });

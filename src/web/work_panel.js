@@ -314,9 +314,11 @@
     const line = model().sourceLine(item);
     if (line !== null) section.append(make('p', '', line));
     for (const entry of result.evidence) {
+      const from = model().evidenceSourceLine(entry);
       section.append(make('p', '', [
         'Evidence attached',
-        model().who(entry.by),
+        ...(from === null ? [] : [from]),
+        'recorded by ' + model().who(entry.by),
         stampOf(entry.at),
         entry.target_matches ? 'examined the current target' : 'examined an earlier target: ' + entry.target,
         entry.observed,
@@ -836,7 +838,7 @@
     createLabel('work-create-body').textContent = evidence ? 'What it does not show' : 'Details';
     element('work-create-title').value = evidence ? prefill.target : prefill.title;
     element('work-create-body').value = evidence ? '' : prefill.body;
-    element('work-create-quote').value = evidence ? prefill.observed : prefill.source_message.quote;
+    element('work-create-quote').value = prefill.source_message.quote;
     element('work-create-to-label').textContent = kind === 'decision' ? 'Ask' : 'Next action for';
     fillSelect(element('work-create-to'),
       participantOptions({ value: '', text: kind === 'decision' ? 'Choose who to ask' : 'Nobody yet' }), '');
@@ -896,7 +898,7 @@
       op = 'items/evidence';
       body = {
         id: element('work-create-item').value, target: element('work-create-title').value,
-        observed: prefill.observed, reference: prefill.reference, limits: element('work-create-body').value,
+        observed: prefill.observed, limits: element('work-create-body').value, source_message: prefill.source_message,
       };
     } else {
       op = 'items/create';
