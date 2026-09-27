@@ -349,7 +349,7 @@ function createWorkService(options) {
     return {
       id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: item.state,
       responsible: clone(item.responsible), next_to: clone(item.next_to), next_action: item.next_action,
-      target: item.target, created_by: clone(item.created_by), updated_at: item.updated_at,
+      target: item.target, block_reason: item.block_reason, created_by: clone(item.created_by), updated_at: item.updated_at,
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),
       awaiting: awaitingDecision(draft, item),
     };

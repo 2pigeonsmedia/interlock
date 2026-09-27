@@ -314,3 +314,10 @@ test('an Actions section every participant sees, between Reported to you and Pro
   assert.doesNotMatch(body[1], /mutate|deps\.|fetch\(|notify|share/i);
   assert.match(WORK_PANEL_JS, /const OPENER_LISTS = Object\.freeze\(\[[^\]]*'actions-list'/);
 });
+
+test('Actions group headings keep names as stored, and the drawer\'s actions are named apart from the section', () => {
+  assert.match(WORK_PANEL_JS, /make\('h4', 'work-tree-facts', group\.who \+ ' · ' \+ group\.rows\.length\)/);
+  assert.doesNotMatch(WORK_PANEL_JS, /make\('h4', 'work-state'/);
+  assert.match(ROOM, /<section id="work-drawer-actions" aria-label="Actions on this record"><\/section>/);
+  assert.doesNotMatch(ROOM, /aria-label="Actions"/);
+});

@@ -299,6 +299,18 @@ test('list and brief rows carry who created the record, with ids stripped on the
   assert.equal(JSON.stringify(stripIds(brief)).includes('subject_id'), false);
 });
 
+test('work rows carry the block reason; decision rows carry none', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead);
+  work.updateWork(lead, { operation_id: uuid(), id: item.id, expected_revision: 1, state: 'blocked',
+    block_reason: 'Waiting on the bank.', note: 'stuck' });
+  const decision = newDecision(work, builder, owner);
+  const rows = new Map(work.list(owner, {}).items.map(row => [row.id, row]));
+  assert.equal(rows.get(item.id).block_reason, 'Waiting on the bank.');
+  assert.equal(work.brief(owner).open.find(row => row.id === item.id).block_reason, 'Waiting on the bank.');
+  assert.equal(Object.hasOwn(rows.get(decision.id), 'block_reason'), false);
+});
+
 test('a decision asked of the owner enters her queue; a seat cannot answer it; an answer of no is answered', () => {
   const { work } = fresh();
   const decision = newDecision(work, builder, owner);

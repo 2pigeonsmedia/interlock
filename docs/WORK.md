@@ -151,10 +151,6 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 - `list[?project=ID&needs_me=1&after=N&limit=N]` — rows with a `total` and a
   `next` continuation; never a silent cap. Retired projects are omitted unless
   named.
-
-`list` and `brief` rows of every kind carry `created_by`, the participant
-who recorded the item (a name, kind and session, like every participant in a
-response).
 - `items/<id>` — the item, its evidence (each with `target_matches`), and its
   history.
 - `changes?after=N[&limit=N]` — events after a cursor, with `total` and the
@@ -162,6 +158,12 @@ response).
 - `export?format=json|md` — the whole record as a document, without opaque
   ids. In Markdown each record line stays one line: a line break inside a
   field is shown as ` ⏎ `.
+
+`list` and `brief` rows of every kind carry `created_by`, the participant
+who recorded the item (a name, kind and session, like every participant in a
+response). Work and finding rows also carry `block_reason`: the last reason
+recorded, kept after the item moves on, so it names the current reason only
+while the state is `blocked`.
 
 ## Refusals
 
@@ -233,7 +235,9 @@ Five sections, in this order:
   counts, its objective, today's-focus note, and who last changed it. Opening
   a project lists its records (up to 200, with `Showing N of total`) as a
   tree of parents and follow-ups. Under each row's title, id and state, one
-  line gives the row's own facts: for work, `next: <name> — <action>`,
+  line gives the row's own facts: for work, `blocked: <reason>` while it is
+  blocked, `next: <name> — <action>` (`unassigned` when no one is named, as
+  in Actions; a blocked item shows it only when it names someone),
   `responsible: <name>`, `target: …`, `awaiting D-n` and `evidence attached`,
   each only when set; for a decision, `asked of <name> by <name>` and, once
   answered, `answered by <name>` or `reported by <name> · attributed to

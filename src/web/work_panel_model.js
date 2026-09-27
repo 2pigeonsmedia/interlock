@@ -76,8 +76,12 @@
   // its recipient. A blocked item is an action only when it names one — the
   // same rule the service's needs_me uses — so a blocked wait with no
   // recipient is nobody's action.
+  function hasAction(row) {
+    return typeof row.next_action === 'string' && row.next_action.trim() !== '';
+  }
+
   function isWorkAction(row) {
-    if (!row.next_action) return false;
+    if (!hasAction(row)) return false;
     if (row.state === 'open' || row.state === 'active' || row.state === 'ready') return true;
     return row.state === 'blocked' && Boolean(row.next_to);
   }
@@ -105,7 +109,7 @@
     for (const row of brief.open) {
       if (!isWorkAction(row)) continue;
       const recipient = row.next_to ? who(row.next_to) : UNASSIGNED;
-      add(row, recipient, 'next: ' + recipient + ' — ' + oneLine(row.next_action), row.next_action);
+      add(row, recipient, 'next: ' + recipient + ' — ' + oneLine(row.next_action.trim()), row.next_action);
     }
     for (const row of brief.decisions) {
       if (row.state !== 'awaiting') continue;
@@ -185,7 +189,9 @@
   }
 
   // The line under a row in the project drawer, from the row's own fields:
-  // for work, who acts next and on what, who is responsible, the target, an
+  // for work, why it is blocked while it is, who acts next and on what (a
+  // blocked item only when it names someone; no recipient reads unassigned,
+  // as in Actions), who is responsible, the target, an
   // open question it waits on, and whether evidence is attached; for a
   // decision, who asked whom and how it was answered. Empty when there is
   // nothing to say. An attached entry is never called verified.
@@ -201,8 +207,14 @@
       }
       return parts.join(' · ');
     }
-    const action = row.next_action ? oneLine(row.next_action) : '';
-    if (row.next_to || action) parts.push('next: ' + who(row.next_to) + (action ? ' — ' + action : ''));
+    const blocked = row.state === 'blocked';
+    if (blocked && typeof row.block_reason === 'string' && row.block_reason.trim() !== '') {
+      parts.push('blocked: ' + oneLine(row.block_reason.trim()));
+    }
+    const action = hasAction(row) ? oneLine(row.next_action.trim()) : '';
+    if (row.next_to || (action && !blocked)) {
+      parts.push('next: ' + (row.next_to ? who(row.next_to) : UNASSIGNED) + (action ? ' — ' + action : ''));
+    }
     if (row.responsible) parts.push('responsible: ' + who(row.responsible));
     if (row.target) parts.push('target: ' + oneLine(row.target));
     if (row.awaiting) parts.push('awaiting ' + row.awaiting);

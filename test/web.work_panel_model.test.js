@@ -233,12 +233,28 @@ test('a project row line carries the work record\'s own facts', () => {
   const bare = { id: 'W-8', kind: 'work', state: 'open', responsible: null, next_to: null, next_action: '',
     target: '', evidence_attached: false, awaiting: null };
   assert.equal(projectRowLine(bare), '');
-  // An action addressed to nobody still shows the action.
-  assert.equal(projectRowLine(Object.assign({}, bare, { next_action: 'Pick an owner' })), 'next: nobody — Pick an owner');
+  // An action addressed to no one still shows the action, under the word Actions uses.
+  assert.equal(projectRowLine(Object.assign({}, bare, { next_action: 'Pick an owner' })), 'next: unassigned — Pick an owner');
+  // A whitespace-only action is no action.
+  assert.equal(projectRowLine(Object.assign({}, bare, { next_action: ' \n ' })), '');
+  assert.equal(projectRowLine(Object.assign({}, bare, { next_action: '  Pick an owner ' })), 'next: unassigned — Pick an owner');
   assert.equal(projectRowLine(Object.assign({}, bare, { next_to: LEAD })), 'next: Lead');
   assert.equal(projectRowLine(Object.assign({}, bare, { kind: 'finding', next_to: LEAD, next_action: 'complete 717',
     target: 'line\ntwo', evidence_attached: true, awaiting: 'D-4' })),
   'next: Lead — complete 717 · target: line ⏎ two · awaiting D-4 · evidence attached');
+});
+
+test('a blocked project row leads with its reason, then the next step only when it names someone', () => {
+  const blocked = { id: 'W-4', kind: 'work', state: 'blocked', responsible: BUILDER_1, next_to: null,
+    next_action: 'Chase the bank', block_reason: 'waiting on the bank', target: '', evidence_attached: false, awaiting: null };
+  assert.equal(projectRowLine(blocked), 'blocked: waiting on the bank · responsible: Builder (session 1)');
+  assert.equal(projectRowLine(Object.assign({}, blocked, { next_to: ANA })),
+    'blocked: waiting on the bank · next: Ana — Chase the bank · responsible: Builder (session 1)');
+  assert.equal(projectRowLine(Object.assign({}, blocked, { block_reason: 'two\nlines' })),
+    'blocked: two ⏎ lines · responsible: Builder (session 1)');
+  // A reason left over from an earlier block is not shown once the item moves on.
+  assert.equal(projectRowLine(Object.assign({}, blocked, { state: 'active', next_to: ANA })),
+    'next: Ana — Chase the bank · responsible: Builder (session 1)');
 });
 
 test('a project row line for a decision names who asked whom and how it was answered, never verified', () => {
@@ -285,6 +301,8 @@ function workRow(id, fields) {
 // A blocked item that names its recipient is still that person's action.
 const BLOCKED_FOR_ANA = workRow('W-14', { state: 'blocked', next_to: ANA, next_action: 'Send the keys', updated_at: NOW - 4 * HOUR });
 
+const ZOE = Object.freeze({ subject_id: 'u-zoe', name: 'Zoe', kind: 'person', session: null });
+
 const ACTIONS_BRIEF = Object.freeze(Object.assign({}, BRIEF, {
   needs_me: [WORK_ROW, DECISION_ROW, BLOCKED_FOR_ANA],
   open: [
@@ -297,6 +315,8 @@ const ACTIONS_BRIEF = Object.freeze(Object.assign({}, BRIEF, {
     workRow('W-11', { state: 'done', next_to: ANA, next_action: 'Nothing' }),
     workRow('W-12', { state: 'active', next_to: BUILDER_1, next_action: 'Review\nthe patch' }),
     workRow('W-13', { next_to: null, next_action: '' }),
+    workRow('W-15', { next_to: null, next_action: '   ' }),
+    workRow('W-16', { next_to: ZOE, next_action: 'File the return' }),
   ],
   decisions: [
     DECISION_ROW,
@@ -312,9 +332,11 @@ test('actions group every open action by the person or seat it is addressed to, 
     ['Bo', ['W-6']],
     ['Builder (session 1)', ['W-12']],
     ['Builder (session 2)', ['W-10', 'W-7']],
+    // Unassigned is last even after a name that sorts after it.
+    ['Zoe', ['W-16']],
     ['unassigned', ['W-9']],
   ]);
-  assert.equal(actions.count, 8);
+  assert.equal(actions.count, 9);
   const rows = new Map(actions.groups.flatMap(group => group.rows).map(row => [row.id, row]));
   assert.deepEqual(rows.get('W-1'), { id: 'W-1', kind: 'work', projectName: 'Operations', title: 'Rotate the keys',
     state: 'active', ask: 'Approve the rotation window',
@@ -327,13 +349,14 @@ test('actions group every open action by the person or seat it is addressed to, 
   assert.equal(rows.get('W-9').line, 'next: unassigned — Pick an owner · Finance · Ready');
   assert.equal(rows.get('W-12').line, 'next: Builder (session 1) — Review ⏎ the patch · Operations · Active');
   // A blocked wait with no recipient is nobody's action; done, reported and action-less rows are not actions.
-  for (const id of ['W-8', 'W-11', 'W-4', 'W-2', 'W-5', 'W-13']) assert.equal(rows.has(id), false, id);
+  // A whitespace-only next action is no action.
+  for (const id of ['W-8', 'W-11', 'W-4', 'W-2', 'W-5', 'W-13', 'W-15']) assert.equal(rows.has(id), false, id);
 });
 
 test('the actions count is distinct records, and an empty brief has no groups', () => {
   const doubled = Object.assign({}, ACTIONS_BRIEF, { open: [WORK_ROW, ...ACTIONS_BRIEF.open] });
   const actions = actionsByPerson(doubled);
-  assert.equal(actions.count, 8);
+  assert.equal(actions.count, 9);
   assert.deepEqual(actions.groups[0].rows.map(row => row.id), ['W-1', 'W-14', 'W-3']);
   assert.deepEqual(actionsByPerson(Object.assign({}, BRIEF, { open: [], decisions: [] })), { count: 0, groups: [] });
 });

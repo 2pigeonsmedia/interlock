@@ -163,7 +163,8 @@
     element('actions-count').textContent = String(actions.count);
     element('actions-list').replaceChildren(...actions.groups.map(group => {
       const block = make('div', 'work-group');
-      block.append(make('h4', 'work-state', group.who + ' · ' + group.rows.length));
+      // Names render as stored: the muted facts style, not the uppercase state style.
+      block.append(make('h4', 'work-tree-facts', group.who + ' · ' + group.rows.length));
       for (const row of group.rows) {
         const card = make('div', 'work-row');
         card.append(
