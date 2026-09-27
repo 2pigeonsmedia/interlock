@@ -12,6 +12,7 @@
   const CHANGES_PAGE_MAX = 500;
   const PROJECT_LIMIT = 200;
   const UNKNOWN_ITEM = "This record is not in the room's work record (unknown-item).";
+  const WORK_STATE_CHOICES = Object.freeze(['open', 'active', 'blocked', 'ready', 'done']);
 
   let session = null;
 
@@ -79,7 +80,7 @@
     element('needs-you-list').replaceChildren(...needs.rows.map(row => {
       const card = make('div', 'work-row');
       card.append(
-        openButton('work-open', row.title, row.action + ' ' + row.id, () => openItem(row.id)),
+        openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, () => openItem(row.id)),
         make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting),
         make('p', '', row.ask + ' — asked by ' + row.askedBy),
       );
@@ -92,7 +93,7 @@
     element('reported-list').replaceChildren(...model().reportedToYou(brief).map(row => {
       const card = make('div', 'work-row');
       card.append(
-        openButton('work-open', row.title, 'Open ' + row.id, () => openItem(row.id)),
+        openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id)),
         make('p', 'work-state', row.id + ' · ' + stampOf(row.at)),
         make('p', '', model().reportedLabel(answers.get(row.id))),
       );
@@ -103,8 +104,8 @@
   function renderProjects(brief) {
     element('project-list').replaceChildren(...model().projectSummaries(brief).map(project => {
       const card = make('div', 'work-row');
-      card.append(openButton('work-open-project', project.display_name, 'Open project ' + project.id,
-        () => openProject(project.id)));
+      card.append(openButton('work-open-project', project.display_name,
+        'Open project ' + project.id + ': ' + project.display_name, () => openProject(project.id)));
       card.append(make('p', 'work-state',
         'open ' + project.open + ' · blocked ' + project.blocked + ' · ready ' + project.ready +
         ' · awaiting ' + project.awaiting));
@@ -185,6 +186,10 @@
 
   function setStatus(text) {
     element('work-status').textContent = text;
+  }
+
+  function staleWords(revision) {
+    return 'This record changed (now revision ' + revision + '). Review it and try again.';
   }
 
   async function refresh() {
@@ -320,6 +325,342 @@
       ...model().historyLines(result.history).map(line => make('p', '', line)));
   }
 
+  // ── writes ──────────────────────────────────────────────────────────────
+
+  // Re-reads the record a stale write aimed at, shows it, and says which
+  // revision it is now.
+  async function staleNotice(op, id, status) {
+    const state = session;
+    try {
+      if (op.startsWith('projects/')) {
+        await loadBrief();
+        if (!current(state)) return;
+        const project = state.brief.projects.find(row => row.id === id);
+        await openProject(id);
+        if (current(state)) status.textContent = project ? staleWords(project.revision) : model().errorWords('stale-revision');
+      } else {
+        const fresh = await workGet('/api/work/items/' + encodeURIComponent(id));
+        if (!current(state)) return;
+        await openItem(id);
+        if (current(state)) status.textContent = staleWords(fresh.item.revision);
+      }
+    } catch (error) {
+      if (current(state)) status.textContent = model().errorWords(error.code);
+    }
+  }
+
+  // Every write: a fresh operation id, the page's ordinary mutation, a
+  // refusal in words where the form is, and a refresh on success. Resolves to
+  // the result, or null when the write did not happen.
+  async function write(op, body, status) {
+    const state = session;
+    if (!state) return null;
+    const where = status || element('work-drawer-status');
+    let result;
+    try {
+      result = await state.deps.mutate('/api/work/' + op, Object.assign({ operation_id: crypto.randomUUID() }, body));
+    } catch (error) {
+      if (!current(state)) return null;
+      if (error.status === 401 || error.code === 'not-authenticated') state.deps.onSessionEnded();
+      else if (error.code === 'stale-revision' && typeof body.id === 'string') await staleNotice(op, body.id, where);
+      else where.textContent = model().errorWords(error.code);
+      return null;
+    }
+    if (!current(state)) return null;
+    where.textContent = '';
+    refresh();
+    return result;
+  }
+
+  // ── forms ───────────────────────────────────────────────────────────────
+
+  function control(tag, name, labelText, options = {}) {
+    const node = document.createElement(tag);
+    node.name = name;
+    if (tag === 'input') node.type = options.type || 'text';
+    if (options.required) node.required = true;
+    if (tag === 'textarea') node.rows = options.rows || 3;
+    const label = make('label', 'work-field', labelText);
+    if (node.type === 'checkbox') label.prepend(node);
+    else label.append(node);
+    if (options.value !== undefined && node.type !== 'checkbox') node.value = options.value;
+    return { label, node };
+  }
+
+  function choice(name, labelText, options, selected) {
+    const field = control('select', name, labelText);
+    for (const option of options) {
+      const node = make('option', '', option.text);
+      node.value = option.value;
+      if (option.value === selected) node.selected = true;
+      field.node.append(node);
+    }
+    return field;
+  }
+
+  // Participants by the name a body addresses them with; `keep` is the
+  // current recipient, listed even after they left so a form never drops
+  // them by accident.
+  function participantOptions(first, keep) {
+    const seen = new Set();
+    const options = first ? [first] : [];
+    for (const row of (keep ? [keep] : []).concat(session.deps.participants())) {
+      const name = model().who(row);
+      if (seen.has(name)) continue;
+      seen.add(name);
+      options.push({ value: name, text: name });
+    }
+    return options;
+  }
+
+  function optionalValue(value) {
+    return value.trim() === '' ? undefined : value;
+  }
+
+  function actionForm(className, fields, submitText, onSubmit) {
+    const form = make('form', 'work-form ' + className);
+    for (const field of fields) form.append(field.label || field);
+    const submit = make('button', 'primary-action', submitText);
+    submit.type = 'submit';
+    form.append(submit);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      submit.disabled = true;
+      try {
+        await onSubmit();
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    return form;
+  }
+
+  // One button per act; a click reveals that act's form in the slot below
+  // the buttons, so a write always takes a second, deliberate click.
+  function actionButton(buttons, slot, text, item, build) {
+    const button = make('button', 'quiet-action', text);
+    button.type = 'button';
+    button.setAttribute('aria-label', text + ' ' + item.id + ': ' + item.title);
+    button.addEventListener('click', () => {
+      slot.replaceChildren(...build());
+      const first = slot.querySelector('input, textarea, select, button');
+      if (first) first.focus();
+    });
+    buttons.append(button);
+    return button;
+  }
+
+  function isMe(ref) {
+    return Boolean(ref) && ref.kind === 'person' && ref.name === session.user.name;
+  }
+
+  function isOwner() {
+    return Array.isArray(session.user.roles) && session.user.roles.includes('owner');
+  }
+
+  // After a decision write: the tile and the item re-read.
+  async function afterDecisionWrite(result, item) {
+    const state = session;
+    try {
+      await loadBrief();
+    } catch (_) {
+      // The poll reports a failed read; the write itself succeeded.
+    }
+    if (!current(state)) return;
+    await openItem(item.id);
+  }
+
+  function answerFields(withReason) {
+    const fields = [control('textarea', 'text', 'Answer', { required: true })];
+    fields.push(control('input', 'conditions', 'Conditions (optional)'));
+    if (withReason) fields.push(control('input', 'reason', 'Reason for the correction', { required: true }));
+    return fields;
+  }
+
+  function answerForm(item, withReason) {
+    const fields = answerFields(withReason);
+    const [text, conditions, reason] = fields;
+    const parts = [];
+    parts.push(make('p', 'work-proposal', item.proposal ? 'Proposal: ' + item.proposal : 'No proposal was written.'));
+    parts.push(actionForm('work-answer', fields, withReason ? 'Record corrected answer' : 'Record answer', async () => {
+      const body = { id: item.id, expected_revision: item.revision, text: text.node.value };
+      if (optionalValue(conditions.node.value) !== undefined) body.conditions = conditions.node.value;
+      if (reason) body.reason = reason.node.value;
+      const result = await write('decisions/answer', body);
+      if (result) await afterDecisionWrite(result, item);
+    }));
+    return parts;
+  }
+
+  function reportForm(item) {
+    const text = control('textarea', 'text', 'The exact words of the answer', { required: true });
+    const source = control('input', 'source', 'Where it was given', { required: true });
+    const conditions = control('input', 'conditions', 'Conditions (optional)');
+    return [
+      make('p', '', 'The record will show you reported it, attributed to ' + model().who(item.asked_of) +
+        ', not confirmed here.'),
+      actionForm('work-report', [text, source, conditions], 'Record reported answer', async () => {
+        const body = { id: item.id, expected_revision: item.revision, text: text.node.value, source: source.node.value };
+        if (optionalValue(conditions.node.value) !== undefined) body.conditions = conditions.node.value;
+        const result = await write('decisions/report', body);
+        if (result) await afterDecisionWrite(result, item);
+      }),
+    ];
+  }
+
+  function confirmForm(item) {
+    const reason = control('input', 'reason', 'Note (optional)');
+    return [actionForm('work-confirm', [reason], 'Confirm', async () => {
+      const body = { id: item.id, expected_revision: item.revision };
+      if (optionalValue(reason.node.value) !== undefined) body.reason = reason.node.value;
+      const result = await write('decisions/confirm', body);
+      if (result) await afterDecisionWrite(result, item);
+    })];
+  }
+
+  function withdrawForm(item) {
+    const reason = control('input', 'reason', 'Reason', { required: true });
+    return [actionForm('work-withdraw', [reason], 'Withdraw question', async () => {
+      const result = await write('decisions/withdraw', { id: item.id, expected_revision: item.revision, reason: reason.node.value });
+      if (result) await afterDecisionWrite(result, item);
+    })];
+  }
+
+  function reopenForm(item) {
+    const reason = control('input', 'reason', 'Reason', { required: true });
+    const askedOf = choice('asked_of', 'Ask', participantOptions({ value: '', text: 'Keep ' + model().who(item.asked_of) }), '');
+    return [actionForm('work-reopen', [reason, askedOf], 'Reopen question', async () => {
+      const body = { id: item.id, expected_revision: item.revision, reason: reason.node.value };
+      if (askedOf.node.value !== '') body.asked_of = askedOf.node.value;
+      const result = await write('decisions/reopen', body);
+      if (result) await afterDecisionWrite(result, item);
+    })];
+  }
+
+  function renderDecisionActions(buttons, slot, item) {
+    if (item.state === 'awaiting') {
+      if (isMe(item.asked_of)) actionButton(buttons, slot, 'Answer', item, () => answerForm(item, false));
+      else actionButton(buttons, slot, 'Report an answer given elsewhere', item, () => reportForm(item));
+    }
+    if (item.state === 'reported' && isMe(item.answer.attributed_to)) {
+      buttons.before(make('p', '', 'An answer was reported for you and is not confirmed here until you confirm or correct it.'));
+      actionButton(buttons, slot, 'Confirm as my answer', item, () => confirmForm(item));
+      actionButton(buttons, slot, 'Correct', item, () => answerForm(item, true));
+    }
+    if (isMe(item.asked_by) || isOwner()) {
+      if (item.state === 'awaiting' || item.state === 'reported') {
+        actionButton(buttons, slot, 'Withdraw', item, () => withdrawForm(item));
+      }
+      if (item.state !== 'awaiting') actionButton(buttons, slot, 'Reopen', item, () => reopenForm(item));
+    }
+  }
+
+  function evidenceLabel(entry) {
+    return '#' + entry.seq + ' · ' + entry.target + ' · ' + entry.observed;
+  }
+
+  // Shows the fields the chosen state needs and hides the rest.
+  function showStateFields(stateField, groups) {
+    for (const [name, fields] of Object.entries(groups)) {
+      for (const field of fields) field.label.hidden = stateField.node.value !== name;
+    }
+  }
+
+  function updateForm(item, evidence) {
+    const state = choice('state', 'State', WORK_STATE_CHOICES.map(value => ({
+      value, text: model().stateLabel({ kind: item.kind, state: value }),
+    })), item.state);
+    const blockReason = control('input', 'block_reason', 'What it is waiting on', { value: item.block_reason });
+    const nextTo = choice('next_to', 'Next action for',
+      participantOptions({ value: '', text: 'Nobody' }, item.next_to), item.next_to ? model().who(item.next_to) : '');
+    const nextAction = control('input', 'next_action', 'Next action', { value: item.next_action });
+    const doneAccount = control('textarea', 'done_account', 'What was done', { value: item.done_account });
+    const doneEvidence = choice('done_evidence', 'Evidence for done',
+      [{ value: '', text: 'Choose an evidence entry' }].concat(evidence.map(entry => ({
+        value: String(entry.seq), text: evidenceLabel(entry),
+      }))), '');
+    const noEvidence = control('input', 'no_evidence', 'No evidence attached', { type: 'checkbox' });
+    const target = control('input', 'target', 'Target', { value: item.target });
+    const title = control('input', 'title', 'Title', { value: item.title, required: true });
+    const bodyField = control('textarea', 'body', 'Details', { value: item.body, required: true });
+    const note = control('input', 'note', 'Note on this change', { required: true });
+    const doneFields = evidence.length ? [doneAccount, doneEvidence, noEvidence] : [doneAccount, noEvidence];
+    const groups = { blocked: [blockReason], done: item.state === 'done' ? [doneAccount] : doneFields };
+    state.node.addEventListener('change', () => showStateFields(state, groups));
+    showStateFields(state, groups);
+    const fields = [state, blockReason, nextTo, nextAction].concat(doneFields, [target, title, bodyField, note]);
+    if (item.state === 'done') { doneEvidence.label.hidden = true; noEvidence.label.hidden = true; }
+    return [actionForm('work-update', fields, 'Save update', async () => {
+      const body = { id: item.id, expected_revision: item.revision, note: note.node.value };
+      const chosen = state.node.value;
+      if (chosen !== item.state) body.state = chosen;
+      if (chosen === 'blocked') body.block_reason = blockReason.node.value;
+      const nextName = nextTo.node.value;
+      const currentNext = item.next_to ? model().who(item.next_to) : '';
+      if (nextName !== currentNext) body.next_to = nextName === '' ? null : nextName;
+      if (nextAction.node.value !== item.next_action) body.next_action = nextAction.node.value;
+      if (chosen === 'done') {
+        body.done_account = doneAccount.node.value;
+        if (item.state !== 'done') {
+          if (noEvidence.node.checked && doneEvidence.node.value !== '') {
+            element('work-drawer-status').textContent = 'Choose an evidence entry or No evidence attached, not both.';
+            return;
+          }
+          if (noEvidence.node.checked) body.no_evidence = true;
+          else if (doneEvidence.node.value !== '') body.done_evidence = Number(doneEvidence.node.value);
+          else {
+            element('work-drawer-status').textContent = 'Choose an evidence entry or No evidence attached.';
+            return;
+          }
+        }
+      }
+      for (const [field, value] of [[target, item.target], [title, item.title], [bodyField, item.body]]) {
+        if (field.node.value !== value) body[field.node.name] = field.node.value;
+      }
+      const result = await write('items/update', body);
+      if (result) await openItem(item.id);
+    })];
+  }
+
+  function evidenceForm(item) {
+    const target = control('input', 'target', 'Target examined', { value: item.target, required: true });
+    const observed = control('textarea', 'observed', 'What was observed', { required: true });
+    const reference = control('input', 'reference', 'Reference', { required: true });
+    const limits = control('textarea', 'limits', 'What it does not show', { required: true });
+    return [actionForm('work-evidence', [target, observed, reference, limits], 'Attach', async () => {
+      const result = await write('items/evidence', {
+        id: item.id, target: target.node.value, observed: observed.node.value,
+        reference: reference.node.value, limits: limits.node.value,
+      });
+      if (result) await openItem(item.id);
+    })];
+  }
+
+  function noteForm(item) {
+    const text = control('textarea', 'text', 'Note', { required: true });
+    return [actionForm('work-note', [text], 'Add note', async () => {
+      const result = await write('items/note', { id: item.id, text: text.node.value });
+      if (result) await openItem(item.id);
+    })];
+  }
+
+  function renderWorkActions(buttons, slot, item, evidence) {
+    actionButton(buttons, slot, 'Update', item, () => updateForm(item, evidence));
+    actionButton(buttons, slot, 'Attach evidence', item, () => evidenceForm(item));
+    actionButton(buttons, slot, 'Add note', item, () => noteForm(item));
+  }
+
+  function renderDrawerActions(result) {
+    const item = result.item;
+    const section = element('work-drawer-actions');
+    const buttons = make('div', 'work-action-buttons');
+    const slot = make('div', 'work-action-form');
+    section.append(buttons, slot);
+    if (item.kind === 'decision') renderDecisionActions(buttons, slot, item);
+    else renderWorkActions(buttons, slot, item, result.evidence);
+    if (item.kind === 'decision') actionButton(buttons, slot, 'Add note', item, () => noteForm(item));
+  }
+
   async function openItem(id) {
     const state = session;
     if (!state) return;
@@ -343,6 +684,7 @@
     const item = result.item;
     clearDrawer(item.id + ' · ' + item.title, projectName(state, item.project));
     renderDrawerState(state, result);
+    renderDrawerActions(result);
     renderDrawerSource(result);
     renderDrawerHistory(result);
     showDrawer();
@@ -350,7 +692,7 @@
 
   function renderTreeRow(row, label) {
     const entry = make('li');
-    entry.append(openButton('work-open', label, 'Open ' + row.id, () => openItem(row.id)));
+    entry.append(openButton('work-open', label, 'Open ' + row.id + ': ' + label, () => openItem(row.id)));
     entry.append(make('span', 'work-state', ' ' + row.id + ' · ' + model().stateLabel(row)));
     return entry;
   }

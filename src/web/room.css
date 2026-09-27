@@ -1016,6 +1016,20 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
 .work-tree .work-tree { margin: 6px 0 0 10px; padding-left: 12px; border-left: 1px solid var(--line); }
 .work-tree .work-open { display: inline-block; width: auto; max-width: 100%; }
 .work-change { padding: 4px 0; font-size: 0.8rem; color: var(--ink-2); overflow-wrap: anywhere; }
+.work-action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.work-form { display: grid; gap: 7px; margin-top: 12px; }
+.work-field { display: grid; gap: 4px; font-size: 0.8rem; font-weight: 600; color: var(--ink-3); }
+.work-field:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: 6px; font-weight: 400; color: var(--ink-2); }
+.work-form input:not([type="checkbox"]), .work-form select, .work-form textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--tile-edge);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  font-weight: 400;
+  color: var(--ink);
+}
+.work-form > button { justify-self: start; }
 
 @media (max-width: 760px) {
   .room-layout { grid-template-columns: 1fr; }

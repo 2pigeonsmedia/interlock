@@ -192,3 +192,13 @@ test('the work panel renders with text only, names the unknown record, and start
   assert.match(ROOM_JS, /InterlockWorkPanel\.start\(/);
   assert.match(ROOM_JS, /InterlockWorkPanel\.stop\(\)/);
 });
+
+test('the work panel writes through deliberate forms', () => {
+  for (const words of [/Record answer/, /Report an answer given elsewhere/, /Confirm as my answer/,
+    /No evidence attached/, /not confirmed here/]) {
+    assert.match(WORK_PANEL_JS, words);
+  }
+  // Label in name: an action button's accessible name is "<action> <id>: <title>".
+  assert.match(WORK_PANEL_JS, /row\.action \+ ' ' \+ row\.id \+ ': ' \+ row\.title/);
+  assert.match(WORK_PANEL_JS, /text \+ ' ' \+ item\.id \+ ': ' \+ item\.title/);
+});
