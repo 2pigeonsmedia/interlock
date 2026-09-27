@@ -968,7 +968,7 @@ function createWorkService(options) {
         }
       } else {
         lines.push('- responsible: ' + who(item.responsible) + ' · next: ' + (item.next_to ? who(item.next_to) + ' — ' + oneLine(item.next_action) : 'nobody') +
-          ' · target: ' + (oneLine(item.target) || 'none') + (item.block_reason ? ' · blocked: ' + oneLine(item.block_reason) : '') +
+          ' · target: ' + (oneLine(item.target) || 'none') + (item.state === 'blocked' && item.block_reason ? ' · blocked: ' + oneLine(item.block_reason) : '') +
           (item.done_account ? ' · done: ' + oneLine(item.done_account) +
             (item.state === 'done' ? (item.done_without_evidence ? ' · no evidence attached' : ' · evidence entry ' + item.done_evidence) : '') : '') +
           (item.consequence ? ' · consequence: ' + oneLine(item.consequence) : '') + (item.severity ? ' · severity: ' + item.severity : ''));

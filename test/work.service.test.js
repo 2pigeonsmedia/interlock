@@ -861,3 +861,16 @@ test('evidence from a room message keeps the capture, credits the speaker in the
     }), 'invalid-source');
   }
 });
+
+test('an export names a block reason only while the item is blocked', () => {
+  const { work } = fresh();
+  const item = newWork(work, lead);
+  work.updateWork(lead, { operation_id: uuid(), id: item.id, expected_revision: 1, state: 'blocked', block_reason: 'Waiting on the bank.', note: 'stuck' });
+  const itemLine = () => work.exportRecords(owner, { format: 'md' }).body.split('\n').find(line => line.startsWith('- responsible: '));
+  assert.match(itemLine(), / · blocked: Waiting on the bank\./);
+  work.updateWork(lead, { operation_id: uuid(), id: item.id, expected_revision: 2, state: 'done', done_account: 'Imported.',
+    no_evidence: true, note: 'finished' });
+  assert.doesNotMatch(itemLine(), /blocked:/);
+  assert.match(itemLine(), / · done: Imported\./);
+  code(() => work.updateWork(lead, { operation_id: uuid(), id: item.id, expected_revision: 3, title: 'x' }), 'invalid-note');
+});
