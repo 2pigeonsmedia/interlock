@@ -269,3 +269,16 @@ test('closing the drawer returns focus to the row that opened it, even after a p
   assert.match(WORK_PANEL_JS, /querySelectorAll\('button\[data-id\]'\)/);
   assert.match(WORK_PANEL_JS, /function restoreOpenerFocus[\s\S]*?element\('needs-you-toggle'\)\.focus\(\)/);
 });
+
+test('between 761 and 1000 px the header wraps and the tiles stay three columns, Conversation wider than Work', () => {
+  assert.match(ROOM_CSS, /@media \(max-width: 1000px\)[\s\S]*\.room-actions[^}]*flex-wrap: wrap/);
+  const narrow = /@media \(max-width: 1000px\) \{([^@]*)\}/.exec(ROOM_CSS);
+  assert.ok(narrow, 'the 1000 px block must exist');
+  assert.match(narrow[1], /\.room-header \{[^}]*flex-wrap: wrap/);
+  assert.match(narrow[1], /\.room-layout \{[^}]*grid-template-columns: 200px minmax\(0, 3fr\) minmax\(0, 2fr\)/);
+  assert.doesNotMatch(narrow[1], /--wait|--ember|--signal|--ai\b|--owner/);
+  // The one-column rule below 760 px must come later in the cascade.
+  assert.ok(ROOM_CSS.indexOf('@media (max-width: 1000px)') < ROOM_CSS.lastIndexOf('@media (max-width: 760px)'),
+    'the 760 px one-column rule must follow the 1000 px block');
+  assert.match(ROOM_CSS.slice(ROOM_CSS.lastIndexOf('@media (max-width: 760px)')), /\.room-layout \{ grid-template-columns: 1fr; \}/);
+});

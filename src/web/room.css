@@ -1031,6 +1031,16 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
 }
 .work-form > button { justify-self: start; }
 
+/* Between 761 and 1000 px the header's groups wrap instead of pushing the page
+ * sideways, and the tiles stay three columns with a narrower People column so
+ * Conversation stays wider than Work. Below 760 px the one-column rule that
+ * follows takes over. */
+@media (max-width: 1000px) {
+  .room-header { flex-wrap: wrap; }
+  .room-actions { flex-wrap: wrap; }
+  .room-layout { grid-template-columns: 200px minmax(0, 3fr) minmax(0, 2fr); }
+}
+
 @media (max-width: 760px) {
   .room-layout { grid-template-columns: 1fr; }
   .work { order: 3; }
