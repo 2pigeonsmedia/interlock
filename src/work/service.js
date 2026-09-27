@@ -923,10 +923,18 @@ function createWorkService(options) {
     }
     if (event.before && event.after) {
       for (const field of Object.keys(event.before)) {
-        parts.push(field + ': ' + JSON.stringify(event.before[field]) + ' → ' + JSON.stringify(event.after[field]));
+        parts.push(field + ': ' + changedValue(event.before[field]) + ' → ' + changedValue(event.after[field]));
       }
     }
     return '- ' + parts.join(' · ');
+  }
+
+  // A replaced value in a history line: a participant as name and session
+  // (never its opaque id), text on one line, anything else as JSON.
+  function changedValue(value) {
+    if (validRef(value)) return who(value);
+    if (typeof value === 'string') return oneLine(value);
+    return JSON.stringify(value);
   }
 
   function markdownExport(draft, exportedAt) {

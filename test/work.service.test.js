@@ -649,6 +649,18 @@ test('a ref keeps the session discriminator of the participant it names, through
   assert.ok(work.exportRecords(owner, { format: 'md' }).body.includes('Builder (session 2)'));
 });
 
+test('a changed participant exports as name and session, never as its opaque id', () => {
+  const { work } = fresh();
+  const second = { subject_id: 's-9', name: 'Builder', kind: 'seat', session: 2 };
+  const item = newWork(work, lead, { next_to: ref(lead), next_action: 'Prepare.' });
+  work.updateWork(lead, { operation_id: uuid(), id: item.id, expected_revision: 1, next_to: second, note: 'handing over' });
+  const markdown = work.exportRecords(owner, { format: 'md' }).body;
+  assert.doesNotMatch(markdown, /subject_id/);
+  const updated = markdown.split('\n').filter(line => line.includes(' · updated · '));
+  assert.equal(updated.length, 1);
+  assert.ok(updated[0].endsWith(' · handing over · next_to: Lead → Builder (session 2)'), updated[0]);
+});
+
 // ── second review (Codex) ─────────────────────────────────────────────────────
 
 test('history keeps the values a change replaced, and creation records the initial fields', () => {

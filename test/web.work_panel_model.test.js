@@ -259,7 +259,7 @@ const EVENTS = Object.freeze([
 
 test('history lines match the export event rules', () => {
   assert.deepEqual(historyLines(EVENTS), [
-    `${STAMP} · Builder (session 2) · state-changed · active → done · rotated · state: "active" → "done" · done_account: "" → "Keys rotated"`,
+    `${STAMP} · Builder (session 2) · state-changed · active → done · rotated · state: active → done · done_account:  → Keys rotated`,
     `${STAMP} · Builder (session 1) · answer-reported · Yes · source: call on Monday · attributed to Ana · reported by Builder (session 1), not confirmed here`,
     `${STAMP} · Lead · shared · exposure · sent as #57 to Ana · a send receipt is not proof of reading`,
     `${STAMP} · Lead · shared · notify · declined · to Ana`,
@@ -292,7 +292,9 @@ test('history lines agree byte for byte with the service export', () => {
     work.share(lead, { operation_id: op(), id: item.id, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: 57 });
     work.share(lead, { operation_id: op(), id: item.id, purpose: 'notify', outcome: 'declined', to: 'Ana' });
     work.share(lead, { operation_id: op(), id: item.id, purpose: 'notify', outcome: 'failed', to: 'Ana', detail: 'offline' });
-    work.updateWork(builder, { operation_id: op(), id: item.id, expected_revision: 2, state: 'done',
+    work.updateWork(builder, { operation_id: op(), id: item.id, expected_revision: 2, responsible: refOf(builder),
+      next_to: refOf(lead), next_action: 'Review it', note: 'handing over' });
+    work.updateWork(builder, { operation_id: op(), id: item.id, expected_revision: 3, state: 'done',
       done_account: 'Rotated.', no_evidence: true, note: 'finished' });
     const decision = work.createItem(builder, { operation_id: op(), kind: 'decision', project: 'ops', title: 'Pick',
       body: 'Which bank', asked_of: refOf(owner), proposal: 'Credit union' }).item;
@@ -309,6 +311,9 @@ test('history lines agree byte for byte with the service export', () => {
       assert.ok(history.length >= 3);
       assert.deepEqual(historyLines(history), expected);
     }
+    assert.ok(exported.some(line => line.endsWith(' · responsible: null → Builder (session 2) · next_to: Builder (session 2) → Lead (session 1) · ' +
+      'next_action: Do it → Review it')), 'a changed participant reads as name and session');
+    assert.equal(exported.join('\n').includes('subject_id'), false);
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }

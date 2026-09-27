@@ -354,8 +354,12 @@ test('work records ride the existing identity and survive a clear, a restart and
     assert.equal(promotedDetail.status, 200, promotedDetail.text);
     assert.ok(promotedDetail.json.history.some(event => event.kind === 'shared' && event.message_id === exposureId),
       'the history carries the share with its message id');
+    const handed = await post(runtime, '/api/work/items/update',
+      { operation_id: uuid(), id: 'W-1', expected_revision: 2, responsible: 'Ana', note: 'the owner holds it' }, owner);
+    assert.equal(handed.status, 200, handed.text);
     const sharedExport = await get(runtime, '/api/work/export?format=md', owner);
     assert.equal(sharedExport.status, 200, sharedExport.text);
+    assert.equal(sharedExport.text.includes('subject_id'), false, 'a changed participant never exports its opaque id');
     assert.ok(sharedExport.text.includes('sent as #' + exposureId), 'the export names the sent message');
 
     const evidenceFromRoom = await aiPost(runtime, '/api/ai/work/items/evidence', {
@@ -393,7 +397,7 @@ test('work records ride the existing identity and survive a clear, a restart and
     owner = await login(runtime, password);
     const afterRestart = await get(runtime, '/api/work/items/W-1', owner);
     assert.equal(afterRestart.status, 200, afterRestart.text);
-    assert.equal(afterRestart.json.item.revision, 2);
+    assert.equal(afterRestart.json.item.revision, 3);
   } finally {
     await runtime.close();
   }

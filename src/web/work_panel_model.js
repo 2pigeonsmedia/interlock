@@ -199,10 +199,23 @@
     }
     if (event.before && event.after) {
       for (const field of Object.keys(event.before)) {
-        parts.push(field + ': ' + JSON.stringify(event.before[field]) + ' → ' + JSON.stringify(event.after[field]));
+        parts.push(field + ': ' + changedValue(event.before[field]) + ' → ' + changedValue(event.after[field]));
       }
     }
     return parts.join(' · ');
+  }
+
+  // The work service's changedValue. Refs here carry no subject id, so a ref
+  // is an object with a name and a participant kind; it renders the same way.
+  function changedValue(value) {
+    if (isRef(value)) return who(value);
+    if (typeof value === 'string') return oneLine(value);
+    return JSON.stringify(value);
+  }
+
+  function isRef(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      typeof value.name === 'string' && (value.kind === 'person' || value.kind === 'seat');
   }
 
   function historyLines(events) {
