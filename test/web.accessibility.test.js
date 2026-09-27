@@ -242,9 +242,9 @@ test('a write with no error code reads as unavailable, and an open form keeps on
   assert.match(WORK_PANEL_JS, /const operationId = operation \? operation\.id : crypto\.randomUUID\(\);/);
   assert.match(WORK_PANEL_JS, /if \(operation\) operation\.id = crypto\.randomUUID\(\);/);
   const forms = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+'/g);
-  const threaded = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+', [^\n]*async operation => \{/g);
+  const wired = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+', [^\n]*async operation => \{/g);
   assert.equal(forms.length, 9);
-  assert.equal(threaded.length, forms.length, 'every form hands its operation to its write');
+  assert.equal(wired.length, forms.length, 'every form hands its operation to its write');
   assert.equal((WORK_PANEL_JS.match(/, null, operation\)/g) || []).length, forms.length);
   assert.match(WORK_PANEL_JS, /write\(op, body, element\('work-create-status'\), state\.createOperation\)/);
   assert.match(WORK_PANEL_JS, /addEventListener\('input', renewCreateOperation/);
