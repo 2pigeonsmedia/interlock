@@ -103,6 +103,8 @@ function createWorkRoutes(options) {
     const entry = MUTATIONS[op];
     if (!entry) return refusal(404, 'not-found');
     if (!plainObject(body)) return refusal(400, 'invalid-request');
+    // raw_digest is the route's own field; a body may never carry it.
+    if (Object.prototype.hasOwnProperty.call(body, 'raw_digest')) return refusal(400, 'invalid-request');
     const input = Object.assign({}, body);
     try {
       // Recognise a retry from the request as sent, before names resolve, so

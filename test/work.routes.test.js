@@ -3,7 +3,13 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const { createWorkRoutes } = require('../src/work/routes.js');
+const { createWorkService } = require('../src/work/service.js');
+const { openWorkStore } = require('../src/work/store.js');
 
 function fakeService() {
   const calls = [];
@@ -128,4 +134,62 @@ test('a retry whose recipient has since left the room replays the original resul
   const changed = routes.mutate('items/create', actor, Object.assign({}, body, { title: 'Something else' }));
   assert.equal(changed.status, 409);
   assert.equal(changed.body.error, 'operation-conflict');
+});
+
+test('a body carrying raw_digest is refused before any digest or resolution', () => {
+  let rosterCalls = 0;
+  const counted = () => { rosterCalls += 1; return roster(); };
+  let replays = 0;
+  const service = fakeService();
+  service.replay = () => { replays += 1; return null; };
+  const routes = createWorkRoutes({ work: service, participants: counted });
+  const smuggled = routes.mutate('items/create', actor, {
+    operation_id: '9b2f6c1e-4d3a-4b5c-8e7f-0a1b2c3d4e5f', kind: 'work', project: 'ops',
+    title: 'Hand over', body: 'To Lead.', next_to: 'Lead', raw_digest: 'SMUGGLED',
+  });
+  assert.equal(smuggled.status, 400, JSON.stringify(smuggled.body));
+  assert.equal(smuggled.body.error, 'invalid-request');
+  assert.equal(rosterCalls, 0, 'the roster is not consulted');
+  assert.equal(replays, 0, 'replay is not asked');
+  assert.equal(service.calls.length, 0, 'the service op is not called');
+});
+
+test('over the real service, a retry whose recipient has left the room replays the stored result', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-work-routes-'));
+  const store = openWorkStore({ dataDir });
+  const lists = [
+    [
+      { subject_id: 'p-1', name: 'Ana', kind: 'person', session: null },
+      { subject_id: 's-1', name: 'Lead', kind: 'seat', session: 3 },
+      { subject_id: 's-2', name: 'Builder', kind: 'seat', session: 1 },
+    ],
+    [
+      { subject_id: 'p-1', name: 'Ana', kind: 'person', session: null },
+      { subject_id: 's-1', name: 'Lead', kind: 'seat', session: 3 },
+    ],
+  ];
+  let rosterCalls = 0;
+  const changingRoster = () => lists[Math.min(rosterCalls++, lists.length - 1)];
+  const routes = createWorkRoutes({ work: createWorkService({ store }), participants: changingRoster });
+  const operationId = '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f';
+  const body = {
+    operation_id: operationId, kind: 'work', project: 'ops', title: 'Hand over', body: 'To Builder.',
+    next_to: 'Builder', next_action: 'Pick up the import.',
+  };
+  const first = routes.mutate('items/create', actor, body);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  const entry = store.read().operations[operationId];
+  assert.match(entry.raw_digest, /^[0-9a-f]{64}$/, 'the route digest is stored beside the resolved one');
+  assert.match(entry.digest, /^[0-9a-f]{64}$/);
+  const retry = routes.mutate('items/create', actor, Object.assign({}, body));
+  assert.equal(retry.status, 200, JSON.stringify(retry.body));
+  assert.deepEqual(retry.body, Object.assign({}, first.body, { replayed: true }));
+  assert.deepEqual(retry.body.item.next_to, { name: 'Builder', kind: 'seat', session: 1 });
+  assert.equal(rosterCalls, 1, 'the retry never consults the roster');
+  const changed = routes.mutate('items/create', actor, Object.assign({}, body, { title: 'Something else' }));
+  assert.equal(changed.status, 409);
+  assert.equal(changed.body.error, 'operation-conflict');
+  const listed = routes.read('list', actor, {});
+  assert.equal(listed.body.items.length, 1);
+  fs.rmSync(dataDir, { recursive: true, force: true });
 });
