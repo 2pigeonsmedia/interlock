@@ -13,6 +13,7 @@
   const PROJECT_LIMIT = 200;
   const UNKNOWN_ITEM = "This record is not in the room's work record (unknown-item).";
   const WORK_STATE_CHOICES = Object.freeze(['open', 'active', 'blocked', 'ready', 'done']);
+  const SHARE_FAILED = 'Update saved; message not sent. Sending again creates a new message.';
 
   let session = null;
 
@@ -199,7 +200,7 @@
     try {
       await loadBrief();
       await loadChanges(false);
-      if (current(state)) setStatus('');
+      if (current(state)) setStatus(state.notice);
     } catch (error) {
       if (current(state)) setStatus(model().errorWords(error.code));
     } finally {
@@ -458,7 +459,9 @@
     return Array.isArray(session.user.roles) && session.user.roles.includes('owner');
   }
 
-  // After a decision write: the tile and the item re-read.
+  // After a decision write: the tile and the item re-read. A result that
+  // carries an exposure draft (a report, or a correction of one) hands the
+  // draft to the composer instead, which closes the drawer.
   async function afterDecisionWrite(result, item) {
     const state = session;
     try {
@@ -467,7 +470,14 @@
       // The poll reports a failed read; the write itself succeeded.
     }
     if (!current(state)) return;
-    await openItem(item.id);
+    if (result.exposure) {
+      await openShare({
+        purpose: 'exposure', to: result.exposure.to, itemId: item.id,
+        text: model().exposureText(result.exposure, state.deps.aiNames()),
+      });
+    } else {
+      await openItem(item.id);
+    }
   }
 
   function answerFields(withReason) {
@@ -659,6 +669,326 @@
     if (item.kind === 'decision') renderDecisionActions(buttons, slot, item);
     else renderWorkActions(buttons, slot, item, result.evidence);
     if (item.kind === 'decision') actionButton(buttons, slot, 'Add note', item, () => noteForm(item));
+    const recipient = item.kind === 'decision' ? (item.state === 'awaiting' ? item.asked_of : null) : item.next_to;
+    if (recipient && !isMe(recipient)) {
+      const notify = make('button', 'quiet-action', 'Notify');
+      notify.type = 'button';
+      notify.setAttribute('aria-label', 'Notify ' + item.id + ': ' + item.title);
+      notify.addEventListener('click', () => notifyShare(item));
+      buttons.append(notify);
+    }
+  }
+
+  // ── sharing through the ordinary composer ───────────────────────────────
+
+  function shareSentence(share) {
+    return share.purpose === 'exposure'
+      ? 'Exposure draft for ' + share.itemId + ', addressed to ' + share.to + ' — send it with the composer, or'
+      : 'Notify ' + share.to + ' about ' + share.itemId + ' — send it with the composer, or';
+  }
+
+  function hideShare() {
+    element('work-share-bar').hidden = true;
+    element('work-share-text').textContent = '';
+  }
+
+  // The composer's own input listener refreshes the mention preview.
+  function setComposer(composer, text) {
+    composer.value = text;
+    composer.dispatchEvent(new Event('input'));
+  }
+
+  function recordShare(share, outcome, extra) {
+    return write('items/share', Object.assign({
+      id: share.itemId, purpose: share.purpose, outcome, to: share.to,
+    }, extra), element('work-status'));
+  }
+
+  // One share is pending at a time: opening another records the first as
+  // declined. The draft is an ordinary message the viewer sends, edits or
+  // declines; the drawer closes so the composer can take focus.
+  async function openShare(share) {
+    const state = session;
+    if (!state) return;
+    const previous = state.share;
+    state.share = share;
+    state.notice = '';
+    setStatus('');
+    const drawer = element('work-drawer');
+    if (drawer.open) drawer.close();
+    setComposer(state.deps.composer, share.text);
+    state.deps.composer.focus();
+    element('work-share-text').textContent = shareSentence(share);
+    element('work-share-bar').hidden = false;
+    if (previous) await recordShare(previous, 'declined');
+  }
+
+  function notifyShare(item) {
+    const recipient = item.kind === 'decision' ? item.asked_of : item.next_to;
+    openShare({
+      purpose: 'notify', to: model().who(recipient), itemId: item.id,
+      text: model().notifyText(item, session.deps.aiNames()),
+    });
+  }
+
+  async function shareSaved(event) {
+    const state = session;
+    const share = state && state.share;
+    if (!share) return;
+    state.share = null;
+    state.notice = '';
+    hideShare();
+    const result = await recordShare(share, 'sent', { message_id: event.detail.id });
+    if (result && current(state) && element('work-drawer').open && state.drawerItem === share.itemId) {
+      await openItem(share.itemId);
+    }
+  }
+
+  // The share stays pending: the draft is still in the composer, and a send
+  // that succeeds later is recorded as sent.
+  async function shareFailed(event) {
+    const state = session;
+    const share = state && state.share;
+    if (!share) return;
+    state.notice = SHARE_FAILED;
+    setStatus(SHARE_FAILED);
+    const result = await recordShare(share, 'failed', { detail: String(event.detail.code) });
+    if (result && current(state)) setStatus(state.notice);
+  }
+
+  async function declineShare() {
+    const state = session;
+    const share = state && state.share;
+    if (!share) return;
+    state.share = null;
+    state.notice = '';
+    setStatus('');
+    hideShare();
+    if (state.deps.composer.value === share.text) setComposer(state.deps.composer, '');
+    await recordShare(share, 'declined');
+  }
+
+  // ── create from a message ───────────────────────────────────────────────
+
+  function fillSelect(select, options, selected) {
+    select.replaceChildren(...options.map(option => {
+      const node = make('option', '', option.text);
+      node.value = option.value;
+      node.selected = option.value === selected;
+      return node;
+    }));
+  }
+
+  function createKind() {
+    return element('work-create-form').querySelector('input[name="kind"]:checked').value;
+  }
+
+  function createLabel(id) {
+    return element('work-create-form').querySelector('label[for="' + id + '"]');
+  }
+
+  function showCreateField(id, shown) {
+    element(id).hidden = !shown;
+    createLabel(id).hidden = !shown;
+  }
+
+  // The kind radios re-prefill from the message. Evidence names what the
+  // message examined and what it does not show; the message is what was
+  // observed. There is no answer field: promoting a message never answers.
+  function applyCreateKind() {
+    const state = session;
+    const message = state && state.createMessage;
+    if (!message) return;
+    const kind = createKind();
+    const prefill = model().messagePrefill(message, kind);
+    const evidence = kind === 'evidence';
+    createLabel('work-create-title').textContent = evidence ? 'Target examined' : 'Title';
+    createLabel('work-create-body').textContent = evidence ? 'What it does not show' : 'Details';
+    element('work-create-title').value = evidence ? prefill.target : prefill.title;
+    element('work-create-body').value = evidence ? '' : prefill.body;
+    element('work-create-quote').value = evidence ? prefill.observed : prefill.source_message.quote;
+    element('work-create-to-label').textContent = kind === 'decision' ? 'Ask' : 'Next action for';
+    fillSelect(element('work-create-to'),
+      participantOptions({ value: '', text: kind === 'decision' ? 'Choose who to ask' : 'Nobody yet' }), '');
+    element('work-create-next-action').value = '';
+    element('work-create-title').required = true;
+    element('work-create-body').required = true;
+    element('work-create-to').required = kind === 'decision';
+    element('work-create-next-action').required = false;
+    element('work-create-item').required = evidence;
+    showCreateField('work-create-project', !evidence);
+    showCreateField('work-create-to', !evidence);
+    showCreateField('work-create-next-action', kind === 'work');
+    showCreateField('work-create-item', evidence);
+    element('work-create-status').textContent = '';
+  }
+
+  function createChanged(event) {
+    if (event.target.name === 'kind') applyCreateKind();
+    else if (event.target.id === 'work-create-to' && createKind() === 'work') {
+      element('work-create-next-action').required = event.target.value !== '';
+    }
+  }
+
+  function openCreateDialog(event) {
+    const state = session;
+    if (!state) return;
+    const message = event.detail.message;
+    const brief = state.brief;
+    state.createMessage = message;
+    element('work-create-form').reset();
+    const speakerSession = message.session;
+    element('work-create-from').textContent = 'From message #' + message.id + ' by ' + message.byline +
+      (speakerSession !== null && speakerSession !== undefined ? ' (session ' + speakerSession + ')' : '') +
+      ' · recording as ' + state.user.name;
+    const projects = brief ? brief.projects : [];
+    fillSelect(element('work-create-project'), projects.map(project => ({ value: project.id, text: project.display_name })),
+      projects.some(project => project.id === 'ops') ? 'ops' : (projects[0] && projects[0].id));
+    fillSelect(element('work-create-item'), [{ value: '', text: 'Choose an item' }].concat(
+      (brief ? brief.open : []).map(row => ({ value: row.id, text: row.id + ' · ' + row.title }))), '');
+    applyCreateKind();
+    element('work-create-dialog').showModal();
+  }
+
+  async function submitCreate(event) {
+    // Cancel is a dialog-method submit button: let it close the dialog.
+    if (event.submitter && event.submitter.getAttribute('formmethod') === 'dialog') return;
+    event.preventDefault();
+    const state = session;
+    const message = state && state.createMessage;
+    if (!message) return;
+    const kind = createKind();
+    const prefill = model().messagePrefill(message, kind);
+    let op;
+    let body;
+    if (kind === 'evidence') {
+      op = 'items/evidence';
+      body = {
+        id: element('work-create-item').value, target: element('work-create-title').value,
+        observed: prefill.observed, reference: prefill.reference, limits: element('work-create-body').value,
+      };
+    } else {
+      op = 'items/create';
+      body = {
+        kind, project: element('work-create-project').value,
+        title: element('work-create-title').value, body: element('work-create-body').value,
+        source_message: prefill.source_message,
+      };
+      const to = element('work-create-to').value;
+      if (kind === 'decision') body.asked_of = to;
+      else if (to !== '') {
+        body.next_to = to;
+        body.next_action = element('work-create-next-action').value;
+      }
+    }
+    const save = element('work-create-save');
+    save.disabled = true;
+    let result;
+    try {
+      result = await write(op, body, element('work-create-status'));
+    } finally {
+      save.disabled = false;
+    }
+    if (!result || !current(state)) return;
+    state.createMessage = null;
+    element('work-create-dialog').close();
+    await openItem(kind === 'evidence' ? body.id : result.item.id);
+  }
+
+  // ── projects ────────────────────────────────────────────────────────────
+
+  function projectForm(project) {
+    const objective = control('input', 'objective', 'Objective', { value: project.objective });
+    const today = control('input', 'today', 'Today', { value: project.today });
+    return actionForm('work-project', [objective, today], 'Save project notes', async () => {
+      const body = { id: project.id, expected_revision: project.revision };
+      if (objective.node.value !== project.objective) body.objective = objective.node.value;
+      if (today.node.value !== project.today) body.today = today.node.value;
+      if (body.objective === undefined && body.today === undefined) {
+        element('work-drawer-status').textContent = 'Nothing changed.';
+        return;
+      }
+      const result = await write('projects/update', body);
+      if (!result) return;
+      try {
+        await loadBrief();
+      } catch (_) {
+        // The poll reports a failed read; the write itself succeeded.
+      }
+      await openProject(project.id);
+    });
+  }
+
+  function settingsProjectsStatus(text) {
+    element('settings-projects-status').textContent = text;
+  }
+
+  async function renderProjectsSettings() {
+    const state = session;
+    if (!state) return;
+    let brief;
+    try {
+      brief = await workGet('/api/work/brief');
+    } catch (error) {
+      if (current(state) && error.code !== 'not-authenticated') settingsProjectsStatus(model().errorWords(error.code));
+      return;
+    }
+    if (!current(state)) return;
+    element('settings-project-list').replaceChildren(...brief.projects.map(project => {
+      const row = make('div', 'settings-participant');
+      const facts = make('div');
+      facts.append(make('strong', '', project.display_name), make('small', '', project.id));
+      row.append(facts);
+      if (isOwner()) {
+        const retire = make('button', 'quiet-action', 'Retire');
+        retire.type = 'button';
+        retire.setAttribute('aria-label', 'Retire ' + project.id + ': ' + project.display_name);
+        retire.addEventListener('click', () => ownerProjectAct('projects/retire', { id: project.id }, retire,
+          'Project ' + project.id + ' retired.'));
+        row.append(retire);
+      }
+      return row;
+    }));
+  }
+
+  // Creating or retiring a project is the owner's act behind a fresh
+  // passkey step-up, one step-up per act.
+  async function ownerProjectAct(op, body, button, done) {
+    const state = session;
+    if (!state) return null;
+    button.disabled = true;
+    try {
+      settingsProjectsStatus('');
+      try {
+        await state.deps.freshOwnerStepUp();
+      } catch (error) {
+        if (!current(state)) return null;
+        if (error.status === 401) state.deps.onSessionEnded();
+        else settingsProjectsStatus(model().errorWords(error.code));
+        return null;
+      }
+      if (!current(state)) return null;
+      const result = await write(op, body, element('settings-projects-status'));
+      if (!result) return null;
+      await renderProjectsSettings();
+      if (current(state)) settingsProjectsStatus(done);
+      return result;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function submitProject(event) {
+    event.preventDefault();
+    const id = element('project-id').value;
+    const result = await ownerProjectAct('projects/create', { id, display_name: element('project-name').value },
+      element('project-create-button'), 'Project ' + id + ' created.');
+    if (result) element('project-create-form').reset();
+  }
+
+  function openSettingsProjects() {
+    settingsProjectsStatus('');
+    renderProjectsSettings();
   }
 
   async function openItem(id) {
@@ -671,6 +1001,7 @@
     } catch (error) {
       if (!current(state) || request !== state.drawerRequest) return;
       if (error.code === 'unknown-item') {
+        state.drawerItem = null;
         clearDrawer(id, '');
         element('work-drawer-history').hidden = true;
         element('work-drawer-state').append(make('p', '', UNKNOWN_ITEM));
@@ -682,6 +1013,7 @@
     }
     if (!current(state) || request !== state.drawerRequest) return;
     const item = result.item;
+    state.drawerItem = item.id;
     clearDrawer(item.id + ' · ' + item.title, projectName(state, item.project));
     renderDrawerState(state, result);
     renderDrawerActions(result);
@@ -725,11 +1057,14 @@
     }
     if (!current(state) || request !== state.drawerRequest) return;
     state.projectRows = { project: id, rows: result.items };
+    state.drawerItem = null;
     clearDrawer(projectName(state, id), '');
     element('work-drawer-history').hidden = true;
     const section = element('work-drawer-state');
     section.append(make('p', 'work-state', 'Showing ' + result.items.length + ' of ' + result.total));
     section.append(renderProjectTree(result.items));
+    const project = state.brief && state.brief.projects.find(row => row.id === id);
+    if (project) element('work-drawer-actions').append(projectForm(project));
     showDrawer();
   }
 
@@ -744,6 +1079,8 @@
     element('changes-more').hidden = true;
     element('needs-you-toggle').setAttribute('aria-expanded', 'true');
     element('needs-you-list').hidden = false;
+    element('settings-project-list').replaceChildren();
+    hideShare();
     setStatus('');
   }
 
@@ -752,13 +1089,22 @@
     const state = {
       user, deps, brief: null, projectRows: null,
       changes: [], changesTotal: 0, changesBusy: false,
-      refreshing: false, drawerRequest: 0, timer: null, listeners: new AbortController(),
+      refreshing: false, drawerRequest: 0, drawerItem: null, timer: null, listeners: new AbortController(),
+      share: null, notice: '', createMessage: null,
     };
     session = state;
     const signal = state.listeners.signal;
     element('needs-you-toggle').addEventListener('click', toggleNeedsYou, { signal });
     element('work-count-button').addEventListener('click', showNeedsYou, { signal });
     element('changes-more').addEventListener('click', showMoreChanges, { signal });
+    element('work-share-decline').addEventListener('click', declineShare, { signal });
+    element('work-create-form').addEventListener('submit', submitCreate, { signal });
+    element('work-create-form').addEventListener('change', createChanged, { signal });
+    element('project-create-form').addEventListener('submit', submitProject, { signal });
+    element('settings-button').addEventListener('click', openSettingsProjects, { signal });
+    document.addEventListener('interlock:message-work', openCreateDialog, { signal });
+    document.addEventListener('interlock:message-saved', shareSaved, { signal });
+    document.addEventListener('interlock:message-failed', shareFailed, { signal });
     setStatus('');
     refresh();
     state.timer = setInterval(refresh, WORK_POLL_MS);
@@ -771,8 +1117,10 @@
     clearInterval(state.timer);
     state.listeners.abort();
     resetTile();
-    const drawer = element('work-drawer');
-    if (drawer.open) drawer.close();
+    for (const id of ['work-drawer', 'work-create-dialog']) {
+      const dialog = element(id);
+      if (dialog.open) dialog.close();
+    }
   }
 
   const contract = Object.freeze({ start, stop });

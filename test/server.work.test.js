@@ -160,6 +160,7 @@ test('work records ride the existing identity and survive a clear, a restart and
   let runtime = await startInterlockServer({ port, dataDir });
   let password;
   let device;
+  let promotedId;
   try {
     const setup = await bootstrap(runtime);
     password = setup.password;
@@ -318,6 +319,38 @@ test('work records ride the existing identity and survive a clear, a restart and
     assert.equal(forgedSpeaker.status, 400, forgedSpeaker.text);
     assert.equal(forgedSpeaker.json.error, 'invalid-request');
 
+    // The owner promotes her own message into a question for herself; the
+    // promotion records who said it and is not an answer. Lead then reports
+    // an answer given elsewhere and records sending the exposure draft.
+    const promoted = await post(runtime, '/api/work/items/create', {
+      operation_id: uuid(), kind: 'decision', project: 'finance', title: 'Is March final?',
+      body: 'Promoted from the room.', asked_of: 'Ana', source_message: { message_id: m, quote: 'March cut-off' },
+    }, owner);
+    assert.equal(promoted.status, 201, promoted.text);
+    promotedId = promoted.json.item.id;
+    assert.equal(promoted.json.item.answer, null, 'promoting a message is not an answer');
+    assert.equal(promoted.json.item.source_message.message_id, m);
+    const reported = await aiPost(runtime, '/api/ai/work/decisions/report', {
+      operation_id: uuid(), id: promotedId, expected_revision: 1, text: 'March is final.', source: 'said on a call',
+    }, lead.token);
+    assert.equal(reported.status, 200, reported.text);
+    assert.equal(reported.json.exposure.to, 'Ana');
+    const exposureMessage = await aiPost(runtime, '/api/ai/messages',
+      { text: reported.json.exposure.text, client_message_id: uuid() }, lead.token);
+    assert.equal(exposureMessage.status, 201, exposureMessage.text);
+    const exposureId = exposureMessage.json.message.id;
+    const shared = await aiPost(runtime, '/api/ai/work/items/share', {
+      operation_id: uuid(), id: promotedId, purpose: 'exposure', outcome: 'sent', to: 'Ana', message_id: exposureId,
+    }, lead.token);
+    assert.equal(shared.status, 201, shared.text);
+    const promotedDetail = await get(runtime, `/api/work/items/${promotedId}`, owner);
+    assert.equal(promotedDetail.status, 200, promotedDetail.text);
+    assert.ok(promotedDetail.json.history.some(event => event.kind === 'shared' && event.message_id === exposureId),
+      'the history carries the share with its message id');
+    const sharedExport = await get(runtime, '/api/work/export?format=md', owner);
+    assert.equal(sharedExport.status, 200, sharedExport.text);
+    assert.ok(sharedExport.text.includes('sent as #' + exposureId), 'the export names the sent message');
+
     const left = await aiPost(runtime, '/api/ai/leave', {}, lead.token);
     assert.equal(left.status, 200, left.text);
     const afterLeave = await aiGet(runtime, '/api/ai/work/brief', lead.token);
@@ -353,5 +386,5 @@ test('work records ride the existing identity and survive a clear, a restart and
   const restored = restoreInstallation({ backup: backupDir, dataDir: restoreDir });
   assert.equal(restored.files, backedUp.files);
   const store = JSON.parse(fs.readFileSync(path.join(restoreDir, 'work', 'store.json'), 'utf8'));
-  assert.deepEqual(store.items.map(item => item.id), ['W-1', 'D-2', 'D-3']);
+  assert.deepEqual(store.items.map(item => item.id), ['W-1', 'D-2', 'D-3', promotedId]);
 });

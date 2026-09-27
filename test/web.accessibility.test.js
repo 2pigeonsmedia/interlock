@@ -202,3 +202,13 @@ test('the work panel writes through deliberate forms', () => {
   assert.match(WORK_PANEL_JS, /row\.action \+ ' ' \+ row\.id \+ ': ' \+ row\.title/);
   assert.match(WORK_PANEL_JS, /text \+ ' ' \+ item\.id \+ ': ' \+ item\.title/);
 });
+
+test('exposure and notify travel through the ordinary composer, and a message can become work', () => {
+  assert.match(ROOM_JS, /interlock:message-saved/);
+  assert.match(ROOM_JS, /interlock:message-failed/);
+  assert.match(ROOM_JS, /interlock:message-work/);
+  assert.match(ROOM_JS, /Create work from message #\$\{message\.id\}/);
+  assert.match(WORK_PANEL_JS, /Update saved; message not sent\./);
+  assert.match(WORK_PANEL_JS, /Sending again creates a new message\./);
+  assert.match(WORK_PANEL_JS, /source_message/);
+});
