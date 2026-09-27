@@ -281,7 +281,7 @@ recorded when the draft is sent or declined.
 - **Notify** — shown when the record's next step is addressed to someone other
   than the viewer (or a decision awaits someone else's answer).
 
-Every write sends a fresh `operation_id`. A stale revision re-reads the record
+Every form keeps one `operation_id` while it is open (see below). A stale revision re-reads the record
 and says which revision it is now; other refusals read in words; a signed-out
 session returns to sign-in.
 
