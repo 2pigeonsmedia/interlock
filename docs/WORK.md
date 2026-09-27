@@ -290,19 +290,30 @@ viewer. Recording a reported answer puts the exposure draft in the composer,
 addressed to the person the words are attributed to; recording a correction of
 a reported answer addresses the draft to the person who reported the replaced
 answer. The draft carries an `@` mention when its recipient is an AI, and a
-share bar under the composer says what the draft is for. Notify does the same for the person the record waits
-on. The viewer sends, edits or declines the draft:
+share bar under the composer says what the draft is for and ends "— your
+next message will be recorded as this share." Notify does the same for the
+person the record waits on. The viewer sends, edits or declines the draft:
 
 - **Sent** — the viewer's ordinary Send; the outcome is recorded with the new
   message id.
 - **Declined** — the bar's **Decline**; the draft is cleared only if it is
   unchanged. Opening another share while one is pending records the first as
   declined: one share is pending at a time.
-- **Failed** — a send the room did not save. The outcome is recorded with the
+- **Failed** — a send the room refused. The outcome is recorded with the
   refusal code, and the notice reads "Update saved; message not sent. Sending
   again creates a new message." (for Notify: "Message not sent. Sending again
-  creates a new message."). The share stays pending, so a later send that
-  succeeds is recorded as sent.
+  creates a new message."). A send the room could not confirm either way (no
+  reply, or a reply that is not a saved message) is recorded as failed with
+  `unconfirmed`, and the notice reads "The message may not have been sent;
+  check the transcript." Either way the share stays pending, so a later send
+  that succeeds is recorded as sent. If recording the failure is itself
+  refused, that refusal is shown in the drawer's status line and the notice
+  stays.
+
+Every form in the panel keeps one `operation_id` while it is open: submitting
+again after a lost reply sends the same id and the same body, so the server
+replays the first write instead of making a second. The id is renewed once a
+write succeeds or any field changes.
 
 ### Create from a message
 

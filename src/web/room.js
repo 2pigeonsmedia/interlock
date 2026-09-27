@@ -1430,7 +1430,7 @@ messageForm.addEventListener('submit', async event => {
     }
     if (!response.ok || result.ok !== true || !validMessage(result.message)) {
       setRoomNotice('Interlock could not confirm the message. Check the transcript before sending it again.');
-      failed(response.status, result.error || 'unavailable');
+      failed(response.status, 'unconfirmed');
       return;
     }
     saved = true;
@@ -1448,7 +1448,7 @@ messageForm.addEventListener('submit', async event => {
   } catch (_) {
     setConnectionState('unavailable');
     setRoomNotice('Interlock could not confirm the message. Check the transcript before sending it again.');
-    if (!saved) failed(0, 'unavailable');
+    if (!saved) failed(0, 'unconfirmed');
   } finally {
     if (!saved) {
       forceFollowAfterSend = false;

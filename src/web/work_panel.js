@@ -17,6 +17,8 @@
     exposure: 'Update saved; message not sent. Sending again creates a new message.',
     notify: 'Message not sent. Sending again creates a new message.',
   });
+  // The room could not confirm the send either way: it may have been saved.
+  const SHARE_UNCONFIRMED = 'The message may not have been sent; check the transcript.';
 
   let session = null;
 
@@ -205,7 +207,8 @@
       await loadChanges(false);
       if (current(state)) setStatus(state.notice);
     } catch (error) {
-      if (current(state)) setStatus(model().errorWords(error.code));
+      // A failed read never hides a share notice: both stay on screen.
+      if (current(state)) setStatus([state.notice, model().errorWords(error.code)].filter(Boolean).join(' '));
     } finally {
       state.refreshing = false;
     }
@@ -355,23 +358,38 @@
     }
   }
 
-  // Every write: a fresh operation id, the page's ordinary mutation, a
-  // refusal in words where the form is, and a refresh on success. Resolves to
-  // the result, or null when the write did not happen.
-  async function write(op, body, status) {
+  // An open form's operation id: made when the form is built, kept across a
+  // re-submit so a retry after a lost reply replays instead of writing twice,
+  // and renewed once the write succeeds or any field changes.
+  function formOperation(form) {
+    const operation = { id: crypto.randomUUID() };
+    const renew = () => { operation.id = crypto.randomUUID(); };
+    form.addEventListener('input', renew);
+    form.addEventListener('change', renew);
+    return operation;
+  }
+
+  // Every write: the form's operation id (or a fresh one), the page's ordinary
+  // mutation, a refusal in words where the form is, and a refresh on success.
+  // Resolves to the result, or null when the write did not happen. An error
+  // with no code (the network, not the server) reads as unavailable.
+  async function write(op, body, status, operation) {
     const state = session;
     if (!state) return null;
     const where = status || element('work-drawer-status');
     let result;
     try {
-      result = await state.deps.mutate('/api/work/' + op, Object.assign({ operation_id: crypto.randomUUID() }, body));
+      const operationId = operation ? operation.id : crypto.randomUUID();
+      result = await state.deps.mutate('/api/work/' + op, Object.assign({ operation_id: operationId }, body));
     } catch (error) {
       if (!current(state)) return null;
-      if (error.status === 401 || error.code === 'not-authenticated') state.deps.onSessionEnded();
-      else if (error.code === 'stale-revision' && typeof body.id === 'string') await staleNotice(op, body.id, where);
-      else where.textContent = model().errorWords(error.code);
+      const code = error && typeof error.code === 'string' ? error.code : 'unavailable';
+      if ((error && error.status === 401) || code === 'not-authenticated') state.deps.onSessionEnded();
+      else if (code === 'stale-revision' && typeof body.id === 'string') await staleNotice(op, body.id, where);
+      else where.textContent = model().errorWords(code);
       return null;
     }
+    if (operation) operation.id = crypto.randomUUID();
     if (!current(state)) return null;
     where.textContent = '';
     refresh();
@@ -429,11 +447,12 @@
     const submit = make('button', 'primary-action', submitText);
     submit.type = 'submit';
     form.append(submit);
+    const operation = formOperation(form);
     form.addEventListener('submit', async event => {
       event.preventDefault();
       submit.disabled = true;
       try {
-        await onSubmit();
+        await onSubmit(operation);
       } finally {
         submit.disabled = false;
       }
@@ -499,11 +518,11 @@
     const [text, conditions, reason] = fields;
     const parts = [];
     parts.push(make('p', 'work-proposal', item.proposal ? 'Proposal: ' + item.proposal : 'No proposal was written.'));
-    parts.push(actionForm('work-answer', fields, submitText, async () => {
+    parts.push(actionForm('work-answer', fields, submitText, async operation => {
       const body = { id: item.id, expected_revision: item.revision, text: text.node.value };
       if (optionalValue(conditions.node.value) !== undefined) body.conditions = conditions.node.value;
       if (reason) body.reason = reason.node.value;
-      const result = await write('decisions/answer', body);
+      const result = await write('decisions/answer', body, null, operation);
       if (result) await afterDecisionWrite(result, item);
     }));
     return parts;
@@ -516,10 +535,10 @@
     return [
       make('p', '', 'The record will show you reported it, attributed to ' + model().who(item.asked_of) +
         ', not confirmed here.'),
-      actionForm('work-report', [text, source, conditions], 'Record reported answer', async () => {
+      actionForm('work-report', [text, source, conditions], 'Record reported answer', async operation => {
         const body = { id: item.id, expected_revision: item.revision, text: text.node.value, source: source.node.value };
         if (optionalValue(conditions.node.value) !== undefined) body.conditions = conditions.node.value;
-        const result = await write('decisions/report', body);
+        const result = await write('decisions/report', body, null, operation);
         if (result) await afterDecisionWrite(result, item);
       }),
     ];
@@ -527,18 +546,18 @@
 
   function confirmForm(item) {
     const reason = control('input', 'reason', 'Note (optional)');
-    return [actionForm('work-confirm', [reason], 'Confirm', async () => {
+    return [actionForm('work-confirm', [reason], 'Confirm', async operation => {
       const body = { id: item.id, expected_revision: item.revision };
       if (optionalValue(reason.node.value) !== undefined) body.reason = reason.node.value;
-      const result = await write('decisions/confirm', body);
+      const result = await write('decisions/confirm', body, null, operation);
       if (result) await afterDecisionWrite(result, item);
     })];
   }
 
   function withdrawForm(item) {
     const reason = control('input', 'reason', 'Reason', { required: true });
-    return [actionForm('work-withdraw', [reason], 'Withdraw question', async () => {
-      const result = await write('decisions/withdraw', { id: item.id, expected_revision: item.revision, reason: reason.node.value });
+    return [actionForm('work-withdraw', [reason], 'Withdraw question', async operation => {
+      const result = await write('decisions/withdraw', { id: item.id, expected_revision: item.revision, reason: reason.node.value }, null, operation);
       if (result) await afterDecisionWrite(result, item);
     })];
   }
@@ -546,10 +565,10 @@
   function reopenForm(item) {
     const reason = control('input', 'reason', 'Reason', { required: true });
     const askedOf = choice('asked_of', 'Ask', participantOptions({ value: '', text: 'Keep ' + model().who(item.asked_of) }), '');
-    return [actionForm('work-reopen', [reason, askedOf], 'Reopen question', async () => {
+    return [actionForm('work-reopen', [reason, askedOf], 'Reopen question', async operation => {
       const body = { id: item.id, expected_revision: item.revision, reason: reason.node.value };
       if (askedOf.node.value !== '') body.asked_of = askedOf.node.value;
-      const result = await write('decisions/reopen', body);
+      const result = await write('decisions/reopen', body, null, operation);
       if (result) await afterDecisionWrite(result, item);
     })];
   }
@@ -632,7 +651,7 @@
     byState();
     const fields = [state, blockReason, nextTo, nextAction].concat(doneFields, [target, title, bodyField, note]);
     if (item.state === 'done') { doneEvidence.label.hidden = true; noEvidence.label.hidden = true; }
-    return [actionForm('work-update', fields, 'Save update', async () => {
+    return [actionForm('work-update', fields, 'Save update', async operation => {
       const body = { id: item.id, expected_revision: item.revision, note: note.node.value };
       const chosen = state.node.value;
       if (chosen !== item.state) body.state = chosen;
@@ -659,7 +678,7 @@
       for (const [field, value] of [[target, item.target], [title, item.title], [bodyField, item.body]]) {
         if (field.node.value !== value) body[field.node.name] = field.node.value;
       }
-      const result = await write('items/update', body);
+      const result = await write('items/update', body, null, operation);
       if (result) await openItem(item.id);
     })];
   }
@@ -669,19 +688,19 @@
     const observed = control('textarea', 'observed', 'What was observed', { required: true });
     const reference = control('input', 'reference', 'Reference', { required: true });
     const limits = control('textarea', 'limits', 'What it does not show', { required: true });
-    return [actionForm('work-evidence', [target, observed, reference, limits], 'Attach', async () => {
+    return [actionForm('work-evidence', [target, observed, reference, limits], 'Attach', async operation => {
       const result = await write('items/evidence', {
         id: item.id, target: target.node.value, observed: observed.node.value,
         reference: reference.node.value, limits: limits.node.value,
-      });
+      }, null, operation);
       if (result) await openItem(item.id);
     })];
   }
 
   function noteForm(item) {
     const text = control('textarea', 'text', 'Note', { required: true });
-    return [actionForm('work-note', [text], 'Add note', async () => {
-      const result = await write('items/note', { id: item.id, text: text.node.value });
+    return [actionForm('work-note', [text], 'Add note', async operation => {
+      const result = await write('items/note', { id: item.id, text: text.node.value }, null, operation);
       if (result) await openItem(item.id);
     })];
   }
@@ -713,10 +732,12 @@
 
   // ── sharing through the ordinary composer ───────────────────────────────
 
+  const SHARE_NEXT = ' — your next message will be recorded as this share.';
+
   function shareSentence(share) {
     return share.purpose === 'exposure'
-      ? 'Exposure draft for ' + share.itemId + ', addressed to ' + share.to + ' — send it with the composer, or'
-      : 'Notify ' + share.to + ' about ' + share.itemId + ' — send it with the composer, or';
+      ? 'Exposure draft for ' + share.itemId + ', addressed to ' + share.to + SHARE_NEXT
+      : 'Notify ' + share.to + ' about ' + share.itemId + SHARE_NEXT;
   }
 
   function hideShare() {
@@ -730,10 +751,12 @@
     composer.dispatchEvent(new Event('input'));
   }
 
+  // A refusal to record a failed send goes to the drawer's status line, so
+  // the failure notice in the tile stays on screen.
   function recordShare(share, outcome, extra) {
     return write('items/share', Object.assign({
       id: share.itemId, purpose: share.purpose, outcome, to: share.to,
-    }, extra), element('work-status'));
+    }, extra), element(outcome === 'failed' ? 'work-drawer-status' : 'work-status'));
   }
 
   // One share is pending at a time: opening another records the first as
@@ -777,12 +800,13 @@
   }
 
   // The share stays pending: the draft is still in the composer, and a send
-  // that succeeds later is recorded as sent.
+  // that succeeds later is recorded as sent. A send the room could not
+  // confirm ('unconfirmed') may have been saved, and the notice says so.
   async function shareFailed(event) {
     const state = session;
     const share = state && state.share;
     if (!share) return;
-    state.notice = SHARE_FAILED[share.purpose];
+    state.notice = event.detail.code === 'unconfirmed' ? SHARE_UNCONFIRMED : SHARE_FAILED[share.purpose];
     setStatus(state.notice);
     const result = await recordShare(share, 'failed', { detail: String(event.detail.code) });
     if (result && current(state)) setStatus(state.notice);
@@ -855,7 +879,12 @@
     element('work-create-status').textContent = '';
   }
 
+  function renewCreateOperation() {
+    if (session) session.createOperation = { id: crypto.randomUUID() };
+  }
+
   function createChanged(event) {
+    renewCreateOperation();
     if (event.target.name === 'kind') applyCreateKind();
     else if (event.target.id === 'work-create-to' && createKind() === 'work') {
       element('work-create-next-action').required = event.target.value !== '';
@@ -868,6 +897,7 @@
     const message = event.detail.message;
     const brief = state.brief;
     state.createMessage = message;
+    state.createOperation = { id: crypto.randomUUID() };
     element('work-create-form').reset();
     const speakerSession = message.session;
     element('work-create-from').textContent = 'From message #' + message.id + ' by ' + message.byline +
@@ -918,7 +948,7 @@
     save.disabled = true;
     let result;
     try {
-      result = await write(op, body, element('work-create-status'));
+      result = await write(op, body, element('work-create-status'), state.createOperation);
     } finally {
       save.disabled = false;
     }
@@ -933,7 +963,7 @@
   function projectForm(project) {
     const objective = control('input', 'objective', 'Objective', { value: project.objective });
     const today = control('input', 'today', 'Today', { value: project.today });
-    return actionForm('work-project', [objective, today], 'Save project notes', async () => {
+    return actionForm('work-project', [objective, today], 'Save project notes', async operation => {
       const body = { id: project.id, expected_revision: project.revision };
       if (objective.node.value !== project.objective) body.objective = objective.node.value;
       if (today.node.value !== project.today) body.today = today.node.value;
@@ -941,7 +971,7 @@
         element('work-drawer-status').textContent = 'Nothing changed.';
         return;
       }
-      const result = await write('projects/update', body);
+      const result = await write('projects/update', body, null, operation);
       if (!result) return;
       try {
         await loadBrief();
@@ -986,7 +1016,7 @@
 
   // Creating or retiring a project is the owner's act behind a fresh
   // passkey step-up, one step-up per act.
-  async function ownerProjectAct(op, body, button, done) {
+  async function ownerProjectAct(op, body, button, done, operation) {
     const state = session;
     if (!state) return null;
     button.disabled = true;
@@ -1001,7 +1031,7 @@
         return null;
       }
       if (!current(state)) return null;
-      const result = await write(op, body, element('settings-projects-status'));
+      const result = await write(op, body, element('settings-projects-status'), operation);
       if (!result) return null;
       await renderProjectsSettings();
       if (current(state)) settingsProjectsStatus(done);
@@ -1015,7 +1045,7 @@
     event.preventDefault();
     const id = element('project-id').value;
     const result = await ownerProjectAct('projects/create', { id, display_name: element('project-name').value },
-      element('project-create-button'), 'Project ' + id + ' created.');
+      element('project-create-button'), 'Project ' + id + ' created.', session && session.projectOperation);
     if (result) element('project-create-form').reset();
   }
 
@@ -1124,6 +1154,7 @@
       changes: [], changesTotal: 0, changesBusy: false,
       refreshing: false, drawerRequest: 0, drawerItem: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
+      createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },
     };
     session = state;
     const signal = state.listeners.signal;
@@ -1133,6 +1164,8 @@
     element('work-share-decline').addEventListener('click', declineShare, { signal });
     element('work-create-form').addEventListener('submit', submitCreate, { signal });
     element('work-create-form').addEventListener('change', createChanged, { signal });
+    element('work-create-form').addEventListener('input', renewCreateOperation, { signal });
+    element('project-create-form').addEventListener('input', () => { state.projectOperation = { id: crypto.randomUUID() }; }, { signal });
     element('project-create-form').addEventListener('submit', submitProject, { signal });
     element('settings-button').addEventListener('click', openSettingsProjects, { signal });
     document.addEventListener('interlock:message-work', openCreateDialog, { signal });

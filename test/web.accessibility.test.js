@@ -213,6 +213,16 @@ test('exposure and notify travel through the ordinary composer, and a message ca
   assert.match(WORK_PANEL_JS, /notify: 'Message not sent\. Sending again creates a new message\.'/,
     'a failed Notify saved no update, so its notice does not say one was saved');
   assert.match(WORK_PANEL_JS, /source_message/);
+  // A send the room could not confirm is recorded as unconfirmed, and says it may have been sent.
+  assert.match(ROOM_JS, /!validMessage\(result\.message\)\) \{[^}]*failed\(response\.status, 'unconfirmed'\)/);
+  assert.match(ROOM_JS, /if \(!saved\) failed\(0, 'unconfirmed'\)/);
+  assert.doesNotMatch(ROOM_JS, /failed\(0, 'unavailable'\)/);
+  assert.match(WORK_PANEL_JS, /SHARE_UNCONFIRMED = 'The message may not have been sent; check the transcript\.'/);
+  assert.match(WORK_PANEL_JS, /event\.detail\.code === 'unconfirmed' \? SHARE_UNCONFIRMED : SHARE_FAILED\[share\.purpose\]/);
+  // Recording the failure never overwrites the failure notice.
+  assert.match(WORK_PANEL_JS, /element\(outcome === 'failed' \? 'work-drawer-status' : 'work-status'\)/);
+  assert.match(WORK_PANEL_JS, /setStatus\(\[state\.notice, model\(\)\.errorWords\(error\.code\)\]\.filter\(Boolean\)\.join\(' '\)\)/);
+  assert.match(WORK_PANEL_JS, /SHARE_NEXT = ' — your next message will be recorded as this share\.'/);
   assert.match(WORK_PANEL_JS, /quote_truncated \? '\. Quoted the first 4 KB of message #' \+ message\.id/,
     'a cut quote says so in the dialog');
 });
@@ -223,4 +233,19 @@ test('the owner may answer for the person asked, and the update form says what e
   assert.match(WORK_PANEL_JS, /requireFor\(blockReason, 'What it is waiting on', chosen === 'blocked'\)/);
   assert.match(WORK_PANEL_JS, /requireFor\(nextTo, 'Next action for', chosen === 'ready'\)/);
   assert.match(WORK_PANEL_JS, /requireFor\(nextAction, 'Next action', chosen === 'ready'\)/);
+});
+
+test('a write with no error code reads as unavailable, and an open form keeps one operation id until it changes or succeeds', () => {
+  assert.match(WORK_PANEL_JS, /const code = error && typeof error\.code === 'string' \? error\.code : 'unavailable';/);
+  assert.doesNotMatch(WORK_PANEL_JS, /errorWords\(error\.code\)\s*;\s*\n\s*return null;/, 'write reports the mapped code');
+  assert.match(WORK_PANEL_JS, /function formOperation\(form\) \{[\s\S]{0,200}?form\.addEventListener\('input', renew\);\s*form\.addEventListener\('change', renew\);/);
+  assert.match(WORK_PANEL_JS, /const operationId = operation \? operation\.id : crypto\.randomUUID\(\);/);
+  assert.match(WORK_PANEL_JS, /if \(operation\) operation\.id = crypto\.randomUUID\(\);/);
+  const forms = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+'/g);
+  const threaded = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+', [^\n]*async operation => \{/g);
+  assert.equal(forms.length, 9);
+  assert.equal(threaded.length, forms.length, 'every form hands its operation to its write');
+  assert.equal((WORK_PANEL_JS.match(/, null, operation\)/g) || []).length, forms.length);
+  assert.match(WORK_PANEL_JS, /write\(op, body, element\('work-create-status'\), state\.createOperation\)/);
+  assert.match(WORK_PANEL_JS, /addEventListener\('input', renewCreateOperation/);
 });
