@@ -162,3 +162,21 @@ test('the header keeps navigation, actions, and the account separable on every p
   assert.match(ROOM_JS,
     /searchParams\.get\('open'\)[^]*requested === 'connect-ai'[^]*requested === 'settings'[^]*button\.click\(\)/);
 });
+
+test('the work panel is a third tile with words for state, no borrowed hue, and no inline code', () => {
+  assert.match(ROOM, /<aside class="work" aria-labelledby="work-heading">/);
+  for (const id of ['needs-you-count', 'work-status', 'work-drawer', 'work-create-dialog',
+    'work-share-bar', 'work-count-button', 'project-create-form']) {
+    assert.match(ROOM, new RegExp(`id="${id}"`), `${id} must be present`);
+  }
+  assert.match(ROOM, /<dialog id="work-drawer"/);
+  assert.doesNotMatch(ROOM, /\son[a-z]+=|<style|\sstyle=/i, 'the page runs under a strict CSP');
+  assert.match(ROOM_CSS, /\.room-layout\s*\{[^}]*grid-template-columns:\s*254px minmax\(0, 3fr\) minmax\(0, 2fr\)/s);
+  const marker = ROOM_CSS.indexOf('/* ---------- work ----------');
+  assert.ok(marker >= 0, 'the work section must exist');
+  const workCss = ROOM_CSS.slice(marker);
+  assert.doesNotMatch(workCss.split('/* ----------')[1] ?? workCss, /--wait|--ember|--signal|--ai\b|--owner/,
+    'work states are words; the panel adds no hue');
+  assert.match(ROOM_CSS, /@media \(max-width: 760px\)[\s\S]*\.work \{ order: 3; \}/);
+  assert.match(ROOM, /work_panel_model\.js"[\s\S]*work_panel\.js"[\s\S]*room\.js"/);
+});

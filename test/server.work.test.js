@@ -165,6 +165,11 @@ test('work records ride the existing identity and survive a clear, a restart and
     password = setup.password;
     device = setup.device;
     let owner = await login(runtime, password);
+    for (const asset of ['/work_panel.js', '/work_panel_model.js']) {
+      const served = await get(runtime, asset, owner);
+      assert.equal(served.status, 200, `${asset} is served`);
+      assert.match(served.headers['content-type'], /^text\/javascript/);
+    }
 
     const l1 = await post(runtime, '/api/work/projects/create',
       { operation_id: uuid(), id: 'finance', display_name: 'Finance' }, owner);

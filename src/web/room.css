@@ -477,12 +477,12 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 .room-layout {
   min-height: 0;
   display: grid;
-  grid-template-columns: 254px 1fr;
+  grid-template-columns: 254px minmax(0, 3fr) minmax(0, 2fr);
   gap: var(--tile);
   padding: var(--tile);
 }
 
-.roster, .conversation {
+.roster, .conversation, .work {
   min-height: 0;
   border: 1px solid var(--tile-edge);
   border-radius: 5px;
@@ -944,4 +944,61 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
   .history-section { padding: 22px 16px 24px; }
   .history-table { min-width: 760px; }
   .archive-history { grid-template-columns: 1fr; }
+}
+
+/* ---------- work ----------
+ * The third tile: tracked work beside the conversation, never wider than it.
+ * Work states are words in the mono face; the panel adds no hue of its own.
+ * Focus uses the global :focus-visible outline. */
+
+.work { overflow: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 14px; }
+.work-heading h2 {
+  font-family: var(--font-ai);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.work-scope { margin-top: 4px; font-size: 0.8rem; color: var(--ink-3); }
+.work-section { display: grid; gap: 4px; }
+.work-section h3 { font-size: 0.85rem; font-weight: 600; color: var(--ink-2); }
+.work-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.work-count { font-family: var(--font-ai); font-size: 0.78rem; font-variant-numeric: tabular-nums; color: var(--ink-3); }
+.work-list { display: grid; }
+.work-state { font-family: var(--font-ai); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.work-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.work .status { margin-top: 0; }
+.work-share-bar { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--tile-edge); border-radius: var(--radius); background: var(--paper-2); margin-top: 9px; font-size: 0.85rem; color: var(--ink-2); }
+.work-share-bar > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.work-drawer > details, .work-drawer > .status { margin: 0; padding: 0 22px 18px; }
+.work-drawer summary { cursor: pointer; color: var(--ink-3); }
+.work-create-form { display: grid; gap: 7px; padding: 18px 22px; }
+.work-create-form label, .work-create-kind legend { font-size: 0.8rem; font-weight: 600; color: var(--ink-3); }
+.work-create-kind { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; border: 0; }
+.work-create-kind label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; color: var(--ink-2); }
+.work-create-form input:not([type="radio"]), .work-create-form select, .work-create-form textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--tile-edge);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+}
+.work-create-form textarea[readonly] { color: var(--ink-3); }
+.work-create-from { font-size: 0.85rem; color: var(--ink-3); }
+.work-create-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 760px) {
+  .room-layout { grid-template-columns: 1fr; }
+  .work { order: 3; }
 }
