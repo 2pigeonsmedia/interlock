@@ -9,6 +9,7 @@ const ROOT = path.join(__dirname, '..');
 const ROOM = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.html'), 'utf8');
 const ROOM_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.css'), 'utf8');
 const ROOM_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.js'), 'utf8');
+const WORK_PANEL_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'work_panel.js'), 'utf8');
 const PAGE_HEADER_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'page_header.js'), 'utf8');
 const SETUP_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'setup.css'), 'utf8');
 const RECOVERY_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'recovery.css'), 'utf8');
@@ -179,4 +180,15 @@ test('the work panel is a third tile with words for state, no borrowed hue, and 
     'work states are words; the panel adds no hue');
   assert.match(ROOM_CSS, /@media \(max-width: 760px\)[\s\S]*\.work \{ order: 3; \}/);
   assert.match(ROOM, /work_panel_model\.js"[\s\S]*work_panel\.js"[\s\S]*room\.js"/);
+});
+
+test('the work panel renders with text only, names the unknown record, and starts and stops with the room', () => {
+  assert.match(WORK_PANEL_JS, /textContent/);
+  assert.doesNotMatch(WORK_PANEL_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+  assert.match(WORK_PANEL_JS, /not in the room's work record/);
+  assert.match(WORK_PANEL_JS, /Evidence attached/);
+  assert.doesNotMatch(WORK_PANEL_JS, /\bVerified\b/);
+  assert.match(WORK_PANEL_JS, /showModal\(\)/);
+  assert.match(ROOM_JS, /InterlockWorkPanel\.start\(/);
+  assert.match(ROOM_JS, /InterlockWorkPanel\.stop\(\)/);
 });

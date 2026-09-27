@@ -211,6 +211,7 @@ function stopRoomFacts() {
 }
 
 function showLogin(message = '') {
+  InterlockWorkPanel.stop();
   roomRequestGeneration.rotate();
   stopRoomFacts();
   connectAiButton.disabled = true;
@@ -260,6 +261,17 @@ function showRoom(user) {
     if (owner) loadPendingAis();
   }, ROOM_FACT_INTERVAL_MS);
   openRequestedPanel();
+  InterlockWorkPanel.start(user, {
+    mutate: ownerMutation,
+    aiNames: () => rosterSeats.map(row => row.name),
+    participants: () => rosterParticipants.filter(row => row.kind === 'person' || row.present),
+    composer: messageBody,
+    freshOwnerStepUp,
+    onSessionEnded: () => {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+    },
+  });
 }
 
 function openRequestedPanel() {
