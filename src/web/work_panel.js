@@ -72,12 +72,46 @@
 
   // ── the tile ────────────────────────────────────────────────────────────
 
-  function openButton(className, text, label, onClick) {
+  // The tile lists whose rows open the drawer. A poll rebuilds them, so the
+  // row that opened the drawer is remembered by list and record id, not as a
+  // node, and found again when the drawer closes.
+  const OPENER_LISTS = Object.freeze(['needs-you-list', 'reported-list', 'project-list']);
+
+  function openButton(className, text, label, onClick, id) {
     const button = make('button', className, text);
     button.type = 'button';
     button.setAttribute('aria-label', label);
-    button.addEventListener('click', onClick);
+    if (id !== undefined) button.dataset.id = id;
+    button.addEventListener('click', () => {
+      rememberOpener(button);
+      onClick();
+    });
     return button;
+  }
+
+  // A row in a tile list becomes the opener; a row inside the open drawer
+  // keeps the one that opened it; anything else forgets it.
+  function rememberOpener(button) {
+    const state = session;
+    if (!state) return;
+    const list = button.closest(OPENER_LISTS.map(id => '#' + id).join(', '));
+    if (list && button.dataset.id !== undefined) state.opener = { list: list.id, id: button.dataset.id };
+    else if (!element('work-drawer').open) state.opener = null;
+  }
+
+  // The dialog returns focus to the button that opened it; when a poll has
+  // replaced that button, focus would fall to the page. Find the current row
+  // for the same record in the same list, else the Needs you toggle.
+  function restoreOpenerFocus() {
+    const state = session;
+    if (!state) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const opener = state.opener;
+    const list = opener ? element(opener.list) : null;
+    const match = list ? Array.from(list.querySelectorAll('button[data-id]')).find(button => button.dataset.id === opener.id) : null;
+    if (match) match.focus();
+    if (!match || document.activeElement !== match) element('needs-you-toggle').focus();
   }
 
   function renderNeedsYou(brief) {
@@ -87,7 +121,7 @@
     element('needs-you-list').replaceChildren(...needs.rows.map(row => {
       const card = make('div', 'work-row');
       card.append(
-        openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, () => openItem(row.id)),
+        openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, () => openItem(row.id), row.id),
         make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting),
         make('p', '', row.ask + ' — ' + row.by),
       );
@@ -100,7 +134,7 @@
     element('reported-list').replaceChildren(...model().reportedToYou(brief).map(row => {
       const card = make('div', 'work-row');
       card.append(
-        openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id)),
+        openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id), row.id),
         make('p', 'work-state', row.id + ' · ' + stampOf(row.at)),
         make('p', '', model().reportedLabel(answers.get(row.id))),
       );
@@ -112,7 +146,7 @@
     element('project-list').replaceChildren(...model().projectSummaries(brief).map(project => {
       const card = make('div', 'work-row');
       card.append(openButton('work-open-project', project.display_name,
-        'Open project ' + project.id + ': ' + project.display_name, () => openProject(project.id)));
+        'Open project ' + project.id + ': ' + project.display_name, () => openProject(project.id), project.id));
       card.append(make('p', 'work-state',
         'open ' + project.open + ' · blocked ' + project.blocked + ' · ready ' + project.ready +
         ' · awaiting ' + project.awaiting));
@@ -1149,7 +1183,7 @@
     const state = {
       user, deps, brief: null, projectRows: null,
       changes: [], changesTotal: 0, changesBusy: false,
-      refreshing: false, drawerRequest: 0, drawerItem: null, timer: null, listeners: new AbortController(),
+      refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },
     };
@@ -1158,6 +1192,7 @@
     element('needs-you-toggle').addEventListener('click', toggleNeedsYou, { signal });
     element('work-count-button').addEventListener('click', showNeedsYou, { signal });
     element('changes-more').addEventListener('click', showMoreChanges, { signal });
+    element('work-drawer').addEventListener('close', restoreOpenerFocus, { signal });
     element('work-share-decline').addEventListener('click', declineShare, { signal });
     element('work-create-form').addEventListener('submit', submitCreate, { signal });
     element('work-create-form').addEventListener('change', createChanged, { signal });

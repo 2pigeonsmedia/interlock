@@ -262,3 +262,10 @@ test('the tile says who is responsible, the drawer says whom an owner answered f
   assert.ok(!compiled.test('Ops'));
   assert.ok(!compiled.test('o'));
 });
+
+test('closing the drawer returns focus to the row that opened it, even after a poll rebuilt the list', () => {
+  assert.match(WORK_PANEL_JS, /element\('work-drawer'\)\.addEventListener\('close', restoreOpenerFocus/);
+  assert.match(WORK_PANEL_JS, /button\.dataset\.id = id/);
+  assert.match(WORK_PANEL_JS, /querySelectorAll\('button\[data-id\]'\)/);
+  assert.match(WORK_PANEL_JS, /function restoreOpenerFocus[\s\S]*?element\('needs-you-toggle'\)\.focus\(\)/);
+});
