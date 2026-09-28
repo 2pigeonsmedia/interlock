@@ -245,7 +245,9 @@ test('a write with no error code reads as unavailable, and an open form keeps on
   const wired = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+', [^\n]*async operation => \{/g);
   assert.equal(forms.length, 9);
   assert.equal(wired.length, forms.length, 'every form hands its operation to its write');
-  assert.equal((WORK_PANEL_JS.match(/, null, operation\)/g) || []).length, forms.length);
+  // Every drawer form reports in the drawer; the project notes form reports beside its project.
+  assert.equal((WORK_PANEL_JS.match(/, null, operation\)/g) || []).length, forms.length - 1);
+  assert.match(WORK_PANEL_JS, /write\('projects\/update', body, view\.status, operation\)/);
   assert.match(WORK_PANEL_JS, /write\(op, body, element\('work-create-status'\), state\.createOperation\)/);
   assert.match(WORK_PANEL_JS, /addEventListener\('input', renewCreateOperation/);
 });
@@ -288,8 +290,9 @@ test('between 761 and 1000 px the header wraps and the tiles stay three columns,
   assert.match(ROOM_CSS.slice(ROOM_CSS.lastIndexOf('@media (max-width: 760px)')), /\.room-layout \{ grid-template-columns: 1fr; \}/);
 });
 
-test('a project drawer row carries a line of the record\'s own facts under its title', () => {
-  assert.match(WORK_PANEL_JS, /function renderTreeRow[\s\S]*?const facts = model\(\)\.projectRowLine\(row\)[\s\S]*?if \(facts\) entry\.append\(make\('p', 'work-tree-facts', facts\)\)/);
+test('a project row carries a line of the record\'s own facts under its title', () => {
+  assert.match(WORK_PANEL_JS, /function renderTreeRow\(node\)[\s\S]*?if \(node\.facts\) entry\.append\(make\('p', 'work-tree-facts', node\.facts\)\)/);
+  assert.match(WORK_PANEL_JS, /facts: model\(\)\.projectRowLine\(node\.row\)/);
   const rule = /\.work-tree-facts \{([^}]*)\}/.exec(ROOM_CSS);
   assert.ok(rule, 'the facts line has its own rule');
   assert.match(rule[1], /color: var\(--ink-3\)/);
@@ -320,4 +323,28 @@ test('Actions group headings keep names as stored, and the drawer\'s actions are
   assert.doesNotMatch(WORK_PANEL_JS, /make\('h4', 'work-state'/);
   assert.match(ROOM, /<section id="work-drawer-actions" aria-label="Actions on this record"><\/section>/);
   assert.doesNotMatch(ROOM, /aria-label="Actions"/);
+});
+
+test('each project lists its work in place: a heading, an inline edit, rows, and done collapsed; no project pop-up, no recent changes', () => {
+  assert.match(WORK_PANEL_JS, /function renderProjects\(brief\)[\s\S]*?model\(\)\.projectSections\(brief\)/);
+  assert.match(WORK_PANEL_JS, /make\('section', 'work-project'\)/);
+  assert.match(WORK_PANEL_JS, /setAttribute\('aria-labelledby', 'project-' \+ id \+ '-heading'\)/);
+  assert.match(WORK_PANEL_JS, /make\('h4', 'work-project-heading'\)/);
+  assert.match(WORK_PANEL_JS, /make\('p', 'work-project-brief'\)/);
+  assert.match(WORK_PANEL_JS, /'Edit ' \+ section\.display_name \+ "'s objective and today"/);
+  assert.match(WORK_PANEL_JS, /'done \(' \+ section\.doneCount \+ '\)'/);
+  assert.match(WORK_PANEL_JS, /doneToggle\.setAttribute\('aria-expanded', 'false'\)/);
+  assert.match(WORK_PANEL_JS, /'\/api\/work\/list\?project=' \+ encodeURIComponent\(view\.id\) \+ '&limit=' \+ PROJECT_LIMIT/);
+  assert.match(WORK_PANEL_JS, /write\('projects\/update', body, view\.status, operation\)/);
+  // The heading is text: nothing in the tile opens a dialog for a project.
+  assert.doesNotMatch(WORK_PANEL_JS, /openProject|renderProjectTree|work-open-project|Showing ' \+/);
+  // Recent changes left the tile; the changes stream stays an API and CLI surface.
+  for (const gone of ['changes-heading', 'changes-list', 'changes-total', 'changes-more', 'Recent changes']) {
+    assert.doesNotMatch(ROOM, new RegExp(gone), `${gone} must be gone from the page`);
+  }
+  assert.doesNotMatch(WORK_PANEL_JS, /loadChanges|renderChanges|showMoreChanges|\/api\/work\/changes/);
+  assert.doesNotMatch(ROOM_CSS, /\.work-change\b|\.work-open-project\b/);
+  const rule = /\.work-project \{([^}]*)\}/.exec(ROOM_CSS);
+  assert.ok(rule, 'a project section has its own rule');
+  assert.doesNotMatch(ROOM_CSS.slice(ROOM_CSS.indexOf('.work-project')), /--wait|--ember|--signal|--ai\b|--owner|#[0-9a-f]{3,8}\b/i);
 });

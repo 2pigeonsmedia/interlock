@@ -1,16 +1,13 @@
 'use strict';
 
 // The work panel renders the work record beside the conversation: what needs
-// the viewer, answers reported on their behalf, each project's summary, the
-// record's changes, and a drawer for one item or one project.
+// the viewer, answers reported on their behalf, everyone's open actions, and
+// each project's open work and decisions in place, with a drawer for one item.
 // InterlockWorkPanelModel supplies the rows, labels and lines; this file
 // fetches, assembles them into the page with textContent, and wires the
 // controls and their forms.
 (function exposeWorkPanel(root) {
   const WORK_POLL_MS = 5_000;
-  const CHANGES_FIRST = 20;
-  const CHANGES_MORE = 50;
-  const CHANGES_PAGE_MAX = 500;
   const PROJECT_LIMIT = 200;
   const UNKNOWN_ITEM = "This record is not in the room's work record (unknown-item).";
   const WORK_STATE_CHOICES = Object.freeze(['open', 'active', 'blocked', 'ready', 'done']);
@@ -178,19 +175,151 @@
     }));
   }
 
+  // ── projects, in place ──────────────────────────────────────────────────
+
+  // Each project keeps one section node across polls, so an open edit form
+  // keeps its words and focus, and an expanded done list stays open. A poll
+  // rewrites the heading, notes and rows; it never touches the form slot.
+  function projectView(state, id) {
+    if (state.projectViews.has(id)) return state.projectViews.get(id);
+    const view = { id, section: make('section', 'work-project'), editing: false, doneOpen: false, doneFor: null, project: null };
+    view.section.setAttribute('aria-labelledby', 'project-' + id + '-heading');
+    view.heading = make('h4', 'work-project-heading');
+    view.heading.id = 'project-' + id + '-heading';
+    view.brief = make('p', 'work-project-brief');
+    view.edit = make('button', 'quiet-action', 'Edit');
+    view.edit.type = 'button';
+    view.edit.addEventListener('click', () => startProjectEdit(view));
+    view.formSlot = make('div', 'work-project-form');
+    view.status = make('p', 'status work-project-status');
+    view.status.setAttribute('role', 'status');
+    view.rows = make('ul', 'work-tree');
+    view.doneToggle = make('button', 'work-toggle work-done-toggle');
+    view.doneToggle.type = 'button';
+    view.doneToggle.setAttribute('aria-expanded', 'false');
+    view.doneToggle.setAttribute('aria-controls', 'project-' + id + '-done');
+    view.doneToggle.addEventListener('click', () => toggleDone(view));
+    view.doneList = make('ul', 'work-tree');
+    view.doneList.id = 'project-' + id + '-done';
+    view.doneList.hidden = true;
+    view.section.append(view.heading, view.brief, view.edit, view.formSlot, view.status, view.rows, view.doneToggle, view.doneList);
+    state.projectViews.set(id, view);
+    return view;
+  }
+
+  function renderTreeRow(node) {
+    const row = node.row;
+    const entry = make('li');
+    entry.append(openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id), row.id));
+    entry.append(make('span', 'work-state', ' ' + row.id + ' · ' + model().stateLabel(row)));
+    if (node.facts) entry.append(make('p', 'work-tree-facts', node.facts));
+    if (node.children && node.children.length) {
+      const children = make('ul', 'work-tree');
+      for (const child of node.children) children.append(renderTreeRow(child));
+      entry.append(children);
+    }
+    return entry;
+  }
+
+  function renderRowNodes(list, nodes, empty) {
+    list.replaceChildren(...(nodes.length ? nodes.map(renderTreeRow) : [make('li', 'work-tree-facts', empty)]));
+  }
+
   function renderProjects(brief) {
-    element('project-list').replaceChildren(...model().projectSummaries(brief).map(project => {
-      const card = make('div', 'work-row');
-      card.append(openButton('work-open-project', project.display_name,
-        'Open project ' + project.id + ': ' + project.display_name, () => openProject(project.id), project.id));
-      card.append(make('p', 'work-state',
-        'open ' + project.open + ' · blocked ' + project.blocked + ' · ready ' + project.ready +
-        ' · awaiting ' + project.awaiting));
-      if (project.objective) card.append(make('p', '', project.objective));
-      if (project.today) card.append(make('p', '', project.today));
-      card.append(make('p', 'work-state', project.updatedBy + ' · ' + stampOf(project.updated_at)));
-      return card;
+    const state = session;
+    const counts = new Map(model().projectSummaries(brief).map(project => [project.id, project]));
+    const views = model().projectSections(brief).map(section => {
+      const view = projectView(state, section.id);
+      const count = counts.get(section.id);
+      view.project = section;
+      view.heading.replaceChildren(document.createTextNode(section.display_name + ' '), make('span', 'work-state',
+        'open ' + count.open + ' · blocked ' + count.blocked + ' · ready ' + count.ready + ' · awaiting ' + count.awaiting));
+      view.brief.textContent = [section.objective, section.today, section.updatedBy + ' · ' + stampOf(section.updated_at)]
+        .filter(Boolean).join(' · ');
+      view.edit.setAttribute('aria-label', 'Edit ' + section.display_name + "'s objective and today");
+      view.edit.hidden = view.editing;
+      renderRowNodes(view.rows, section.rows, 'Nothing open');
+      view.doneToggle.textContent = 'done (' + section.doneCount + ')';
+      if (view.doneOpen && view.doneFor !== section.doneCount) loadDone(view);
+      return view;
+    });
+    for (const [id, view] of state.projectViews) {
+      if (!views.includes(view)) state.projectViews.delete(id);
+    }
+    const list = element('project-list');
+    const sections = views.map(view => view.section);
+    const same = list.children.length === sections.length && sections.every((node, index) => list.children[index] === node);
+    if (!same) list.replaceChildren(...sections);
+  }
+
+  // Done rows are fetched when the list opens, and again when the count
+  // moves while it is open; every page is read, so the list never caps.
+  async function loadDone(view) {
+    const state = session;
+    view.doneFor = view.project.doneCount;
+    const rows = [];
+    try {
+      let after = 0;
+      for (;;) {
+        const page = await workGet('/api/work/list?project=' + encodeURIComponent(view.id) + '&limit=' + PROJECT_LIMIT +
+          (after ? '&after=' + after : ''));
+        if (!current(state)) return;
+        rows.push(...page.items.filter(row => row.state === 'done'));
+        if (page.next === null || page.next === undefined) break;
+        after = page.next;
+      }
+    } catch (error) {
+      if (!current(state)) return;
+      view.doneFor = null;
+      if (error.code !== 'not-authenticated') view.status.textContent = model().errorWords(error.code);
+      return;
+    }
+    const nodes = model().projectTree(rows).map(node => ({
+      row: node.row, facts: model().projectRowLine(node.row),
+      children: node.children.map(child => ({ row: child, facts: model().projectRowLine(child) })),
     }));
+    renderRowNodes(view.doneList, nodes, 'Nothing done yet');
+  }
+
+  function toggleDone(view) {
+    view.doneOpen = !view.doneOpen;
+    view.doneToggle.setAttribute('aria-expanded', view.doneOpen ? 'true' : 'false');
+    view.doneList.hidden = !view.doneOpen;
+    if (view.doneOpen) loadDone(view);
+  }
+
+  // The objective and today's-focus note, edited where they are shown.
+  function startProjectEdit(view) {
+    const project = view.project;
+    const objective = control('input', 'objective', 'Objective', { value: project.objective });
+    const today = control('input', 'today', 'Today', { value: project.today });
+    const cancel = make('button', 'quiet-action', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => endProjectEdit(view));
+    const form = actionForm('work-project', [objective, today], 'Save', async operation => {
+      const body = { id: project.id, expected_revision: project.revision };
+      if (objective.node.value !== project.objective) body.objective = objective.node.value;
+      if (today.node.value !== project.today) body.today = today.node.value;
+      if (body.objective === undefined && body.today === undefined) {
+        view.status.textContent = 'Nothing changed.';
+        return;
+      }
+      const result = await write('projects/update', body, view.status, operation);
+      if (result) endProjectEdit(view);
+    });
+    form.append(cancel);
+    view.editing = true;
+    view.edit.hidden = true;
+    view.status.textContent = '';
+    view.formSlot.replaceChildren(form);
+    objective.node.focus();
+  }
+
+  function endProjectEdit(view) {
+    view.editing = false;
+    view.formSlot.replaceChildren();
+    view.edit.hidden = false;
+    view.edit.focus();
   }
 
   async function loadBrief() {
@@ -202,64 +331,6 @@
     renderReported(brief);
     renderActions(brief);
     renderProjects(brief);
-  }
-
-  // Changes read newest first. The brief's cursor is the latest event's seq and
-  // seqs run densely from 1, so the cursor is the number of events in the
-  // record; changes() counts only events after `after`, so its total is not.
-  function renderChanges(state) {
-    const oldest = state.changes.length ? state.changes[state.changes.length - 1].seq : state.changesTotal + 1;
-    const view = model().recentChanges({ events: state.changes, total: state.changesTotal }, state.changes.length);
-    element('changes-total').textContent = String(view.total);
-    element('changes-list').replaceChildren(...view.lines.map(line => make('p', 'work-change', line)));
-    element('changes-more').hidden = !(oldest > 1);
-  }
-
-  // Events (after, after + limit], newest first.
-  async function changesDescending(after, limit) {
-    const page = await workGet('/api/work/changes?after=' + after + '&limit=' + limit);
-    return page.events.slice().sort((a, b) => b.seq - a.seq);
-  }
-
-  // A refresh adds what arrived since the newest event shown, keeping the
-  // number shown (or reads the latest CHANGES_FIRST when nothing is shown or
-  // the gap is too wide); Show more reads the CHANGES_MORE events older than
-  // the oldest shown.
-  async function loadChanges(more) {
-    const state = session;
-    if (!state || !state.brief || state.changesBusy) return;
-    state.changesBusy = true;
-    try {
-      const cursor = state.brief.cursor;
-      if (more) {
-        if (!state.changes.length) return;
-        const oldest = state.changes[state.changes.length - 1].seq;
-        const after = Math.max(0, oldest - 1 - CHANGES_MORE);
-        const limit = oldest - 1 - after;
-        if (limit < 1) return;
-        const older = await changesDescending(after, limit);
-        if (!current(state)) return;
-        state.changes = state.changes.concat(older);
-      } else {
-        const newest = state.changes.length ? state.changes[0].seq : null;
-        if (newest === null || cursor - newest > CHANGES_PAGE_MAX || cursor < newest) {
-          const after = Math.max(0, cursor - CHANGES_FIRST);
-          const latest = cursor > after ? await changesDescending(after, cursor - after) : [];
-          if (!current(state)) return;
-          state.changes = latest;
-        } else if (cursor > newest) {
-          const arrived = await changesDescending(newest, cursor - newest);
-          if (!current(state)) return;
-          // The window keeps its size: new events push the oldest shown ones
-          // back behind Show more instead of growing the list.
-          state.changes = arrived.concat(state.changes).slice(0, Math.max(CHANGES_FIRST, state.changes.length));
-        }
-      }
-      state.changesTotal = cursor;
-      renderChanges(state);
-    } finally {
-      state.changesBusy = false;
-    }
   }
 
   function setStatus(text) {
@@ -276,7 +347,6 @@
     state.refreshing = true;
     try {
       await loadBrief();
-      await loadChanges(false);
       if (current(state)) setStatus(state.notice);
     } catch (error) {
       // A failed read never hides a share notice: both stay on screen.
@@ -303,19 +373,6 @@
   function showNeedsYou() {
     element('work-heading').scrollIntoView();
     element('needs-you-toggle').focus();
-  }
-
-  async function showMoreChanges() {
-    const state = session;
-    const button = element('changes-more');
-    button.disabled = true;
-    try {
-      await loadChanges(true);
-    } catch (error) {
-      if (current(state)) setStatus(model().errorWords(error.code));
-    } finally {
-      button.disabled = false;
-    }
   }
 
   // ── the drawer ──────────────────────────────────────────────────────────
@@ -348,16 +405,11 @@
     return closes.length ? closes[closes.length - 1].by : null;
   }
 
-  // Children come from the rows this page already holds: the brief's open work
-  // and live decisions (every open follow-up of an active project), and the
-  // last project list opened in the drawer.
+  // Children come from the brief's open work and live decisions: every open
+  // follow-up of an active project, which is all the done line counts.
   function childrenOf(state, item) {
-    const rows = new Map();
-    if (state.brief) for (const row of state.brief.open.concat(state.brief.decisions)) rows.set(row.id, row);
-    if (state.projectRows && state.projectRows.project === item.project) {
-      for (const row of state.projectRows.rows) rows.set(row.id, row);
-    }
-    return [...rows.values()].filter(row => row.parent === item.id);
+    if (!state.brief) return [];
+    return state.brief.open.concat(state.brief.decisions).filter(row => row.parent === item.id);
   }
 
   function renderDrawerDecision(section, item, history) {
@@ -420,8 +472,10 @@
         await loadBrief();
         if (!current(state)) return;
         const project = state.brief.projects.find(row => row.id === id);
-        await openProject(id);
-        if (current(state)) status.textContent = project ? staleWords(project.revision) : model().errorWords('stale-revision');
+        // The open form is rebuilt on the fresh notes and revision.
+        const view = state.projectViews.get(id);
+        if (view && view.editing) startProjectEdit(view);
+        status.textContent = project ? staleWords(project.revision) : model().errorWords('stale-revision');
       } else {
         const fresh = await workGet('/api/work/items/' + encodeURIComponent(id));
         if (!current(state)) return;
@@ -1035,28 +1089,6 @@
 
   // ── projects ────────────────────────────────────────────────────────────
 
-  function projectForm(project) {
-    const objective = control('input', 'objective', 'Objective', { value: project.objective });
-    const today = control('input', 'today', 'Today', { value: project.today });
-    return actionForm('work-project', [objective, today], 'Save project notes', async operation => {
-      const body = { id: project.id, expected_revision: project.revision };
-      if (objective.node.value !== project.objective) body.objective = objective.node.value;
-      if (today.node.value !== project.today) body.today = today.node.value;
-      if (body.objective === undefined && body.today === undefined) {
-        element('work-drawer-status').textContent = 'Nothing changed.';
-        return;
-      }
-      const result = await write('projects/update', body, null, operation);
-      if (!result) return;
-      try {
-        await loadBrief();
-      } catch (_) {
-        // The poll reports a failed read; the write itself succeeded.
-      }
-      await openProject(project.id);
-    });
-  }
-
   function settingsProjectsStatus(text) {
     element('settings-projects-status').textContent = text;
   }
@@ -1160,64 +1192,14 @@
     showDrawer();
   }
 
-  function renderTreeRow(row, label) {
-    const entry = make('li');
-    entry.append(openButton('work-open', label, 'Open ' + row.id + ': ' + label, () => openItem(row.id)));
-    entry.append(make('span', 'work-state', ' ' + row.id + ' · ' + model().stateLabel(row)));
-    const facts = model().projectRowLine(row);
-    if (facts) entry.append(make('p', 'work-tree-facts', facts));
-    return entry;
-  }
-
-  function renderProjectTree(rows) {
-    const list = make('ul', 'work-tree');
-    for (const node of model().projectTree(rows)) {
-      const entry = renderTreeRow(node.row, node.label);
-      if (node.children.length) {
-        const children = make('ul', 'work-tree');
-        for (const child of node.children) children.append(renderTreeRow(child, child.title));
-        entry.append(children);
-      }
-      list.append(entry);
-    }
-    return list;
-  }
-
-  async function openProject(id) {
-    const state = session;
-    if (!state) return;
-    const request = ++state.drawerRequest;
-    let result;
-    try {
-      result = await workGet('/api/work/list?project=' + encodeURIComponent(id) + '&limit=' + PROJECT_LIMIT);
-    } catch (error) {
-      if (!current(state) || request !== state.drawerRequest) return;
-      if (error.code !== 'not-authenticated') setStatus(model().errorWords(error.code));
-      return;
-    }
-    if (!current(state) || request !== state.drawerRequest) return;
-    state.projectRows = { project: id, rows: result.items };
-    state.drawerItem = null;
-    clearDrawer(projectName(state, id), '');
-    element('work-drawer-history').hidden = true;
-    const section = element('work-drawer-state');
-    section.append(make('p', 'work-state', 'Showing ' + result.items.length + ' of ' + result.total));
-    section.append(renderProjectTree(result.items));
-    const project = state.brief && state.brief.projects.find(row => row.id === id);
-    if (project) element('work-drawer-actions').append(projectForm(project));
-    showDrawer();
-  }
-
   // ── start and stop ─────────────────────────────────────────────────────
 
   // A signed-out page keeps nothing of the last viewer's record on screen.
   function resetTile() {
-    for (const id of ['needs-you-list', 'reported-list', 'actions-list', 'project-list', 'changes-list']) element(id).replaceChildren();
+    for (const id of ['needs-you-list', 'reported-list', 'actions-list', 'project-list']) element(id).replaceChildren();
     element('needs-you-count').textContent = '0';
     element('actions-count').textContent = '0';
     element('work-count-button').textContent = 'Needs you · 0';
-    element('changes-total').textContent = '0';
-    element('changes-more').hidden = true;
     element('needs-you-toggle').setAttribute('aria-expanded', 'true');
     element('needs-you-list').hidden = false;
     element('actions-toggle').setAttribute('aria-expanded', 'true');
@@ -1230,8 +1212,7 @@
   function start(user, deps) {
     stop();
     const state = {
-      user, deps, brief: null, projectRows: null,
-      changes: [], changesTotal: 0, changesBusy: false,
+      user, deps, brief: null, projectViews: new Map(),
       refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },
@@ -1241,7 +1222,6 @@
     element('needs-you-toggle').addEventListener('click', toggleNeedsYou, { signal });
     element('actions-toggle').addEventListener('click', toggleActions, { signal });
     element('work-count-button').addEventListener('click', showNeedsYou, { signal });
-    element('changes-more').addEventListener('click', showMoreChanges, { signal });
     element('work-drawer').addEventListener('close', scheduleOpenerFocus, { signal });
     element('work-share-decline').addEventListener('click', declineShare, { signal });
     element('work-create-form').addEventListener('submit', submitCreate, { signal });

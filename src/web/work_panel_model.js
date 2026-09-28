@@ -207,6 +207,13 @@
       }
       return parts.join(' · ');
     }
+    // A done row names no next step: only that it is done, whether evidence
+    // is attached, and a question it still waits on.
+    if (row.state === 'done') {
+      parts.push('done', row.evidence_attached ? 'evidence attached' : 'no evidence attached');
+      if (row.awaiting) parts.push('awaiting ' + row.awaiting);
+      return parts.join(' · ');
+    }
     const blocked = row.state === 'blocked';
     if (blocked && typeof row.block_reason === 'string' && row.block_reason.trim() !== '') {
       parts.push('blocked: ' + oneLine(row.block_reason.trim()));
@@ -220,6 +227,35 @@
     if (row.awaiting) parts.push('awaiting ' + row.awaiting);
     if (row.evidence_attached) parts.push('evidence attached');
     return parts.join(' · ');
+  }
+
+  function factsNode(row) {
+    return { row, facts: projectRowLine(row) };
+  }
+
+  // Rows as the tile lists them: projectTree's nesting, each row with its
+  // facts line.
+  function rowNodes(rows) {
+    return projectTree(rows).map(node => Object.assign(factsNode(node.row), { children: node.children.map(factsNode) }));
+  }
+
+  // Each project in the tile, in place: its notes, its done count, and its
+  // open work and live decisions from the brief, nested one level by parent.
+  // A child whose parent is done has no parent among these rows, so it lists
+  // at top level.
+  function projectSections(brief) {
+    const rows = brief.open.concat(brief.decisions);
+    return brief.projects.map(project => ({
+      id: project.id,
+      display_name: project.display_name,
+      objective: project.objective,
+      today: project.today,
+      revision: project.revision,
+      updatedBy: who(project.updated_by),
+      updated_at: project.updated_at,
+      doneCount: Number.isSafeInteger(project.done_count) ? project.done_count : 0,
+      rows: rowNodes(rows.filter(row => row.project === project.id)),
+    }));
   }
 
   function isOpenFollowUp(row) {
@@ -314,16 +350,6 @@
 
   function historyLines(events) {
     return events.map(historyLine);
-  }
-
-  function recentChanges(changes, shown) {
-    const count = Math.min(shown, changes.events.length);
-    return {
-      lines: historyLines(changes.events).slice(0, count),
-      total: changes.total,
-      shown: count,
-      more: changes.total > count,
-    };
   }
 
   // The server's limits, in UTF-8 bytes.
@@ -447,8 +473,8 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, doneLine,
-    reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
+    who, waitingLabel, stateLabel, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
+    reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;

@@ -857,7 +857,12 @@ function createWorkService(options) {
     return {
       ok: true,
       cursor: draft.next_event - 1,
-      projects: projects.map(publicProject),
+      // Each project's done work and findings are counted, not listed: the
+      // tile collapses them as done (N) and lists them on request.
+      projects: projects.map(project => Object.assign(publicProject(project), {
+        done_count: draft.items.filter(item => item.project === project.id && item.kind !== 'decision' &&
+          item.state === 'done').length,
+      })),
       needs_me: mine.filter(item => needsMe(item, me)).map(item => row(draft, item)),
       reported_to_me: mine.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&
         item.answer.kind === 'reported' && item.answer.attributed_to.subject_id === me).map(item => row(draft, item)),

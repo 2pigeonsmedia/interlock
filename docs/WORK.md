@@ -146,7 +146,8 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 
 `GET /api/work/...` (session) or `GET /api/ai/work/...` (bearer):
 
-- `brief[?project=ID]` — projects, `needs_me`, `reported_to_me`, open work,
+- `brief[?project=ID]` — projects (each with `done_count`, its work and
+  findings in state `done`), `needs_me`, `reported_to_me`, open work,
   decisions, and the `cursor` a later `changes` call continues from.
 - `list[?project=ID&needs_me=1&after=N&limit=N]` — rows with a `total` and a
   `next` continuation; never a silent cap. Retired projects are omitted unless
@@ -198,13 +199,13 @@ replays the original result. `report-answer` prints the exposure draft and the
 ## In the browser
 
 The room page shows the record in a Work tile beside the conversation. It
-reads `brief` and `changes` every five seconds and writes through the browser
+reads `brief` every five seconds and writes through the browser
 routes above; every state, count and name it shows comes from the record,
 never from message text.
 
 ### The tile
 
-Five sections, in this order:
+Four sections, in this order:
 
 - **Needs you** — every record whose next action is addressed to the viewer,
   or a decision awaiting their answer, oldest change first. It counts
@@ -231,23 +232,28 @@ Five sections, in this order:
   and it does not change who a request is addressed to. It is built from the
   same brief the personal queue uses, so the two can never disagree: a
   viewer's group here holds exactly the records in their Needs you.
-- **Projects** — each active project's open, blocked, ready and awaiting
-  counts, its objective, today's-focus note, and who last changed it. Opening
-  a project lists its records (up to 200, with `Showing N of total`) as a
-  tree of parents and follow-ups. Under each row's title, id and state, one
-  line gives the row's own facts: for work, `blocked: <reason>` while it is
-  blocked, `next: <name> — <action>` (`unassigned` when no one is named, as
-  in Actions; a blocked item shows it only when it names someone),
+- **Projects** — each active project in place, with no pop-up for a
+  project. Its heading is the project's name with its open, blocked, ready
+  and awaiting counts; under it, its objective, today's-focus note and who
+  last changed them, with an **Edit** button that opens a form for those two
+  right there (Save, Cancel). Any participant may edit them. Then the
+  project's open work and live decisions, nested one level under their
+  parent (a follow-up whose parent is done lists at top level). Each row is a
+  button (`Open W-12: …`) with its id and state, and under it one line of the
+  row's own facts: for work, `blocked: <reason>` while it is blocked,
+  `next: <name> — <action>` (`unassigned` when no one is named, as in
+  Actions; a blocked item shows it only when it names someone),
   `responsible: <name>`, `target: …`, `awaiting D-n` and `evidence attached`,
-  each only when set; for a decision, `asked of <name> by <name>` and, once
-  answered, `answered by <name>` or `reported by <name> · attributed to
-  <name>`. Then a form for the objective and the
-  today's-focus note. Any participant may edit those two.
-- **Recent changes** — the record's events, newest first, with the record's
-  total event count beside the heading. It shows the latest 20; **Show more**
-  loads the 50 events before the oldest one shown, and stays while older
-  events exist. New events push the oldest shown ones back behind Show more;
-  the list never caps silently.
+  each only when set; for a done item only `done · evidence attached` or
+  `done · no evidence attached`, and `awaiting D-n` if a question is still
+  open; for a decision, `asked of <name> by <name>` and, once answered,
+  `answered by <name>` or `reported by <name> · attributed to <name>`. Last,
+  `done (N)`, collapsed: N is the brief's `done_count`, and opening it reads
+  the project's list, every page of it, and shows the done rows the same way.
+
+The tile does not show the record's changes. Each record's history is in its
+drawer; the changes stream stays an API and CLI surface (`changes`, `work
+changes`), with its total and continuation, never capping silently.
 
 ### One record
 

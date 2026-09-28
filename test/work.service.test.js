@@ -638,6 +638,25 @@ test('export carries actors, states, conditions, limits and earlier answers in b
   code(() => work.exportRecords(owner, { format: 'xml' }), 'invalid-format');
 });
 
+test('brief counts each project\'s done work and findings, never its decisions', () => {
+  const { work } = fresh();
+  work.createProject(owner, { operation_id: uuid(), id: 'finance', display_name: 'Finance' });
+  const counts = () => new Map(work.brief(owner).projects.map(project => [project.id, project.done_count]));
+  assert.deepEqual([...counts()], [['ops', 0], ['finance', 0]]);
+  const done = newWork(work, lead);
+  work.updateWork(lead, { operation_id: uuid(), id: done.id, expected_revision: 1, state: 'done',
+    done_account: 'Imported.', no_evidence: true, note: 'closing' });
+  const finding = work.createItem(lead, { operation_id: uuid(), kind: 'finding', project: 'finance', title: 'Gap',
+    body: 'Seen.' }).item;
+  work.updateWork(lead, { operation_id: uuid(), id: finding.id, expected_revision: 1, state: 'done',
+    done_account: 'Closed.', no_evidence: true, note: 'closing' });
+  newWork(work, lead);
+  const decision = newDecision(work, builder, owner);
+  work.answer(owner, { operation_id: uuid(), id: decision.id, expected_revision: 1, text: 'No.' });
+  assert.deepEqual([...counts()], [['ops', 1], ['finance', 1]]);
+  assert.equal(work.brief(owner, { project: 'finance' }).projects[0].done_count, 1);
+});
+
 test('retired projects drop out of the default list and brief but their records stay readable', () => {
   const { work } = fresh();
   work.createProject(owner, { operation_id: uuid(), id: 'finance', display_name: 'Finance' });

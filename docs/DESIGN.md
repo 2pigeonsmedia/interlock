@@ -222,11 +222,6 @@ trimmed to the section headings and lists; `work_panel.js` fills the lists:
     <h3 id="projects-heading">Projects</h3>
     <div id="project-list" class="work-list"></div>
   </section>
-  <section class="work-section" aria-labelledby="changes-heading">
-    <h3 id="changes-heading">Recent changes <span id="changes-total" class="work-count">0</span></h3>
-    <div id="changes-list" class="work-list"></div>
-    <button id="changes-more" class="quiet-action" type="button" hidden>Show more</button>
-  </section>
   <p id="work-status" class="status" role="status" aria-live="polite"></p>
 </aside>
 
@@ -236,6 +231,22 @@ trimmed to the section headings and lists; `work_panel.js` fills the lists:
   <p class="work-state">Operations · D-7 · waiting 2h</p>
   <p>Ship on Friday — asked by Lead</p>
 </div>
+
+<!-- one project, in place, as work_panel.js builds it inside #project-list -->
+<section class="work-project" aria-labelledby="project-ops-heading">
+  <h4 id="project-ops-heading" class="work-project-heading">Operations <span class="work-state">open 1 · blocked 0 · ready 0 · awaiting 0</span></h4>
+  <p class="work-project-brief">Keep it running · Keys · Ana · 2026-09-27T20:00:00.000Z</p>
+  <button class="quiet-action" type="button" aria-label="Edit Operations's objective and today">Edit</button>
+  <div class="work-project-form"></div>
+  <p class="status work-project-status" role="status"></p>
+  <ul class="work-tree">
+    <li><button class="work-open" type="button" aria-label="Open W-1: Rotate the keys">Rotate the keys</button>
+      <span class="work-state"> W-1 · Open</span>
+      <p class="work-tree-facts">next: Lead — complete 717</p></li>
+  </ul>
+  <button class="work-toggle work-done-toggle" type="button" aria-expanded="false" aria-controls="project-ops-done">done (1)</button>
+  <ul id="project-ops-done" class="work-tree" hidden></ul>
+</section>
 ```
 
 The header carries `#work-count-button` (`Needs you · N`), the composer
@@ -248,10 +259,15 @@ Rules the CSS relies on:
   ink — never a hue. The tile adds no colour of its own: amber, teal, ice
   blue, violet and crimson keep their jobs above, and a blocked or awaiting
   record is said, not lit.
-- Row actions are `<button>`s (`.work-open`, `.work-open-project`) whose
-  accessible name carries the record id and title (`Answer D-7: …`,
-  `Open work W-12: …`, `Open project ops: …`); the drawer's act buttons
-  follow the same `<act> <id>: <title>` form.
+- Row actions are `.work-open` `<button>`s whose accessible name carries the
+  record id and title (`Answer D-7: …`, `Open work W-12: …`, `Open W-1: …`);
+  the drawer's act buttons follow the same `<act> <id>: <title>` form.
+- A project is a `.work-project` section in the tile, never a dialog: its
+  heading is text, its notes are edited in place, and its rows and
+  `done (N)` list sit under it. The tile has no recent-changes list; history
+  lives in each record's drawer.
+- The facts line under a row (`.work-tree-facts`) is muted and in sentence
+  case: it carries the record's own words.
 - The record drawer (`#work-drawer`) and the create dialog
   (`#work-create-dialog`) are native `<dialog>`s opened with `showModal()`.
   The drawer's order is fixed: current state, actions, source, then the

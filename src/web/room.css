@@ -998,7 +998,7 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
 .work-create-from { font-size: 0.85rem; color: var(--ink-3); }
 .work-create-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .work-row > * { grid-column: 1 / -1; min-width: 0; }
-.work-open, .work-open-project {
+.work-open {
   display: block;
   width: 100%;
   padding: 6px 9px;
@@ -1015,10 +1015,16 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
 .work-tree { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .work-tree .work-tree { margin: 6px 0 0 10px; padding-left: 12px; border-left: 1px solid var(--line); }
 .work-tree .work-open { display: inline-block; width: auto; max-width: 100%; }
-/* The record's facts under a drawer row: muted like the state line, but in
+/* The record's facts under a row: muted like the state line, but in
    sentence case, since it carries the record's own words. */
 .work-tree-facts { margin: 2px 0 0; font-family: var(--font-ai); font-size: 0.72rem; color: var(--ink-3); overflow-wrap: anywhere; }
-.work-change { padding: 4px 0; font-size: 0.8rem; color: var(--ink-2); overflow-wrap: anywhere; }
+.work-project { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+.work-project-heading { font-size: 0.85rem; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.work-project-heading .work-state { font-weight: 400; }
+.work-project-brief { font-size: 0.8rem; color: var(--ink-2); overflow-wrap: anywhere; }
+.work-project > .quiet-action { justify-self: start; }
+.work-project-form .work-form { margin-top: 0; }
+.work-done-toggle { font-size: 0.8rem; color: var(--ink-3); }
 .work-action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .work-form { display: grid; gap: 7px; margin-top: 12px; }
 .work-field { display: grid; gap: 4px; font-size: 0.8rem; font-weight: 600; color: var(--ink-3); }

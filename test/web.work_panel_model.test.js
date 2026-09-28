@@ -7,8 +7,8 @@ const model = require('../src/web/work_panel_model.js');
 
 const {
   who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
-  reportedLabel, historyLines, recentChanges, messagePrefill, exposureText, notifyText, shareLine,
-  errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson,
+  reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
+  errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson, projectSections,
 } = model;
 
 const MINUTE = 60_000;
@@ -414,6 +414,54 @@ test('on real service briefs, every viewer\'s Needs you equals their Actions gro
   }
 });
 
+test('a done row\'s facts line says done and whether evidence is attached, never a next step', () => {
+  const done = { id: 'W-1', kind: 'work', state: 'done', responsible: BUILDER_1, next_to: null,
+    next_action: 'complete 717', block_reason: 'old wait', target: 'v2', evidence_attached: true, awaiting: null };
+  assert.equal(projectRowLine(done), 'done · evidence attached');
+  assert.equal(projectRowLine(Object.assign({}, done, { evidence_attached: false })), 'done · no evidence attached');
+  assert.equal(projectRowLine(Object.assign({}, done, { next_to: LEAD, awaiting: 'D-4' })), 'done · evidence attached · awaiting D-4');
+  assert.doesNotMatch(projectRowLine(Object.assign({}, done, { next_to: LEAD })), /next:/);
+});
+
+test('project sections list each project\'s open work and decisions in place, nested one level, with its done count', () => {
+  const brief = {
+    projects: [
+      Object.assign({}, PROJECTS[0], { done_count: 2 }),
+      Object.assign({}, PROJECTS[1], { done_count: 0 }),
+    ],
+    open: [
+      workRow('W-12', { parent: null, next_to: LEAD, next_action: 'complete 717' }),
+      workRow('W-14', { parent: 'W-12', kind: 'finding', state: 'blocked', block_reason: 'waiting on the bank' }),
+      // Its parent W-2 is done, so it is not in the brief: this row lists at top level.
+      workRow('W-15', { parent: 'W-2', next_action: 'Follow up' }),
+      workRow('W-20', { project: 'finance', parent: null }),
+    ],
+    decisions: [
+      Object.assign({}, DECISION_ROW, { id: 'D-13', project: 'ops', parent: 'W-12' }),
+      Object.assign({}, REPORTED_ROW, { id: 'D-3', project: 'finance', parent: null }),
+    ],
+  };
+  const sections = projectSections(brief);
+  assert.deepEqual(sections.map(section => [section.id, section.display_name, section.doneCount]),
+    [['ops', 'Operations', 2], ['finance', 'Finance', 0]]);
+  const [ops, finance] = sections;
+  assert.equal(ops.objective, 'Keep it running');
+  assert.equal(ops.today, 'Keys');
+  assert.equal(ops.revision, 2);
+  assert.equal(ops.updatedBy, 'Builder (session 1)');
+  assert.equal(ops.updated_at, NOW - DAY);
+  assert.deepEqual(ops.rows.map(node => [node.row.id, node.children.map(child => child.row.id)]),
+    [['W-12', ['D-13', 'W-14']], ['W-15', []]]);
+  assert.equal(ops.rows[0].facts, 'next: Lead — complete 717');
+  assert.equal(ops.rows[0].children[1].facts, 'blocked: waiting on the bank');
+  assert.equal(ops.rows[0].children[0].facts, 'asked of Ana by Lead');
+  assert.equal(ops.rows[1].facts, 'next: unassigned — Follow up');
+  assert.deepEqual(finance.rows.map(node => node.row.id), ['D-3', 'W-20']);
+  assert.equal(finance.rows[0].facts, 'asked of Ana by Builder (session 1) · reported by Builder (session 1) · attributed to Ana');
+  // A brief from before done_count counts nothing rather than failing.
+  assert.equal(projectSections(Object.assign({}, brief, { projects: [PROJECTS[0]] }))[0].doneCount, 0);
+});
+
 test('the done line names the closer, the disposition, the evidence or its absence, and open follow-ups', () => {
   const withEvidence = { kind: 'work', state: 'done', done_account: 'Keys rotated', done_evidence: 14,
     done_without_evidence: false };
@@ -539,20 +587,6 @@ test('a plain reopen names no previous recipient; a re-address does', () => {
     `${STAMP} · Lead · reopened · reason: again · asked of Builder (session 1)`);
   assert.equal(historyLines([reopened({ previous_asked_of: BUILDER_2 })])[0],
     `${STAMP} · Lead · reopened · reason: again · asked of Builder (session 1) · previously asked of Builder (session 2)`);
-});
-
-test('recent changes shows its total and whether more exist', () => {
-  const some = recentChanges({ events: EVENTS, total: 40, cursor: 10 }, 3);
-  assert.equal(some.lines.length, 3);
-  assert.equal(some.lines[0], historyLines(EVENTS)[0]);
-  assert.equal(some.total, 40);
-  assert.equal(some.shown, 3);
-  assert.equal(some.more, true);
-  const all = recentChanges({ events: EVENTS.slice(0, 2), total: 2, cursor: 6 }, 20);
-  assert.deepEqual(all, { lines: historyLines(EVENTS.slice(0, 2)), total: 2, shown: 2, more: false });
-  const short = recentChanges({ events: EVENTS.slice(0, 2), total: 3, cursor: 6 }, 3);
-  assert.equal(short.shown, 2);
-  assert.equal(short.more, true);
 });
 
 const MESSAGE = Object.freeze({
@@ -709,6 +743,6 @@ test('an answer reads who gave it, and an owner answering for someone names both
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
   assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'doneLine', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
-    'needsYou', 'notifyText', 'projectRowLine', 'projectSummaries', 'projectTree', 'recentChanges', 'reportedLabel', 'reportedToYou',
+    'needsYou', 'notifyText', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
 });
