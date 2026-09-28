@@ -412,29 +412,17 @@
     return state.brief.open.concat(state.brief.decisions).filter(row => row.parent === item.id);
   }
 
-  function renderDrawerDecision(section, item, history) {
-    section.append(make('p', '', 'Asked of ' + model().who(item.asked_of) + ' by ' + model().who(item.asked_by)));
-    for (const line of model().answerLines(item, history)) section.append(make('p', '', line));
-    if (item.proposal) section.append(make('p', '', 'Proposal: ' + item.proposal));
-    if (item.answer) section.append(make('p', '', 'Answer: ' + item.answer.text));
-  }
-
-  function renderDrawerWork(state, section, item, evidence, history) {
-    section.append(make('p', '', 'Responsible: ' + (item.responsible ? model().who(item.responsible) : 'unassigned')));
-    if (item.next_to) section.append(make('p', '', 'Next: ' + model().who(item.next_to) + ' — ' + item.next_action));
-    if (item.target) section.append(make('p', '', 'Target: ' + item.target));
-    if (item.block_reason) section.append(make('p', '', 'Blocked: ' + item.block_reason));
-    if (item.state === 'done') {
-      section.append(make('p', '', model().doneLine(item, evidence, childrenOf(state, item), closerOf(history))));
-    }
-  }
-
+  // The state as a word, every field of the record, then a done item's one
+  // done line.
   function renderDrawerState(state, result) {
     const item = result.item;
     const section = element('work-drawer-state');
     section.append(make('p', 'work-state', model().stateLabel(item)));
-    if (item.kind === 'decision') renderDrawerDecision(section, item, result.history);
-    else renderDrawerWork(state, section, item, result.evidence, result.history);
+    for (const line of model().drawerLines(item, result.history)) section.append(make('p', 'work-drawer-line', line));
+    if (item.kind !== 'decision' && item.state === 'done') {
+      section.append(make('p', 'work-drawer-line',
+        model().doneLine(item, result.evidence, childrenOf(state, item), closerOf(result.history))));
+    }
   }
 
   function renderDrawerSource(result) {

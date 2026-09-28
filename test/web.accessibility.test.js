@@ -255,7 +255,8 @@ test('a write with no error code reads as unavailable, and an open form keeps on
 test('the tile says who is responsible, the drawer says whom an owner answered for, and the project id pattern is valid', () => {
   assert.match(WORK_PANEL_JS, /row\.ask \+ ' — ' \+ row\.by/);
   assert.doesNotMatch(WORK_PANEL_JS, /asked by ' \+ row\.askedBy/);
-  assert.match(WORK_PANEL_JS, /model\(\)\.answerLines\(item, history\)/);
+  // The drawer's answer lines come from the model's drawerLines, which calls answerLines.
+  assert.match(WORK_PANEL_JS, /model\(\)\.drawerLines\(item, result\.history\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /Every number and\s*\/\/ every sentence comes from/);
   const pattern = /<input id="project-id" pattern="([^"]+)"/.exec(ROOM)[1];
   // Browsers compile the pattern attribute with the v flag.
@@ -347,4 +348,10 @@ test('each project lists its work in place: a heading, an inline edit, rows, and
   const rule = /\.work-project \{([^}]*)\}/.exec(ROOM_CSS);
   assert.ok(rule, 'a project section has its own rule');
   assert.doesNotMatch(ROOM_CSS.slice(ROOM_CSS.indexOf('.work-project')), /--wait|--ember|--signal|--ai\b|--owner|#[0-9a-f]{3,8}\b/i);
+});
+
+test('the item dialog renders every line the model gives it, keeping line breaks', () => {
+  assert.match(WORK_PANEL_JS, /for \(const line of model\(\)\.drawerLines\(item, result\.history\)\) section\.append\(make\('p', 'work-drawer-line', line\)\)/);
+  assert.doesNotMatch(WORK_PANEL_JS, /'Responsible: '|'Blocked: '|'Asked of '/);
+  assert.match(ROOM_CSS, /\.work-drawer-line \{[^}]*white-space: pre-wrap/);
 });

@@ -297,6 +297,45 @@
     return ['Answered here by ' + who(answer.by)];
   }
 
+  // Where the record sits: the work item it follows up and the records it
+  // links to; then its details, as written.
+  function placeLines(item) {
+    const lines = [];
+    if (item.parent) lines.push('Follow-up of ' + item.parent);
+    if (Array.isArray(item.links) && item.links.length) lines.push('Linked: ' + item.links.join(', '));
+    if (item.body) lines.push('Details: ' + item.body);
+    return lines;
+  }
+
+  // The item dialog's current-state lines: every field of the record, so a
+  // question can be answered without the history. A block reason shows only
+  // while the item is blocked (the service keeps the last one after), and a
+  // next action with no recipient reads unassigned, as in the tile. A done
+  // item's done line is added by the caller, which holds its closer and
+  // follow-ups.
+  function drawerLines(item, history) {
+    if (item.kind === 'decision') {
+      const answer = item.answer;
+      return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by)]
+        .concat(answerLines(item, history))
+        .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])
+        .concat(item.rationale ? ['Rationale: ' + item.rationale] : [])
+        .concat(item.scope ? ['Scope: ' + item.scope] : [])
+        .concat(answer ? ['Answer: ' + answer.text] : [])
+        .concat(answer && answer.conditions ? ['Conditions: ' + answer.conditions] : [])
+        .concat(answer && answer.kind === 'reported' && answer.source ? ['Answer source: ' + answer.source] : [])
+        .concat(placeLines(item));
+    }
+    const lines = ['Responsible: ' + (item.responsible ? who(item.responsible) : UNASSIGNED)];
+    const action = hasAction(item) ? item.next_action.trim() : '';
+    if (item.next_to || action) lines.push('Next: ' + (item.next_to ? who(item.next_to) : UNASSIGNED) + (action ? ' — ' + action : ''));
+    if (item.target) lines.push('Target: ' + item.target);
+    if (item.state === 'blocked' && item.block_reason) lines.push('Blocked: ' + item.block_reason);
+    if (item.consequence) lines.push('Consequence: ' + item.consequence);
+    if (item.severity) lines.push('Severity: ' + item.severity);
+    return lines.concat(placeLines(item));
+  }
+
   // The work service's eventLine, field for field, without its leading '- '.
   function historyLine(event) {
     const parts = [stamp(event.at), who(event.by), event.kind];
@@ -475,7 +514,7 @@
   const contract = Object.freeze({
     who, waitingLabel, stateLabel, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
-    errorWords, sourceLine, evidenceSourceLine, answerLines,
+    errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockWorkPanelModel', {

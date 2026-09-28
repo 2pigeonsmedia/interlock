@@ -261,15 +261,20 @@ Choosing a row opens the record in a drawer, in this order:
 
 1. **Current state** — the state as a word (`Open`, `Active`, `Blocked`,
    `Ready`, `Done`; for a decision `Awaiting answer`, `Answered here`,
-   `Answer reported`, `Withdrawn`), then who is responsible, who acts next and
-   the next action, the target and what a blocked item waits on. A decision
-   shows whom it asks and who asked, the proposal and the answer; a reported
+   `Answer reported`, `Withdrawn`), then every field of the record: who is
+   responsible, who acts next and the next action (`unassigned` when no one
+   is named), the target, what a blocked item waits on (only while it is
+   blocked), a finding's consequence and severity. A decision shows whom it
+   asks and who asked, the proposal, rationale and scope, and the answer with
+   its conditions and, for a reported answer, where it was given. Both end
+   with the work item they follow up, the records they link to, and their
+   details as written, line breaks kept. A reported
    answer reads `Reported by X · attributed to Y · not confirmed here`, and
    an answer the owner gave for the person asked reads `Answered by <owner> ·
    asked of <person>` with `Reason: …`. A
    Done item adds one line: who closed it · the account of what was done ·
    `evidence entry N` or `no evidence attached` · its open follow-ups.
-2. **Actions** — the acts this viewer may take (below).
+2. **Actions on this record** — the acts this viewer may take (below).
 3. **Source** — the free-text source, then, for a record created from a room
    message, `From room message #42 by <speaker> · “quote” · recorded by
    <recorder>`: the speaker and the person who recorded it are separate

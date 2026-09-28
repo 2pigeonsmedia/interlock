@@ -8,7 +8,7 @@ const model = require('../src/web/work_panel_model.js');
 const {
   who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
-  errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson, projectSections,
+  errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson, projectSections, drawerLines,
 } = model;
 
 const MINUTE = 60_000;
@@ -462,6 +462,51 @@ test('project sections list each project\'s open work and decisions in place, ne
   assert.equal(projectSections(Object.assign({}, brief, { projects: [PROJECTS[0]] }))[0].doneCount, 0);
 });
 
+test('the item dialog shows every field of a work item or finding, and a block reason only while blocked', () => {
+  const finding = { id: 'W-14', kind: 'finding', state: 'blocked', responsible: BUILDER_1, next_to: null,
+    next_action: 'Chase the bank', target: 'statement v2', block_reason: 'waiting on the bank',
+    consequence: 'Dates import wrong', severity: 'blocking', parent: 'W-12', links: ['D-13', 'W-3'],
+    body: 'Rows from March drift.\nSeen twice.' };
+  assert.deepEqual(drawerLines(finding, []), [
+    'Responsible: Builder (session 1)',
+    'Next: unassigned — Chase the bank',
+    'Target: statement v2',
+    'Blocked: waiting on the bank',
+    'Consequence: Dates import wrong',
+    'Severity: blocking',
+    'Follow-up of W-12',
+    'Linked: D-13, W-3',
+    'Details: Rows from March drift.\nSeen twice.',
+  ]);
+  const moved = Object.assign({}, finding, { kind: 'work', state: 'active', next_to: LEAD, consequence: '', severity: null,
+    parent: null, links: [], target: '', responsible: null, body: 'Why' });
+  assert.deepEqual(drawerLines(moved, []), ['Responsible: unassigned', 'Next: Lead — Chase the bank', 'Details: Why']);
+  assert.deepEqual(drawerLines(Object.assign({}, moved, { next_to: null, next_action: '  ' }), []),
+    ['Responsible: unassigned', 'Details: Why']);
+});
+
+test('the item dialog shows every field of a decision, with its answer\'s conditions and source', () => {
+  const asked = { id: 'D-13', kind: 'decision', state: 'awaiting', asked_of: ANA, asked_by: LEAD, proposal: 'Use the credit union',
+    rationale: 'Lower fees', scope: 'Checking only', conditions: '', answer: null, parent: 'W-12', links: [], body: 'Which bank?' };
+  assert.deepEqual(drawerLines(asked, []), [
+    'Asked of Ana by Lead', 'Proposal: Use the credit union', 'Rationale: Lower fees', 'Scope: Checking only',
+    'Follow-up of W-12', 'Details: Which bank?',
+  ]);
+  const reported = Object.assign({}, asked, { state: 'reported', rationale: '', scope: '', parent: null,
+    answer: { kind: 'reported', text: 'Yes', conditions: 'after Friday', source: 'phone call', by: BUILDER_1,
+      attributed_to: ANA, at: NOW, reason: '' } });
+  assert.deepEqual(drawerLines(reported, []), [
+    'Asked of Ana by Lead', 'Reported by Builder (session 1) · attributed to Ana · not confirmed here',
+    'Proposal: Use the credit union', 'Answer: Yes', 'Conditions: after Friday', 'Answer source: phone call',
+    'Details: Which bank?',
+  ]);
+  const direct = Object.assign({}, reported, { state: 'answered',
+    answer: { kind: 'direct', text: 'No', conditions: '', source: 'recorded here', by: ANA, attributed_to: ANA, at: NOW, reason: '' } });
+  assert.deepEqual(drawerLines(direct, []), [
+    'Asked of Ana by Lead', 'Answered here by Ana', 'Proposal: Use the credit union', 'Answer: No', 'Details: Which bank?',
+  ]);
+});
+
 test('the done line names the closer, the disposition, the evidence or its absence, and open follow-ups', () => {
   const withEvidence = { kind: 'work', state: 'done', done_account: 'Keys rotated', done_evidence: 14,
     done_without_evidence: false };
@@ -742,7 +787,7 @@ test('an answer reads who gave it, and an owner answering for someone names both
 
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'doneLine', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
     'needsYou', 'notifyText', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
 });
