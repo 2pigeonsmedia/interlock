@@ -185,6 +185,63 @@ test('the house-level switch reaches can() through authorizeSeatBearer, for read
   assert.equal(await rowsAfter(quiet, 'write'), 1, 'quiet service: an allowed seat write is still a row');
 });
 
+// An AI seat polls the room with its bearer on every read. With reads quiet,
+// a poll must add no row to ANY telemetry stream — the bearer's successful
+// authentication included — while a failed bearer is still written.
+test('quiet AI read polls write no row in any stream; a failed bearer still does', async () => {
+  const world = await Step.freshAdmin(F);
+  const identity = F.load('index.js');
+  const audit = F.load('audit.js');
+  const candidate = identity.newAiCredential();
+  const step = await world.elevate(world.T + 10);
+  const joined = world.instance.allowAiAdmission(world.env(step, world.T + 13), {
+    request_id: crypto.randomUUID(), name: 'Marlow', product: 'Claude Code',
+    product_provenance: 'client-reported', selector: candidate.selector, digest: candidate.digest,
+  });
+  assert.equal(joined.ok, true, 'ARRANGEMENT: the seat is admitted: ' + JSON.stringify(joined));
+  const quiet = identity.create({
+    stateDir: world.dir, tenant: F.TENANT, cookieName: identity.COOKIE_NAME, originClass: 'local',
+    hostLabel: 'quiet-test', rpId: Step.RP_ID, origin: Step.ORIGIN, challengeOrigin: Step.ORIGIN,
+    harness: true, webauthn: true, auditAllowedReads: false,
+  });
+  const bearer = { authorization_header: 'Bearer ' + candidate.token, source: '127.0.0.1' };
+  const STREAMS = ['authn', 'authz', 'authn_deny', 'authz_deny'];
+  async function counts() {
+    await audit.drain();
+    return Object.fromEntries(STREAMS.map(stream => [stream, audit.read(stream, { limit: 1000 }).length]));
+  }
+  function added(before, after) {
+    return Object.fromEntries(STREAMS.map(stream => [stream, after[stream] - before[stream]]));
+  }
+
+  const loudBefore = await counts();
+  const loud = world.instance.authorizeSeatBearer(bearer, 'read', 'room:main');
+  assert.equal(loud.allow, true, 'ARRANGEMENT: the seat may read: ' + JSON.stringify(loud));
+  const loudAdded = added(loudBefore, await counts());
+  assert.deepEqual(loudAdded, { authn: 1, authz: 1, authn_deny: 0, authz_deny: 0 },
+    'ARRANGEMENT: a default seat read is counted in authn and authz, so the counter sees bearer rows');
+
+  const quietBefore = await counts();
+  for (let i = 0; i < 3; i += 1) {
+    const poll = quiet.authorizeSeatBearer(bearer, 'read', 'room:main');
+    assert.equal(poll.allow, true, 'ARRANGEMENT: quiet poll ' + i + ' is allowed: ' + JSON.stringify(poll));
+  }
+  assert.deepEqual(added(quietBefore, await counts()), { authn: 0, authz: 0, authn_deny: 0, authz_deny: 0 },
+    'three quiet read polls add no row to any stream');
+
+  const writeBefore = await counts();
+  assert.equal(quiet.authorizeSeatBearer(bearer, 'write', 'room:main').allow, true, 'ARRANGEMENT: the seat may write');
+  assert.deepEqual(added(writeBefore, await counts()), { authn: 1, authz: 1, authn_deny: 0, authz_deny: 0 },
+    'a quiet service still writes the bearer authentication and the authorization of a write');
+
+  const badBefore = await counts();
+  const bad = quiet.authorizeSeatBearer(
+    { authorization_header: 'Bearer ' + identity.newAiCredential().token, source: '127.0.0.1' }, 'read', 'room:main');
+  assert.equal(bad.allow, false, 'ARRANGEMENT: an unknown bearer is refused');
+  assert.deepEqual(added(badBefore, await counts()), { authn: 0, authz: 0, authn_deny: 1, authz_deny: 0 },
+    'a failed bearer on a quiet read is still an authn_deny row');
+});
+
 test('auditAllowedReads must be a boolean when present, and is refused before anything is bound', async () => {
   const fx = await F.fixture('identity-quiet-reads-config-');
   const identity = F.load('index.js');

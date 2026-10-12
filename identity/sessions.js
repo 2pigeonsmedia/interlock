@@ -378,6 +378,11 @@ function authenticate(input) {
     remoteAddress: remoteField.ok && remoteField.present ? remoteField.value : undefined,
   });
   const header = inspectHeaders(headers);
+  // A host whose allowed reads are quiet passes quietSeatSuccess: true for a
+  // seat's read. Only the verified-seat success row is skipped; every failure
+  // and every other success is still written.
+  const quietField = topField(top, 'quietSeatSuccess');
+  const quietSeatSuccess = quietField.ok && quietField.present && quietField.value === true;
 
   if (header.auth.state === 'invalid') {
     emit(fixedRow({
@@ -404,7 +409,7 @@ function authenticate(input) {
         }));
         return null;
       }
-      emit(fixedRow({
+      if (!(quietSeatSuccess && subject.kind === 'seat')) emit(fixedRow({
         subject,
         origin,
         result: 'success',

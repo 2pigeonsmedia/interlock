@@ -434,6 +434,10 @@ function create(config) {
       headers: { authorization: header },
       remoteAddress: typeof meta.source === 'string' ? meta.source : meta.remoteAddress,
       acceptedGenerations: [1],
+      // A quiet allowed read writes no authz row (can() below); the bearer's
+      // successful authentication for that read is quiet too, or every AI poll
+      // would still be a row.
+      quietSeatSuccess: auditAllowedReads === false && capability === 'read',
     });
     if (!authenticated || typeof authenticated.subject_id !== 'string') {
       return { allow: false, rung: 'credential', reason: 'invalid-bearer' };
