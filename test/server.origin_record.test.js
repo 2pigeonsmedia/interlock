@@ -29,6 +29,18 @@ function reservePort() {
   });
 }
 
+// A start that must be refused. If it starts anyway, the runtime is closed
+// before the failure is reported, so the file ends as a failure instead of
+// leaving a listener that keeps the process alive.
+async function assertStartRefused(options, expected, message) {
+  let started = null;
+  try {
+    await assert.rejects(async () => { started = await startInterlockServer(options); }, expected, message);
+  } finally {
+    if (started !== null) await started.close();
+  }
+}
+
 function readRecord(dataDir) {
   return JSON.parse(fs.readFileSync(path.join(dataDir, 'origin.json'), 'utf8'));
 }
@@ -52,7 +64,7 @@ test('a loopback data directory refuses a hosted start and keeps working on anot
   await second.close();
 
   const recorded = fs.readFileSync(path.join(dataDir, 'origin.json'), 'utf8');
-  await assert.rejects(startInterlockServer({ port: await reservePort(), dataDir, hostedOrigin: HOSTED }), error => {
+  await assertStartRefused({ port: await reservePort(), dataDir, hostedOrigin: HOSTED }, error => {
     assert.equal(error.code, 'origin-mismatch');
     assert.ok(error.message.includes('http://localhost'), error.message);
     assert.ok(error.message.includes(HOSTED), error.message);
@@ -87,7 +99,7 @@ test('a directory from a release that kept no record is treated as loopback', as
   fs.mkdirSync(path.join(dataDir, 'identity'), { mode: 0o700 });
   fs.writeFileSync(path.join(dataDir, 'identity', 'identity-state.v2.json'), '{}\n', { mode: 0o600 });
   assert.equal(fs.existsSync(path.join(dataDir, 'origin.json')), false, 'ARRANGEMENT: no record');
-  await assert.rejects(startInterlockServer({ port: await reservePort(), dataDir, hostedOrigin: HOSTED }),
+  await assertStartRefused({ port: await reservePort(), dataDir, hostedOrigin: HOSTED },
     error => error.code === 'origin-mismatch' && error.message.includes(HOSTED));
   assert.equal(fs.existsSync(path.join(dataDir, 'origin.json')), false, 'a refused start writes no record');
 });
