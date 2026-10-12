@@ -101,11 +101,28 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     assert.equal(forged.json.error, 'setup-code-required');
     assert.equal(forged.headers['set-cookie'], undefined);
 
-    const wrongCode = await post(runtime, '/api/bootstrap/redeem',
-      { name: 'Mallory', password: 'correct horse battery staple', setup_code: 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA-AA' });
-    assert.equal(wrongCode.status, 403, wrongCode.text);
-    assert.equal(wrongCode.json.error, 'setup-code-invalid');
-    assert.equal(wrongCode.headers['set-cookie'], undefined);
+    // A wrong code costs one second and never ends the process or closes the door.
+    const WRONG = 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA-AA';
+    const sequentialStart = performance.now();
+    for (let i = 0; i < 5; i += 1) {
+      const wrongCode = await post(runtime, '/api/bootstrap/redeem',
+        { name: 'Mallory', password: 'correct horse battery staple', setup_code: WRONG });
+      assert.equal(wrongCode.status, 403, wrongCode.text);
+      assert.equal(wrongCode.json.error, 'setup-code-invalid');
+      assert.equal(wrongCode.headers['set-cookie'], undefined);
+    }
+    const sequentialMs = performance.now() - sequentialStart;
+    assert.ok(sequentialMs >= 5_000, `five wrong codes cost at least five seconds (${Math.round(sequentialMs)} ms)`);
+    // Serialized per process: two concurrent wrong codes cost two seconds, not one.
+    const parallelStart = performance.now();
+    const parallel = await Promise.all([0, 1].map(() => post(runtime, '/api/bootstrap/redeem',
+      { name: 'Mallory', password: 'correct horse battery staple', setup_code: WRONG })));
+    const parallelMs = performance.now() - parallelStart;
+    assert.deepEqual(parallel.map(r => r.status), [403, 403]);
+    assert.ok(parallelMs >= 2_000, `concurrent wrong codes queue behind one another (${Math.round(parallelMs)} ms)`);
+    const stillServing = await call(runtime, { path: '/health' });
+    assert.equal(stillServing.status, 200, 'wrong codes never stop the server');
+    assert.equal(typeof runtime.setupCode, 'string', 'wrong codes never withdraw the setup code');
 
     const shortPassword = await post(runtime, '/api/bootstrap/redeem',
       { name: 'Ana', password: 'short', setup_code: runtime.setupCode });

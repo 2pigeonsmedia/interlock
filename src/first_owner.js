@@ -444,7 +444,7 @@ function createFirstOwnerHandler(options) {
           return sendJson(request, response, 403, { ok: false, error: 'setup-code-required' });
         }
         if (!hostedMode.setupCodeMatches(input.setup_code)) {
-          hostedMode.wrongSetupCode();
+          await hostedMode.wrongSetupCode();
           return sendJson(request, response, 403, { ok: false, error: 'setup-code-invalid' });
         }
       }

@@ -20,6 +20,7 @@ const { parseHostedOrigin, makeSetupCode, setupCodeMatches } = require('./hosted
 
 const LOOPBACK_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8788;
+const WRONG_SETUP_CODE_DELAY_MS = 1_000;
 const OPTION_KEYS = Object.freeze(['port']);
 const INTERLOCK_OPTION_KEYS = Object.freeze(['dataDir', 'port', 'hostedOrigin']);
 
@@ -345,10 +346,13 @@ async function startInterlockServer(options) {
     let reportFailure;
     const failure = new Promise(resolve => { reportFailure = resolve; });
     // Hosted mode: first-owner setup needs a one-time code printed to the
-    // console. It lives here so the runtime can report it; three wrong codes
-    // withdraw it and report a failure, which ends the process.
+    // console. It lives here so the runtime can report it. A wrong code never
+    // ends the process or closes the door (that would hand anyone who finds the
+    // hostname an outage lever); it costs one second, serialized per process,
+    // so N concurrent guesses cost N seconds.
     let setupCode = hosted && !house.firstOwner.status().completed ? makeSetupCode() : null;
     let wrongCodes = 0;
+    let wrongCodeQueue = Promise.resolve();
     const hostedForHandler = hosted ? Object.freeze({
       origin: hosted.origin,
       host: hosted.host,
@@ -358,12 +362,10 @@ async function startInterlockServer(options) {
       setupCompleted: () => { setupCode = null; },
       wrongSetupCode: () => {
         wrongCodes += 1;
-        if (wrongCodes >= 3) {
-          setupCode = null;
-          const error = new Error('interlock server: three wrong setup codes; refusing to keep the setup window open');
-          error.code = 'setup-code-exhausted';
-          reportFailure(error);
-        }
+        console.log(`wrong setup code (${wrongCodes})`);
+        const turn = wrongCodeQueue.then(() => new Promise(resolve => setTimeout(resolve, WRONG_SETUP_CODE_DELAY_MS)));
+        wrongCodeQueue = turn;
+        return turn;
       },
     }) : null;
     const handler = createFirstOwnerHandler({

@@ -6,6 +6,7 @@ const continueButton = document.querySelector('#continue-button');
 const statusLine = document.querySelector('#status');
 const setupCodeField = document.querySelector('#setup-code-field');
 const setupCodeInput = document.querySelector('#setup-code');
+const localNote = document.querySelector('.local-note');
 let csrfToken = null;
 let nextStep = null;
 
@@ -191,6 +192,10 @@ continueButton.addEventListener('click', continueSetup);
     if (response.status === 410 && status.error === 'setup-complete') {
       window.location.replace('/');
       return;
+    }
+    if (status.hosted === true) {
+      localNote.firstChild.nodeValue =
+        `This room is reachable at ${window.location.origin}; keep the setup code private. `;
     }
     if (!window.PublicKeyCredential || !navigator.credentials) {
       setStatus('This browser cannot create the required passkey.', 'error');
