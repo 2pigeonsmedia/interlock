@@ -8,10 +8,42 @@ const crypto = require('node:crypto');
 const net = require('node:net');
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 function refuse(detail) {
   throw new TypeError('interlock: --hosted-origin ' + detail);
+}
+
+function isLoopbackIPv4(address) {
+  const octets = address.split('.').map(Number);
+  return octets[0] === 127 || octets.every(octet => octet === 0);
+}
+
+// The IPv4 address inside an IPv4-mapped IPv6 address (::ffff:127.0.0.1 or
+// ::ffff:7f00:1), or null when the address is not of that form.
+function mappedIPv4(ipv6) {
+  const tail = /^::ffff:(.+)$/i.exec(ipv6);
+  if (!tail) return null;
+  if (net.isIPv4(tail[1])) return tail[1];
+  const groups = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(tail[1]);
+  if (!groups) return null;
+  const high = parseInt(groups[1], 16);
+  const low = parseInt(groups[2], 16);
+  return [high >> 8, high & 255, low >> 8, low & 255].join('.');
+}
+
+// Every spelling of "this machine": localhost and *.localhost (one trailing
+// dot allowed), 127.0.0.0/8, 0.0.0.0, ::, ::1, and IPv4-mapped forms of those.
+function isLoopbackHostname(hostname) {
+  let name = hostname.toLowerCase().replace(/\.$/, '');
+  if (name.startsWith('[') && name.endsWith(']')) name = name.slice(1, -1);
+  if (name === 'localhost' || name.endsWith('.localhost')) return true;
+  if (net.isIPv4(name)) return isLoopbackIPv4(name);
+  if (net.isIPv6(name)) {
+    if (name === '::' || name === '::1') return true;
+    const mapped = mappedIPv4(name);
+    return mapped !== null && isLoopbackIPv4(mapped);
+  }
+  return false;
 }
 
 function parseHostedOrigin(text) {
@@ -20,7 +52,7 @@ function parseHostedOrigin(text) {
   try { parsed = new URL(text); } catch (_) { refuse('is not a URL: ' + JSON.stringify(text)); }
   if (parsed.protocol !== 'https:') refuse('must use https:// — browsers refuse the room cookie on any other scheme');
   if (parsed.origin !== text) refuse('must be exactly its own origin (no path, query, fragment, credentials or mixed case): ' + JSON.stringify(text));
-  if (LOOPBACK_HOSTNAMES.has(parsed.hostname)) refuse('must not name this machine; leave the flag off for loopback mode');
+  if (isLoopbackHostname(parsed.hostname)) refuse('must not name this machine; leave the flag off for loopback mode');
   return Object.freeze({ origin: parsed.origin, host: parsed.host, hostname: parsed.hostname });
 }
 

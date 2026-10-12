@@ -26,6 +26,13 @@ test('parseHostedOrigin refuses everything that is not that', () => {
     'https://localhost',                 // loopback host in the hosted flag
     'https://127.0.0.1',                 // loopback host
     'https://[::1]',                     // loopback host
+    'https://127.0.0.2',                 // loopback host: anywhere in 127.0.0.0/8
+    'https://127.0.0.1.',                // loopback host: trailing dot
+    'https://localhost.',                // loopback host: trailing dot
+    'https://foo.localhost',             // loopback host: any *.localhost name
+    'https://0.0.0.0',                   // unspecified IPv4 address
+    'https://[::]',                      // unspecified IPv6 address
+    'https://[::ffff:7f00:1]',           // IPv4-mapped loopback
     'app.example.com',                   // no scheme
     '',                                  // empty
   ]) {
@@ -40,6 +47,22 @@ test('makeSetupCode is 26 base32 characters in groups of four, from 130 random b
   assert.equal(asked, 17, 'seventeen random bytes feed 26 base32 characters');
   assert.match(code, /^[A-Z2-7]{4}(-[A-Z2-7]{4}){5}-[A-Z2-7]{2}$/);
   assert.equal(code.replace(/-/g, '').length, 26);
+  // Known vectors (RFC 4648 base32 of the same bytes, first 26 characters): a
+  // mask, a dropped bit or a shortened alphabet would pass the shape checks
+  // above but not these.
+  const vector = (bytes) => {
+    const calls = [];
+    const out = makeSetupCode(size => {
+      calls.push(size);
+      assert.equal(bytes.length, size, 'the stub holds exactly the bytes asked for');
+      return bytes;
+    });
+    assert.deepEqual(calls, [17], 'one request, for seventeen bytes');
+    return out;
+  };
+  assert.equal(vector(Buffer.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])),
+    'AAAQ-EAYE-AUDA-OCAJ-BIFQ-YDIO-B4');
+  assert.equal(vector(Buffer.alloc(17, 0xff)), '7777-7777-7777-7777-7777-7777-77');
   const real = makeSetupCode();
   assert.match(real, /^[A-Z2-7]{4}(-[A-Z2-7]{4}){5}-[A-Z2-7]{2}$/);
   assert.notEqual(real, makeSetupCode(), 'two codes differ');
