@@ -444,7 +444,7 @@ function createFirstOwnerHandler(options) {
           return sendJson(request, response, 403, { ok: false, error: 'setup-code-required' });
         }
         if (!hostedMode.setupCodeMatches(input.setup_code)) {
-          const slot = hostedMode.wrongSetupCode(Date.now());
+          const slot = hostedMode.wrongSetupCode();
           if (slot.busy) {
             return sendJson(request, response, 429, { ok: false, error: 'setup-code-busy' },
               { 'retry-after': String(slot.retry_after_s) });
@@ -453,6 +453,13 @@ function createFirstOwnerHandler(options) {
           // early releases its timer; nothing waits on its behalf.
           let closedEarly = false;
           await new Promise(resolve => {
+            // Already over (the client left between its last byte and this
+            // compare): 'close' has come and gone, so arm nothing.
+            if (response.destroyed || response.writableEnded) {
+              closedEarly = true;
+              resolve();
+              return;
+            }
             const timer = setTimeout(resolve, slot.wait_ms);
             response.once('close', () => {
               closedEarly = true;

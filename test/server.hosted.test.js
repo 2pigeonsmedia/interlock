@@ -6,8 +6,11 @@ const http = require('node:http');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
+const { Readable } = require('node:stream');
 const test = require('node:test');
 
+const { createFirstOwnerHandler } = require('../src/first_owner.js');
 const { startInterlockServer } = require('../src/server.js');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
 
@@ -78,8 +81,17 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
   const port = await reservePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-hosted-'));
   const wrongCounts = [];
+  // The host's observer may fail either way (odd counts throw, even counts
+  // return a rejected promise); neither may reach the request or the process.
+  const observerFaults = { thrown: 0, rejected: 0 };
   const runtime = await startInterlockServer({
-    port, dataDir, hostedOrigin: HOSTED, onWrongSetupCode: count => { wrongCounts.push(count); },
+    port, dataDir, hostedOrigin: HOSTED,
+    onWrongSetupCode: count => {
+      wrongCounts.push(count);
+      if (count % 2 === 1) { observerFaults.thrown += 1; throw new Error('observer threw'); }
+      observerFaults.rejected += 1;
+      return Promise.reject(new Error('observer rejected'));
+    },
   });
   try {
     // ARRANGEMENT: the runtime reports hosted mode and a setup code.
@@ -115,7 +127,20 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     assert.deepEqual(wrongCounts, [], 'ARRANGEMENT: no wrong code yet');
     const sequentialStart = performance.now();
     for (let i = 0; i < 5; i += 1) {
-      const wrongCode = await wrongRedeem();
+      // The last one runs while the wall clock reads an hour earlier. Slots
+      // follow a monotonic clock, so it is answered like the others instead of
+      // as busy until the wall clock catches up.
+      const realNow = Date.now;
+      let wrongCode;
+      try {
+        if (i === 4) {
+          Date.now = () => realNow() - 3_600_000;
+          assert.ok(realNow() - Date.now() >= 3_599_000, 'ARRANGEMENT: the wall clock stepped back an hour');
+        }
+        wrongCode = await wrongRedeem();
+      } finally {
+        Date.now = realNow;
+      }
       assert.equal(wrongCode.status, 403, wrongCode.text);
       assert.equal(wrongCode.json.error, 'setup-code-invalid');
       assert.equal(wrongCode.headers['set-cookie'], undefined);
@@ -141,6 +166,8 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     assert.equal(wrongCounts.length, 17, 'ARRANGEMENT: all twelve wrong codes reached the server; the queue is busy');
+    assert.deepEqual(observerFaults, { thrown: 9, rejected: 8 },
+      'ARRANGEMENT: the observer failed on every wrong code, by throwing and by rejecting');
 
     const stillServing = await call(runtime, { path: '/health' });
     assert.equal(stillServing.status, 200, 'wrong codes never stop the server');
@@ -216,5 +243,92 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     assert.equal(weakChange.json.error, 'password-too-short');
   } finally {
     await runtime.close();
+  }
+});
+
+test('hosted mode: a wrong code whose client has already gone arms no wait', async () => {
+  // A client that leaves between the end of its body and the compare never
+  // reaches the server's 'close' listener in time; the wait must not be armed
+  // for it. A real socket cannot be made to leave inside that window, so this
+  // drives the handler directly with a response that is already over.
+  function stubs(names) {
+    return Object.fromEntries(names.map(name => [name, () => { throw new Error(`unexpected call: ${name}`); }]));
+  }
+  const house = Object.assign(stubs([
+    'authorizeRead', 'authorizeWrite', 'authorizeSeatBearer', 'aiSessionDiscriminator', 'resolveSession',
+    'whoami', 'listParticipants', 'releaseIdleSeats', 'listRecentEndedSeats', 'listAiSeatHistory', 'invite',
+    'redeem', 'revokeParticipant', 'endOwnSeat', 'changePassword', 'signOutOtherSessions', 'confirmTranscriptClear',
+  ]), {
+    firstOwner: { status: () => ({ completed: false, in_progress: false }) },
+    authenticators: {},
+    sessions: {},
+    login: {},
+  });
+  const chat = stubs([
+    'append', 'read', 'readForSeat', 'wait', 'waitForSeat', 'waitForSeatRings', 'acknowledge', 'touchParticipant',
+    'listParticipants', 'participantState', 'readDeliveryChanges', 'transcriptCleared', 'peekBefore', 'peekFind',
+  ]);
+  const admission = stubs(['knock', 'list', 'allow', 'decline']);
+  const archive = stubs(['exportTranscript', 'clearTranscript', 'listArchives', 'readArtifact']);
+  const slots = [];
+  const handler = createFirstOwnerHandler({
+    house, chat, admission, archive,
+    origin: HOSTED,
+    assets: { setup: {}, room: {} },
+    releaseIdle: async () => undefined,
+    dataDir: os.tmpdir(),
+    hosted: {
+      origin: HOSTED,
+      setupCodeMatches: () => false,
+      setupCompleted: () => undefined,
+      wrongSetupCode: () => { slots.push('taken'); return { busy: false, wait_ms: 5_000 }; },
+    },
+  });
+
+  for (const gone of [{ destroyed: true, writableEnded: false }, { destroyed: false, writableEnded: true }]) {
+    slots.length = 0;
+    const written = [];
+    const response = Object.assign(new EventEmitter(), gone, {
+      headersSent: false,
+      setHeader() { written.push('setHeader'); },
+      writeHead() { written.push('writeHead'); },
+      write() { written.push('write'); },
+      end() { written.push('end'); },
+    });
+    const body = Buffer.from(JSON.stringify({
+      name: 'Mallory', password: 'correct horse battery staple', setup_code: 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA-AA',
+    }));
+    const request = Object.assign(Readable.from([body]), {
+      method: 'POST',
+      url: '/api/bootstrap/redeem',
+      headers: {
+        host: 'app.example.test', origin: HOSTED, 'sec-fetch-site': 'same-origin',
+        'content-type': 'application/json', 'content-length': String(body.length),
+      },
+      socket: { remoteAddress: '127.0.0.1' },
+    });
+
+    assert.ok(response.destroyed || response.writableEnded, 'ARRANGEMENT: the response is already over');
+    const realSetTimeout = globalThis.setTimeout;
+    const waits = [];
+    globalThis.setTimeout = (callback, ms, ...rest) => {
+      const timer = realSetTimeout(callback, ms, ...rest);
+      if (ms === 5_000) waits.push(timer);
+      return timer;
+    };
+    let settled = false;
+    try {
+      const finished = handler(request, response).then(() => { settled = true; });
+      await new Promise(resolve => realSetTimeout(resolve, 200));
+      assert.deepEqual(slots, ['taken'], 'ARRANGEMENT: the request reached the wrong-code wait');
+      assert.equal(waits.length, 0, `no wait timer is armed for ${JSON.stringify(gone)}`);
+      assert.equal(settled, true, 'the handler is done without waiting out the slot');
+      await finished;
+      assert.deepEqual(written, [], 'nothing is written to a finished response');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      for (const timer of waits) clearTimeout(timer);
+      response.emit('close');
+    }
   }
 });

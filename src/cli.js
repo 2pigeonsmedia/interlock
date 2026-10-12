@@ -12,6 +12,7 @@ const EXIT_OK = 0;
 const EXIT_RUNTIME = 1;
 const EXIT_USAGE = 2;
 const DEFAULT_URL = 'http://localhost:8788';
+const WRONG_SETUP_CODE_REPORT_MS = 1_000;
 const JOIN_WINDOW_MS = 15 * 60 * 1000;
 const JOIN_RETRY_MS = 1_000;
 const JOIN_FETCH_TIMEOUT_MS = 25_000;
@@ -34,11 +35,11 @@ One shared chat room for humans and multiple AI sessions.
 Usage:
   interlock --help
   interlock --version
-  interlock start [--port PORT]
+  interlock start [--port PORT] [--hosted-origin https://HOST]
   interlock recover [--port PORT]
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
-  interlock join [--product LABEL] [--name NAME] [--url LOOPBACK_URL]
+  interlock join [--product LABEL] [--name NAME] [--url URL]
   interlock history --connection NAME [--drain | --skip-to-current | --before N | --find TEXT] [--json]
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
@@ -161,6 +162,62 @@ function startPort(args) {
   if (args.length !== 2 || args[0] !== '--port' || !/^[0-9]{1,5}$/.test(args[1])) return null;
   const port = Number(args[1]);
   return Number.isSafeInteger(port) && port >= 1 && port <= 65_535 ? port : null;
+}
+
+function startOptions(args) {
+  const options = { port: undefined, hostedOrigin: undefined };
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index];
+    const value = args[index + 1];
+    if (typeof value !== 'string') return null;
+    if (flag === '--port' && options.port === undefined && /^[0-9]{1,5}$/.test(value)) {
+      const port = Number(value);
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) return null;
+      options.port = port;
+    } else if (flag === '--hosted-origin' && options.hostedOrigin === undefined && value.length > 0) {
+      options.hostedOrigin = value;
+    } else {
+      return null;
+    }
+  }
+  return args.length % 2 === 0 ? Object.freeze(options) : null;
+}
+
+// Hosted mode only: the server reports every wrong setup code to the host. The
+// host may be watched by one person on one terminal, so a flood of wrong codes
+// is folded into at most one stderr line per window, carrying the latest count.
+// The timer never keeps the process alive; flush() prints what is pending and
+// retires the reporter.
+function wrongSetupCodeReporter(stderr, timers) {
+  let latest = 0;
+  let printed = 0;
+  let timer = null;
+  let retired = false;
+  function emit() {
+    timer = null;
+    if (latest > printed) {
+      printed = latest;
+      line(stderr, `interlock: wrong setup code (${latest} so far)`);
+    }
+  }
+  return Object.freeze({
+    report(count) {
+      if (retired) return;
+      latest = count;
+      if (timer === null) {
+        timer = timers.setTimeout(emit, WRONG_SETUP_CODE_REPORT_MS);
+        timer.unref();
+      }
+    },
+    flush() {
+      retired = true;
+      if (timer !== null) {
+        timers.clearTimeout(timer);
+        timer = null;
+      }
+      emit();
+    },
+  });
 }
 
 function storageOptions(command, args) {
@@ -1239,7 +1296,7 @@ async function runJoin(args, io, dependencies = {}) {
   const { stdout, stderr } = io;
   const parsed = joinOptions(args);
   if (!parsed) {
-    line(stderr, 'interlock: usage: interlock join [--product LABEL] [--name NAME] [--url LOOPBACK_URL]');
+    line(stderr, 'interlock: usage: interlock join [--product LABEL] [--name NAME] [--url URL]');
     return EXIT_USAGE;
   }
   const promptInput = io.stdin || process.stdin;
@@ -1251,7 +1308,7 @@ async function runJoin(args, io, dependencies = {}) {
   }
   const profileModule = dependencies.profiles || require('./client/profiles.js');
   if (!profileModule.validUrl(parsed.url)) {
-    line(stderr, 'interlock: join accepts only a canonical http://localhost loopback URL.');
+    line(stderr, 'interlock: join accepts only http://localhost or a canonical https origin.');
     return EXIT_USAGE;
   }
   line(stdout, `Interlock target: ${terminalSafe(parsed.url)}`);
@@ -1528,11 +1585,19 @@ function waitForShutdown(options = {}) {
 
 async function runStart(args, io, dependencies = {}) {
   const { stdout, stderr } = io;
-  const requestedPort = startPort(args);
-  if (requestedPort === null) {
-    line(stderr, 'interlock: usage: interlock start [--port PORT]');
+  const parsed = startOptions(args);
+  if (parsed === null) {
+    line(stderr, 'interlock: usage: interlock start [--port PORT] [--hosted-origin https://HOST]');
     return EXIT_USAGE;
   }
+  if (parsed.hostedOrigin !== undefined) {
+    try { require('./hosted.js').parseHostedOrigin(parsed.hostedOrigin); }
+    catch (error) {
+      line(stderr, terminalSafe(error && error.message));
+      return EXIT_USAGE;
+    }
+  }
+  const requestedPort = parsed.port;
   const { resolveDataDir } = dependencies.config || require('./config.js');
   const { DEFAULT_PORT, startInterlockServer } = dependencies.server || require('./server.js');
   const wait = dependencies.waitForShutdown || waitForShutdown;
@@ -1549,9 +1614,17 @@ async function runStart(args, io, dependencies = {}) {
     return EXIT_USAGE;
   }
 
+  const serverOptions = { dataDir, port };
+  let wrongCodes = null;
+  if (parsed.hostedOrigin !== undefined) {
+    wrongCodes = wrongSetupCodeReporter(stderr, dependencies.timers || { setTimeout, clearTimeout });
+    serverOptions.hostedOrigin = parsed.hostedOrigin;
+    serverOptions.onWrongSetupCode = wrongCodes.report;
+  }
+
   let runtime;
   try {
-    runtime = await startInterlockServer({ dataDir, port });
+    runtime = await startInterlockServer(serverOptions);
   } catch (error) {
     if (error && error.code === 'already-running') {
       line(stderr, 'interlock: this installation is already running.');
@@ -1574,6 +1647,14 @@ async function runStart(args, io, dependencies = {}) {
   }
   line(stdout, `Open: ${runtime.url}`);
   line(stdout, `AI join: interlock join --url ${runtime.url}`);
+  if (runtime.hosted) {
+    line(stdout, `Your front on this machine must forward ${runtime.url} to http://localhost:${runtime.port} and preserve the Host header.`);
+    if (typeof runtime.setupCode === 'string') {
+      line(stdout, '');
+      line(stdout, `Setup code (first owner only, shown once): ${runtime.setupCode}`);
+      line(stdout, 'Open the room in a browser, create the owner account, and type this code when asked. It is never written anywhere else.');
+    }
+  }
   line(stdout, `Data: ${runtime.dataDir}`);
   line(stdout, 'Press Ctrl+C to stop.');
 
@@ -1595,6 +1676,7 @@ async function runStart(args, io, dependencies = {}) {
   }
   let closedCleanly = true;
   try { await runtime.close(); } catch (_) { closedCleanly = false; }
+  if (wrongCodes !== null) wrongCodes.flush();
   if (!closedCleanly) {
     line(stderr, 'interlock: shutdown did not complete cleanly.');
   }
@@ -1998,5 +2080,6 @@ module.exports = {
   commandOptions,
   joinOptions,
   storageOptions,
+  startOptions,
   startPort,
 };

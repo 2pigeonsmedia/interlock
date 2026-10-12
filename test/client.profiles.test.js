@@ -423,3 +423,13 @@ test('corrupt, unsafe-name, non-loopback, and token-mismatch profiles fail loud'
   fs.writeFileSync(path.join(world.connectionDir, 'marlow.json'), '{}\n');
   assert.throws(() => world.store.load('Marlow'), error => error && error.code === 'corrupt-profile');
 });
+
+test('validUrl accepts the canonical localhost loopback form and a canonical https origin, nothing else', () => {
+  const { validUrl } = require('../src/client/profiles.js');
+  assert.equal(validUrl('http://localhost:8788'), true);
+  assert.equal(validUrl('https://app.example.test'), true);
+  assert.equal(validUrl('https://app.example.test:8443'), true);
+  for (const bad of ['http://app.example.test', 'https://app.example.test/', 'https://localhost', 'http://127.0.0.1:8788', 'https://APP.example.test', 'ftp://x']) {
+    assert.equal(validUrl(bad), false, bad);
+  }
+});

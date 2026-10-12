@@ -21,6 +21,7 @@ const {
   joinOptions,
   runRecover,
   runStart,
+  startOptions,
   startPort,
 } = require('../src/cli.js');
 
@@ -42,7 +43,8 @@ test('the empty CLI prints honest current help', () => {
   assert.equal(result.code, EXIT_OK);
   assert.match(result.stdout, /One shared chat room/);
   assert.match(result.stdout, /An AI runs "interlock join"/);
-  assert.match(result.stdout, /interlock join \[--product LABEL\] \[--name NAME\] \[--url LOOPBACK_URL\]/);
+  assert.match(result.stdout, /interlock start \[--port PORT\] \[--hosted-origin https:\/\/HOST\]/);
+  assert.match(result.stdout, /interlock join \[--product LABEL\] \[--name NAME\] \[--url URL\]/);
   assert.match(result.stdout, /history --connection NAME/);
   assert.match(result.stdout, /doorbell --connection NAME/);
   assert.match(result.stdout, /interlock-doorbell --help/);
@@ -1321,6 +1323,224 @@ test('start closes and fails honestly after a post-listen server error', async (
   assert.equal(closed, true);
   assert.match(stderr, /stopped unexpectedly/);
   assert.doesNotMatch(stderr, /shutdown did not complete cleanly/);
+});
+
+function captureIo() {
+  let stdout = '';
+  let stderr = '';
+  return {
+    stdout: { write: value => { stdout += String(value); } },
+    stderr: { write: value => { stderr += String(value); } },
+    stdoutText: () => stdout,
+    stderrText: () => stderr,
+  };
+}
+
+const HOSTED_ORIGIN = 'https://app.example.test';
+const SETUP_CODE = 'ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ';
+
+function hostedRuntime(overrides = {}) {
+  return Object.assign({
+    url: HOSTED_ORIGIN,
+    dataDir: '/tmp/x',
+    address: '127.0.0.1',
+    port: 8788,
+    hosted: { origin: HOSTED_ORIGIN, host: 'app.example.test', hostname: 'app.example.test' },
+    setupCode: SETUP_CODE,
+    failure: new Promise(() => {}),
+    close: async () => {},
+    recoveredStaleLock: false,
+  }, overrides);
+}
+
+function hostedDependencies(startInterlockServer, extra = {}) {
+  return Object.assign({
+    server: { DEFAULT_PORT: 8788, startInterlockServer },
+    config: { resolveDataDir: () => '/tmp/x' },
+    env: {},
+    platform: 'linux',
+    waitForShutdown: async () => {},
+  }, extra);
+}
+
+function fakeTimers() {
+  const armed = [];
+  return {
+    armed,
+    setTimeout(callback, ms) {
+      const timer = {
+        callback, ms, cleared: false, unrefCalled: false,
+        unref() { timer.unrefCalled = true; return timer; },
+      };
+      armed.push(timer);
+      return timer;
+    },
+    clearTimeout(timer) { timer.cleared = true; },
+  };
+}
+
+test('start options take --port and --hosted-origin once each, in either order, as complete pairs', () => {
+  assert.deepEqual(startOptions([]), { port: undefined, hostedOrigin: undefined });
+  assert.deepEqual(startOptions(['--port', '9123']), { port: 9123, hostedOrigin: undefined });
+  assert.deepEqual(startOptions(['--hosted-origin', HOSTED_ORIGIN]),
+    { port: undefined, hostedOrigin: HOSTED_ORIGIN });
+  assert.deepEqual(startOptions(['--hosted-origin', HOSTED_ORIGIN, '--port', '9123']),
+    { port: 9123, hostedOrigin: HOSTED_ORIGIN });
+  assert.deepEqual(startOptions(['--port', '9123', '--hosted-origin', HOSTED_ORIGIN]),
+    { port: 9123, hostedOrigin: HOSTED_ORIGIN });
+  for (const args of [
+    ['9123'], ['--host', '0.0.0.0'], ['--port'], ['--port', '0'], ['--port', '65536'], ['--port', '12x'],
+    ['--port', '1', '--port', '2'], ['--hosted-origin'], ['--hosted-origin', ''],
+    ['--hosted-origin', HOSTED_ORIGIN, '--hosted-origin', HOSTED_ORIGIN],
+    ['--hosted-origin', '--port', '9123'], ['--port', '1234', 'extra'],
+  ]) assert.equal(startOptions(args), null, args.join(' '));
+});
+
+test('start accepts --hosted-origin with --port in either order and refuses a malformed one before touching the server', async () => {
+  const calls = [];
+  const deps = hostedDependencies(async options => {
+    calls.push(options);
+    throw Object.assign(new Error('stop here'), { code: 'test-stop' });
+  });
+  assert.equal(calls.length, 0, 'ARRANGEMENT: the server has not been called yet');
+  const settled = captureIo();
+  assert.equal(await runStart(['--hosted-origin', HOSTED_ORIGIN, '--port', '9000'], settled, deps), EXIT_RUNTIME);
+  assert.equal(calls.length, 1, 'ARRANGEMENT: the valid origin reached the server');
+  const { onWrongSetupCode, ...rest } = calls[0];
+  assert.deepEqual(rest, { dataDir: '/tmp/x', port: 9000, hostedOrigin: HOSTED_ORIGIN });
+  assert.equal(typeof onWrongSetupCode, 'function', 'hosted mode hands the server the CLI wrong-code reporter');
+  await runStart(['--port', '9001', '--hosted-origin', HOSTED_ORIGIN], captureIo(), deps);
+  assert.equal(calls.length, 2, 'ARRANGEMENT: the reverse order reached the server');
+  assert.equal(calls[1].port, 9001);
+  assert.equal(calls[1].hostedOrigin, HOSTED_ORIGIN);
+  for (const bad of ['http://app.example.test', 'https://app.example.test/', 'https://localhost']) {
+    const refused = captureIo();
+    const code = await runStart(['--hosted-origin', bad], refused, deps);
+    assert.equal(code, EXIT_USAGE, bad);
+    assert.match(refused.stderrText(), /^interlock: --hosted-origin /, bad);
+    assert.equal(refused.stdoutText(), '', bad);
+  }
+  const plain = captureIo();
+  await runStart(['--hosted-origin', 'http://app.example.test'], plain, deps);
+  assert.match(plain.stderrText(), /interlock: --hosted-origin must use https:\/\//);
+  assert.equal(calls.length, 2, 'the server was not started for a refused origin');
+});
+
+test('start in hosted mode prints the front rule and the setup code once; a completed setup prints no code; loopback prints neither', async () => {
+  const io = captureIo();
+  const served = [];
+  const deps = hostedDependencies(async options => { served.push(options); return hostedRuntime(); });
+  assert.equal(await runStart(['--hosted-origin', HOSTED_ORIGIN], io, deps), EXIT_OK, io.stderrText());
+  assert.equal(served.length, 1, 'ARRANGEMENT: hosted mode started once');
+  assert.equal(served[0].hostedOrigin, HOSTED_ORIGIN);
+  const out = io.stdoutText();
+  assert.match(out, /Open: https:\/\/app\.example\.test\n/);
+  assert.match(out, /AI join: interlock join --url https:\/\/app\.example\.test\n/);
+  const front = 'Your front on this machine must forward https://app.example.test to http://localhost:8788 and preserve the Host header.\n';
+  const code = `\nSetup code (first owner only, shown once): ${SETUP_CODE}\n` +
+    'Open the room in a browser, create the owner account, and type this code when asked. It is never written anywhere else.\n';
+  assert.ok(out.includes(front + code), out);
+  assert.ok(out.indexOf('AI join:') < out.indexOf('Your front on this machine'));
+  assert.equal(out.split('Setup code').length - 1, 1, 'the code is printed exactly once');
+  assert.equal(io.stderrText(), '');
+
+  const quiet = captureIo();
+  const finished = hostedDependencies(async () => hostedRuntime({ setupCode: null }));
+  assert.equal(await runStart(['--hosted-origin', HOSTED_ORIGIN], quiet, finished), EXIT_OK);
+  assert.match(quiet.stdoutText(), /Your front on this machine must forward https:\/\/app\.example\.test to http:\/\/localhost:8788/,
+    'ARRANGEMENT: hosted output is present without a code');
+  assert.doesNotMatch(quiet.stdoutText(), /Setup code/);
+  assert.doesNotMatch(quiet.stdoutText(), /Open the room in a browser/);
+
+  const plain = captureIo();
+  const loopbackCalls = [];
+  const loopback = hostedDependencies(async options => {
+    loopbackCalls.push(options);
+    return { dataDir: options.dataDir, port: options.port, url: `http://localhost:${options.port}`, hosted: null, setupCode: null, async close() {} };
+  });
+  assert.equal(await runStart(['--port', '9123'], plain, loopback), EXIT_OK);
+  assert.deepEqual(loopbackCalls, [{ dataDir: '/tmp/x', port: 9123 }], 'ARRANGEMENT: loopback passes neither hosted option');
+  assert.doesNotMatch(plain.stdoutText(), /Your front on this machine|Setup code/);
+});
+
+test('hosted start coalesces wrong setup codes: one line per window carrying the latest count, and the last count on shutdown', async () => {
+  const timers = fakeTimers();
+  const io = captureIo();
+  let observer = null;
+  let release;
+  const shutdown = new Promise(resolve => { release = resolve; });
+  const finished = runStart(['--hosted-origin', HOSTED_ORIGIN], io, hostedDependencies(async options => {
+    observer = options.onWrongSetupCode;
+    return hostedRuntime();
+  }, { timers, waitForShutdown: () => shutdown }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof observer, 'function', 'ARRANGEMENT: the server received the reporter');
+  assert.match(io.stdoutText(), /Press Ctrl\+C to stop\./, 'ARRANGEMENT: the CLI is running');
+  assert.equal(timers.armed.length, 0, 'ARRANGEMENT: nothing armed before a wrong code');
+
+  observer(1);
+  observer(2);
+  observer(3);
+  assert.equal(timers.armed.length, 1, 'three codes inside one window share one timer');
+  assert.equal(timers.armed[0].ms, 1_000);
+  assert.equal(timers.armed[0].unrefCalled, true, 'the reporter never keeps the process alive');
+  assert.equal(io.stderrText(), '', 'nothing is printed until the window closes');
+  timers.armed[0].callback();
+  assert.equal(io.stderrText(), 'interlock: wrong setup code (3 so far)\n');
+
+  observer(4);
+  assert.equal(timers.armed.length, 2, 'the next wrong code opens a new window');
+  assert.equal(io.stderrText(), 'interlock: wrong setup code (3 so far)\n');
+  release('SIGINT');
+  assert.equal(await finished, EXIT_OK);
+  assert.equal(timers.armed[1].cleared, true, 'shutdown cancels the pending window');
+  assert.equal(io.stderrText(),
+    'interlock: wrong setup code (3 so far)\ninterlock: wrong setup code (4 so far)\n',
+    'shutdown flushes the last count exactly once');
+  observer(5);
+  timers.armed[1].callback();
+  assert.equal(timers.armed.length, 2, 'a stopped reporter arms nothing');
+  assert.equal(io.stderrText().split('\n').length - 1, 2, 'a stopped reporter prints nothing');
+});
+
+test('join accepts a canonical https origin and still refuses a plain-http remote', async () => {
+  const refused = await captureCommand(['join', '--url', 'http://app.example.test', '--product', 'X', '--name', 'Marlow'], {
+    config: { resolveConnectionDir: () => { throw new Error('must refuse before any connection directory'); } },
+    fetch: async () => { throw new Error('must refuse before network'); },
+  });
+  assert.equal(refused.code, EXIT_USAGE);
+  assert.equal(refused.stdout, '');
+  assert.equal(refused.stderr, 'interlock: join accepts only http://localhost or a canonical https origin.\n');
+
+  const usage = await captureCommand(['join', '--bogus', 'x']);
+  assert.equal(usage.code, EXIT_USAGE);
+  assert.equal(usage.stderr, 'interlock: usage: interlock join [--product LABEL] [--name NAME] [--url URL]\n');
+
+  const connectionDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-join-https-')), 'profiles');
+  const urls = [];
+  const result = await captureJoin(['--url', HOSTED_ORIGIN, '--product', 'Codex CLI', '--name', 'Marlow'], {
+    config: { resolveConnectionDir: () => connectionDir },
+    clock: (() => { let time = 1_000; return () => ++time; })(),
+    async fetch(url, options) {
+      urls.push(url);
+      if (url.endsWith('/api/ai/session')) return fakeResponse(401, { ok: false, error: 'invalid-connection' });
+      if (url.endsWith('/api/ai/head')) return fakeResponse(200, { ok: true, head: 3, connection_session: null });
+      const body = JSON.parse(options.body);
+      return fakeResponse(200, {
+        ok: true, state: 'allowed', request_id: body.request_id, name: body.name, product: body.product,
+        product_provenance: body.product_provenance, expires_at: 50_000,
+        enrollment: { subject_id: 'seat-1', name: body.name, product: body.product,
+          product_provenance: body.product_provenance, expires_at: 50_000 },
+      });
+    },
+    ask: async () => { throw new Error('valid adapter hints must not prompt'); },
+  });
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /Interlock target: https:\/\/app\.example\.test\n/);
+  assert.ok(urls.length > 0 && urls.every(url => url.startsWith(`${HOSTED_ORIGIN}/api/ai/`)), urls.join(' '));
+  const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'marlow.json'), 'utf8'));
+  assert.equal(profile.server_url, HOSTED_ORIGIN, 'the profile pins the https origin it joined');
+  assert.equal(profile.state, 'admitted');
 });
 
 test('recover reports the local URL, closes after browser completion, and gives the restart handoff', async () => {

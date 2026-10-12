@@ -64,11 +64,15 @@ function validProduct(value) {
     Array.from(value).length <= 40 && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value);
 }
 
+// A join target is the loopback room or a hosted room's canonical https origin
+// (no path, no trailing slash, lower-case host, never a name for this machine).
 function validUrl(value) {
   let parsed;
   try { parsed = new URL(value); } catch (_) { return false; }
-  return parsed.protocol === 'http:' && parsed.hostname === 'localhost' &&
-    parsed.origin === value;
+  if (parsed.origin !== value) return false;
+  if (parsed.protocol === 'http:') return parsed.hostname === 'localhost';
+  if (parsed.protocol === 'https:') return !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+  return false;
 }
 
 function validCandidate(profile) {

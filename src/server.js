@@ -5,6 +5,7 @@ const dns = require('node:dns');
 const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
+const { performance } = require('node:perf_hooks');
 
 const identity = require('identity');
 const { openAdmissionService } = require('./admission/service.js');
@@ -137,6 +138,14 @@ function requireInterlockOptions(input) {
   }
   const onWrongSetupCode = opts.onWrongSetupCode === undefined ? null : opts.onWrongSetupCode;
   return { dataDir: opts.dataDir, port, hosted, onWrongSetupCode };
+}
+
+// The host's observer never breaks a request or the process: it is called
+// synchronously, and a throw, a rejected promise or a throwing thenable are all
+// swallowed here.
+function observeWrongSetupCode(observer, count) {
+  try { Promise.resolve(observer(count)).catch(() => { /* contained */ }); }
+  catch (_) { /* contained */ }
 }
 
 function loadBrowserAssets() {
@@ -359,9 +368,10 @@ async function startInterlockServer(options) {
     // console. It lives here so the runtime can report it. A wrong code never
     // ends the process or closes the door (that would hand anyone who finds the
     // hostname an outage lever). Wrong codes are answered one second apart by a
-    // slot timestamp; a wrong code whose slot would be more than ten seconds
-    // away is answered at once as busy and takes no slot. The server prints
-    // nothing; the host may observe the running count.
+    // slot on a monotonic clock (a wall-clock step never lengthens the queue);
+    // a wrong code whose slot would be more than ten seconds away is answered
+    // at once as busy and takes no slot. The server prints nothing; the host
+    // may observe the running count.
     let setupCode = hosted && !house.firstOwner.status().completed ? makeSetupCode() : null;
     let wrongCodes = 0;
     let nextSlot = 0;
@@ -371,11 +381,10 @@ async function startInterlockServer(options) {
       hostname: hosted.hostname,
       setupCodeMatches: supplied => setupCodeMatches(setupCode, supplied),
       setupCompleted: () => { setupCode = null; },
-      wrongSetupCode: now => {
+      wrongSetupCode: () => {
         wrongCodes += 1;
-        if (onWrongSetupCode !== null) {
-          try { onWrongSetupCode(wrongCodes); } catch (_) { /* the host's observer never breaks a request */ }
-        }
+        if (onWrongSetupCode !== null) observeWrongSetupCode(onWrongSetupCode, wrongCodes);
+        const now = performance.now();
         const slot = Math.max(now, nextSlot) + WRONG_SETUP_CODE_DELAY_MS;
         const waitMs = slot - now;
         if (waitMs > WRONG_SETUP_CODE_MAX_WAIT_MS) {
