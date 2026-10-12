@@ -13,10 +13,20 @@ function refuse(detail) {
   throw new TypeError('interlock: --hosted-origin ' + detail);
 }
 
-// The input as it may be echoed: any userinfo (user:password@) replaced, so a
-// refusal never prints a credential into a terminal or a service log.
-function redacted(text) {
-  return text.replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/, '$1[redacted]@');
+// The input as a refusal may echo it, so a refusal never prints a credential
+// into a terminal or a service log. Text without '@' cannot carry userinfo
+// and is shown as given. Otherwise userinfo (user:password@) is replaced, but
+// only when the input parsed and the replacement removed what the parser
+// found; anything else is not shown at all, because where its credential
+// ends cannot be known.
+const NOT_SHOWN = '(input not shown: it may contain a credential)';
+
+function shown(text, parsed) {
+  if (!text.includes('@')) return JSON.stringify(text);
+  if (parsed === null) return NOT_SHOWN;
+  const replaced = text.replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/, '$1[redacted]@');
+  if (replaced === text && (parsed.username !== '' || parsed.password !== '')) return NOT_SHOWN;
+  return JSON.stringify(replaced);
 }
 
 function isLoopbackIPv4(address) {
@@ -55,9 +65,9 @@ function isLoopbackHostname(hostname) {
 function parseHostedOrigin(text) {
   if (typeof text !== 'string' || text.length === 0) refuse('requires a canonical https origin such as https://app.example.com');
   let parsed;
-  try { parsed = new URL(text); } catch (_) { refuse('is not a URL: ' + JSON.stringify(redacted(text))); }
+  try { parsed = new URL(text); } catch (_) { refuse('is not a URL: ' + shown(text, null)); }
   if (parsed.protocol !== 'https:') refuse('must use https:// — browsers refuse the room cookie on any other scheme');
-  if (parsed.origin !== text) refuse('must be exactly its own origin (no path, query, fragment, credentials or mixed case): ' + JSON.stringify(redacted(text)));
+  if (parsed.origin !== text) refuse('must be exactly its own origin (no path, query, fragment, credentials or mixed case): ' + shown(text, parsed));
   if (isLoopbackHostname(parsed.hostname)) refuse('must not name this machine; leave the flag off for loopback mode');
   return Object.freeze({ origin: parsed.origin, host: parsed.host, hostname: parsed.hostname });
 }

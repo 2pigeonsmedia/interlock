@@ -124,7 +124,6 @@ test('a refused origin is echoed without its credentials', () => {
   for (const [bad, shown] of [
     ['https://user:s3cret-pw@app.example.com', 'https://[redacted]@app.example.com'],
     ['https://s3cret-pw@app.example.com/room', 'https://[redacted]@app.example.com/room'],
-    ['https://user:s3cret-pw@bad host', 'https://[redacted]@bad host'],
   ]) {
     let message = null;
     try { parseHostedOrigin(bad); } catch (error) { message = error.message; }
@@ -135,4 +134,27 @@ test('a refused origin is echoed without its credentials', () => {
   }
   assert.throws(() => parseHostedOrigin('https://app.example.com/room'), /"https:\/\/app\.example\.com\/room"/,
     'an input without credentials is echoed as given');
+});
+
+test('a refused origin whose credentials cannot be located is not echoed at all', () => {
+  // Each of these fails to parse, or parses with its credentials somewhere the
+  // userinfo pattern does not reach, so no part of the input may be shown.
+  for (const bad of [
+    'https://user:s3c?ret@app.example.com',
+    'https://user:s3c#ret@app.example.com',
+    'https://user:s3c/ret@app.example.com',
+    '//user:s3cret@app.example.com',
+    'https://user:s3cret-pw@bad host',
+    ' https://user:s3cret-pw@app.example.com',
+  ]) {
+    let message = null;
+    try { parseHostedOrigin(bad); } catch (error) { message = error.message; }
+    assert.ok(typeof message === 'string' && message.startsWith('interlock: --hosted-origin'),
+      'ARRANGEMENT: ' + JSON.stringify(bad) + ' is refused: ' + message);
+    for (const secret of ['s3c', 'ret@', 'user:']) {
+      assert.ok(!message.includes(secret), JSON.stringify(bad) + ': ' + JSON.stringify(secret) + ' is not echoed: ' + message);
+    }
+  }
+  assert.throws(() => parseHostedOrigin('app.example.com'), /"app\.example\.com"/,
+    'an unparsable input without credentials is still echoed as given');
 });
