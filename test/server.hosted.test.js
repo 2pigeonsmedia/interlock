@@ -16,6 +16,8 @@ const { createDevice } = require('../identity/test/step_up_fixture.js');
 
 const HOSTED = 'https://app.example.test';
 const HOST = 'app.example.test';
+// A refused passkey ceremony answers 409 passkey-failed, whatever the cause.
+const PASSKEY_REFUSED = { status: 409, error: 'passkey-failed' };
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -208,7 +210,23 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     session.cookie = resumed.headers['set-cookie'][0].split(';', 1)[0];
     session.csrf = resumed.json.csrf_token;
 
-    // Passkeys bind to the exact hostname.
+    // Passkeys bind to the exact hostname. A passkey made for http://localhost
+    // on this port is refused on both credential ceremonies; each refusal is
+    // followed by the same ceremony succeeding with the hosted device, so the
+    // refusal is the origin and rpId, not a broken ceremony.
+    const localDevice = createDevice({ origin: 'http://localhost:' + port, rpId: 'localhost' });
+    const localRegistration = await post(runtime, '/api/bootstrap/registration/options', {}, session);
+    assert.equal(localRegistration.status, 200, 'ARRANGEMENT: a registration ceremony is open: ' + localRegistration.text);
+    assert.equal(localRegistration.json.options.rp.id, HOST, 'ARRANGEMENT: the ceremony names the hosted rpId');
+    const localRegistered = await post(runtime, '/api/bootstrap/registration/finish', {
+      ceremony_id: localRegistration.json.ceremony_id,
+      response: localDevice.registration(localRegistration.json.options.challenge),
+    }, session);
+    console.log('# localhost passkey registration on the hosted server: ' + localRegistered.status + ' ' + localRegistered.text.trim());
+    assert.equal(localRegistered.status, PASSKEY_REFUSED.status, localRegistered.text);
+    assert.equal(localRegistered.json.ok, false);
+    assert.equal(localRegistered.json.error, PASSKEY_REFUSED.error);
+
     const device = createDevice({ origin: HOSTED, rpId: HOST });
     const registration = await post(runtime, '/api/bootstrap/registration/options', {}, session);
     assert.equal(registration.status, 200, registration.text);
@@ -217,9 +235,23 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
       ceremony_id: registration.json.ceremony_id,
       response: device.registration(registration.json.options.challenge),
     }, session);
-    assert.equal(registered.status, 200, registered.text);
+    assert.equal(registered.status, 200, 'the hosted device registers: ' + registered.text);
+
+    const localElevation = await post(runtime, '/api/bootstrap/elevation/options', {}, session);
+    assert.equal(localElevation.status, 200, 'ARRANGEMENT: an assertion ceremony is open: ' + localElevation.text);
+    const localAsserted = await post(runtime, '/api/bootstrap/complete', {
+      ceremony_id: localElevation.json.ceremony_id,
+      response: localDevice.assertion(localElevation.json.options.challenge),
+    }, session);
+    console.log('# localhost passkey assertion on the hosted server: ' + localAsserted.status + ' ' + localAsserted.text.trim());
+    assert.equal(localAsserted.status, PASSKEY_REFUSED.status, localAsserted.text);
+    assert.equal(localAsserted.json.ok, false);
+    assert.equal(localAsserted.json.error, PASSKEY_REFUSED.error);
+    assert.notEqual(runtime.setupCode, null, 'the refused assertion did not complete setup');
+
     const elevation = await post(runtime, '/api/bootstrap/elevation/options', {}, session);
     assert.equal(elevation.status, 200, elevation.text);
+    assert.equal(elevation.json.options.rpId, HOST, 'the assertion ceremony names the hosted rpId');
     assert.notEqual(runtime.setupCode, null, 'ARRANGEMENT: the code is held until setup completes');
     const completed = await post(runtime, '/api/bootstrap/complete', {
       ceremony_id: elevation.json.ceremony_id,
