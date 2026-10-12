@@ -322,6 +322,15 @@ function can(subject_id, capability, resource, context) {
   const candidate = { allow, reason };
   // Quiet allowed reads (host policy): a routine successful read is not an
   // audit event. Denies, and every non-read capability, are still rows.
+  //
+  // This return happens BEFORE audit.authz(row) and finalFromAudit(), so a quiet
+  // allowed read BYPASSES the audit-health fail-closed check ON PURPOSE: it is
+  // not an audit event, so it is not gated by whether the audit stream can take
+  // one. Denies, writes and every non-read capability still go through
+  // finalFromAudit and still fail closed ('audit-not-ready', 'audit-overflow',
+  // 'audit-fault'). A host that turns this on is choosing "readable while audit
+  // is down": an unhealthy audit stream degrades the room to read-only rather
+  // than taking it dark.
   if (allow && capability === 'read' && values.audit_allowed_reads === false) {
     return candidate;
   }

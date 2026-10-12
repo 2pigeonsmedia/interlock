@@ -2,6 +2,9 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const F = require('./fixture.js');
@@ -104,6 +107,47 @@ test('the house-level switch reaches can() through authorizeRead', async () => {
 
   assert.equal(await readOnce(loud), 1, 'default service: an allowed authorizeRead is a row');
   assert.equal(await readOnce(quiet), 0, 'quiet service: no row for the allowed authorizeRead');
+});
+
+// The contract in can.js: a quiet allowed read is not gated by audit health.
+// The audit stream is arranged NOT RUNNING (state bound and loaded, audit.start()
+// never called), the simplest unhealthy state the module lets a test reach. It
+// does not cover a full queue ('audit-overflow') or a faulted writer
+// ('audit-fault'); those share the same finalFromAudit path, but are not pinned.
+test('a quiet allowed read stays available while the audit stream is down; loud reads and writes fail closed', () => {
+  F.evictModule();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-quiet-reads-down-'));
+  const repo = F.load('repo.js');
+  const subjects = F.load('subjects.js');
+  const grants = F.load('grants.js');
+  const audit = F.load('audit.js');
+  const { can } = F.load('can.js');
+  repo.configureStateDir(dir);
+  assert.equal(repo.initialize({ tenant: F.TENANT }).ready, true, 'ARRANGEMENT: state loads clean');
+  const person = subjects.create({ tenant: F.TENANT, kind: 'person', name: 'Owner' });
+  for (const capability of ['read', 'write']) {
+    grants.add({
+      tenant: F.TENANT, subject_id: person.id, capability,
+      resource: 'room:main', origin: 'any', expires_at: 0,
+    });
+  }
+  assert.throws(() => audit.read('authz', { limit: 1 }), /start\(\) has not completed/,
+    'ARRANGEMENT: the audit stream is not running');
+  assert.equal(audit.health().dropped, 0, 'ARRANGEMENT: nothing has been refused by the audit stream yet');
+
+  const quietRead = can(person.id, 'read', 'room:main', F.context({ audit_allowed_reads: false }));
+  assert.deepEqual(quietRead, { allow: true, reason: 'granted' },
+    'a quiet allowed read is not gated by audit health');
+  assert.equal(audit.health().dropped, 0, 'the quiet read never reached the audit stream');
+
+  const loudRead = can(person.id, 'read', 'room:main', F.context());
+  assert.deepEqual(loudRead, { allow: false, reason: 'audit-not-ready' },
+    'control: the same read, loud, fails closed — so the quiet allow above is the policy, not a healthy audit');
+  assert.equal(audit.health().dropped, 1, 'the loud read was refused by the audit stream');
+
+  const quietWrite = can(person.id, 'write', 'room:main', F.context({ audit_allowed_reads: false }));
+  assert.deepEqual(quietWrite, { allow: false, reason: 'audit-not-ready' },
+    'only a READ is exempt: an allowed write still fails closed');
 });
 
 // The AI seat's bearer door takes the capability from its caller, so the host
