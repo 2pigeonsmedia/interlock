@@ -14,13 +14,21 @@ const path = require('path');
 const repo = require('./repo.js');
 
 const EPOCH_KEY = 'unverified-legacy';
-const STREAMS = Object.freeze(['authn', 'authz', 'mutation']);
+const STREAMS = Object.freeze(['authn', 'authz', 'mutation', 'authn_deny', 'authz_deny']);
+// Failure rows of each telemetry stream go to a sibling `<stream>_deny` stream,
+// so a flood of failures cannot age out the evidence of itself (the segment cap
+// is per stream). The producers' own failure values: `can()` writes 'deny';
+// password verification writes 'denied'; session verification writes 'failure'.
+const DENY_RESULTS = Object.freeze({
+  authn: Object.freeze(['denied', 'failure']),
+  authz: Object.freeze(['deny']),
+});
 const MAX_QUEUE = 10000;
 const MAX_BYTES = 64 * 1024 * 1024;
-// Telemetry streams (authn/authz) keep at most this many rotated segments
-// each, oldest removed when a new one is cut: 8 × 64 MiB bounds a stream at
-// 512 MiB plus the live file. Mutation rows are not telemetry and are never
-// pruned here.
+// Telemetry streams (authn/authz and their _deny siblings) keep at most this
+// many rotated segments each, oldest removed when a new one is cut: 8 × 64 MiB
+// bounds a stream at 512 MiB plus the live file. Mutation rows are not
+// telemetry and are never pruned here.
 const MAX_SEGMENTS = 8;
 const MAX_ROW = 8 * 1024;
 const MAX_BATCH_BYTES = 1024 * 1024;
@@ -29,7 +37,7 @@ const MAX_FIELD = 4096;
 const MAX_SCHEMES = 32;
 const MAX_SCHEME = 256;
 const MAX_READ_LIMIT = 1000;
-const SEGMENT_RE = /^(authn|authz|mutation)\.log\.(\d{12})-(\d+)-([a-z0-9]+)$/;
+const SEGMENT_RE = /^(authn|authz|mutation|authn_deny|authz_deny)\.log\.(\d{12})-(\d+)-([a-z0-9]+)$/;
 
 const FIELDS = Object.freeze([
   'tenant', 'subject_id', 'subject_name', 'subject_kind', 'kind', 'principal',
@@ -435,8 +443,20 @@ function safeIdentity(source, fields) {
   return out;
 }
 
+// A deny stream carries its parent stream's row schema.
+function schemaStream(stream) {
+  return stream.replace(/_deny$/, '');
+}
+
+// The stream a telemetry row is written to: its own, or its deny sibling.
+function targetStream(stream, row) {
+  const result = ownData(row, 'result');
+  return result.present && DENY_RESULTS[stream].includes(result.value)
+    ? stream + '_deny' : stream;
+}
+
 function telemetryPlaceholder(stream, source, result, reason) {
-  const allowed = stream === 'authn'
+  const allowed = schemaStream(stream) === 'authn'
     ? ['tenant', 'subject_id', 'subject_name', 'kind', 'origin', 'attribution',
       'scheme', 'credential_id', 'event_id']
     : ['tenant', 'subject_id', 'subject_name', 'kind', 'principal', 'capability',
@@ -454,7 +474,8 @@ function normalizeTelemetry(stream, row) {
   if (!row || typeof row !== 'object' || Array.isArray(row)) {
     return telemetryPlaceholder(stream, null, 'audit-input-error', 'invalid telemetry row');
   }
-  const fields = stream === 'authn' ? AUTHN_FIELDS : AUTHZ_FIELDS;
+  const schema = schemaStream(stream);
+  const fields = schema === 'authn' ? AUTHN_FIELDS : AUTHZ_FIELDS;
   const out = { ts: Date.now() };
   let invalid = false;
   let oversized = false;
@@ -489,8 +510,8 @@ function normalizeTelemetry(stream, row) {
   }
 
   if (!validString(out.tenant) || !validString(out.result) ||
-      (stream === 'authn' && !validString(out.scheme)) ||
-      (stream === 'authz' &&
+      (schema === 'authn' && !validString(out.scheme)) ||
+      (schema === 'authz' &&
        (!validString(out.capability) || !validString(out.resource)))) {
     invalid = true;
   }
@@ -531,8 +552,10 @@ function enqueue(stream, row) {
       setFault('telemetry', 'audit: telemetry queue overflow at ' + MAX_QUEUE);
       return { accepted: false, reason: 'overflow' };
     }
-    const line = lineForTelemetry(stream, row);
-    QUEUE.push({ stream, line, bytes: Buffer.byteLength(line, 'utf8') });
+    let target = stream;
+    try { target = targetStream(stream, row); } catch (_) { /* placeholder row below */ }
+    const line = lineForTelemetry(target, row);
+    QUEUE.push({ stream: target, line, bytes: Buffer.byteLength(line, 'utf8') });
     kickTelemetry();
     return { accepted: true, queued: QUEUE.length };
   } catch (_) {

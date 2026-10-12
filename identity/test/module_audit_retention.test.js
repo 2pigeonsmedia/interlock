@@ -54,9 +54,16 @@ test('rotating a full authz log keeps at most MAX_SEGMENTS older segments, oldes
   assert.equal(fs.statSync(live).size, audit.MAX_BYTES, 'ARRANGEMENT: live log at the rotation threshold');
   assert.equal(segmentsOf(dir, 'authz').length, cap + 2, 'ARRANGEMENT: more segments than the cap on disk');
 
+  // ARRANGEMENT: denies are written to authz_deny, so the decision that drives
+  // authz rotation must be an allow; the fixture person starts with no grants.
+  fx.grants.add({
+    tenant: F.TENANT, subject_id: fx.person.id, capability: 'read',
+    resource: 'room:main', origin: 'any', expires_at: 0,
+  });
+
   // ACT: one real authorization decision through the real audit path.
   const decision = fx.can(fx.person.id, 'read', 'room:main', F.context());
-  assert.equal(typeof decision.allow, 'boolean', 'a decision was audited');
+  assert.equal(decision.allow, true, 'ARRANGEMENT: an allowed decision is written to authz');
   await audit.drain();
 
   // OUTCOME: rotation produced ordinal cap+3; pruning removed ordinals 1..3.

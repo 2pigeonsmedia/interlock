@@ -10,9 +10,10 @@ const test = require('node:test');
 const F = require('./fixture.js');
 const Step = require('./step_up_fixture.js');
 
+// Every authorization row: allows are in authz, denies in authz_deny.
 async function authzRows(audit) {
   await audit.drain();
-  return audit.read('authz', { limit: 1000 });
+  return audit.read('authz', { limit: 1000 }).concat(audit.read('authz_deny', { limit: 1000 }));
 }
 
 // A construction config the module accepts, over the fixture's state directory.
