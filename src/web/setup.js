@@ -152,7 +152,18 @@ async function finishPasskeySetup() {
   window.location.replace('/');
 }
 
+// Refusals only hosted setup can produce; loopback never sees these codes.
+const SETUP_REFUSALS = Object.freeze({
+  'setup-code-required': 'Enter the setup code printed by the server.',
+  'setup-code-invalid': 'That setup code is not right. Check the server console and try again.',
+  'setup-code-busy': 'Too many wrong codes right now; wait a few seconds.',
+  'password-too-short': 'Use at least 12 characters.',
+});
+
 function friendlyFailure(error) {
+  if (error && Object.prototype.hasOwnProperty.call(SETUP_REFUSALS, error.code)) {
+    return SETUP_REFUSALS[error.code];
+  }
   if (error && (error.name === 'NotAllowedError' || error.message === 'passkey-cancelled')) {
     return 'Passkey setup was cancelled. You can try again.';
   }
@@ -219,6 +230,11 @@ continueButton.addEventListener('click', continueSetup);
     if (status.hosted === true) {
       localNote.firstChild.nodeValue =
         `This room is reachable at ${window.location.origin}; keep the setup code private. `;
+      const recoveryHint = [...form.querySelectorAll('.hint')].find(hint => hint.textContent.includes('interlock recover'));
+      if (recoveryHint) {
+        recoveryHint.textContent =
+          'Interlock does not give you a permanent recovery code. Owner recovery for a hosted room is described in HOSTING.md.';
+      }
     }
     if (!window.PublicKeyCredential || !navigator.credentials) {
       setStatus('This browser cannot create the required passkey.', 'error');

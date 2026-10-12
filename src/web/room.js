@@ -85,6 +85,33 @@ for (const command of document.querySelectorAll('[data-interlock-join-command]')
   command.textContent = `interlock join --url ${window.location.origin}`;
 }
 
+// Hosted mode: the static page says "this computer", which is only true on
+// loopback. Swap those sentences once the server says the room is hosted.
+function replaceText(element, from, to) {
+  if (!element) return;
+  for (const node of element.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE && node.nodeValue.includes(from)) {
+      node.nodeValue = node.nodeValue.replace(from, to);
+    }
+  }
+}
+
+let hostedWordingApplied = false;
+function applyHostedWording() {
+  if (hostedWordingApplied) return;
+  hostedWordingApplied = true;
+  const origin = window.location.origin;
+  const [joinNote, reachNote] = document.querySelectorAll('#login-view .local-note');
+  replaceText(joinNote, ' in a terminal on this computer.', ' in any terminal that can reach this room.');
+  if (reachNote) reachNote.textContent = `This room is reachable at ${origin}.`;
+  replaceText(document.querySelector('.join-instruction small'),
+    'The AI runs that in a terminal on this computer', 'The AI runs that in any terminal that can reach this room');
+  const recoveryNote = document.querySelector('.settings-note');
+  if (recoveryNote) {
+    recoveryNote.textContent = 'Lost the owner password or passkey? Owner recovery for a hosted room is described in HOSTING.md.';
+  }
+}
+
 function setConnectionState(state) {
   connectionState.className = 'connection-state ' + state;
   connectionState.textContent = state === 'running'
@@ -1704,6 +1731,7 @@ signOutOthersButton.addEventListener('click', async () => {
     const response = await fetch('/api/session', { cache: 'no-store', credentials: 'same-origin' });
     const result = await readJson(response);
     setConnectionState('running');
+    if (result.hosted === true) applyHostedWording();
     if (!response.ok || result.ok !== true || result.authenticated !== true || !result.user) {
       forgetCsrf();
       showLogin();

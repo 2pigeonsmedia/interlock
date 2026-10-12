@@ -272,6 +272,16 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     assert.equal(signedIn.status, 200, signedIn.text);
     const owner = { cookie: signedIn.headers['set-cookie'][0].split(';', 1)[0], csrf: signedIn.json.csrf_token };
 
+    // The room page learns hosted mode from /api/session, signed in or not, so
+    // it never tells a remote visitor the room is on "this computer".
+    const anonymous = await call(runtime, { path: '/api/session' });
+    assert.equal(anonymous.status, 401, 'ARRANGEMENT: no cookie is not signed in');
+    assert.equal(anonymous.json.error, 'not-authenticated');
+    assert.equal(anonymous.json.hosted, true, 'a signed-out page learns hosted mode');
+    const ownSession = await call(runtime, { path: '/api/session', headers: { cookie: owner.cookie } });
+    assert.equal(ownSession.status, 200, 'ARRANGEMENT: the owner is signed in');
+    assert.equal(ownSession.json.authenticated, true);
+    assert.equal(ownSession.json.hosted, true, 'a signed-in page learns hosted mode');
     const weakChange = await post(runtime, '/api/owner/password',
       { current_password: 'correct horse battery staple', new_password: 'short' }, owner);
     assert.equal(weakChange.status, 400, weakChange.text);

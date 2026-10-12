@@ -484,6 +484,8 @@ test('the loopback browser transport completes first-owner setup through the pub
       headers: { host: `localhost:${port}`, cookie: ownerSession.cookie },
     });
     assert.equal(afterLogout.status, 401);
+    assert.deepEqual(afterLogout.json, { ok: false, authenticated: false, error: 'not-authenticated' },
+      'loopback /api/session carries no hosted flag');
     assert.equal(afterLogout.headers['set-cookie'], undefined,
       'the explicit logout response already cleared the cookie; stale reads never mutate it');
     const idempotentLogout = await post(runtime, '/api/logout', {});

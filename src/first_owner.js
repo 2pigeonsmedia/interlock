@@ -1845,15 +1845,17 @@ function createFirstOwnerHandler(options) {
           activity: 'ordinary',
           now: Date.now(),
         }));
+        // Hosted mode only: the room page swaps its "this computer" wording.
         if (user === null) {
-          sendJson(request, response, 401, {
+          sendJson(request, response, 401, Object.assign({
             ok: false,
             authenticated: false,
             error: 'not-authenticated',
-          });
+          }, hostedMode ? { hosted: true } : {}));
           return;
         }
-        sendJson(request, response, 200, { ok: true, authenticated: true, user });
+        sendJson(request, response, 200,
+          Object.assign({ ok: true, authenticated: true, user }, hostedMode ? { hosted: true } : {}));
         return;
       }
       if (pathname === '/api/history/names' || pathname === '/api/history/archives') {
