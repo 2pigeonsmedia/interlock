@@ -188,7 +188,7 @@ test('the house-level switch reaches can() through authorizeSeatBearer, for read
 // An AI seat polls the room with its bearer on every read. With reads quiet,
 // a poll must add no row to ANY telemetry stream — the bearer's successful
 // authentication included — while a failed bearer is still written.
-test('quiet AI read polls write no row in any stream; a failed bearer still does', async () => {
+test('quiet AI read polls write no row in any stream; a failed bearer or a tool bearer still does', async () => {
   const world = await Step.freshAdmin(F);
   const identity = F.load('index.js');
   const audit = F.load('audit.js');
@@ -240,6 +240,24 @@ test('quiet AI read polls write no row in any stream; a failed bearer still does
   assert.equal(bad.allow, false, 'ARRANGEMENT: an unknown bearer is refused');
   assert.deepEqual(added(badBefore, await counts()), { authn: 0, authz: 0, authn_deny: 1, authz_deny: 0 },
     'a failed bearer on a quiet read is still an authn_deny row');
+
+  // A tool's bearer handed to the seat door authenticates and is then refused
+  // as not a seat. Only a seat's read is quiet, so that authentication is a row.
+  const subjects = F.load('subjects.js');
+  const credentials = F.load('credentials.js');
+  const tool = subjects.create({ tenant: F.TENANT, kind: 'tool', name: 'quiet-cli' });
+  const toolToken = credentials.newToken();
+  credentials.issue({
+    selector: toolToken.selector, digest: toolToken.digest, subject_id: tool.id,
+    type: 'tool', ttlMs: 24 * 60 * 60 * 1000, generation: 1, request_id: crypto.randomUUID(),
+  });
+  const toolBefore = await counts();
+  const toolRead = quiet.authorizeSeatBearer(
+    { authorization_header: 'Bearer ' + toolToken.token, source: '127.0.0.1' }, 'read', 'room:main');
+  assert.equal(toolRead.allow, false, 'ARRANGEMENT: a tool bearer is refused at the seat door');
+  assert.equal(toolRead.reason, 'not-a-seat', 'ARRANGEMENT: refused after it authenticated: ' + JSON.stringify(toolRead));
+  assert.deepEqual(added(toolBefore, await counts()), { authn: 1, authz: 0, authn_deny: 0, authz_deny: 0 },
+    'a tool bearer at the seat door on a quiet read still writes its authentication row');
 });
 
 test('auditAllowedReads must be a boolean when present, and is refused before anything is bound', async () => {
