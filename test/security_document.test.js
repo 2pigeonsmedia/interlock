@@ -93,6 +93,8 @@ test('the hosted setup code and the password door are described as built', () =>
     'and per address until fifteen minutes pass with no attempt; while attempts continue, every attempt is ' +
     'refused without a check.');
   assertSentence(SECURITY,
+    'A client address is an IPv4 address, or for IPv6 the /64 block the address belongs to; an IPv4-mapped IPv6 address counts as its IPv4 address.');
+  assertSentence(SECURITY,
     'Attempts still being checked count against the limit, so parallel guesses get no more checks than sequential ones.');
   assert.doesNotMatch(SECURITY, /guesses per account per day/, 'no per-day guess figure: the limit is lock-until-quiet');
   assertSentence(SECURITY, 'The counters live in memory and are reset by every restart.');

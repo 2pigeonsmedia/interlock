@@ -232,7 +232,8 @@ one.
 **Sign-in is refused.** Sign-in allows at most five password checks per account
 and per address until fifteen minutes pass with no attempt; while attempts
 continue, every attempt is refused without a check, even with the right
-password, after a wait of up to 30 seconds. Anyone who knows an account name can
+password, after a wait of up to 30 seconds. An address here is an IPv4 address
+or, for IPv6, the /64 block it belongs to. Anyone who knows an account name can
 use this to keep its owner out of password sign-in for as long as they keep
 trying. If the owner is refused with the right password after
 someone else has been guessing, wait fifteen minutes without trying or restart

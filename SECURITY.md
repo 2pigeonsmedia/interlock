@@ -64,7 +64,9 @@ no others.
   without a passkey. Failures are throttled per client address and per account:
   at most five password checks per account and per address until fifteen
   minutes pass with no attempt; while attempts continue, every attempt is
-  refused without a check. Attempts still being checked count against the
+  refused without a check. A client address is an IPv4 address, or for IPv6
+  the /64 block the address belongs to; an IPv4-mapped IPv6 address counts as
+  its IPv4 address. Attempts still being checked count against the
   limit, so parallel guesses get no more checks than sequential ones. The
   counters live in memory and are reset by every restart. Once an account or
   client address has failed five times, each further attempt for it waits out
