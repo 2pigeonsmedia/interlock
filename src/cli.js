@@ -1724,6 +1724,13 @@ async function runRecover(args, io, dependencies = {}) {
       line(stderr, 'interlock: instance ownership cannot be verified safely; recovery did not start.');
       return EXIT_RUNTIME;
     }
+    if (error && error.code === 'not-loopback') {
+      const served = /^https?:\/\//.test(error.recordedOrigin)
+        ? `serves ${error.recordedOrigin}` : 'has an origin record that cannot be read';
+      line(stderr, `interlock: this data directory ${served}; owner recovery works only for a room served at http://localhost.`);
+      line(stderr, 'Recovery would replace the owner passkey with one bound to localhost, which this room cannot use. See HOSTING.md.');
+      return EXIT_RUNTIME;
+    }
     if (error && (error.code === 'data-dir-missing' || error.code === 'installation-missing' ||
         error.code === 'installation-invalid')) {
       line(stderr, 'interlock: no completed Interlock installation was found at the configured data directory.');

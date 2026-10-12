@@ -317,15 +317,22 @@ function writeOriginRecord(dataDir, origin) {
   fs.renameSync(temporary, target);
 }
 
-// Throws origin-mismatch, or records the origin on a directory's first start.
-function claimDataDirOrigin(dataDir, origin) {
-  let recorded = null;
+const UNREADABLE_ORIGIN_RECORD = 'an unreadable origin record';
+
+// The origin a directory recorded; null when it has no record, or
+// UNREADABLE_ORIGIN_RECORD when the record exists but cannot be read.
+function recordedDataDirOrigin(dataDir) {
   try {
     const parsed = JSON.parse(fs.readFileSync(path.join(dataDir, ORIGIN_RECORD), 'utf8'));
-    recorded = parsed && typeof parsed.origin === 'string' ? parsed.origin : 'an unreadable origin record';
+    return parsed && typeof parsed.origin === 'string' ? parsed.origin : UNREADABLE_ORIGIN_RECORD;
   } catch (error) {
-    if (!error || error.code !== 'ENOENT') recorded = 'an unreadable origin record';
+    return error && error.code === 'ENOENT' ? null : UNREADABLE_ORIGIN_RECORD;
   }
+}
+
+// Throws origin-mismatch, or records the origin on a directory's first start.
+function claimDataDirOrigin(dataDir, origin) {
+  const recorded = recordedDataDirOrigin(dataDir);
   if (recorded === null) {
     const legacy = LEGACY_IDENTITY_FILES.some(name => fs.existsSync(path.join(dataDir, 'identity', name)));
     if (legacy && originFamily(origin) !== 'http://localhost') {
@@ -546,6 +553,8 @@ module.exports = Object.freeze({
   configureHttpServer,
   isLoopbackAddress,
   listen,
+  originFamily,
+  recordedDataDirOrigin,
   startHealthServer,
   startInterlockServer,
 });

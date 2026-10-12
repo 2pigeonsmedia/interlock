@@ -14,6 +14,8 @@ const {
   configureHttpServer,
   isLoopbackAddress,
   listen,
+  originFamily,
+  recordedDataDirOrigin,
 } = require('./server.js');
 
 const MAX_JSON_BYTES = 384 * 1024;
@@ -295,6 +297,18 @@ async function startRecoveryServer(options) {
   }
   if (!stateDirStat.isDirectory() || stateDirStat.isSymbolicLink() ||
       !stateStat.isFile() || stateStat.isSymbolicLink()) fail('installation-invalid');
+
+  // Recovery replaces the owner's passkey with one bound to http://localhost.
+  // A directory that serves another origin, or whose record cannot be read,
+  // would be left with a passkey its own pages cannot use, so it is refused
+  // before the lock or any identity state is touched.
+  const recorded = recordedDataDirOrigin(dataDir);
+  if (recorded !== null && originFamily(recorded) !== 'http://localhost') {
+    const error = new Error('interlock recovery: not-loopback');
+    error.code = 'not-loopback';
+    error.recordedOrigin = recorded;
+    throw error;
+  }
 
   const assets = loadAssets();
   const instanceLock = acquireInstanceLock({ dataDir });

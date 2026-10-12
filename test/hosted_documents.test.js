@@ -15,6 +15,7 @@ const README = read('README.md');
 const UPGRADE = read('UPGRADE.md');
 const SECURITY = read('SECURITY.md');
 const GUIDE = read('GUIDE.md');
+const RECOVERY = read('RECOVERY.md');
 const IDENTITY_README = read('identity', 'README.md');
 const PROTOCOL = read('docs', 'PROTOCOL.md');
 
@@ -141,10 +142,13 @@ test('the protocol names the hosted origin as the one canonical host and still b
     'and in both shapes binds only to verified loopback addresses. A request whose `Host` is not that origin is answered 421.');
 });
 
-test('HOSTING.md says what the passkey is for and how to stay recoverable while hosted recovery is unproven', () => {
+test('HOSTING.md says what the passkey is for and how to stay recoverable while recover refuses a hosted room', () => {
   assertSentence(HOSTING,
     'In hosted mode the password is the sign-in credential and the passkey is used only to confirm sensitive actions.');
   assertSentence(HOSTING,
-    'Owner recovery of a hosted installation is unproven in this release: keep the owner password in a password manager and keep a verified backup.');
+    '`interlock recover` refuses a hosted data directory, because the passkey it sets is bound to `localhost`: keep the owner password in a password manager and keep a verified backup.');
+  assertSentence(RECOVERY,
+    'Recovery works only for a room served at `http://localhost`: it refuses a data directory started with `--hosted-origin`, because the new passkey would be bound to `localhost`.');
+  assert.doesNotMatch(HOSTING, /recovery of a hosted installation is unproven/, 'recovery of a hosted room is refused, not untried');
   assert.doesNotMatch(HOSTING, /more\s+than\s+one\s+device/, 'the passkey is not the recovery path');
 });

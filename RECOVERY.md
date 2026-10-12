@@ -25,6 +25,10 @@ If the installation normally uses a custom `INTERLOCK_DATA_DIR`, use the same
 environment setting for `recover`. `--port PORT` is available when the default
 loopback port is already in use.
 
+Recovery works only for a room served at `http://localhost`: it refuses a data
+directory started with `--hosted-origin`, because the new passkey would be
+bound to `localhost`. See [`HOSTING.md`](HOSTING.md).
+
 ## What recovery changes
 
 A successful recovery atomically:

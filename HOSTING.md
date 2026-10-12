@@ -256,6 +256,7 @@ Another front, a front on a different machine, or a front that does not preserve
 [`RECOVERY.md`](RECOVERY.md)) serves its page at `http://localhost`, and a
 passkey is bound to the hostname it was created for. In hosted mode the password
 is the sign-in credential and the passkey is used only to confirm sensitive
-actions. Owner recovery of a hosted installation is unproven in this release:
-keep the owner password in a password manager and keep a verified backup. To move an existing loopback installation to hosted mode, see
+actions. `interlock recover` refuses a hosted data directory, because the
+passkey it sets is bound to `localhost`: keep the owner password in a password
+manager and keep a verified backup. To move an existing loopback installation to hosted mode, see
 [`UPGRADE.md`](UPGRADE.md).
