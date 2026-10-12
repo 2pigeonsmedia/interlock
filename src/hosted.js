@@ -89,11 +89,39 @@ function setupCodeMatches(expected, supplied) {
   return crypto.timingSafeEqual(a, b);
 }
 
+// The eight hextets of an IPv6 address, as numbers, or null.
+function ipv6Hextets(address) {
+  let host;
+  try { host = new URL('http://[' + address.replace(/%.*$/, '') + ']').hostname.slice(1, -1); } catch (_) { return null; }
+  const [head, tail] = host.includes('::') ? host.split('::') : [host, null];
+  const left = head === '' ? [] : head.split(':');
+  const right = tail === null || tail === '' ? [] : tail.split(':');
+  const missing = 8 - left.length - right.length;
+  if (tail === null ? missing !== 0 : missing < 1) return null;
+  const groups = left.concat(new Array(tail === null ? 0 : missing).fill('0'), right).map(g => parseInt(g, 16));
+  return groups.length === 8 && groups.every(g => g >= 0 && g <= 0xffff) ? groups : null;
+}
+
+// The throttle key for a hosted client. IPv4 is kept as it is; an IPv4-mapped
+// IPv6 address is its IPv4; any other IPv6 address is keyed by its /64, the
+// smallest block one subscriber is routinely given, so rotating through the
+// addresses of one /64 does not yield fresh keys.
+function canonicalSource(address) {
+  if (net.isIPv4(address)) return address;
+  if (!net.isIPv6(address)) return address;
+  const mapped = mappedIPv4(address.toLowerCase());
+  if (mapped !== null) return mapped;
+  const groups = ipv6Hextets(address);
+  if (groups === null) return address;
+  const prefix = groups.slice(0, 4).map(g => g.toString(16)).join(':') + ':0:0:0:0';
+  return new URL('http://[' + prefix + ']').hostname.slice(1, -1) + '/64';
+}
+
 function clientSource(request, hosted) {
   const socketSource = (request && request.socket && request.socket.remoteAddress) || 'loopback';
   if (!hosted) return socketSource;
   const header = request && request.headers ? request.headers['cf-connecting-ip'] : undefined;
-  return typeof header === 'string' && net.isIP(header) !== 0 ? header : socketSource;
+  return canonicalSource(typeof header === 'string' && net.isIP(header) !== 0 ? header : socketSource);
 }
 
 module.exports = Object.freeze({

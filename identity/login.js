@@ -50,6 +50,7 @@ const THROTTLE_MAX_MS = 30_000;
 const THROTTLE_DECAY_MS = 900_000;        // 15 minutes without a failure
 const THROTTLE_MAX_ENTRIES = 4096;
 const THROTTLE_OVERFLOW_BUCKETS = 64;
+const THROTTLE_OVERFLOW_KEYS = 16384;
 
 function isPlainObject(o) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
@@ -98,6 +99,12 @@ function createLoginThrottle(opts) {
   // buckets rather than EVICTING A HOT ATTACKER KEY — eviction under flood is
   // exactly how an attacker clears their own counter.
   const overflow = new Map();
+  // The keys that have failed into an overflow bucket (key -> last failure). A
+  // bucket counts only against these: a key that never failed is not refused
+  // because strangers sharing its bucket did. If this set is itself full, every
+  // unseen key is judged by its bucket again — under that flood the throttle
+  // can no longer tell keys apart, and it fails closed.
+  const overflowKeys = new Map();
   // Attempts that passed check() and are still inside their password check.
   // check() counts them as if they had already failed, so a parallel burst
   // cannot all pass the throttle before the first failure is recorded. They are
@@ -112,8 +119,8 @@ function createLoginThrottle(opts) {
   function bucketOf(k) {
     return 'b' + (parseInt(k.slice(0, 8), 16) % THROTTLE_OVERFLOW_BUCKETS);
   }
-  function decay(map, now) {
-    for (const [k, v] of map) if (now - v.last >= decayMs) map.delete(k);
+  function decay(map, now, bare) {
+    for (const [k, v] of map) if (now - (bare ? v : v.last) >= decayMs) map.delete(k);
   }
   function bump(map, k, now) {
     decay(map, now);
@@ -124,6 +131,8 @@ function createLoginThrottle(opts) {
       const ob = overflow.get(b) || { n: 0, last: now };
       ob.n += 1; ob.last = now;
       overflow.set(b, ob);
+      if (!overflowKeys.has(k) && overflowKeys.size >= THROTTLE_OVERFLOW_KEYS) decay(overflowKeys, now, true);
+      if (overflowKeys.has(k) || overflowKeys.size < THROTTLE_OVERFLOW_KEYS) overflowKeys.set(k, now);
       return;
     }
     map.set(k, { n: 1, last: now });
@@ -131,6 +140,9 @@ function createLoginThrottle(opts) {
   function countFor(map, k, now) {
     const cur = map.get(k);
     if (cur && now - cur.last < decayMs) return cur.n;
+    const failedAt = overflowKeys.get(k);
+    const failedHere = failedAt !== undefined && now - failedAt < decayMs;
+    if (!failedHere && overflowKeys.size < THROTTLE_OVERFLOW_KEYS) return 0;
     const ob = overflow.get(bucketOf(k));
     if (ob && now - ob.last < decayMs) return ob.n;
     return 0;
@@ -194,6 +206,8 @@ function createLoginThrottle(opts) {
         source_entries: source.size,
         account_entries: account.size,
         overflow_buckets: overflow.size,
+        overflow_keys: overflowKeys.size,
+        cap_overflow_keys: THROTTLE_OVERFLOW_KEYS,
         inflight_source_entries: inflightSource.size,
         inflight_account_entries: inflightAccount.size,
         cap_entries: THROTTLE_MAX_ENTRIES,

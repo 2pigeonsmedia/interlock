@@ -88,7 +88,7 @@ test('clientSource reads CF-Connecting-IP only in hosted mode and only when it i
   const hosted = { origin: 'https://app.example.com', host: 'app.example.com', hostname: 'app.example.com' };
   const req = (headers, remote) => ({ headers, socket: { remoteAddress: remote } });
   assert.equal(clientSource(req({ 'cf-connecting-ip': '203.0.113.9' }, '127.0.0.1'), hosted), '203.0.113.9');
-  assert.equal(clientSource(req({ 'cf-connecting-ip': '2001:db8::9' }, '127.0.0.1'), hosted), '2001:db8::9');
+  assert.equal(clientSource(req({ 'cf-connecting-ip': '2001:db8::9' }, '127.0.0.1'), hosted), '2001:db8::/64');
   assert.equal(clientSource(req({ 'cf-connecting-ip': 'not-an-ip' }, '127.0.0.1'), hosted), '127.0.0.1');
   assert.equal(clientSource(req({}, '127.0.0.1'), hosted), '127.0.0.1');
   assert.equal(clientSource(req({}, undefined), hosted), 'loopback');
@@ -96,4 +96,26 @@ test('clientSource reads CF-Connecting-IP only in hosted mode and only when it i
     'loopback mode ignores the header even when present');
   assert.equal(clientSource(req({ 'x-forwarded-for': '203.0.113.9' }, '127.0.0.1'), hosted), '127.0.0.1',
     'X-Forwarded-For is never read');
+});
+
+test('clientSource keys a hosted IPv6 client by its /64 and an IPv4-mapped one by its IPv4', () => {
+  const hosted = { origin: 'https://app.example.com', host: 'app.example.com', hostname: 'app.example.com' };
+  const req = (ip) => ({ headers: { 'cf-connecting-ip': ip }, socket: { remoteAddress: '127.0.0.1' } });
+  const net = require('node:net');
+  for (const ip of ['2001:db8:1:2::1', '2001:DB8:1:2:ffff:ffff:ffff:ffff', '2001:0db8:0001:0002:0:0:0:9', '::ffff:198.51.100.7']) {
+    assert.equal(net.isIP(ip), 6, 'ARRANGEMENT: ' + ip + ' is an IPv6 address the header check admits');
+  }
+  // One /64 is one source, however the host part rotates and however it is spelled.
+  assert.equal(clientSource(req('2001:db8:1:2::1'), hosted), '2001:db8:1:2::/64');
+  assert.equal(clientSource(req('2001:DB8:1:2:ffff:ffff:ffff:ffff'), hosted), '2001:db8:1:2::/64');
+  assert.equal(clientSource(req('2001:0db8:0001:0002:0:0:0:9'), hosted), '2001:db8:1:2::/64');
+  // A neighbouring /64 is a different source.
+  assert.equal(clientSource(req('2001:db8:1:3::1'), hosted), '2001:db8:1:3::/64');
+  // IPv4-mapped addresses are the IPv4 client, in either spelling.
+  assert.equal(clientSource(req('::ffff:198.51.100.7'), hosted), '198.51.100.7');
+  assert.equal(clientSource(req('::FFFF:c633:6407'), hosted), '198.51.100.7');
+  // IPv4 is kept as it is.
+  assert.equal(clientSource(req('198.51.100.7'), hosted), '198.51.100.7');
+  // Loopback mode keeps the raw socket address, IPv6 included.
+  assert.equal(clientSource({ headers: {}, socket: { remoteAddress: '::ffff:127.0.0.1' } }, null), '::ffff:127.0.0.1');
 });
