@@ -57,7 +57,7 @@ function post(runtime, pathName, body, session = {}, extraHeaders = {}) {
 }
 
 // One identity binding per process: this file starts ONE hosted data directory.
-// The lockout and the throttle each live in their own file for the same reason.
+// The throttle halves each live in their own file for the same reason.
 
 test('hosted mode: refusals happen at construction, before any directory is created', async () => {
   const port = await reservePort();
@@ -67,13 +67,20 @@ test('hosted mode: refusals happen at construction, before any directory is crea
     await assert.rejects(startInterlockServer({ port, dataDir, hostedOrigin: bad }),
       /interlock: --hosted-origin/, String(bad));
   }
+  await assert.rejects(startInterlockServer({ port, dataDir, onWrongSetupCode: () => undefined }),
+    /onWrongSetupCode is accepted only with hostedOrigin/, 'loopback mode refuses the callback');
+  await assert.rejects(startInterlockServer({ port, dataDir, hostedOrigin: HOSTED, onWrongSetupCode: 'print' }),
+    /onWrongSetupCode must be a function/);
   assert.equal(fs.existsSync(dataDir), false, 'no data directory was created by a refused start');
 });
 
 test('hosted mode: Host is pinned to the hosted origin, the setup code gates first-owner setup, /health says nothing', async () => {
   const port = await reservePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-hosted-'));
-  const runtime = await startInterlockServer({ port, dataDir, hostedOrigin: HOSTED });
+  const wrongCounts = [];
+  const runtime = await startInterlockServer({
+    port, dataDir, hostedOrigin: HOSTED, onWrongSetupCode: count => { wrongCounts.push(count); },
+  });
   try {
     // ARRANGEMENT: the runtime reports hosted mode and a setup code.
     assert.deepEqual(runtime.hosted, { origin: HOSTED, host: HOST, hostname: HOST });
@@ -103,35 +110,66 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
 
     // A wrong code costs one second and never ends the process or closes the door.
     const WRONG = 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA-AA';
+    const wrongRedeem = () => post(runtime, '/api/bootstrap/redeem',
+      { name: 'Mallory', password: 'correct horse battery staple', setup_code: WRONG });
+    assert.deepEqual(wrongCounts, [], 'ARRANGEMENT: no wrong code yet');
     const sequentialStart = performance.now();
     for (let i = 0; i < 5; i += 1) {
-      const wrongCode = await post(runtime, '/api/bootstrap/redeem',
-        { name: 'Mallory', password: 'correct horse battery staple', setup_code: WRONG });
+      const wrongCode = await wrongRedeem();
       assert.equal(wrongCode.status, 403, wrongCode.text);
       assert.equal(wrongCode.json.error, 'setup-code-invalid');
       assert.equal(wrongCode.headers['set-cookie'], undefined);
     }
     const sequentialMs = performance.now() - sequentialStart;
     assert.ok(sequentialMs >= 5_000, `five wrong codes cost at least five seconds (${Math.round(sequentialMs)} ms)`);
-    // Serialized per process: two concurrent wrong codes cost two seconds, not one.
-    const parallelStart = performance.now();
-    const parallel = await Promise.all([0, 1].map(() => post(runtime, '/api/bootstrap/redeem',
-      { name: 'Mallory', password: 'correct horse battery staple', setup_code: WRONG })));
-    const parallelMs = performance.now() - parallelStart;
-    assert.deepEqual(parallel.map(r => r.status), [403, 403]);
-    assert.ok(parallelMs >= 2_000, `concurrent wrong codes queue behind one another (${Math.round(parallelMs)} ms)`);
-    const stillServing = await call(runtime, { path: '/health' });
-    assert.equal(stillServing.status, 200, 'wrong codes never stop the server');
-    assert.equal(typeof runtime.setupCode, 'string', 'wrong codes never withdraw the setup code');
+    assert.deepEqual(wrongCounts, [1, 2, 3, 4, 5], 'the host sees each wrong code with its running count');
 
     const shortPassword = await post(runtime, '/api/bootstrap/redeem',
       { name: 'Ana', password: 'short', setup_code: runtime.setupCode });
     assert.equal(shortPassword.status, 400, shortPassword.text);
     assert.equal(shortPassword.json.error, 'password-too-short');
 
+    // Twelve wrong codes in flight at once: ten take slots one second apart,
+    // the rest would wait more than ten seconds and are answered at once as busy.
+    // One burst covers both "the queue is bounded" and "the correct code is not
+    // delayed by a busy queue": the correct code can redeem only once per room.
+    const burstStart = performance.now();
+    const burst = Array.from({ length: 12 }, () => wrongRedeem()
+      .then(response => ({ response, ms: performance.now() - burstStart })));
+    const waitStart = performance.now();
+    while (wrongCounts.length < 17 && performance.now() - waitStart < 5_000) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(wrongCounts.length, 17, 'ARRANGEMENT: all twelve wrong codes reached the server; the queue is busy');
+
+    const stillServing = await call(runtime, { path: '/health' });
+    assert.equal(stillServing.status, 200, 'wrong codes never stop the server');
+    assert.equal(typeof runtime.setupCode, 'string', 'wrong codes never withdraw the setup code');
+
+    const correctStart = performance.now();
     const redeemed = await post(runtime, '/api/bootstrap/redeem',
       { name: 'Ana', password: 'correct horse battery staple', setup_code: runtime.setupCode.toLowerCase() });
+    const correctMs = performance.now() - correctStart;
     assert.equal(redeemed.status, 200, redeemed.text);
+    assert.ok(correctMs < 1_000, `the correct code never waits behind wrong ones (${Math.round(correctMs)} ms)`);
+
+    const answered = await Promise.all(burst);
+    const busy = answered.filter(item => item.response.status === 429);
+    const queued = answered.filter(item => item.response.status === 403);
+    assert.equal(busy.length + queued.length, 12, answered.map(item => item.response.status).join(','));
+    assert.ok(busy.length >= 1, 'beyond the cap a wrong code is answered as busy');
+    for (const item of busy) {
+      assert.equal(item.response.json.error, 'setup-code-busy');
+      assert.match(item.response.headers['retry-after'], /^[1-9][0-9]*$/);
+      assert.ok(item.ms < 1_000, `a busy answer comes at once (${Math.round(item.ms)} ms)`);
+    }
+    for (const item of queued) assert.equal(item.response.json.error, 'setup-code-invalid');
+    const lastQueuedMs = Math.max(...queued.map(item => item.ms));
+    assert.ok(lastQueuedMs >= (queued.length - 1) * 1_000,
+      `queued wrong codes are answered one second apart (${queued.length} took ${Math.round(lastQueuedMs)} ms)`);
+    assert.deepEqual(wrongCounts, Array.from({ length: 17 }, (_, i) => i + 1),
+      'the running count increases by one for every wrong code, busy ones included');
+
     const session = { cookie: redeemed.headers['set-cookie'][0].split(';', 1)[0], csrf: redeemed.json.csrf_token };
     assert.match(redeemed.headers['set-cookie'][0], /^__Host-/, 'the cookie is the __Host- cookie');
 

@@ -444,7 +444,23 @@ function createFirstOwnerHandler(options) {
           return sendJson(request, response, 403, { ok: false, error: 'setup-code-required' });
         }
         if (!hostedMode.setupCodeMatches(input.setup_code)) {
-          await hostedMode.wrongSetupCode();
+          const slot = hostedMode.wrongSetupCode(Date.now());
+          if (slot.busy) {
+            return sendJson(request, response, 429, { ok: false, error: 'setup-code-busy' },
+              { 'retry-after': String(slot.retry_after_s) });
+          }
+          // Hold the answer until this wrong code's slot. A client that leaves
+          // early releases its timer; nothing waits on its behalf.
+          let closedEarly = false;
+          await new Promise(resolve => {
+            const timer = setTimeout(resolve, slot.wait_ms);
+            response.once('close', () => {
+              closedEarly = true;
+              clearTimeout(timer);
+              resolve();
+            });
+          });
+          if (closedEarly) return;
           return sendJson(request, response, 403, { ok: false, error: 'setup-code-invalid' });
         }
       }

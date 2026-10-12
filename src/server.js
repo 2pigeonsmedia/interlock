@@ -21,8 +21,9 @@ const { parseHostedOrigin, makeSetupCode, setupCodeMatches } = require('./hosted
 const LOOPBACK_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8788;
 const WRONG_SETUP_CODE_DELAY_MS = 1_000;
+const WRONG_SETUP_CODE_MAX_WAIT_MS = 10_000;
 const OPTION_KEYS = Object.freeze(['port']);
-const INTERLOCK_OPTION_KEYS = Object.freeze(['dataDir', 'port', 'hostedOrigin']);
+const INTERLOCK_OPTION_KEYS = Object.freeze(['dataDir', 'port', 'hostedOrigin', 'onWrongSetupCode']);
 
 function isLoopbackAddress(address) {
   if (net.isIPv4(address)) return address.split('.', 1)[0] === '127';
@@ -111,7 +112,7 @@ function requireInterlockOptions(input) {
   }
   for (const key of Reflect.ownKeys(opts)) {
     if (typeof key !== 'string' || !INTERLOCK_OPTION_KEYS.includes(key)) {
-      throw new TypeError('interlock server: full host accepts only dataDir, port and hostedOrigin');
+      throw new TypeError('interlock server: full host accepts only dataDir, port, hostedOrigin and onWrongSetupCode');
     }
     const descriptor = Object.getOwnPropertyDescriptor(opts, key);
     if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
@@ -126,7 +127,16 @@ function requireInterlockOptions(input) {
     throw new TypeError('interlock server: dataDir is required and must be absolute');
   }
   const hosted = opts.hostedOrigin === undefined ? null : parseHostedOrigin(opts.hostedOrigin);
-  return { dataDir: opts.dataDir, port, hosted };
+  if (opts.onWrongSetupCode !== undefined) {
+    if (hosted === null) {
+      throw new TypeError('interlock server: onWrongSetupCode is accepted only with hostedOrigin');
+    }
+    if (typeof opts.onWrongSetupCode !== 'function') {
+      throw new TypeError('interlock server: onWrongSetupCode must be a function');
+    }
+  }
+  const onWrongSetupCode = opts.onWrongSetupCode === undefined ? null : opts.onWrongSetupCode;
+  return { dataDir: opts.dataDir, port, hosted, onWrongSetupCode };
 }
 
 function loadBrowserAssets() {
@@ -266,7 +276,7 @@ function startHealthServer(options) {
 }
 
 async function startInterlockServer(options) {
-  const { dataDir, port, hosted } = requireInterlockOptions(options);
+  const { dataDir, port, hosted, onWrongSetupCode } = requireInterlockOptions(options);
   const assets = loadBrowserAssets();
   const origin = hosted ? hosted.origin : new URL(`http://localhost:${port}`).origin;
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -348,24 +358,31 @@ async function startInterlockServer(options) {
     // Hosted mode: first-owner setup needs a one-time code printed to the
     // console. It lives here so the runtime can report it. A wrong code never
     // ends the process or closes the door (that would hand anyone who finds the
-    // hostname an outage lever); it costs one second, serialized per process,
-    // so N concurrent guesses cost N seconds.
+    // hostname an outage lever). Wrong codes are answered one second apart by a
+    // slot timestamp; a wrong code whose slot would be more than ten seconds
+    // away is answered at once as busy and takes no slot. The server prints
+    // nothing; the host may observe the running count.
     let setupCode = hosted && !house.firstOwner.status().completed ? makeSetupCode() : null;
     let wrongCodes = 0;
-    let wrongCodeQueue = Promise.resolve();
+    let nextSlot = 0;
     const hostedForHandler = hosted ? Object.freeze({
       origin: hosted.origin,
       host: hosted.host,
       hostname: hosted.hostname,
-      setupCode: () => setupCode,
       setupCodeMatches: supplied => setupCodeMatches(setupCode, supplied),
       setupCompleted: () => { setupCode = null; },
-      wrongSetupCode: () => {
+      wrongSetupCode: now => {
         wrongCodes += 1;
-        console.log(`wrong setup code (${wrongCodes})`);
-        const turn = wrongCodeQueue.then(() => new Promise(resolve => setTimeout(resolve, WRONG_SETUP_CODE_DELAY_MS)));
-        wrongCodeQueue = turn;
-        return turn;
+        if (onWrongSetupCode !== null) {
+          try { onWrongSetupCode(wrongCodes); } catch (_) { /* the host's observer never breaks a request */ }
+        }
+        const slot = Math.max(now, nextSlot) + WRONG_SETUP_CODE_DELAY_MS;
+        const waitMs = slot - now;
+        if (waitMs > WRONG_SETUP_CODE_MAX_WAIT_MS) {
+          return Object.freeze({ busy: true, retry_after_s: Math.ceil(waitMs / 1000) });
+        }
+        nextSlot = slot;
+        return Object.freeze({ busy: false, wait_ms: waitMs });
       },
     }) : null;
     const handler = createFirstOwnerHandler({

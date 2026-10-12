@@ -71,7 +71,7 @@ test('the loopback browser transport completes first-owner setup through the pub
   const stateDir = path.join(dataDir, 'identity');
   await assert.rejects(
     startInterlockServer({ port, dataDir, host: '0.0.0.0' }),
-    /accepts only dataDir, port and hostedOrigin/,
+    /accepts only dataDir, port, hostedOrigin and onWrongSetupCode/,
   );
   await assert.rejects(startInterlockServer({ port: 0, dataDir }), /port must be an integer/);
   await assert.rejects(startInterlockServer({ port, dataDir: 'relative' }), /must be absolute/);

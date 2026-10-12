@@ -4,11 +4,34 @@ const form = document.querySelector('#owner-form');
 const setupButton = document.querySelector('#setup-button');
 const continueButton = document.querySelector('#continue-button');
 const statusLine = document.querySelector('#status');
-const setupCodeField = document.querySelector('#setup-code-field');
-const setupCodeInput = document.querySelector('#setup-code');
+let setupCodeField = null;
 const localNote = document.querySelector('.local-note');
 let csrfToken = null;
 let nextStep = null;
+
+// Hosted mode only: the setup code field, built here so the static page both
+// modes share stays as it is.
+function addSetupCodeField() {
+  const field = document.createElement('div');
+  field.id = 'setup-code-field';
+  const label = document.createElement('label');
+  label.htmlFor = 'setup-code';
+  label.textContent = 'Setup code';
+  const input = document.createElement('input');
+  input.id = 'setup-code';
+  input.name = 'setup_code';
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('autocapitalize', 'characters');
+  input.setAttribute('spellcheck', 'false');
+  input.maxLength = 64;
+  input.required = true;
+  const help = document.createElement('p');
+  help.className = 'hint';
+  help.textContent = 'Printed by the server when it started.';
+  field.append(label, input, help);
+  form.prepend(field);
+  return field;
+}
 
 function setStatus(message, kind = '') {
   statusLine.textContent = message;
@@ -169,7 +192,7 @@ form.addEventListener('submit', async event => {
       name: data.get('name'),
       password: data.get('password'),
     };
-    if (!setupCodeField.hidden) redeemBody.setup_code = data.get('setup_code');
+    if (setupCodeField !== null) redeemBody.setup_code = data.get('setup_code');
     const redeemed = await jsonRequest('/api/bootstrap/redeem', redeemBody);
     csrfToken = redeemed.csrf_token;
     nextStep = redeemed.next;
@@ -202,9 +225,8 @@ continueButton.addEventListener('click', continueSetup);
       setupButton.disabled = true;
       return;
     }
-    if (status.hosted === true && status.state === 'empty') {
-      setupCodeField.hidden = false;
-      setupCodeInput.required = true;
+    if (status.hosted === true && status.state === 'empty' && setupCodeField === null) {
+      setupCodeField = addSetupCodeField();
     }
     if (status.state === 'in-progress') {
       setStatus('Owner setup has started. Enter the same name and password to continue.');
