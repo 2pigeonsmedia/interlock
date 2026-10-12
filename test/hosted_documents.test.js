@@ -94,6 +94,12 @@ test('HOSTING.md describes wrong setup codes as noise the server survives', () =
 
 test('HOSTING.md says what throttled sign-in looks like and what clears it', () => {
   assertSentence(HOSTING,
+    'Sign-in allows at most five password checks per account and per address until fifteen minutes pass with no attempt; ' +
+    'while attempts continue, every attempt is refused without a check, even with the right password, after a wait of up to 30 seconds.');
+  assertSentence(HOSTING,
+    'Anyone who knows an account name can use this to keep its owner out of password sign-in for as long as they keep trying.');
+  assert.doesNotMatch(HOSTING, /guesses per account per day/);
+  assertSentence(HOSTING,
     'If the owner is refused with the right password after someone else has been guessing, wait fifteen minutes without trying or restart the service: the throttle counters live in memory.');
 });
 

@@ -225,9 +225,12 @@ at most one such line per second. If you did not type those codes, finish your
 own setup now, or restart the service to invalidate the old code and print a new
 one.
 
-**Sign-in is refused.** After five failures an account or client address is
-throttled: each further attempt waits up to 30 seconds and is then refused, even
-with the right password. If the owner is refused with the right password after
+**Sign-in is refused.** Sign-in allows at most five password checks per account
+and per address until fifteen minutes pass with no attempt; while attempts
+continue, every attempt is refused without a check, even with the right
+password, after a wait of up to 30 seconds. Anyone who knows an account name can
+use this to keep its owner out of password sign-in for as long as they keep
+trying. If the owner is refused with the right password after
 someone else has been guessing, wait fifteen minutes without trying or restart
 the service: the throttle counters live in memory.
 

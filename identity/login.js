@@ -98,6 +98,13 @@ function createLoginThrottle(opts) {
   // buckets rather than EVICTING A HOT ATTACKER KEY — eviction under flood is
   // exactly how an attacker clears their own counter.
   const overflow = new Map();
+  // Attempts that passed check() and are still inside their password check.
+  // check() counts them as if they had already failed, so a parallel burst
+  // cannot all pass the throttle before the first failure is recorded. They are
+  // released in a finally, never recorded: a pre-recorded failure would leave a
+  // source bump behind every successful sign-in.
+  const inflightSource = new Map();
+  const inflightAccount = new Map();
 
   function keyOf(value) {
     return crypto.createHmac('sha256', HMAC_KEY).update(String(value)).digest('hex');
@@ -145,10 +152,30 @@ function createLoginThrottle(opts) {
     check(args) {
       const a = isPlainObject(args) ? args : {};
       const now = Number.isSafeInteger(a.now) ? a.now : 0;
-      const ds = delayFor(countFor(source, sourceKey(a.source), now));
-      const da = delayFor(countFor(account, accountKey(a.account), now));
+      const sk = sourceKey(a.source);
+      const ak = accountKey(a.account);
+      const ds = delayFor(countFor(source, sk, now) + (inflightSource.get(sk) || 0));
+      const da = delayFor(countFor(account, ak, now) + (inflightAccount.get(ak) || 0));
       const delay_ms = Math.max(ds, da);      // both checked; the larger controls
       return Object.freeze({ allowed: delay_ms === 0, delay_ms, retry_after_ms: delay_ms });
+    },
+    // Marks one attempt as in flight. Returns the release function; calling it
+    // more than once releases once.
+    begin(args) {
+      const a = isPlainObject(args) ? args : {};
+      const sk = sourceKey(a.source);
+      const ak = accountKey(a.account);
+      inflightSource.set(sk, (inflightSource.get(sk) || 0) + 1);
+      inflightAccount.set(ak, (inflightAccount.get(ak) || 0) + 1);
+      let released = false;
+      return function release() {
+        if (released) return;
+        released = true;
+        for (const [map, k] of [[inflightSource, sk], [inflightAccount, ak]]) {
+          const n = (map.get(k) || 0) - 1;
+          if (n > 0) map.set(k, n); else map.delete(k);
+        }
+      };
     },
     recordFailure(args) {
       const a = isPlainObject(args) ? args : {};
@@ -167,6 +194,8 @@ function createLoginThrottle(opts) {
         source_entries: source.size,
         account_entries: account.size,
         overflow_buckets: overflow.size,
+        inflight_source_entries: inflightSource.size,
+        inflight_account_entries: inflightAccount.size,
         cap_entries: THROTTLE_MAX_ENTRIES,
         cap_overflow: THROTTLE_OVERFLOW_BUCKETS,
         threshold,
@@ -276,6 +305,18 @@ function createLoginService(opts) {
       return INVALID;
     }
 
+    // Counted as in flight from here until this attempt returns, synchronously
+    // after the passing check and before the first await.
+    const release = typeof throttle.begin === 'function'
+      ? throttle.begin({ source, account: name, now }) : null;
+    try {
+      return await verifiedLogin(name, password, source, prior_cookie_header, now);
+    } finally {
+      if (release) release();
+    }
+  }
+
+  async function verifiedLogin(name, password, source, prior_cookie_header, now) {
     // §6 C1: resolve through the repository's canonical name fold. When the name
     // is unknown we pass the SUBMITTED bounded name so R4's dummy KDF still runs
     // — skipping it here would be a user-enumeration oracle.

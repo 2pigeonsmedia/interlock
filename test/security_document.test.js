@@ -89,11 +89,16 @@ test('the hosted setup code and the password door are described as built', () =>
     'Hosted mode enforces a minimum password length of 12 at setup, invitation redeem and change.');
   assertSentence(SECURITY, 'Sign-in is name and password and returns a full session without a passkey.');
   assertSentence(SECURITY,
-    'Failures are throttled per client address and per account with an exponential delay after five free tries, ' +
-    'capped at 30 seconds, which is about 2,880 guesses per account per day.');
+    'Failures are throttled per client address and per account: at most five password checks per account ' +
+    'and per address until fifteen minutes pass with no attempt; while attempts continue, every attempt is ' +
+    'refused without a check.');
+  assertSentence(SECURITY,
+    'Attempts still being checked count against the limit, so parallel guesses get no more checks than sequential ones.');
+  assert.doesNotMatch(SECURITY, /guesses per account per day/, 'no per-day guess figure: the limit is lock-until-quiet');
   assertSentence(SECURITY, 'The counters live in memory and are reset by every restart.');
   assertSentence(SECURITY,
-    'Once an account or client address has failed five times, each further attempt for it waits out the delay ' +
+    'Once an account or client address has failed five times, each further attempt for it waits out an exponential delay, ' +
+    'capped at 30 seconds, ' +
     'and is then refused, even with the right password, until fifteen minutes pass with no attempt or the server restarts.');
   assertSentence(SECURITY,
     'Anyone who knows an account\'s name can therefore keep that account\'s owner out of password sign-in ' +
