@@ -67,3 +67,27 @@ test('a failed sign-in lands in authn_deny; a successful one in authn', async ()
   assert.ok(allowRows.length >= 1 && allowRows.every(row => row.result === 'ok'),
     'authn holds the success and no failures');
 });
+
+// Routing is by a SUCCESS allowlist: 'success', 'ok' and 'allow' stay in the
+// parent stream and every other result goes to the deny sibling, so a producer
+// that invents a new failure word cannot land it among the successes.
+test('only a known success result stays in the parent stream; any other result is a deny row', async () => {
+  const fx = await F.fixture('identity-deny-streams-allowlist-');
+  const { audit } = fx;
+  const rows = [
+    ['authz', 'allow'], ['authz', 'refused'], ['authn', 'success'], ['authn', 'ok'], ['authn', 'rejected'],
+  ];
+  for (const [stream, result] of rows) {
+    const fields = stream === 'authn' ? { scheme: 'password' } : { capability: 'read', resource: 'room:main' };
+    const accepted = audit[stream](Object.assign({ tenant: F.TENANT, result, reason: 'routing-probe-' + result }, fields));
+    assert.equal(accepted.accepted, true, 'ARRANGEMENT: the ' + stream + ' row ' + result + ' is accepted');
+  }
+  await audit.drain();
+  const probes = stream => audit.read(stream, { limit: 100 })
+    .filter(row => typeof row.reason === 'string' && row.reason.startsWith('routing-probe-'))
+    .map(row => row.result).sort();
+  assert.deepEqual(probes('authz'), ['allow']);
+  assert.deepEqual(probes('authz_deny'), ['refused']);
+  assert.deepEqual(probes('authn'), ['ok', 'success']);
+  assert.deepEqual(probes('authn_deny'), ['rejected']);
+});

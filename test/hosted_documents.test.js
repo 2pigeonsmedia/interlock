@@ -39,6 +39,10 @@ test('HOSTING.md carries the service unit with the hosted origin and a private d
     /^ExecStart=\/usr\/local\/bin\/interlock start --hosted-origin https:\/\/app\.example\.com$/m);
   assert.match(unit, /^Restart=on-failure$/m);
   assert.match(unit, /^StandardOutput=journal$/m);
+  assert.match(unit, /^NoNewPrivileges=yes$/m);
+  assert.match(unit, /^ProtectSystem=strict$/m);
+  assert.match(unit, /^ReadWritePaths=\/var\/lib\/interlock$/m);
+  assert.match(unit, /^PrivateTmp=yes$/m);
   assertSentence(HOSTING, 'Create a system user that owns the data directory and nothing else.');
 });
 

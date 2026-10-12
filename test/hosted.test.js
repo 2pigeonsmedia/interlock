@@ -119,3 +119,20 @@ test('clientSource keys a hosted IPv6 client by its /64 and an IPv4-mapped one b
   // Loopback mode keeps the raw socket address, IPv6 included.
   assert.equal(clientSource({ headers: {}, socket: { remoteAddress: '::ffff:127.0.0.1' } }, null), '::ffff:127.0.0.1');
 });
+
+test('a refused origin is echoed without its credentials', () => {
+  for (const [bad, shown] of [
+    ['https://user:s3cret-pw@app.example.com', 'https://[redacted]@app.example.com'],
+    ['https://s3cret-pw@app.example.com/room', 'https://[redacted]@app.example.com/room'],
+    ['https://user:s3cret-pw@bad host', 'https://[redacted]@bad host'],
+  ]) {
+    let message = null;
+    try { parseHostedOrigin(bad); } catch (error) { message = error.message; }
+    assert.ok(typeof message === 'string' && message.startsWith('interlock: --hosted-origin'),
+      'ARRANGEMENT: ' + bad + ' is refused: ' + message);
+    assert.ok(!message.includes('s3cret-pw'), 'the password is not echoed: ' + message);
+    assert.ok(message.includes(JSON.stringify(shown)), 'the rest of the input is still shown: ' + message);
+  }
+  assert.throws(() => parseHostedOrigin('https://app.example.com/room'), /"https:\/\/app\.example\.com\/room"/,
+    'an input without credentials is echoed as given');
+});

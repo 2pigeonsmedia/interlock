@@ -17,12 +17,11 @@ const EPOCH_KEY = 'unverified-legacy';
 const STREAMS = Object.freeze(['authn', 'authz', 'mutation', 'authn_deny', 'authz_deny']);
 // Failure rows of each telemetry stream go to a sibling `<stream>_deny` stream,
 // so a flood of failures cannot age out the evidence of itself (the segment cap
-// is per stream). The producers' own failure values: `can()` writes 'deny';
-// password verification writes 'denied'; session verification writes 'failure'.
-const DENY_RESULTS = Object.freeze({
-  authn: Object.freeze(['denied', 'failure']),
-  authz: Object.freeze(['deny']),
-});
+// is per stream). Routing is by a SUCCESS allowlist: the producers' success
+// values ('allow' from `can()`, 'ok' from password verification, 'success' from
+// session verification) stay in the parent stream; every other result — any
+// failure word, present or future, and a missing result — goes to the sibling.
+const SUCCESS_RESULTS = Object.freeze(['success', 'ok', 'allow']);
 const MAX_QUEUE = 10000;
 const MAX_BYTES = 64 * 1024 * 1024;
 // Telemetry streams (authn/authz and their _deny siblings) keep at most this
@@ -451,8 +450,8 @@ function schemaStream(stream) {
 // The stream a telemetry row is written to: its own, or its deny sibling.
 function targetStream(stream, row) {
   const result = ownData(row, 'result');
-  return result.present && DENY_RESULTS[stream].includes(result.value)
-    ? stream + '_deny' : stream;
+  return result.present && SUCCESS_RESULTS.includes(result.value)
+    ? stream : stream + '_deny';
 }
 
 function telemetryPlaceholder(stream, source, result, reason) {

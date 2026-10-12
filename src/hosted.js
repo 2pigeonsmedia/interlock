@@ -13,6 +13,12 @@ function refuse(detail) {
   throw new TypeError('interlock: --hosted-origin ' + detail);
 }
 
+// The input as it may be echoed: any userinfo (user:password@) replaced, so a
+// refusal never prints a credential into a terminal or a service log.
+function redacted(text) {
+  return text.replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/, '$1[redacted]@');
+}
+
 function isLoopbackIPv4(address) {
   const octets = address.split('.').map(Number);
   return octets[0] === 127 || octets.every(octet => octet === 0);
@@ -49,9 +55,9 @@ function isLoopbackHostname(hostname) {
 function parseHostedOrigin(text) {
   if (typeof text !== 'string' || text.length === 0) refuse('requires a canonical https origin such as https://app.example.com');
   let parsed;
-  try { parsed = new URL(text); } catch (_) { refuse('is not a URL: ' + JSON.stringify(text)); }
+  try { parsed = new URL(text); } catch (_) { refuse('is not a URL: ' + JSON.stringify(redacted(text))); }
   if (parsed.protocol !== 'https:') refuse('must use https:// — browsers refuse the room cookie on any other scheme');
-  if (parsed.origin !== text) refuse('must be exactly its own origin (no path, query, fragment, credentials or mixed case): ' + JSON.stringify(text));
+  if (parsed.origin !== text) refuse('must be exactly its own origin (no path, query, fragment, credentials or mixed case): ' + JSON.stringify(redacted(text)));
   if (isLoopbackHostname(parsed.hostname)) refuse('must not name this machine; leave the flag off for loopback mode');
   return Object.freeze({ origin: parsed.origin, host: parsed.host, hostname: parsed.hostname });
 }
@@ -73,7 +79,7 @@ function base32(bytes) {
 }
 
 function makeSetupCode(randomBytes = crypto.randomBytes) {
-  const raw = base32(randomBytes(17)).slice(0, 26); // 17 bytes = 136 bits -> 27 chars; keep 26 = 130 bits
+  const raw = base32(randomBytes(17)).slice(0, 26); // 17 bytes = 136 bits -> 28 base32 chars (27 full + 1 padded); keep 26 = 130 bits
   return raw.match(/.{1,4}/g).join('-');
 }
 

@@ -56,6 +56,10 @@ Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/interlock
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
