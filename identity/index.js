@@ -200,6 +200,13 @@ function create(config) {
   const rpId = ownString(config, 'rpId');
   const rpName = ownString(config, 'rpName');
   const origin = ownString(config, 'origin');
+  // Host policy: whether an allowed routine read is an audit row. Default true.
+  // Read and refused here, before `configureStateDir` binds anything.
+  const auditAllowedReadsRaw = ownString(config, 'auditAllowedReads');
+  if (auditAllowedReadsRaw !== undefined && typeof auditAllowedReadsRaw !== 'boolean') {
+    reject('config.auditAllowedReads must be a boolean when present (got ' + JSON.stringify(auditAllowedReadsRaw) + ')');
+  }
+  const auditAllowedReads = auditAllowedReadsRaw !== false;
   if (rpName !== undefined && (typeof rpName !== 'string' || rpName.trim() === '' ||
       rpName.length > 64 || rpName.includes('\0'))) {
     reject('config.rpName must be a bounded non-blank display label when supplied');
@@ -338,7 +345,8 @@ function create(config) {
       return { allow: false, rung: 'session', reason: authenticated.reason };
     }
     const decision = can(authenticated.session.subject_id, capability, resource,
-      { tenant, origin: originClass, assurance: authenticated.session.assurance });
+      { tenant, origin: originClass, assurance: authenticated.session.assurance,
+        audit_allowed_reads: auditAllowedReads });
     return {
       allow: decision.allow,
       rung: 'authorization',
@@ -433,8 +441,11 @@ function create(config) {
     if (authenticated.kind !== 'seat') {
       return { allow: false, rung: 'credential', reason: 'not-a-seat' };
     }
+    // `capability` is the caller's, so this door can also be asked for a write:
+    // can() skips the row only for an allowed 'read', never for anything else.
     const decision = can(authenticated.subject_id, capability, resource,
-      { tenant, origin: originClass, assurance: authenticated.assurance });
+      { tenant, origin: originClass, assurance: authenticated.assurance,
+        audit_allowed_reads: auditAllowedReads });
     const subject = subjects.get(authenticated.subject_id);
     return {
       allow: decision.allow,

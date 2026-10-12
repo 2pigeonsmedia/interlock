@@ -52,6 +52,16 @@ function contextValues(context) {
         out[field] = descriptor.value;
       }
     }
+    // Optional host policy: when present it must be a plain boolean data
+    // property. Any other shape is an invalid context, never a quiet allow.
+    const quiet = Object.getOwnPropertyDescriptor(context, 'audit_allowed_reads');
+    if (quiet) {
+      if (!Object.prototype.hasOwnProperty.call(quiet, 'value') ||
+          typeof quiet.value !== 'boolean') {
+        return null;
+      }
+      out.audit_allowed_reads = quiet.value;
+    }
     return out;
   } catch (_) {
     return null;
@@ -310,6 +320,11 @@ function can(subject_id, capability, resource, context) {
 
   const allow = reason === 'granted';
   const candidate = { allow, reason };
+  // Quiet allowed reads (host policy): a routine successful read is not an
+  // audit event. Denies, and every non-read capability, are still rows.
+  if (allow && capability === 'read' && values.audit_allowed_reads === false) {
+    return candidate;
+  }
   const resolved = subject && typeof subject === 'object' ? subject : null;
   const row = {
     tenant: auditValue(values && values.tenant, validTenant),
