@@ -137,3 +137,11 @@ test('the protocol names the hosted origin as the one canonical host and still b
     'The host is canonical `http://localhost:<port>`, or in hosted mode the one `https://HOST` origin named at start, ' +
     'and in both shapes binds only to verified loopback addresses. A request whose `Host` is not that origin is answered 421.');
 });
+
+test('HOSTING.md says what the passkey is for and how to stay recoverable while hosted recovery is unproven', () => {
+  assertSentence(HOSTING,
+    'In hosted mode the password is the sign-in credential and the passkey is used only to confirm sensitive actions.');
+  assertSentence(HOSTING,
+    'Owner recovery of a hosted installation is unproven in this release: keep the owner password in a password manager and keep a verified backup.');
+  assert.doesNotMatch(HOSTING, /more\s+than\s+one\s+device/, 'the passkey is not the recovery path');
+});
