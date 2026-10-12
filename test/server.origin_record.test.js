@@ -91,3 +91,40 @@ test('a directory from a release that kept no record is treated as loopback', as
     error => error.code === 'origin-mismatch' && error.message.includes(HOSTED));
   assert.equal(fs.existsSync(path.join(dataDir, 'origin.json')), false, 'a refused start writes no record');
 });
+
+test('an unreadable origin record refuses every start and is left as it is', async () => {
+  // A directory whose record cannot be read may have served a hosted origin,
+  // so neither a loopback nor a hosted start may treat it as a first start.
+  for (const [label, arrange] of [
+    ['not JSON', recordPath => fs.writeFileSync(recordPath, 'not json{\n', { mode: 0o600 })],
+    ['no origin string', recordPath => fs.writeFileSync(recordPath, '{"origin":42}\n', { mode: 0o600 })],
+    ['not a file', recordPath => fs.mkdirSync(recordPath, { mode: 0o700 })],
+  ]) {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-origin-unreadable-'));
+    fs.mkdirSync(path.join(dataDir, 'identity'), { mode: 0o700 });
+    fs.writeFileSync(path.join(dataDir, 'identity', 'identity-state.v2.json'), '{}\n', { mode: 0o600 });
+    const recordPath = path.join(dataDir, 'origin.json');
+    arrange(recordPath);
+    const before = fs.statSync(recordPath).isFile() ? fs.readFileSync(recordPath, 'utf8') : 'directory';
+    assert.ok(fs.existsSync(recordPath), 'ARRANGEMENT: ' + label + ': a record is present');
+
+    for (const flags of [{}, { hostedOrigin: HOSTED }]) {
+      const attempt = label + ' ' + JSON.stringify(flags);
+      let started = null;
+      let refusal = null;
+      try {
+        started = await startInterlockServer(Object.assign({ port: await reservePort(), dataDir }, flags));
+      } catch (error) {
+        refusal = error;
+      } finally {
+        if (started !== null) await started.close();
+      }
+      const after = fs.statSync(recordPath).isFile() ? fs.readFileSync(recordPath, 'utf8') : 'directory';
+      assert.equal(after, before, attempt + ': the record is not overwritten');
+      assert.ok(refusal !== null, attempt + ': the start is refused');
+      assert.equal(refusal.code, 'origin-mismatch', attempt + ': ' + refusal.message);
+      assert.ok(refusal.message.includes('an unreadable origin record'), refusal.message);
+      assert.ok(refusal.message.includes('UPGRADE.md'), refusal.message);
+    }
+  }
+});
