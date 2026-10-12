@@ -62,6 +62,7 @@ function post(runtime, pathName, body, session = {}, extraHeaders = {}) {
 }
 
 // One identity binding per process: this file starts ONE hosted data directory.
+let hostedDataDir = null;
 // The throttle halves each live in their own file for the same reason.
 
 test('hosted mode: refusals happen at construction, before any directory is created', async () => {
@@ -82,6 +83,7 @@ test('hosted mode: refusals happen at construction, before any directory is crea
 test('hosted mode: Host is pinned to the hosted origin, the setup code gates first-owner setup, /health says nothing', async () => {
   const port = await reservePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-hosted-'));
+  hostedDataDir = dataDir;
   const wrongCounts = [];
   // The host's observer may fail either way (odd counts throw, even counts
   // return a rejected promise); neither may reach the request or the process.
@@ -269,6 +271,7 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     const signedIn = await post(runtime, '/api/login', { name: 'Ana', password: 'correct horse battery staple' });
     assert.equal(signedIn.status, 200, signedIn.text);
     const owner = { cookie: signedIn.headers['set-cookie'][0].split(';', 1)[0], csrf: signedIn.json.csrf_token };
+
     const weakChange = await post(runtime, '/api/owner/password',
       { current_password: 'correct horse battery staple', new_password: 'short' }, owner);
     assert.equal(weakChange.status, 400, weakChange.text);
@@ -276,6 +279,32 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
   } finally {
     await runtime.close();
   }
+});
+
+test('hosted mode: the data directory remembers its origin; a loopback or other-origin start is refused', async () => {
+  assert.ok(hostedDataDir !== null, 'ARRANGEMENT: the hosted directory above was started and set up');
+  const recordPath = path.join(hostedDataDir, 'origin.json');
+  assert.deepEqual(JSON.parse(fs.readFileSync(recordPath, 'utf8')).origin, HOSTED,
+    'ARRANGEMENT: the first hosted start recorded the hosted origin');
+  if (process.platform !== 'win32') assert.equal(fs.statSync(recordPath).mode & 0o777, 0o600, 'the record is private');
+
+  const again = await startInterlockServer({ port: await reservePort(), dataDir: hostedDataDir, hostedOrigin: HOSTED });
+  assert.equal(again.url, HOSTED, 'a restart at the same origin is allowed');
+  assert.equal(again.setupCode, null, 'and finds the owner it already has');
+  await again.close();
+
+  const recorded = fs.readFileSync(recordPath, 'utf8');
+  for (const other of [{}, { hostedOrigin: 'https://other.example.test' }]) {
+    await assert.rejects(startInterlockServer(Object.assign({ port: await reservePort(), dataDir: hostedDataDir }, other)),
+      error => {
+        assert.equal(error.code, 'origin-mismatch', error.message);
+        assert.ok(error.message.includes(HOSTED), error.message);
+        assert.ok(error.message.includes(other.hostedOrigin || 'http://localhost:'), error.message);
+        assert.ok(error.message.includes('UPGRADE.md'), error.message);
+        return true;
+      }, JSON.stringify(other));
+  }
+  assert.equal(fs.readFileSync(recordPath, 'utf8'), recorded, 'refused starts leave the record alone');
 });
 
 test('hosted mode: a wrong code whose client has already gone arms no wait', async () => {

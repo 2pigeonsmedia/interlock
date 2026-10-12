@@ -1636,6 +1636,10 @@ async function runStart(args, io, dependencies = {}) {
       line(stderr, 'Do not delete the lock while another Interlock process may still be using this data.');
       return EXIT_RUNTIME;
     }
+    if (error && error.code === 'origin-mismatch') {
+      line(stderr, terminalSafe(error.message));
+      return EXIT_RUNTIME;
+    }
     line(stderr, `interlock: could not start safely on loopback port ${port}.`);
     line(stderr, 'Check whether the port is in use and whether the data directory needs attention.');
     return EXIT_RUNTIME;

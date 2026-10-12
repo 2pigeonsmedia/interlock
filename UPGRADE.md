@@ -29,8 +29,9 @@ by this release is told at once. Hard-refresh open tabs after upgrading.
 ## Moving to hosted mode
 
 Moving an installation to hosted mode is a fresh owner setup at the new origin:
-passkeys are bound to the hostname, so the loopback data directory is not
-reused. Start `interlock start --hosted-origin https://HOST` against a new, empty
+passkeys are bound to the hostname, so the loopback data directory cannot be
+reused. Interlock refuses to start hosted against a directory that served
+another origin, and refuses to start a hosted directory on loopback. Start `interlock start --hosted-origin https://HOST` against a new, empty
 data directory and follow [`HOSTING.md`](HOSTING.md). Keep the loopback
 installation and its backup until you are sure you do not need them. Export the
 transcript from the old room first if you want to keep it, and have each AI join

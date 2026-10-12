@@ -284,6 +284,59 @@ function startHealthServer(options) {
   });
 }
 
+// The origin a data directory serves, kept beside its data. Passkeys and the
+// room cookie are bound to the origin, so a directory that served one origin
+// is refused at another. Every http://localhost:PORT is one origin family: a
+// --port change is allowed. A directory with identity state but no record is
+// from a release that served loopback only.
+const ORIGIN_RECORD = 'origin.json';
+const LEGACY_IDENTITY_FILES = Object.freeze(['identity-state.v2.json', 'identity-state.v1.json']);
+
+function originFamily(origin) {
+  return /^http:\/\/localhost(:\d+)?$/.test(origin) ? 'http://localhost' : origin;
+}
+
+function originMismatch(recorded, origin) {
+  const error = new Error(`interlock: this data directory served ${recorded}; it will not start at ${origin}. ` +
+    'Interlock refuses to start hosted against a directory that served another origin, and a hosted directory ' +
+    'cannot be started on loopback. Use a new, empty data directory; see UPGRADE.md.');
+  error.code = 'origin-mismatch';
+  return error;
+}
+
+function writeOriginRecord(dataDir, origin) {
+  const target = path.join(dataDir, ORIGIN_RECORD);
+  const temporary = `${target}.${process.pid}.tmp`;
+  const fd = fs.openSync(temporary, 'w', 0o600);
+  try {
+    fs.writeFileSync(fd, JSON.stringify({ origin }) + '\n');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(temporary, target);
+}
+
+// Throws origin-mismatch, or records the origin on a directory's first start.
+function claimDataDirOrigin(dataDir, origin) {
+  let recorded = null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(dataDir, ORIGIN_RECORD), 'utf8'));
+    recorded = parsed && typeof parsed.origin === 'string' ? parsed.origin : 'an unreadable origin record';
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') recorded = 'an unreadable origin record';
+  }
+  if (recorded === null) {
+    const legacy = LEGACY_IDENTITY_FILES.some(name => fs.existsSync(path.join(dataDir, 'identity', name)));
+    if (legacy && originFamily(origin) !== 'http://localhost') {
+      throw originMismatch('http://localhost (an earlier release)', origin);
+    }
+    writeOriginRecord(dataDir, origin);
+    return;
+  }
+  if (originFamily(recorded) !== originFamily(origin)) throw originMismatch(recorded, origin);
+}
+
 async function startInterlockServer(options) {
   const { dataDir, port, hosted, onWrongSetupCode } = requireInterlockOptions(options);
   const assets = loadBrowserAssets();
@@ -295,6 +348,7 @@ async function startInterlockServer(options) {
   let chat = null;
   let archive = null;
   try {
+    claimDataDirOrigin(dataDir, origin);
     const stateDir = path.join(dataDir, 'identity');
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     if (process.platform !== 'win32') fs.chmodSync(stateDir, 0o700);

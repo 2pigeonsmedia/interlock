@@ -121,7 +121,9 @@ test('README states both shapes and points to the runbook', () => {
 
 test('UPGRADE.md says moving to hosted mode is a fresh owner setup at the new origin', () => {
   assertSentence(UPGRADE,
-    'Moving an installation to hosted mode is a fresh owner setup at the new origin: passkeys are bound to the hostname, so the loopback data directory is not reused.');
+    'Moving an installation to hosted mode is a fresh owner setup at the new origin: passkeys are bound to the hostname, so the loopback data directory cannot be reused.');
+  assertSentence(UPGRADE,
+    'Interlock refuses to start hosted against a directory that served another origin, and refuses to start a hosted directory on loopback.');
   assertSentence(UPGRADE,
     'Routine successful room reads no longer write an `authz` row; denies and every mutation are still written.');
 });
