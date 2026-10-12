@@ -213,9 +213,11 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     session.csrf = resumed.json.csrf_token;
 
     // Passkeys bind to the exact hostname. A passkey made for http://localhost
-    // on this port is refused on both credential ceremonies; each refusal is
-    // followed by the same ceremony succeeding with the hosted device, so the
-    // refusal is the origin and rpId, not a broken ceremony.
+    // on this port is refused at registration, and the registered hosted
+    // passkey is refused when its assertion claims http://localhost or the
+    // localhost rpId. Each refusal is followed by the same ceremony succeeding
+    // with the hosted device, so the refusal is the origin and rpId, not a
+    // broken ceremony or an unknown credential.
     const localDevice = createDevice({ origin: 'http://localhost:' + port, rpId: 'localhost' });
     const localRegistration = await post(runtime, '/api/bootstrap/registration/options', {}, session);
     assert.equal(localRegistration.status, 200, 'ARRANGEMENT: a registration ceremony is open: ' + localRegistration.text);
@@ -239,17 +241,27 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     }, session);
     assert.equal(registered.status, 200, 'the hosted device registers: ' + registered.text);
 
-    const localElevation = await post(runtime, '/api/bootstrap/elevation/options', {}, session);
-    assert.equal(localElevation.status, 200, 'ARRANGEMENT: an assertion ceremony is open: ' + localElevation.text);
-    const localAsserted = await post(runtime, '/api/bootstrap/complete', {
-      ceremony_id: localElevation.json.ceremony_id,
-      response: localDevice.assertion(localElevation.json.options.challenge),
-    }, session);
-    console.log('# localhost passkey assertion on the hosted server: ' + localAsserted.status + ' ' + localAsserted.text.trim());
-    assert.equal(localAsserted.status, PASSKEY_REFUSED.status, localAsserted.text);
-    assert.equal(localAsserted.json.ok, false);
-    assert.equal(localAsserted.json.error, PASSKEY_REFUSED.error);
-    assert.notEqual(runtime.setupCode, null, 'the refused assertion did not complete setup');
+    // The registered key, signing for localhost: both bindings at once, then
+    // each one alone.
+    const LOCAL_ORIGIN = 'http://localhost:' + port;
+    for (const claimed of [
+      { origin: LOCAL_ORIGIN, rpId: 'localhost' },
+      { origin: LOCAL_ORIGIN },
+      { rpId: 'localhost' },
+    ]) {
+      const localElevation = await post(runtime, '/api/bootstrap/elevation/options', {}, session);
+      assert.equal(localElevation.status, 200, 'ARRANGEMENT: an assertion ceremony is open: ' + localElevation.text);
+      const localAsserted = await post(runtime, '/api/bootstrap/complete', {
+        ceremony_id: localElevation.json.ceremony_id,
+        response: device.assertion(localElevation.json.options.challenge, claimed),
+      }, session);
+      console.log('# registered passkey asserting ' + JSON.stringify(claimed) + ' on the hosted server: ' +
+        localAsserted.status + ' ' + localAsserted.text.trim());
+      assert.equal(localAsserted.status, PASSKEY_REFUSED.status, JSON.stringify(claimed) + ' ' + localAsserted.text);
+      assert.equal(localAsserted.json.ok, false);
+      assert.equal(localAsserted.json.error, PASSKEY_REFUSED.error);
+      assert.notEqual(runtime.setupCode, null, 'the refused assertion did not complete setup');
+    }
 
     const elevation = await post(runtime, '/api/bootstrap/elevation/options', {}, session);
     assert.equal(elevation.status, 200, elevation.text);

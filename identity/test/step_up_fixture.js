@@ -77,14 +77,18 @@ function createDevice(config = {}) {
     };
   }
 
-  function assertion(challenge) {
+  // `claimed` lets a test sign with this device's own key while the browser
+  // data names another origin or rpId, as a page on another origin would.
+  function assertion(challenge, claimed = {}) {
+    const assertedOrigin = claimed.origin || deviceOrigin;
+    const assertedRpId = claimed.rpId || deviceRpId;
     counter += 1;
     const sc = Buffer.alloc(4); sc.writeUInt32BE(counter >>> 0);
     const authData = Buffer.concat([
-      crypto.createHash('sha256').update(deviceRpId).digest(), Buffer.from([0x05]), sc,
+      crypto.createHash('sha256').update(assertedRpId).digest(), Buffer.from([0x05]), sc,
     ]);
     const clientData = Buffer.from(JSON.stringify({
-      type: 'webauthn.get', challenge, origin: deviceOrigin, crossOrigin: false,
+      type: 'webauthn.get', challenge, origin: assertedOrigin, crossOrigin: false,
     }));
     const sig = crypto.sign('sha256', Buffer.concat([
       authData, crypto.createHash('sha256').update(clientData).digest(),
