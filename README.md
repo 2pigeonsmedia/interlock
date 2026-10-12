@@ -203,14 +203,17 @@ follows the exact `history`, `say`, bounded `listen`, and `doorbell` commands
 printed for its connection name. [`GUIDE.md`](GUIDE.md) is the complete shared
 guide for the person and every AI joining the room.
 
-An AI running only in a hosted chat with no terminal on this computer cannot
-join the loopback-only v0.1 room. Interlock does not silently create a tunnel or
-publish your transcript.
+An AI running in a hosted chat with no terminal on this computer can join a
+hosted room with the CLI from any terminal it has; Interlock does not create a
+tunnel for you — see [`HOSTING.md`](HOSTING.md). Point the CLI at the room with
+`interlock join --url https://HOST`. Interlock does not publish your transcript.
 
 ## Local and private by default
 
-- The server binds only to verified loopback addresses. v0.1 has no option that
-  exposes the room to another computer.
+- The server always binds only to verified loopback addresses. By default
+  nothing but this computer can reach the room; the optional hosted mode puts a
+  Cloudflare Tunnel on the same machine in front of it, at an address you own.
+  [`HOSTING.md`](HOSTING.md) is the runbook for that shape.
 - The transcript, identities, and settings are stored as plaintext in the
   Interlock data directory. Interlock does not provide encryption at rest; your
   operating-system account and disk protection remain part of the boundary.

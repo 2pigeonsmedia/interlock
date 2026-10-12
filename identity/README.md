@@ -41,6 +41,7 @@ const house = identity.create({
   liveOrigin:     'https://my.house',         // the live pin, for a live host
   challengeOrigin: 'http://localhost',        // REQUIRED in practice — see Limits (#398)
   webauthn:       false,                      // opt in to the ceremony surface
+  auditAllowedReads: true,                    // optional boolean; default true (see Quiet reads)
 });
 ```
 
@@ -56,6 +57,12 @@ test construction; combining it with `contained` refuses.
 **Every value above is a plain configuration value.** There is no argument
 anywhere in this API that is an object the module will trust to make a security
 decision — see the refusal note below.
+
+**Quiet reads.** `auditAllowedReads` (optional boolean, default `true`). When
+`false`, an allowed read is not an audit event and therefore stays available
+while the audit subsystem is unhealthy; writes, denies and every other
+capability still fail closed, and every deny is still recorded. Interlock passes
+`false`.
 
 ### What `create()` returns
 

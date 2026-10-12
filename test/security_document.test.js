@@ -22,7 +22,6 @@ test('security reporting uses one private address and never routes vulnerabiliti
 });
 
 test('the supported boundary states local plaintext and shared-room consequences', () => {
-  assert.match(SECURITY, /Loopback only/);
   assert.match(SECURITY, /does not make an untrusted process[^]*safe/);
   assert.match(SECURITY, /transcript[^]*backups are not encrypted/);
   assert.match(SECURITY, /raw bearer\s+credentials/);
@@ -46,4 +45,86 @@ test('the security guide describes built recovery without inventing a master cod
   assert.match(SECURITY, /There is no permanent recovery code/);
   assert.match(SECURITY, /cannot reconstruct a missing or corrupt data directory/);
   assert.doesNotMatch(SECURITY, /recovery and backup are not built|installation as unrecoverable/i);
+});
+
+// Collapse line wrapping so a pin asserts the sentence, not where it wraps.
+function assertSentence(document, text) {
+  assert.ok(document.replace(/\s+/g, ' ').includes(text), `missing exact sentence: ${text}`);
+}
+
+test('the boundary states both supported shapes and the facts of the hosted one', () => {
+  assert.match(SECURITY, /^- \*\*Loopback \(default\)\.\*\*/m);
+  assert.match(SECURITY, /^- \*\*Hosted, behind Cloudflare Tunnel on the same machine\.\*\*/m);
+  assertSentence(SECURITY,
+    '`interlock start` binds to this computer only. Reaching it from another machine is not possible in this mode.');
+  assertSentence(SECURITY,
+    'Started with `interlock start --hosted-origin https://HOST`, the server still binds only loopback; ' +
+    '`cloudflared` on the same machine is the only path in and must preserve the `Host` header.');
+  assertSentence(SECURITY, 'Cloudflare Tunnel is the only supported front.');
+  assertSentence(SECURITY,
+    'Passkeys and the room cookie are bound to that exact origin, and a request for any other `Host` is answered 421.');
+  assertSentence(SECURITY, 'The client address is read from `CF-Connecting-IP` in this mode only.');
+  assertSentence(SECURITY,
+    'The machine is the trust boundary: any process on it can reach the listener with any headers, ' +
+    'including `CF-Connecting-IP`, so do not run untrusted software beside a hosted room.');
+  assertSentence(SECURITY,
+    'Cloudflare terminates TLS for the room\'s hostname, so it can see the traffic it carries; ' +
+    'Interlock adds no end-to-end encryption.');
+  assertSentence(SECURITY, 'Through the front, `/health` answers only `ok`, `service` and `scope`.');
+});
+
+test('the hosted setup code and the password door are described as built', () => {
+  assertSentence(SECURITY, 'First-owner setup is gated by a setup code.');
+  assertSentence(SECURITY,
+    '`interlock start` prints it to the console only while first-owner setup is incomplete, ' +
+    'and the setup page requires it in hosted mode; until setup completes, nobody can claim the room without it.');
+  assertSentence(SECURITY,
+    'A wrong code never locks anything and never stops the server: wrong codes are answered one second apart, ' +
+    'a wait beyond ten seconds is answered at once with 429 and `Retry-After`, ' +
+    'and the correct code is never delayed.');
+  assertSentence(SECURITY,
+    'The console prints at most one `wrong setup code (n so far)` line per second.');
+  assert.doesNotMatch(SECURITY, /three wrong/i, 'a wrong code never stops the server');
+  assertSentence(SECURITY,
+    'Hosted mode enforces a minimum password length of 12 at setup, invitation redeem and change.');
+  assertSentence(SECURITY, 'Sign-in is name and password and returns a full session without a passkey.');
+  assertSentence(SECURITY,
+    'Failures are throttled per client address and per account with an exponential delay after five free tries, ' +
+    'capped at 30 seconds, which is about 2,880 guesses per account per day.');
+  assertSentence(SECURITY, 'The counters live in memory and are reset by every restart.');
+  assertSentence(SECURITY,
+    'Once an account or client address has failed five times, each further attempt for it waits out the delay ' +
+    'and is then refused, even with the right password, until fifteen minutes pass with no attempt or the server restarts.');
+  assertSentence(SECURITY,
+    'Anyone who knows an account\'s name can therefore keep that account\'s owner out of password sign-in ' +
+    'for as long as they keep guessing; choose a long, unique password, because it is the front door.');
+});
+
+test('telemetry is four capped streams, reads are quiet, and the limits are stated', () => {
+  assertSentence(SECURITY,
+    'Telemetry is kept in four streams in the identity directory: `authn`, `authz`, ' +
+    'and their deny counterparts `authn_deny` and `authz_deny`.');
+  assertSentence(SECURITY,
+    'Denies and sign-in failures are kept separately so a flood of failures cannot erase the evidence of itself.');
+  assertSentence(SECURITY,
+    'Telemetry rotates at 64 MiB and keeps at most 8 older segments per stream, oldest removed first; ' +
+    'the mutation record is never pruned.');
+  assertSentence(SECURITY,
+    'Worst-case telemetry disk use is four streams \u00d7 (8 \u00d7 64 MiB + a live file), about 2.25 GiB.');
+  assertSentence(SECURITY,
+    'A failed removal is a telemetry fault like any failed telemetry write: ' +
+    'the installation reports unhealthy until the operator resets it.');
+  assertSentence(SECURITY,
+    'Routine successful room reads write no audit row in either shape; every deny and every mutation is still written.');
+  assertSentence(SECURITY,
+    'Because an allowed read is not an audit event, its authorization does not depend on the audit subsystem ' +
+    'being healthy; writes, denies and every other capability still fail closed.');
+});
+
+test('what is not in scope names the fronts that are unsupported', () => {
+  assertSentence(SECURITY,
+    'A modified copy exposed beyond loopback or placed behind any front other than Cloudflare Tunnel, ' +
+    'a front on a different machine, or a front that does not preserve `Host`');
+  assert.doesNotMatch(SECURITY, /unsupported\s+tunnel/);
+  assert.doesNotMatch(SECURITY, /v0\.1 has no\s+option to listen on a network/);
 });

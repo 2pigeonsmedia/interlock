@@ -18,7 +18,7 @@ const SERVER = fs.readFileSync(path.join(ROOT, 'src', 'server.js'), 'utf8');
 test('the one Guide carries the shared human and AI operating contract', () => {
   for (const pattern of [
     /default is http:\/\/localhost:8788/,
-    /Run `interlock join --url LOOPBACK_URL`, choose a name and join the chatroom/,
+    /Run `interlock join --url URL`, choose a name and join the chatroom/,
     /product\s+label[^]*name[^]*handle, not a persona or costume/i,
     /One live AI or waiting request may use a name/,
     /chooses its listed local name[^]*no new knock or Allow needed/,
@@ -48,13 +48,24 @@ test('the one Guide carries the shared human and AI operating contract', () => {
     /five minutes[^]*leaves People[^]*After 24 hours quiet, the seat is released/,
     /case-insensitive[^]*Only exact lowercase `@all`[^]*`@ALL` is ordinary text/,
     /Do not chorus[^]*otherwise contribute something new/,
-    /hosted chat[^]*no terminal on this computer[^]*does not create a tunnel/is,
     /version mismatch[^]*accepted a message[^]*do not send that message again/is,
     /`leave` command hangs up that seat[^]*forgets the saved connection/,
   ]) assert.match(GUIDE, pattern);
   assert.doesNotMatch(GUIDE,
     /monitor or watch feature that runs `interlock listen`|scheduled task[^]*checks about once a minute/,
     'the Guide must not prescribe a consuming process that cannot prove model delivery');
+});
+
+const HOSTED_AI_SENTENCE =
+  'An AI running in a hosted chat with no terminal on this computer can join a hosted room with the CLI ' +
+  'from any terminal it has; Interlock does not create a tunnel for you \u2014 see HOSTING.md.';
+
+test('the Guide and its rendered Help page say how an AI in a hosted chat joins a hosted room', () => {
+  assert.ok(GUIDE.replace(/\s+/g, ' ').includes(HOSTED_AI_SENTENCE));
+  assert.ok(HELP.replace(/\s+/g, ' ').includes(HOSTED_AI_SENTENCE),
+    'Help is rendered from GUIDE.md and must carry the same sentence');
+  assert.match(HELP, /interlock join --url URL/);
+  assert.doesNotMatch(HELP, /LOOPBACK_URL/);
 });
 
 test('the Guide has one maintainable word ceiling', () => {
@@ -86,7 +97,7 @@ test('the Connect an AI sheet gives one instruction, the same one the Guide teac
   assert.match(login, /Do not sign in here\. Run <code data-interlock-join-command>interlock join<\/code>/);
   assert.ok(ROOM.includes('Run <code data-interlock-join-command>interlock join</code>, choose a name and join the chatroom.'),
     'the sheet must quote the one line the owner says to the AI');
-  assert.match(GUIDE, /Run `interlock join --url LOOPBACK_URL`, choose a name and join the chatroom/,
+  assert.match(GUIDE, /Run `interlock join --url URL`, choose a name and join the chatroom/,
     'the sheet and the Guide must teach the same sentence, or they drift');
   assert.match(ROOM_JS,
     /querySelectorAll\('\[data-interlock-join-command\]'\)[^]*`interlock join --url \$\{window\.location\.origin\}`/,

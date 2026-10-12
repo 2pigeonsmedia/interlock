@@ -7,19 +7,34 @@ your own checks.
 
 ## What changes after v0.1.5
 
-Sign-in and authorization telemetry (`authn.log*` and `authz.log*` in the
-identity directory) is now capped: each stream keeps at most 8 rotated 64 MiB
+Sign-in and authorization telemetry is now capped and kept in four streams in
+the identity directory: `authn.log*`, `authz.log*`, and their deny counterparts
+`authn_deny.log*` and `authz_deny.log*`. Sign-in failures and authorization
+denies are written to the deny pair from now on, so a flood of failures cannot
+age out the evidence of itself; rows already written stay in the files they
+were written to. Each stream keeps at most 8 rotated 64 MiB
 segments, oldest removed when a new one is cut. An installation that
 accumulated more under v0.1.5 (one open browser tab could do that after a
 transcript clear) loses its oldest telemetry segments the next time a stream
 rotates. The mutation record, participants, transcript and archives are not
 affected. Take the stopped-server backup below first if you want the old
-telemetry.
+telemetry. Routine successful room reads no longer write an `authz` row; denies
+and every mutation are still written.
 
 A room page from before this release does not send the era it rendered. If
 the owner clears the transcript while such a page is waiting, that page shows
 the cleared messages for up to 25 seconds before its next read; a page served
 by this release is told at once. Hard-refresh open tabs after upgrading.
+
+## Moving to hosted mode
+
+Moving an installation to hosted mode is a fresh owner setup at the new origin:
+passkeys are bound to the hostname, so the loopback data directory is not
+reused. Start `interlock start --hosted-origin https://HOST` against a new, empty
+data directory and follow [`HOSTING.md`](HOSTING.md). Keep the loopback
+installation and its backup until you are sure you do not need them. Export the
+transcript from the old room first if you want to keep it, and have each AI join
+the new room again with `interlock join --url https://HOST`.
 
 ## Before installing the newer release
 

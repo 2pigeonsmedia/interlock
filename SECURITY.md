@@ -21,19 +21,55 @@ Do not open a public issue for a security problem. You will get a reply acknowle
 ## What is not in scope
 
 - Your operating system, browser, or the AI products you connect
+- Your Cloudflare account, your domain, and the DNS records that point at a hosted room
 - Attacks that require an attacker to already have full control of the computer Interlock runs on
-- A modified copy exposed beyond loopback or placed behind an unsupported
-  tunnel, proxy, or public-network deployment
+- A modified copy exposed beyond loopback or placed behind any front other than
+  Cloudflare Tunnel, a front on a different machine, or a front that does not
+  preserve `Host`
 
 ## Supported deployment boundary
 
-Read these boundaries before relying on Interlock.
+Read these boundaries before relying on Interlock. It supports two shapes and
+no others.
 
-- **Loopback only.** Interlock binds to this computer only and v0.1 has no
-  option to listen on a network. Reaching it from another machine or
-  giving a closed cloud-hosted AI access is not supported. Loopback limits
-  reachability; it does not make an untrusted process already running under
-  your operating-system account safe.
+- **Loopback (default).** `interlock start` binds to this computer only.
+  Reaching it from another machine is not possible in this mode. Loopback
+  limits reachability; it does not make an untrusted process already running
+  under your operating-system account safe.
+- **Hosted, behind Cloudflare Tunnel on the same machine.** Started with
+  `interlock start --hosted-origin https://HOST`, the server still binds only
+  loopback; `cloudflared` on the same machine is the only path in and must
+  preserve the `Host` header. Cloudflare Tunnel is the only supported front.
+  Passkeys and the room cookie are bound to that exact origin, and a request
+  for any other `Host` is answered 421. The client address is read from
+  `CF-Connecting-IP` in this mode only. The machine is the trust boundary: any
+  process on it can reach the listener with any headers, including
+  `CF-Connecting-IP`, so do not run untrusted software beside a hosted room.
+  Cloudflare terminates TLS for the room's hostname, so it can see the traffic
+  it carries; Interlock adds no end-to-end encryption. Through the front,
+  `/health` answers only `ok`, `service` and `scope`. [`HOSTING.md`](HOSTING.md)
+  is the runbook.
+
+  First-owner setup is gated by a setup code. `interlock start` prints it to
+  the console only while first-owner setup is incomplete, and the setup page
+  requires it in hosted mode; until setup completes, nobody can claim the room
+  without it. A wrong code never locks anything and never stops the server:
+  wrong codes are answered one second apart, a wait beyond ten seconds is
+  answered at once with 429 and `Retry-After`, and the correct code is never
+  delayed. The console prints at most one `wrong setup code (n so far)` line per
+  second.
+
+  Hosted mode enforces a minimum password length of 12 at setup, invitation
+  redeem and change. Sign-in is name and password and returns a full session
+  without a passkey. Failures are throttled per client address and per account
+  with an exponential delay after five free tries, capped at 30 seconds, which
+  is about 2,880 guesses per account per day. The counters live in memory and
+  are reset by every restart. Once an account or client address has failed five
+  times, each further attempt for it waits out the delay and is then refused,
+  even with the right password, until fifteen minutes pass with no attempt or
+  the server restarts. Anyone who knows an account's name can therefore keep
+  that account's owner out of password sign-in for as long as they keep
+  guessing; choose a long, unique password, because it is the front door.
 - **Plaintext local storage.** The transcript, identity state, transcript
   exports, and backups are not encrypted by Interlock. The default data
   directory also contains local AI connection profiles with raw bearer
@@ -41,14 +77,22 @@ Read these boundaries before relying on Interlock.
   private files. If `INTERLOCK_CONNECTION_DIR` points elsewhere, protect that
   external directory separately; the normal installation backup does not
   include it. Do not commit or attach any of these files to a report.
-  Sign-in and authorization telemetry (`authn.log`, `authz.log` in the
-  identity directory) rotates at 64 MiB and keeps at most 8 older segments per
-  stream, oldest removed first; the mutation record is never pruned. The
-  trade-off is deliberate: an admitted participant who generates telemetry at
-  volume can age older telemetry out, but cannot fill the disk, and cannot
-  touch the mutation record. Copy telemetry elsewhere if you need it longer.
-  A failed removal is a telemetry fault like any failed telemetry write: the
-  installation reports unhealthy until the operator resets it.
+- **Audit telemetry is bounded and kept apart.** Telemetry is kept in four
+  streams in the identity directory: `authn`, `authz`, and their deny
+  counterparts `authn_deny` and `authz_deny`. Denies and sign-in failures are
+  kept separately so a flood of failures cannot erase the evidence of itself.
+  Telemetry rotates at 64 MiB and keeps at most 8 older segments per
+  stream, oldest removed first; the mutation record is never pruned. Worst-case
+  telemetry disk use is four streams × (8 × 64 MiB + a live file), about
+  2.25 GiB. The trade-off is deliberate: an admitted participant who generates
+  telemetry at volume can age older rows out of that stream, but cannot fill the
+  disk, and cannot touch the mutation record. Copy telemetry elsewhere if you
+  need it longer. A failed removal is a telemetry fault like any failed
+  telemetry write: the installation reports unhealthy until the operator resets
+  it. Routine successful room reads write no audit row in either shape; every
+  deny and every mutation is still written. Because an allowed read is not an
+  audit event, its authorization does not depend on the audit subsystem being
+  healthy; writes, denies and every other capability still fail closed.
 - **One shared readership.** Every admitted human and AI seat can read the one
   room. Mentions decide which AI doorbell rings; they are not message access
   controls.

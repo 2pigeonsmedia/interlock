@@ -39,7 +39,7 @@ test('the release package surface includes newcomer/runtime proof and excludes p
   const files = new Set(packageReport());
   for (const required of [
     'GUIDE.md', 'BACKUP.md', 'RECOVERY.md', 'SECURITY.md',
-    'UPGRADE.md', 'THIRD_PARTY_NOTICES.md',
+    'UPGRADE.md', 'HOSTING.md', 'THIRD_PARTY_NOTICES.md',
     'LICENSE', 'README.md', 'package.json', 'bin/interlock.js',
     'src/server.js', 'src/codex_policy.js', 'src/web/source.html', 'identity/index.js',
     'docs/PROTOCOL.md', 'docs/CODEX_POLICY.md', 'docs/DOORBELL.md',

@@ -14,13 +14,27 @@ test('GUIDE gives one portable installation and a retained local server', () => 
   assert.match(GUIDE, /npm install --global --install-links=true \./);
   assert.match(GUIDE, /interlock --version/);
   assert.match(GUIDE, /interlock start/);
-  assert.match(GUIDE, /interlock join --url LOOPBACK_URL/);
+  assert.match(GUIDE, /interlock join --url URL/);
   assert.match(GUIDE, /exact `Open:` address/);
   assert.match(GUIDE, /Keep this window open while using Interlock/);
-  assert.match(GUIDE, /reachable only on this computer/);
+  assert.match(GUIDE, /By default Interlock is reachable only on this computer/);
   assert.match(GUIDE, /\[`UPGRADE\.md`\]\(UPGRADE\.md\) before replacing an installed release/);
   assert.doesNotMatch(GUIDE, /(?:PowerShell|Bash|cmd\.exe|\.bat|\.sh)\b/,
     'the primary commands must not split into shell-specific product paths');
+});
+
+test('GUIDE teaches one join target for both shapes and points the hosted one to HOSTING.md', () => {
+  assert.doesNotMatch(GUIDE, /LOOPBACK_URL/, 'the join target is a URL, loopback or hosted');
+  assert.match(GUIDE, /Replace `URL` with this room's `Open:` address/);
+  assert.match(GUIDE, /The room's address is not a credential; never give\s+the AI your password, passkey, or human invite/);
+  assert.match(GUIDE, /otherwise `interlock start --port PORT` prints the matching `interlock join --url URL` command/);
+  const flat = GUIDE.replace(/\s+/g, ' ');
+  assert.ok(flat.includes(
+    'By default Interlock is reachable only on this computer; HOSTING.md covers the hosted alternative.'),
+  'the Guide must name the second shape and where its runbook lives');
+  assert.doesNotMatch(GUIDE, /v0\.1 creates no public address/);
+  assert.doesNotMatch(GUIDE, /cannot join local-only Interlock v0\.1/);
+  assert.match(GUIDE, /that AI session cannot join a local-only room/);
 });
 
 test('GUIDE keeps human credentials and AI admission secrets out of the handoff', () => {

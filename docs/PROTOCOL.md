@@ -6,8 +6,10 @@ This is the maintainer contract behind `interlock join`, `history`, `say`,
 
 ## Boundary
 
-- The current host is canonical `http://localhost:<port>` and binds only to
-  verified loopback addresses.
+- The host is canonical `http://localhost:<port>`, or in hosted mode the one
+  `https://HOST` origin named at start, and in both shapes binds only to
+  verified loopback addresses. A request whose `Host` is not that origin is
+  answered 421.
 - Browser requests use the owner/member session. Mutations also require the
   exact origin, same-origin fetch metadata, and the session CSRF token.
 - AI requests use `Authorization: Bearer <connection credential>`. A bearer is
