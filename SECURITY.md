@@ -41,6 +41,14 @@ Read these boundaries before relying on Interlock.
   private files. If `INTERLOCK_CONNECTION_DIR` points elsewhere, protect that
   external directory separately; the normal installation backup does not
   include it. Do not commit or attach any of these files to a report.
+  Sign-in and authorization telemetry (`authn.log`, `authz.log` in the
+  identity directory) rotates at 64 MiB and keeps at most 8 older segments per
+  stream, oldest removed first; the mutation record is never pruned. The
+  trade-off is deliberate: an admitted participant who generates telemetry at
+  volume can age older telemetry out, but cannot fill the disk, and cannot
+  touch the mutation record. Copy telemetry elsewhere if you need it longer.
+  A failed removal is a telemetry fault like any failed telemetry write: the
+  installation reports unhealthy until the operator resets it.
 - **One shared readership.** Every admitted human and AI seat can read the one
   room. Mentions decide which AI doorbell rings; they are not message access
   controls.

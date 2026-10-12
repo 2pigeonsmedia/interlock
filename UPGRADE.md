@@ -7,6 +7,15 @@ your own checks.
 
 ## What changes after v0.1.5
 
+Sign-in and authorization telemetry (`authn.log*` and `authz.log*` in the
+identity directory) is now capped: each stream keeps at most 8 rotated 64 MiB
+segments, oldest removed when a new one is cut. An installation that
+accumulated more under v0.1.5 (one open browser tab could do that after a
+transcript clear) loses its oldest telemetry segments the next time a stream
+rotates. The mutation record, participants, transcript and archives are not
+affected. Take the stopped-server backup below first if you want the old
+telemetry.
+
 A room page from before this release does not send the era it rendered. If
 the owner clears the transcript while such a page is waiting, that page shows
 the cleared messages for up to 25 seconds before its next read; a page served

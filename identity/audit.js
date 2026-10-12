@@ -17,6 +17,11 @@ const EPOCH_KEY = 'unverified-legacy';
 const STREAMS = Object.freeze(['authn', 'authz', 'mutation']);
 const MAX_QUEUE = 10000;
 const MAX_BYTES = 64 * 1024 * 1024;
+// Telemetry streams (authn/authz) keep at most this many rotated segments
+// each, oldest removed when a new one is cut: 8 × 64 MiB bounds a stream at
+// 512 MiB plus the live file. Mutation rows are not telemetry and are never
+// pruned here.
+const MAX_SEGMENTS = 8;
 const MAX_ROW = 8 * 1024;
 const MAX_BATCH_BYTES = 1024 * 1024;
 const BATCH = 256;
@@ -588,6 +593,21 @@ async function nextSegmentPath(stream) {
   throw new Error('audit: cannot allocate a collision-safe segment name');
 }
 
+async function pruneSegments(stream) {
+  let names;
+  try { names = await fsp.readdir(BOUND_DIR); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') return;
+    throw e;
+  }
+  const parts = names.map(name => segmentParts(name, stream)).filter(Boolean)
+    .sort((a, b) => a.ordinal - b.ordinal || a.name.localeCompare(b.name));
+  while (parts.length > MAX_SEGMENTS) {
+    const oldest = parts.shift();
+    await fsp.unlink(path.join(BOUND_DIR, oldest.name));
+  }
+}
+
 async function appendTelemetryBatch(stream, data) {
   await fsp.mkdir(BOUND_DIR, { recursive: true });
   const current = fileFor(stream);
@@ -596,6 +616,7 @@ async function appendTelemetryBatch(stream, data) {
   catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
   if (size + Buffer.byteLength(data, 'utf8') > MAX_BYTES && size > 0) {
     await fsp.rename(current, await nextSegmentPath(stream));
+    await pruneSegments(stream);
   }
   await fsp.appendFile(current, data, 'utf8');
 }
@@ -1226,6 +1247,7 @@ module.exports = {
   STREAMS,
   MAX_QUEUE,
   MAX_BYTES,
+  MAX_SEGMENTS,
   MAX_ROW,
   MAX_BATCH_BYTES,
   BATCH,
