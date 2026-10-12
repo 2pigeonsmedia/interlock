@@ -61,6 +61,18 @@ function post(runtime, pathName, body, session = {}, extraHeaders = {}) {
   return call(runtime, { path: pathName, method: 'POST', body, headers });
 }
 
+// A start that must be refused. If it starts anyway, the runtime is closed
+// before the failure is reported, so a failing check ends the run as a
+// failure instead of leaving a listener that keeps the process alive.
+async function assertStartRefused(options, expected, message) {
+  let started = null;
+  try {
+    await assert.rejects(async () => { started = await startInterlockServer(options); }, expected, message);
+  } finally {
+    if (started !== null) await started.close();
+  }
+}
+
 // One identity binding per process: this file starts ONE hosted data directory.
 let hostedDataDir = null;
 // The throttle halves each live in their own file for the same reason.
@@ -70,12 +82,11 @@ test('hosted mode: refusals happen at construction, before any directory is crea
   const dataDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-hosted-refuse-')), 'data');
   assert.equal(fs.existsSync(dataDir), false, 'ARRANGEMENT: the data directory does not exist yet');
   for (const bad of ['http://app.example.test', 'https://app.example.test/', 'https://localhost', 42]) {
-    await assert.rejects(startInterlockServer({ port, dataDir, hostedOrigin: bad }),
-      /interlock: --hosted-origin/, String(bad));
+    await assertStartRefused({ port, dataDir, hostedOrigin: bad }, /interlock: --hosted-origin/, String(bad));
   }
-  await assert.rejects(startInterlockServer({ port, dataDir, onWrongSetupCode: () => undefined }),
+  await assertStartRefused({ port, dataDir, onWrongSetupCode: () => undefined },
     /onWrongSetupCode is accepted only with hostedOrigin/, 'loopback mode refuses the callback');
-  await assert.rejects(startInterlockServer({ port, dataDir, hostedOrigin: HOSTED, onWrongSetupCode: 'print' }),
+  await assertStartRefused({ port, dataDir, hostedOrigin: HOSTED, onWrongSetupCode: 'print' },
     /onWrongSetupCode must be a function/);
   assert.equal(fs.existsSync(dataDir), false, 'no data directory was created by a refused start');
 });
@@ -311,13 +322,16 @@ test('hosted mode: the data directory remembers its origin; a loopback or other-
   if (process.platform !== 'win32') assert.equal(fs.statSync(recordPath).mode & 0o777, 0o600, 'the record is private');
 
   const again = await startInterlockServer({ port: await reservePort(), dataDir: hostedDataDir, hostedOrigin: HOSTED });
-  assert.equal(again.url, HOSTED, 'a restart at the same origin is allowed');
-  assert.equal(again.setupCode, null, 'and finds the owner it already has');
-  await again.close();
+  try {
+    assert.equal(again.url, HOSTED, 'a restart at the same origin is allowed');
+    assert.equal(again.setupCode, null, 'and finds the owner it already has');
+  } finally {
+    await again.close();
+  }
 
   const recorded = fs.readFileSync(recordPath, 'utf8');
   for (const other of [{}, { hostedOrigin: 'https://other.example.test' }]) {
-    await assert.rejects(startInterlockServer(Object.assign({ port: await reservePort(), dataDir: hostedDataDir }, other)),
+    await assertStartRefused(Object.assign({ port: await reservePort(), dataDir: hostedDataDir }, other),
       error => {
         assert.equal(error.code, 'origin-mismatch', error.message);
         assert.ok(error.message.includes(HOSTED), error.message);
