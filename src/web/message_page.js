@@ -24,7 +24,17 @@
       Number.isSafeInteger(limit) && limit > 0 && result.messages.length < limit);
   }
 
-  const contract = Object.freeze({ caughtUp, validPage });
+  // The one page the loop must not re-ask at once: a WAITED request
+  // answered immediately with nothing. Era changes and floor catch-ups
+  // legitimately produce it once; a server defect produced it forever (in
+  // practice one open tab produced hundreds of requests per second). One
+  // pause bounds either to 1 request/s.
+  function instantEmptyAnswer(result, waited) {
+    return waited === true && !!result && Array.isArray(result.messages) &&
+      result.messages.length === 0 && result.timed_out === false;
+  }
+
+  const contract = Object.freeze({ caughtUp, instantEmptyAnswer, validPage });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockMessagePage', {
     configurable: false, enumerable: false, writable: false, value: contract,

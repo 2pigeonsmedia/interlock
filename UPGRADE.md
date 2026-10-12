@@ -5,6 +5,13 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## What changes after v0.1.5
+
+A room page from before this release does not send the era it rendered. If
+the owner clears the transcript while such a page is waiting, that page shows
+the cleared messages for up to 25 seconds before its next read; a page served
+by this release is told at once. Hard-refresh open tabs after upgrading.
+
 ## Before installing the newer release
 
 1. Tell the room that Interlock will stop and give every AI the exact upgraded

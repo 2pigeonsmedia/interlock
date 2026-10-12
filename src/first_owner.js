@@ -237,22 +237,31 @@ function publicParticipant(participant) {
 
 function messageQuery(target) {
   const entries = [...target.searchParams.entries()];
-  if (entries.length !== 3) return null;
-  const expected = ['after', 'limit', 'wait'];
+  // `era` is optional: the last `first_id` the client rendered. A client
+  // whose era is stale is answered at once so it discards the old transcript;
+  // a client at the floor of its known era holds like any other.
+  const hasEra = entries.some(([key]) => key === 'era');
+  if (entries.length !== (hasEra ? 4 : 3)) return null;
+  const expected = hasEra ? ['after', 'limit', 'wait', 'era'] : ['after', 'limit', 'wait'];
   if (expected.some(key => entries.filter(([actual]) => actual === key).length !== 1) ||
       entries.some(([key]) => !expected.includes(key))) return null;
   const afterRaw = target.searchParams.get('after');
   const limitRaw = target.searchParams.get('limit');
   const waitRaw = target.searchParams.get('wait');
+  const eraRaw = hasEra ? target.searchParams.get('era') : null;
   if (!/^(?:0|[1-9][0-9]*)$/.test(afterRaw || '') ||
       !/^[1-9][0-9]*$/.test(limitRaw || '') ||
-      (waitRaw !== '0' && waitRaw !== '1')) return null;
+      (waitRaw !== '0' && waitRaw !== '1') ||
+      (hasEra && !/^[1-9][0-9]*$/.test(eraRaw || ''))) return null;
   const after = Number(afterRaw);
   const limit = Number(limitRaw);
-  if (!Number.isSafeInteger(after) || !Number.isSafeInteger(limit) || limit > CHAT_READ_LIMIT) {
+  const era = hasEra ? Number(eraRaw) : undefined;
+  if (!Number.isSafeInteger(after) || !Number.isSafeInteger(limit) || limit > CHAT_READ_LIMIT ||
+      (hasEra && !Number.isSafeInteger(era))) {
     return null;
   }
-  return Object.freeze({ after, limit, wait: waitRaw === '1' });
+  return Object.freeze(hasEra ? { after, limit, wait: waitRaw === '1', era }
+    : { after, limit, wait: waitRaw === '1' });
 }
 
 function peekQuery(target) {
@@ -986,7 +995,9 @@ function createFirstOwnerHandler(options) {
     let result;
     try {
       result = query.wait
-        ? await chat.wait({ after: query.after, limit: query.limit }, {
+        ? await chat.wait(query.era === undefined
+          ? { after: query.after, limit: query.limit }
+          : { after: query.after, limit: query.limit, era: query.era }, {
           timeoutMs: BROWSER_WAIT_MS,
           signal: controller.signal,
         })

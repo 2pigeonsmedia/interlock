@@ -10,6 +10,7 @@ const {
   createChatService, MAX_WAIT_MS, AI_PRESENCE_WINDOW_MS,
 } = require('../src/chat/service.js');
 const { openStore } = require('../src/chat/store.js');
+const { createArchiveService } = require('../src/chat/archive.js');
 
 const ACTOR = Object.freeze({
   subject_id: '11111111-1111-4111-8111-111111111111',
@@ -372,5 +373,149 @@ test('a seat can acknowledge only messages addressed to it', async () => {
   assert.equal(page.messages[0].recipients[0].acknowledged_at, 123);
   await assert.rejects(chat.acknowledge(ROSTER[2].subject_id, [saved.id], 124),
     error => code(error) === 'invalid-ack');
+  await chat.close();
+});
+
+// A cleared transcript (first_id === next_id > 1, no messages) left the
+// era-floor clause answering a caught-up client at once, so the browser page
+// re-asked without pause (in practice one open tab produced hundreds of
+// requests per second).
+function clearedService(firstId) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-chat-service-'));
+  const root = path.join(dir, 'chat');
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(root, 'meta.json'),
+    JSON.stringify({ schema: 2, first_id: firstId, next_id: firstId }) + '\n');
+  fs.writeFileSync(path.join(root, 'messages.jsonl'), '');
+  fs.writeFileSync(path.join(root, 'receipts.jsonl'), '');
+  fs.writeFileSync(path.join(root, 'activity.json'),
+    JSON.stringify({ schema: 1, entries: [] }) + '\n');
+  return createChatService({ store: openStore({ dataDir: dir }), participants: () => ROSTER });
+}
+
+test('a caught-up client of a cleared transcript waits for the timeout instead of an instant empty answer', async () => {
+  const chat = clearedService(4);
+  const started = Date.now();
+  const result = await chat.wait({ after: 3, limit: 10 }, { timeoutMs: 60 });
+  assert.equal(result.timed_out, true,
+    'the era floor itself is caught up: nothing is new, so the wait must hold until timeout');
+  assert.deepEqual(result.messages, []);
+  assert.equal(result.cursor, 3);
+  assert.equal(result.first_id, 4);
+  assert.ok(Date.now() - started >= 50, 'answered before the timeout');
+  await chat.close();
+});
+
+test('a client below the era floor of a cleared transcript is answered at once with the floor', async () => {
+  const chat = clearedService(4);
+  const result = await chat.wait({ after: 1, limit: 10 }, { timeoutMs: 2_000 });
+  assert.equal(result.timed_out, false);
+  assert.deepEqual(result.messages, []);
+  assert.equal(result.cursor, 3);
+  assert.equal(result.first_id, 4);
+  await chat.close();
+});
+
+test('a browser that names the current era and sits at its floor holds like any other', async () => {
+  const chat = clearedService(4);
+  const started = Date.now();
+  const result = await chat.wait({ after: 3, limit: 10, era: 4 }, { timeoutMs: 60 });
+  assert.equal(result.timed_out, true);
+  assert.equal(result.cursor, 3);
+  assert.equal(result.first_id, 4);
+  assert.ok(Date.now() - started >= 50);
+  await chat.close();
+});
+
+test('a browser that names a stale era is answered at once so it discards the old transcript', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-chat-service-'));
+  const store = openStore({ dataDir });
+  const chat = createChatService({ store, participants: () => ROSTER });
+  await chat.append({ text: 'one' }, ACTOR);
+  const last = await chat.append({ text: 'two' }, ACTOR);
+  assert.equal(last.id, 2);
+  const cleared = await createArchiveService({ dataDir, store }).clearTranscript();
+  assert.equal(cleared.first_id, 3);
+  chat.transcriptCleared();
+  // The tab rendered era 1 and sits at the old cursor 2, which is also the new floor.
+  const started = Date.now();
+  const woken = await chat.wait({ after: 2, limit: 10, era: 1 }, { timeoutMs: 2_000 });
+  assert.equal(woken.timed_out, false, 'a stale era is answered at once, whatever the cursor');
+  assert.deepEqual(woken.messages, []);
+  assert.equal(woken.cursor, 2);
+  assert.equal(woken.first_id, 3);
+  assert.ok(Date.now() - started < 1_000);
+  // Having rendered era 3, the same tab at the same cursor now holds.
+  const again = await chat.wait({ after: 2, limit: 10, era: 3 }, { timeoutMs: 60 });
+  assert.equal(again.timed_out, true, 'the informed tab at the floor must hold, not answer at once');
+  await chat.close();
+});
+
+test('a tab already waiting when the owner clears is woken by the clear when it named its era', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-chat-service-'));
+  const store = openStore({ dataDir });
+  const chat = createChatService({ store, participants: () => ROSTER });
+  await chat.append({ text: 'one' }, ACTOR);
+  await chat.append({ text: 'two' }, ACTOR);
+  const retained = chat.wait({ after: 2, limit: 10, era: 1 }, { timeoutMs: 2_000 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  await createArchiveService({ dataDir, store }).clearTranscript();
+  chat.transcriptCleared();
+  const woken = await retained;
+  assert.equal(woken.timed_out, false);
+  assert.equal(woken.first_id, 3);
+  await chat.close();
+});
+
+test('era must be a positive safe integer when present', async () => {
+  const chat = clearedService(4);
+  await assert.rejects(chat.wait({ after: 3, limit: 10, era: 0 }, { timeoutMs: 5 }),
+    error => code(error) === 'invalid-read');
+  await assert.rejects(chat.wait({ after: 3, limit: 10, era: '4' }, { timeoutMs: 5 }),
+    error => code(error) === 'invalid-read');
+  await chat.close();
+});
+
+test('an AI seat waiting at the floor of a cleared transcript holds instead of an instant empty answer', async () => {
+  const chat = clearedService(4);
+  const marlow = ROSTER[1];
+  const started = Date.now();
+  const result = await chat.waitForSeat({ after: 3, limit: 10 }, marlow.subject_id, { timeoutMs: 60 });
+  assert.equal(result.timed_out, true, 'the seat is caught up at the floor; nothing is new');
+  assert.deepEqual(result.messages, []);
+  assert.equal(result.first_id, 4);
+  assert.ok(Date.now() - started >= 50, 'answered before the timeout');
+  await chat.close();
+});
+
+test('an AI seat strictly below the floor of a cleared transcript is answered at once', async () => {
+  const chat = clearedService(4);
+  const marlow = ROSTER[1];
+  const result = await chat.waitForSeat({ after: 1, limit: 10 }, marlow.subject_id, { timeoutMs: 2_000 });
+  assert.equal(result.timed_out, false, 'a seat behind the floor must be brought to it at once');
+  assert.deepEqual(result.messages, []);
+  assert.equal(result.first_id, 4);
+  await chat.close();
+});
+
+test('the doorbell wait at the floor of a cleared transcript holds', async () => {
+  const chat = clearedService(4);
+  const marlow = ROSTER[1];
+  const started = Date.now();
+  const result = await chat.waitForSeatRings({ after: 3, limit: 10 }, marlow.subject_id, { timeoutMs: 60 });
+  assert.equal(result.timed_out, true, 'the doorbell seat is caught up at the floor; nothing is new');
+  assert.deepEqual(result.messages, []);
+  assert.equal(result.first_id, 4);
+  assert.ok(Date.now() - started >= 50, 'answered before the timeout');
+  await chat.close();
+});
+
+test('the doorbell wait strictly below the floor of a cleared transcript is answered at once', async () => {
+  const chat = clearedService(4);
+  const marlow = ROSTER[1];
+  const result = await chat.waitForSeatRings({ after: 1, limit: 10 }, marlow.subject_id, { timeoutMs: 2_000 });
+  assert.equal(result.timed_out, false, 'a doorbell seat behind the floor is brought to it at once');
+  assert.deepEqual(result.messages, []);
+  assert.equal(result.first_id, 4);
   await chat.close();
 });

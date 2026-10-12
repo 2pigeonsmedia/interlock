@@ -58,6 +58,7 @@ const mentionPreview = document.querySelector('#mention-preview');
 let csrfToken = null;
 let connectionCheckRunning = false;
 let messageCursor = 0;
+let knownEra = null; // the last first_id this page rendered, sent as `era`
 let messageController = null;
 let messageGeneration = 0;
 const seenMessageIds = new Set();
@@ -187,6 +188,7 @@ function resetTranscript() {
   stopMessages();
   transcript.setAttribute('aria-live', 'off');
   messageCursor = 0;
+  knownEra = null;
   seenMessageIds.clear();
   deliveryCursor = 0;
   initialTranscriptPosition = false;
@@ -1178,7 +1180,8 @@ function retryDelay(signal) {
 
 async function messagePage(wait, signal) {
   const response = await fetch(
-    `/api/messages?after=${messageCursor}&limit=${MESSAGE_PAGE_LIMIT}&wait=${wait ? 1 : 0}`,
+    `/api/messages?after=${messageCursor}&limit=${MESSAGE_PAGE_LIMIT}&wait=${wait ? 1 : 0}` +
+      (knownEra === null ? '' : `&era=${knownEra}`),
     { cache: 'no-store', credentials: 'same-origin', signal },
   );
   const result = await readJson(response);
@@ -1201,6 +1204,7 @@ async function runMessages(generation, signal) {
     try {
       const page = await messagePage(wait, signal);
       if (signal.aborted || generation !== messageGeneration) return;
+      knownEra = page.first_id;
       if (page.first_id > 1) {
         let removed = false;
         for (const id of [...seenMessageIds]) {
@@ -1249,6 +1253,9 @@ async function runMessages(generation, signal) {
         initialTranscriptPosition = false;
         transcript.setAttribute('aria-live', 'polite');
       }
+      // A waited request answered at once with nothing is re-asked after
+      // one pause, never immediately — see InterlockMessagePage.instantEmptyAnswer.
+      if (InterlockMessagePage.instantEmptyAnswer(page, wait)) await retryDelay(signal);
       wait = !initialTranscriptPosition;
     } catch (error) {
       if (signal.aborted || generation !== messageGeneration || error.name === 'AbortError') return;

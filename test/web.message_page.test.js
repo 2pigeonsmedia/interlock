@@ -44,3 +44,17 @@ test('message pages remain strictly increasing from the later of cursor and era 
   }, 2, validMessage), false,
   'the response cursor must be the last returned message id');
 });
+
+test('an instant empty answer to a waited request is the one case the page must pause on', () => {
+  const { instantEmptyAnswer } = require('../src/web/message_page.js');
+  const empty = { ok: true, messages: [], cursor: 3, first_id: 4, timed_out: false };
+  assert.equal(instantEmptyAnswer(empty, true), true,
+    'the server answered a long-poll at once with nothing: re-asking immediately is the spin');
+  assert.equal(instantEmptyAnswer({ ...empty, timed_out: true }, true), false,
+    'a timed-out wait already held for the full window');
+  assert.equal(instantEmptyAnswer({ ...empty, messages: [{ id: 4 }] }, true), false,
+    'new messages are never a reason to pause');
+  assert.equal(instantEmptyAnswer(empty, false), false,
+    'an empty catch-up page while not waiting means caught up, and the loop then switches to waiting');
+  assert.equal(instantEmptyAnswer(null, true), false);
+});

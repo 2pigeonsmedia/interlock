@@ -181,6 +181,22 @@ test('a fresh owner posts, clears, restarts, and survives a verified clean resto
       headers: { cookie: owner.cookie },
     });
     assert.equal(duplicateCursor.status, 400);
+    // `era` is the optional fourth query value — the last first_id the
+    // page rendered. Positive integer only; anything else is a malformed query.
+    const withEra = await call(runtime, {
+      path: '/api/messages?after=0&limit=100&wait=0&era=1',
+      headers: { cookie: owner.cookie },
+    });
+    assert.equal(withEra.status, 200, withEra.text);
+    assert.equal(withEra.json.first_id, 1);
+    for (const bad of ['era=0', 'era=-1', 'era=abc', 'era=1&era=1', 'era=']) {
+      const refused = await call(runtime, {
+        path: `/api/messages?after=0&limit=100&wait=0&${bad}`,
+        headers: { cookie: owner.cookie },
+      });
+      assert.equal(refused.status, 400, bad);
+      assert.equal(refused.json.error, 'invalid-message-query', bad);
+    }
     const postWithQuery = await post(runtime, '/api/messages?unused=1', { text: 'refused' }, owner);
     assert.equal(postWithQuery.status, 400,
       'message input has one body channel and refuses query parameters');
@@ -291,8 +307,9 @@ test('a fresh owner posts, clears, restarts, and survives a verified clean resto
       path: '/api/messages?after=2&limit=100&wait=1', headers: { cookie: staleOwnerCookie },
     });
     owner = await elevate(runtime, owner, setup.device);
+    // The open tab names the era it rendered; the clear makes it stale.
     const waitingDuringClear = call(runtime, {
-      path: '/api/messages?after=2&limit=100&wait=1', headers: { cookie: owner.cookie },
+      path: '/api/messages?after=2&limit=100&wait=1&era=1', headers: { cookie: owner.cookie },
     });
     const cleared = await post(runtime, '/api/transcript/clear', {}, owner);
     assert.equal(cleared.status, 200, cleared.text);
@@ -400,3 +417,4 @@ test('a fresh owner posts, clears, restarts, and survives a verified clean resto
     await runtime.close();
   }
 });
+

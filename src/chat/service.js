@@ -158,6 +158,10 @@ function createChatService(options) {
     requireOpen();
     const options = closedObject(optionsIn, WAIT_OPTION_KEYS);
     if (!options) throw fail('invalid-wait');
+    if (query !== null && typeof query === 'object' && query.era !== undefined &&
+        (!Number.isSafeInteger(query.era) || query.era < 1)) throw fail('invalid-read');
+    const readQuery = query !== null && typeof query === 'object'
+      ? { after: query.after, limit: query.limit } : query;
     const timeoutMs = options.timeoutMs === undefined ? MAX_WAIT_MS : options.timeoutMs;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_WAIT_MS) {
       throw fail('invalid-wait');
@@ -204,11 +208,20 @@ function createChatService(options) {
         if (settled || reading) return;
         reading = true;
         wakeDue = false;
-        Promise.resolve().then(() => store.read(query)).then(page => {
+        Promise.resolve().then(() => store.read(readQuery)).then(page => {
           reading = false;
           if (settled) return;
-          if (page.messages.length > 0 || page.cursor > query.after ||
-              (page.first_id > 1 && page.first_id - 1 >= query.after)) {
+          // Era handling. A client strictly below the floor of a cleared
+          // transcript is answered at once: the store reports an empty page's
+          // cursor as max(after, first_id - 1), so being behind the floor reads
+          // as `cursor > after`. A client that names the era it rendered
+          // (`query.era`, its last first_id) is answered at once when that era
+          // is gone, so an open tab discards the old transcript promptly. A
+          // client AT the floor of the current era is caught up and holds like
+          // any other — the former `first_id - 1 >= after` clause answered it
+          // instantly, so the browser re-asked without pause.
+          const staleEra = query.era !== undefined && query.era !== page.first_id;
+          if (page.messages.length > 0 || page.cursor > query.after || staleEra) {
             succeed(page, false);
             return;
           }
@@ -300,7 +313,13 @@ function createChatService(options) {
         scanForSeat({ after: scanCursor, limit: query.limit }, subjectId, true).then(async page => {
           if (settled) return;
           scanCursor = page.cursor;
-          const transcriptMoved = page.first_id > 1 && page.first_id - 1 >= priorScanCursor;
+          // Era handling, the seat form: a seat strictly below the floor
+          // of a cleared transcript is answered at once so its cursor reaches
+          // the floor; a seat AT the floor holds — it renders no transcript, so
+          // it has nothing to discard. (Chatter also moves scanCursor, so
+          // `cursor > prior` alone cannot mean "era".) The former `>=` answered
+          // a seat at the floor instantly on every poll.
+          const transcriptMoved = page.first_id - 1 > priorScanCursor;
           if (page.messages.length > 0 || transcriptMoved) {
             // A ring wakes the seat, but the payload is shared room catch-up,
             // not only the addressed row. This preserves ordinary and
@@ -386,7 +405,11 @@ function createChatService(options) {
           scanCursor = page.cursor;
           firstId = page.first_id;
           if (page.messages.length > 0) return succeed(page.messages, false);
-          const transcriptMoved = firstId > 1 && firstId - 1 >= priorScanCursor;
+          // Era handling, the doorbell form — same rule as waitForSeat:
+          // strictly below the floor of a cleared transcript is answered at
+          // once; AT the floor holds. The former `>=` answered a seat at the
+          // floor instantly, and `interlock-doorbell run` re-polls with no pause.
+          const transcriptMoved = firstId - 1 > priorScanCursor;
           if (transcriptMoved) return succeed([], false);
           if (timeoutDue) return succeed([], true);
           if (wakeDue) inspect();
