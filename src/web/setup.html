@@ -29,6 +29,12 @@
     <section class="card" aria-labelledby="setup-heading">
       <h2 id="setup-heading">First owner</h2>
       <form id="owner-form">
+        <div id="setup-code-field" hidden>
+          <label for="setup-code">Setup code</label>
+          <input id="setup-code" name="setup_code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64">
+          <p class="hint">Printed by the server when it started.</p>
+        </div>
+
         <label for="owner-name">Your name</label>
         <input id="owner-name" name="name" autocomplete="username" maxlength="64" required>
 

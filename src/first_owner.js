@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('node:path');
+const { clientSource } = require('./hosted.js');
 const { SETTINGS_ENDED_MS } = require('./idle.js');
 const { readRoomSettings, writeRoomSettings } = require('./room_settings.js');
 
@@ -121,6 +122,10 @@ function validCredentialInput(input) {
     typeof input.password === 'string' && input.password.length > 0 &&
     Buffer.byteLength(input.password, 'utf8') <= 1024 && !input.password.includes('\0');
 }
+
+// Hosted mode only: a password set through the internet-facing front must be
+// at least this long. Loopback mode keeps its existing rule.
+const HOSTED_PASSWORD_MIN = 12;
 
 function validInviteInput(input) {
   return validCredentialInput(input) &&
@@ -307,7 +312,8 @@ function deliveryQuery(target) {
 }
 
 function createFirstOwnerHandler(options) {
-  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir } = options || {};
+  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted } = options || {};
+  const hostedMode = hosted ? hosted : null;
   if (!house || !house.firstOwner || !house.authenticators || !house.sessions || !house.login ||
       typeof house.authorizeRead !== 'function' || typeof house.authorizeWrite !== 'function' ||
       typeof house.authorizeSeatBearer !== 'function' ||
@@ -327,9 +333,14 @@ function createFirstOwnerHandler(options) {
   }
   let parsedOrigin;
   try { parsedOrigin = new URL(origin); } catch (_) { parsedOrigin = null; }
-  if (!parsedOrigin || parsedOrigin.protocol !== 'http:' || parsedOrigin.hostname !== 'localhost' ||
-      parsedOrigin.origin !== origin) {
-    throw new TypeError('first owner transport: origin must be one canonical http://localhost origin');
+  const loopbackOrigin = parsedOrigin && !hostedMode && parsedOrigin.protocol === 'http:' &&
+    parsedOrigin.hostname === 'localhost' && parsedOrigin.origin === origin;
+  const hostedOrigin = parsedOrigin && hostedMode && parsedOrigin.protocol === 'https:' &&
+    parsedOrigin.origin === origin && origin === hostedMode.origin &&
+    typeof hostedMode.setupCodeMatches === 'function' && typeof hostedMode.wrongSetupCode === 'function' &&
+    typeof hostedMode.setupCompleted === 'function';
+  if (!parsedOrigin || !(loopbackOrigin || hostedOrigin)) {
+    throw new TypeError('first owner transport: origin must be one canonical http://localhost origin, or the hosted https origin');
   }
   if (!assets || typeof assets !== 'object' || !assets.setup || !assets.room) {
     throw new TypeError('first owner transport: static assets are required');
@@ -415,15 +426,34 @@ function createFirstOwnerHandler(options) {
     if (setup.completed === true) {
       return sendJson(request, response, 409, { ok: false, error: 'setup-complete' });
     }
-    const input = closedObject(body, ['name', 'password']);
+    // Hosted mode: the body may carry the setup code. The resume path (setup
+    // already in progress) signs in with name + password, so the code is not
+    // required there.
+    const input = hostedMode
+      ? closedObject(body, ['name', 'password', 'setup_code']) || closedObject(body, ['name', 'password'])
+      : closedObject(body, ['name', 'password']);
     if (!validCredentialInput(input)) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-setup' });
+    }
+    if (hostedMode) {
+      if (input.password.length < HOSTED_PASSWORD_MIN) {
+        return sendJson(request, response, 400, { ok: false, error: 'password-too-short' });
+      }
+      if (setup.in_progress !== true) {
+        if (typeof input.setup_code !== 'string') {
+          return sendJson(request, response, 403, { ok: false, error: 'setup-code-required' });
+        }
+        if (!hostedMode.setupCodeMatches(input.setup_code)) {
+          hostedMode.wrongSetupCode();
+          return sendJson(request, response, 403, { ok: false, error: 'setup-code-invalid' });
+        }
+      }
     }
     if (setup.in_progress === true) {
       const resumed = await house.login.login({
         name: input.name,
         password: input.password,
-        source: request.socket.remoteAddress || 'loopback',
+        source: clientSource(request, hostedMode),
         request_origin: request.headers.origin,
         sec_fetch_site: request.headers['sec-fetch-site'],
         prior_cookie_header: request.headers.cookie,
@@ -516,6 +546,7 @@ function createFirstOwnerHandler(options) {
     if (!done || done.ok !== true) {
       return sendJson(request, response, 409, { ok: false, error: 'setup-incomplete' });
     }
+    if (hostedMode) hostedMode.setupCompleted();
     return sendJson(request, response, 200, {
       ok: true,
       completed: true,
@@ -570,7 +601,7 @@ function createFirstOwnerHandler(options) {
     const signedIn = await house.login.login({
       name: input.name,
       password: input.password,
-      source: request.socket.remoteAddress || 'loopback',
+      source: clientSource(request, hostedMode),
       request_origin: request.headers.origin,
       sec_fetch_site: request.headers['sec-fetch-site'],
       prior_cookie_header: request.headers.cookie,
@@ -650,6 +681,9 @@ function createFirstOwnerHandler(options) {
     if (!validInviteInput(input)) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-invite' });
     }
+    if (hostedMode && input.password.length < HOSTED_PASSWORD_MIN) {
+      return sendJson(request, response, 400, { ok: false, error: 'password-too-short' });
+    }
     const now = Date.now();
     const redeemed = await house.redeem({ now }, input);
     if (!redeemed || redeemed.ok !== true || typeof redeemed.person_id !== 'string') {
@@ -712,6 +746,9 @@ function createFirstOwnerHandler(options) {
         Buffer.byteLength(input.new_password, 'utf8') > 1024 ||
         input.current_password.includes('\0') || input.new_password.includes('\0')) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-password-change' });
+    }
+    if (hostedMode && input.new_password.length < HOSTED_PASSWORD_MIN) {
+      return sendJson(request, response, 400, { ok: false, error: 'password-too-short' });
     }
     if (!ownerSession(request, response, true)) return;
     const result = await house.changePassword(requestMeta(request, Date.now()), input);
@@ -1143,7 +1180,7 @@ function createFirstOwnerHandler(options) {
     }
     const authorized = house.authorizeSeatBearer({
       authorization_header: request.headers.authorization,
-      source: request.socket.remoteAddress || 'loopback',
+      source: clientSource(request, hostedMode),
     }, 'read', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true ||
         typeof authorized.subject_id !== 'string' || typeof authorized.subject_name !== 'string' ||
@@ -1173,7 +1210,7 @@ function createFirstOwnerHandler(options) {
   function seatAuthorization(request, capability) {
     return house.authorizeSeatBearer({
       authorization_header: request.headers.authorization,
-      source: request.socket.remoteAddress || 'loopback',
+      source: clientSource(request, hostedMode),
     }, capability, CHAT_RESOURCE);
   }
 
@@ -1274,7 +1311,7 @@ function createFirstOwnerHandler(options) {
     try {
       result = house.endOwnSeat({
         authorization_header: request.headers.authorization,
-        source: request.socket.remoteAddress || 'loopback',
+        source: clientSource(request, hostedMode),
       });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'leave-unavailable' });
@@ -1743,7 +1780,12 @@ function createFirstOwnerHandler(options) {
 
     if (request.method === 'GET' || request.method === 'HEAD') {
       if (pathname === '/health') {
-        sendJson(request, response, 200, {
+        // Hosted mode: the front says nothing about setup state.
+        sendJson(request, response, 200, hostedMode ? {
+          ok: true,
+          service: 'interlock',
+          scope: 'process',
+        } : {
           ok: true,
           service: 'interlock',
           scope: 'process',
@@ -1757,7 +1799,7 @@ function createFirstOwnerHandler(options) {
           sendJson(request, response, 410, { ok: false, error: 'setup-complete' });
           return;
         }
-        sendJson(request, response, 200, {
+        const status = {
           ok: true,
           state: setup.in_progress === true ? 'in-progress' : 'empty',
           completed: false,
@@ -1765,7 +1807,9 @@ function createFirstOwnerHandler(options) {
             ? (setup.passkey_registered === true ? 'verify-passkey' : 'register-passkey')
             : null,
           passkey_required: true,
-        });
+        };
+        if (hostedMode) status.hosted = true;
+        sendJson(request, response, 200, status);
         return;
       }
       if (pathname === '/api/session') {

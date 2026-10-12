@@ -16,11 +16,12 @@ const { releaseIdleSeats } = require('./idle.js');
 const { readRoomSettings } = require('./room_settings.js');
 const { renderGuidePage } = require('./guide.js');
 const { acquireInstanceLock } = require('./instance_lock.js');
+const { parseHostedOrigin, makeSetupCode, setupCodeMatches } = require('./hosted.js');
 
 const LOOPBACK_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8788;
 const OPTION_KEYS = Object.freeze(['port']);
-const INTERLOCK_OPTION_KEYS = Object.freeze(['dataDir', 'port']);
+const INTERLOCK_OPTION_KEYS = Object.freeze(['dataDir', 'port', 'hostedOrigin']);
 
 function isLoopbackAddress(address) {
   if (net.isIPv4(address)) return address.split('.', 1)[0] === '127';
@@ -109,7 +110,7 @@ function requireInterlockOptions(input) {
   }
   for (const key of Reflect.ownKeys(opts)) {
     if (typeof key !== 'string' || !INTERLOCK_OPTION_KEYS.includes(key)) {
-      throw new TypeError('interlock server: full host accepts only dataDir and port');
+      throw new TypeError('interlock server: full host accepts only dataDir, port and hostedOrigin');
     }
     const descriptor = Object.getOwnPropertyDescriptor(opts, key);
     if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
@@ -123,7 +124,8 @@ function requireInterlockOptions(input) {
   if (typeof opts.dataDir !== 'string' || !path.isAbsolute(opts.dataDir)) {
     throw new TypeError('interlock server: dataDir is required and must be absolute');
   }
-  return { dataDir: opts.dataDir, port };
+  const hosted = opts.hostedOrigin === undefined ? null : parseHostedOrigin(opts.hostedOrigin);
+  return { dataDir: opts.dataDir, port, hosted };
 }
 
 function loadBrowserAssets() {
@@ -263,9 +265,9 @@ function startHealthServer(options) {
 }
 
 async function startInterlockServer(options) {
-  const { dataDir, port } = requireInterlockOptions(options);
+  const { dataDir, port, hosted } = requireInterlockOptions(options);
   const assets = loadBrowserAssets();
-  const origin = new URL(`http://localhost:${port}`).origin;
+  const origin = hosted ? hosted.origin : new URL(`http://localhost:${port}`).origin;
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const instanceLock = acquireInstanceLock({ dataDir });
   let canReleaseAfterStartupFailure = true;
@@ -276,7 +278,20 @@ async function startInterlockServer(options) {
     const stateDir = path.join(dataDir, 'identity');
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     if (process.platform !== 'win32') fs.chmodSync(stateDir, 0o700);
-    const house = identity.create({
+    const house = identity.create(hosted ? {
+      stateDir,
+      tenant: 'interlock',
+      cookieName: identity.COOKIE_NAME,
+      originClass: 'tunnel',
+      hostLabel: 'interlock',
+      rpId: hosted.hostname,
+      rpName: 'Interlock',
+      origin,
+      challengeOrigin: origin,
+      liveOrigin: hosted.origin,
+      webauthn: true,
+      auditAllowedReads: false,
+    } : {
       stateDir,
       tenant: 'interlock',
       cookieName: identity.COOKIE_NAME,
@@ -288,6 +303,7 @@ async function startInterlockServer(options) {
       challengeOrigin: origin,
       contained: true,
       webauthn: true,
+      auditAllowedReads: false,
     });
     await house.ready();
     instanceLock.assertOwned();
@@ -326,13 +342,35 @@ async function startInterlockServer(options) {
         .finally(() => { idleBusy = null; });
       return idleBusy;
     };
+    let reportFailure;
+    const failure = new Promise(resolve => { reportFailure = resolve; });
+    // Hosted mode: first-owner setup needs a one-time code printed to the
+    // console. It lives here so the runtime can report it; three wrong codes
+    // withdraw it and report a failure, which ends the process.
+    let setupCode = hosted && !house.firstOwner.status().completed ? makeSetupCode() : null;
+    let wrongCodes = 0;
+    const hostedForHandler = hosted ? Object.freeze({
+      origin: hosted.origin,
+      host: hosted.host,
+      hostname: hosted.hostname,
+      setupCode: () => setupCode,
+      setupCodeMatches: supplied => setupCodeMatches(setupCode, supplied),
+      setupCompleted: () => { setupCode = null; },
+      wrongSetupCode: () => {
+        wrongCodes += 1;
+        if (wrongCodes >= 3) {
+          setupCode = null;
+          const error = new Error('interlock server: three wrong setup codes; refusing to keep the setup window open');
+          error.code = 'setup-code-exhausted';
+          reportFailure(error);
+        }
+      },
+    }) : null;
     const handler = createFirstOwnerHandler({
-      house, origin, assets, chat, admission, archive, releaseIdle, dataDir,
+      house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler,
     });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));
-    let reportFailure;
-    const failure = new Promise(resolve => { reportFailure = resolve; });
     function runtimeFailed(error) { reportFailure(error); }
     for (const server of servers) {
       server.on('error', runtimeFailed);
@@ -370,6 +408,10 @@ async function startInterlockServer(options) {
       addresses,
       dataDir,
       failure,
+      hosted: hosted
+        ? Object.freeze({ origin: hosted.origin, host: hosted.host, hostname: hosted.hostname })
+        : null,
+      get setupCode() { return setupCode; },
       port,
       recoveredStaleLock: instanceLock.recovered_stale,
       url: origin,

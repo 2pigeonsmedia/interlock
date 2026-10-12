@@ -4,6 +4,8 @@ const form = document.querySelector('#owner-form');
 const setupButton = document.querySelector('#setup-button');
 const continueButton = document.querySelector('#continue-button');
 const statusLine = document.querySelector('#status');
+const setupCodeField = document.querySelector('#setup-code-field');
+const setupCodeInput = document.querySelector('#setup-code');
 let csrfToken = null;
 let nextStep = null;
 
@@ -162,10 +164,12 @@ form.addEventListener('submit', async event => {
       setStatus('The two passwords do not match.', 'error');
       return;
     }
-    const redeemed = await jsonRequest('/api/bootstrap/redeem', {
+    const redeemBody = {
       name: data.get('name'),
       password: data.get('password'),
-    });
+    };
+    if (!setupCodeField.hidden) redeemBody.setup_code = data.get('setup_code');
+    const redeemed = await jsonRequest('/api/bootstrap/redeem', redeemBody);
     csrfToken = redeemed.csrf_token;
     nextStep = redeemed.next;
     form.hidden = true;
@@ -192,6 +196,10 @@ continueButton.addEventListener('click', continueSetup);
       setStatus('This browser cannot create the required passkey.', 'error');
       setupButton.disabled = true;
       return;
+    }
+    if (status.hosted === true && status.state === 'empty') {
+      setupCodeField.hidden = false;
+      setupCodeInput.required = true;
     }
     if (status.state === 'in-progress') {
       setStatus('Owner setup has started. Enter the same name and password to continue.');
