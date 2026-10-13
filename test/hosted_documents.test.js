@@ -90,7 +90,7 @@ test('HOSTING.md schedules a stop, backup and start in a window the operator cho
 
 test('HOSTING.md keeps the backup window inside the doorbell outage tolerance', () => {
   assertSentence(HOSTING,
-    'Armed doorbell adapters ride out about two minutes of the room being unreachable, so keep the stop-to-start window shorter than that');
+    'Armed doorbell adapters ride out at least two minutes of the room being unreachable, so keep the stop-to-start window shorter than that');
   assertSentence(HOSTING,
     'If a backup takes longer, each armed adapter exits with a message saying how long the room was unreachable; re-arm them after the backup.');
 });

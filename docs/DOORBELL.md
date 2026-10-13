@@ -152,11 +152,13 @@ lists.
 
 **Room unreachable:** the reference runner retries the same poll from the same
 cursor 8 times, 1, 2, 4, 8, 15, 30, 30 and 30 seconds apart, so it rides out
-about two minutes of outage. Each retry prints one line on stderr and nothing on
-stdout, because a retry is not a ring, and a ring posted during the outage is
-offered once the room answers. After the last retry it exits 1, saying how long
-the room was unreachable, with its cursor unchanged; rerun it once the room
-answers. While it retries, `status` can stop reporting `ready`.
+about two minutes of outage when each attempt fails fast, and longer, up to about
+11 minutes, when each attempt waits out its 60-second request timeout. Each retry
+prints one line on stderr and nothing on stdout, because a retry is not a ring,
+and a ring posted during the outage is offered once the room answers. After the
+last retry it exits 1, saying how long the room was unreachable, with its cursor
+unchanged; rerun it once the room answers. While it retries, `status` can stop
+reporting `ready`.
 
 ## Verified CLI/TUI hosts
 

@@ -556,6 +556,8 @@ function fakeRoom() {
       const after = Number(url.searchParams.get('after'));
       room.afters.push(after);
       const answer = room.respond(after, room.afters.length);
+      // null holds the poll open, the way a quiet room does, until close().
+      if (answer === null) return;
       if (typeof answer.body === 'string') {
         response.writeHead(answer.status, { 'content-type': 'text/html' });
         response.end(answer.body);
@@ -740,6 +742,84 @@ test('an outage longer than the retry bound exits loud with the cursor unchanged
   assert.equal(fs.readdirSync(world.stateDir).some(name => name.startsWith('failed-')), true);
 });
 
+test('a good poll restores the full retry budget for the next outage', async () => {
+  const schedule = [40, 40, 40, 40];
+  const room = fakeRoom();
+  await room.listen(0);
+  const world = roomWorld(room.port, schedule.join(','));
+  room.respond = after => ringsAfter(after, [], 5);
+  const seeded = await finished(startAdapter(world));
+  assert.equal(seeded.code, 0, seeded.stderr);
+  assert.equal(savedCursor(world.stateDir), 5);
+
+  // One long-running adapter meets a short outage, two good polls, then a
+  // second outage that needs every retry in the schedule, then ring 6.
+  const firstOutage = 2;
+  const goodPolls = 2;
+  const secondOutage = schedule.length;
+  const plan = [
+    ...Array(firstOutage).fill('outage'),
+    ...Array(goodPolls).fill('good'),
+    ...Array(secondOutage).fill('outage'),
+    'ring',
+  ];
+  room.afters = [];
+  const seen = [];
+  let running = null;
+  room.respond = (after, served) => {
+    const step = plan[served - 1] || 'hold';
+    seen.push({ step, stdout: running.stdout, cursor: savedCursor(world.stateDir) });
+    if (step === 'outage') return gateway(served % 2 === 0 ? 530 : 502);
+    if (step === 'good') return ringsAfter(after, [], 5);
+    if (step === 'ring') return ringsAfter(after, RING_SIX, 6);
+    return null;
+  };
+  // No --once: this adapter keeps polling after a good page, as an armed one does.
+  const child = childProcess.spawn(process.execPath, [
+    RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir,
+  ], { cwd: ROOT, env: world.env });
+  running = { stdout: '', stderr: '', code: null, child };
+  running.child.stdout.on('data', chunk => { running.stdout += chunk; });
+  running.child.stderr.on('data', chunk => { running.stderr += chunk; });
+  running.exited = new Promise(resolve => running.child.on('close', code => {
+    running.code = code;
+    resolve(running);
+  }));
+
+  // The adapter is parked once its poll after the ring is held open.
+  let survived = false;
+  try {
+    const deadline = Date.now() + 30_000;
+    while (running.code === null && Date.now() <= deadline) {
+      if (room.afters.length > plan.length) { survived = true; break; }
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  } finally {
+    running.child.kill('SIGKILL');
+    await running.exited;
+    await room.close();
+  }
+  assert.ok(survived, `adapter did not survive to its poll after the ring: ${JSON.stringify(running.stderr)}`);
+
+  assert.doesNotMatch(running.stderr, /was unreachable for/, 'neither outage ends the adapter');
+  const lines = running.stdout.split('\n').filter(Boolean);
+  assert.equal(lines.length, 1, running.stdout);
+  assert.match(lines[0], /^Interlock rang for Marlow: message 6 from Ana\. /);
+  for (const [index, observed] of seen.entries()) {
+    if (observed.step === 'hold') continue;
+    assert.equal(observed.stdout, '', `poll ${index + 1} (${observed.step}): nothing is rung before ring 6`);
+    assert.equal(observed.cursor, 5, `poll ${index + 1} (${observed.step}): the cursor waits for ring 6`);
+  }
+  assert.deepEqual(room.afters, [...Array(plan.length).fill(5), 6]);
+  const retries = running.stderr.split('\n')
+    .map(line => /retry (\d+) of 4/.exec(line)).filter(Boolean).map(match => Number(match[1]));
+  assert.deepEqual(retries, [1, 2, 1, 2, 3, 4], 'the second outage starts again at retry 1');
+  assert.equal(savedCursor(world.stateDir), 6);
+  assert.equal(fs.readdirSync(world.stateDir).some(name => name.startsWith('failed-')), false,
+    'a recovered outage leaves no failure record');
+});
+
 test('refusals and malformed pages from the room are not retried', async () => {
   const cases = [
     [401, { ok: false, error: 'unauthorized' }, /expired or revoked/],
@@ -806,7 +886,11 @@ test('the documented outage tolerance is the schedule the runner uses', () => {
     `the command exits ${EXIT_UNREACHABLE}; every other failure exits 1`));
   assert.ok(doorbell.includes(
     `cursor ${OUTAGE_RETRY_SCHEDULE_MS.length} times, ` +
-    '1, 2, 4, 8, 15, 30, 30 and 30 seconds apart, so it rides out about two minutes of outage.'));
+    '1, 2, 4, 8, 15, 30, 30 and 30 seconds apart, so it rides out about two minutes of outage ' +
+    'when each attempt fails fast, and longer, up to about 11 minutes, when each attempt waits out ' +
+    'its 60-second request timeout.'));
+  // Worst case: the first attempt and every retry each wait out 60 s, plus the waits between them.
+  assert.equal((OUTAGE_RETRY_SCHEDULE_MS.length + 1) * 60_000 + 120_000, 11 * 60_000);
   assert.ok(doorbell.includes('Each retry prints one line on stderr and nothing on stdout'));
   assert.ok(doorbell.includes('After the last retry it exits 1, saying how long the room was unreachable, with its cursor unchanged'));
   assert.ok(authoring.includes(`Treat exit status ${EXIT_UNREACHABLE} from \`interlock doorbell\` as an unreachable room`));
