@@ -11,6 +11,9 @@ const packageJson = require('../package.json');
 const EXIT_OK = 0;
 const EXIT_RUNTIME = 1;
 const EXIT_USAGE = 2;
+// `interlock doorbell` alone uses this status, so a ring adapter can tell a
+// room it could not reach from a room that refused it.
+const EXIT_UNREACHABLE = 3;
 const DEFAULT_URL = 'http://localhost:8788';
 const WRONG_SETUP_CODE_REPORT_MS = 1_000;
 const JOIN_WINDOW_MS = 15 * 60 * 1000;
@@ -575,17 +578,60 @@ function reportConnectionError(stderr, error, name) {
   }
 }
 
+// A gateway answering for a room that is down (502-504, and the 52x and 530
+// answers of a Cloudflare front) or a transport failure on the way to it means
+// the room was not reached. Every other HTTP status is the room's own answer.
+const UNREACHABLE_STATUSES = new Set([502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530]);
+const UNREACHABLE_TRANSPORT = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+  'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+function transportCode(error) {
+  for (let cause = error, depth = 0; cause && depth < 4; cause = cause.cause, depth += 1) {
+    if (typeof cause.code === 'string' && UNREACHABLE_TRANSPORT.has(cause.code)) return cause.code;
+    if (Array.isArray(cause.errors) && cause.errors.length > 0 &&
+        cause.errors.every(inner => inner && UNREACHABLE_TRANSPORT.has(inner.code))) {
+      return cause.errors[0].code;
+    }
+  }
+  return null;
+}
+
+function roomUnreachable(error) {
+  if (!error) return false;
+  if (Number.isSafeInteger(error.status)) return UNREACHABLE_STATUSES.has(error.status);
+  return error.name === 'AbortError' || transportCode(error) !== null;
+}
+
+function loopbackRoom(profile) {
+  try { return new URL(profile.server_url).hostname === 'localhost'; }
+  catch (_) { return false; }
+}
+
+function roomLabel(profile) {
+  return loopbackRoom(profile) ? 'the local Interlock'
+    : `the Interlock room at ${terminalSafe(profile.server_url)}`;
+}
+
 function reportRequestError(stderr, error, profile) {
+  const room = roomLabel(profile);
   if (error && error.status === 401) {
     line(stderr, `interlock: connection ${terminalSafe(profile.name)} was refused; it may be expired or revoked.`);
   } else if (error && error.name === 'AbortError') {
-    line(stderr, 'interlock: the local Interlock request timed out; run the command again.');
+    line(stderr, loopbackRoom(profile)
+      ? 'interlock: the local Interlock request timed out; run the command again.'
+      : `interlock: the request to ${room} timed out; run the command again.`);
   } else if (error && error.code === 'incompatible-response') {
-    line(stderr, 'interlock: the local Interlock answered, but its response does not match this CLI version; use the command from the same Interlock release as the running room.');
+    line(stderr, `interlock: ${room} answered, but its response does not match this CLI version; use the command from the same Interlock release as the running room.`);
+  } else if (error && error.exact && UNREACHABLE_STATUSES.has(error.status)) {
+    line(stderr, `interlock: ${room} is temporarily unavailable (HTTP ${error.status}); run the command again.`);
+  } else if (error && Number.isSafeInteger(error.status) && UNREACHABLE_STATUSES.has(error.status)) {
+    line(stderr, `interlock: could not reach ${terminalSafe(profile.server_url)} (HTTP ${error.status}); make sure Interlock is running.`);
   } else if (error && Number.isSafeInteger(error.status)) {
-    line(stderr, 'interlock: the local Interlock refused the command.');
+    line(stderr, `interlock: ${room} refused the command.`);
   } else {
-    line(stderr, `interlock: could not reach ${profile.server_url}; make sure Interlock is running.`);
+    line(stderr, `interlock: could not reach ${terminalSafe(profile.server_url)}; make sure Interlock is running.`);
   }
 }
 
@@ -950,7 +996,7 @@ async function runDoorbell(args, io, dependencies = {}) {
     if (!validRingPage(page, after)) throw incompatibleResponse();
   } catch (error) {
     reportRequestError(io.stderr, error, profile);
-    return EXIT_RUNTIME;
+    return roomUnreachable(error) ? EXIT_UNREACHABLE : EXIT_RUNTIME;
   }
   if (parsed.json) {
     line(io.stdout, JSON.stringify(Object.assign({}, page, {
@@ -2074,6 +2120,7 @@ function run(argv, io, dependencies = {}) {
 module.exports = {
   EXIT_OK,
   EXIT_RUNTIME,
+  EXIT_UNREACHABLE,
   EXIT_USAGE,
   HISTORY_DRAIN_BYTES,
   HISTORY_DRAIN_MESSAGES,

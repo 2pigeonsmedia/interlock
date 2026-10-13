@@ -14,6 +14,7 @@ const profileModule = require('../src/client/profiles.js');
 const {
   EXIT_OK,
   EXIT_RUNTIME,
+  EXIT_UNREACHABLE,
   EXIT_USAGE,
   HISTORY_DRAIN_BYTES,
   HISTORY_DRAIN_MESSAGES,
@@ -2488,6 +2489,116 @@ test('doorbell rejects malformed pages and option shapes without touching histor
     assert.equal(refused.code, EXIT_USAGE, argv.join(' '));
     assert.match(refused.stderr, /usage/);
   }
+});
+
+function transportFailure(code) {
+  const cause = Object.assign(new Error(`connect ${code} 127.0.0.1:8788`), { code });
+  return Object.assign(new TypeError('fetch failed'), { cause });
+}
+
+function gatewayPage(status) {
+  return {
+    ok: false,
+    status,
+    async json() { throw new SyntaxError('Unexpected token < in JSON at position 0'); },
+  };
+}
+
+test('doorbell gives an unreachable room its own exit status', async () => {
+  assert.equal(EXIT_UNREACHABLE, 3);
+  const outages = [
+    ['connection refused', async () => { throw transportFailure('ECONNREFUSED'); }, /could not reach http:\/\/localhost:8788/],
+    ['connection reset', async () => { throw transportFailure('ECONNRESET'); }, /could not reach http:\/\/localhost:8788/],
+    ['socket closed', async () => { throw transportFailure('UND_ERR_SOCKET'); }, /could not reach http:\/\/localhost:8788/],
+    ['name lookup', async () => { throw transportFailure('EAI_AGAIN'); }, /could not reach http:\/\/localhost:8788/],
+    ['request timeout', async () => {
+      throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
+    }, /timed out/],
+  ];
+  for (const status of [502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530]) {
+    outages.push([`HTTP ${status}`, async () => gatewayPage(status),
+      new RegExp(`could not reach http://localhost:8788 \\(HTTP ${status}\\)`)]);
+  }
+  for (const [label, fetch, expected] of outages) {
+    const world = admittedConnection({ cursor: 4 });
+    world.dependencies.fetch = fetch;
+    const result = await captureCommand(
+      ['doorbell', '--connection', 'Marlow', '--json'], world.dependencies);
+    assert.equal(result.code, EXIT_UNREACHABLE, label);
+    assert.equal(result.stdout, '', label);
+    assert.match(result.stderr, expected, label);
+    assert.doesNotMatch(result.stderr, /refused the command/, label);
+    assert.deepEqual(world.events, [['load', 'Marlow']], label);
+  }
+});
+
+test('doorbell keeps refusals and unknown failures apart from an unreachable room', async () => {
+  const refusals = [
+    ['HTTP 401', async () => fakeResponse(401, { ok: false, error: 'unauthorized' }), /expired or revoked/],
+    ['HTTP 403', async () => fakeResponse(403, { ok: false, error: 'forbidden' }), /refused the command/],
+    ['HTTP 400', async () => fakeResponse(400, { ok: false, error: 'invalid-ring-query' }), /refused the command/],
+    ['HTTP 404', async () => gatewayPage(404), /refused the command/],
+    ['HTTP 429', async () => fakeResponse(429, { ok: false, error: 'busy' }), /refused the command/],
+    ['HTTP 500', async () => gatewayPage(500), /refused the command/],
+    ['unclassified failure', async () => { throw new Error('offline'); }, /could not reach/],
+    ['malformed page', async () => fakeResponse(200, { ok: true, rings: 'bad' }), /does not match this CLI version/],
+  ];
+  for (const [label, fetch, expected] of refusals) {
+    const world = admittedConnection({ cursor: 4 });
+    world.dependencies.fetch = fetch;
+    const result = await captureCommand(
+      ['doorbell', '--connection', 'Marlow', '--json'], world.dependencies);
+    assert.equal(result.code, EXIT_RUNTIME, label);
+    assert.equal(result.stdout, '', label);
+    assert.match(result.stderr, expected, label);
+  }
+  const expired = admittedConnection({ expires_at: 50 });
+  expired.dependencies.fetch = async () => assert.fail('an expired connection must not poll');
+  const lapsed = await captureCommand(
+    ['doorbell', '--connection', 'Marlow', '--json'], expired.dependencies);
+  assert.equal(lapsed.code, EXIT_RUNTIME);
+  assert.match(lapsed.stderr, /has expired/);
+});
+
+test('a refused command names the room that was contacted', async () => {
+  const hosted = admittedConnection({ server_url: 'https://room.example.test' });
+  hosted.dependencies.fetch = async () => fakeResponse(409, { ok: false, error: 'conflict' });
+  const refused = await captureCommand(
+    ['doorbell', '--connection', 'Marlow', '--json'], hosted.dependencies);
+  assert.equal(refused.code, EXIT_RUNTIME);
+  assert.equal(refused.stderr,
+    'interlock: the Interlock room at https://room.example.test refused the command.\n');
+
+  const hostedOutage = admittedConnection({ server_url: 'https://room.example.test' });
+  hostedOutage.dependencies.fetch = async () => gatewayPage(530);
+  const unreachable = await captureCommand(
+    ['doorbell', '--connection', 'Marlow', '--json'], hostedOutage.dependencies);
+  assert.equal(unreachable.code, EXIT_UNREACHABLE);
+  assert.match(unreachable.stderr, /could not reach https:\/\/room\.example\.test \(HTTP 530\)/);
+  assert.doesNotMatch(unreachable.stderr, /local Interlock/);
+
+  const hostedSay = admittedConnection({ server_url: 'https://room.example.test' });
+  hostedSay.dependencies.fetch = async () => fakeResponse(409, { ok: false, error: 'conflict' });
+  hostedSay.dependencies.readStdin = async () => 'hello';
+  const said = await captureCommand(
+    ['say', '--connection', 'Marlow', '--stdin'], hostedSay.dependencies);
+  assert.equal(said.code, EXIT_RUNTIME);
+  assert.match(said.stderr, /the Interlock room at https:\/\/room\.example\.test refused the command/);
+
+  const busy = admittedConnection({ server_url: 'https://room.example.test' });
+  busy.dependencies.fetch = async () => fakeResponse(503, { ok: false, error: 'chat-unavailable' });
+  const unavailable = await captureCommand(
+    ['doorbell', '--connection', 'Marlow', '--json'], busy.dependencies);
+  assert.equal(unavailable.code, EXIT_UNREACHABLE);
+  assert.equal(unavailable.stderr,
+    'interlock: the Interlock room at https://room.example.test is temporarily unavailable (HTTP 503); run the command again.\n');
+
+  const loopback = admittedConnection();
+  loopback.dependencies.fetch = async () => fakeResponse(409, { ok: false, error: 'conflict' });
+  const local = await captureCommand(
+    ['doorbell', '--connection', 'Marlow', '--json'], loopback.dependencies);
+  assert.equal(local.code, EXIT_RUNTIME);
+  assert.equal(local.stderr, 'interlock: the local Interlock refused the command.\n');
 });
 
 test('machine-readable output is available only behind the explicit json flag', async () => {
