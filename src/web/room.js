@@ -85,8 +85,9 @@ for (const command of document.querySelectorAll('[data-interlock-join-command]')
   command.textContent = `interlock join --url ${window.location.origin}`;
 }
 
-// Hosted mode: the static page says "this computer", which is only true on
-// loopback. Swap those sentences once the server says the room is hosted.
+// Hosted mode: the server already serves the page with hosted wording, so on
+// a hosted page these swaps find nothing to change or write the same text.
+// They remain as a fallback for a page served without that wording.
 function replaceText(element, from, to) {
   if (!element) return;
   for (const node of element.childNodes) {
@@ -112,11 +113,15 @@ function applyHostedWording() {
   }
 }
 
+// The server writes the badge's first text: "Local: checking…" on loopback,
+// "Hosted: checking…" in hosted mode. Later states keep that label.
+const connectionLabel = /^Hosted:/.test(connectionState.textContent) ? 'Hosted' : 'Local';
+
 function setConnectionState(state) {
   connectionState.className = 'connection-state ' + state;
   connectionState.textContent = state === 'running'
-    ? 'Local: running'
-    : (state === 'checking' ? 'Local: checking…' : 'Local: not responding');
+    ? `${connectionLabel}: running`
+    : (state === 'checking' ? `${connectionLabel}: checking…` : `${connectionLabel}: not responding`);
 }
 
 async function checkConnection() {

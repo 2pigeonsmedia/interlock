@@ -11,11 +11,15 @@ const logoutButton = document.querySelector('#logout-button');
 let currentUser = null;
 let pendingCheckRunning = false;
 
+// The server writes the badge's first text: "Local: checking…" on loopback,
+// "Hosted: checking…" in hosted mode. Later states keep that label.
+const connectionLabel = /^Hosted:/.test(connectionState.textContent) ? 'Hosted' : 'Local';
+
 function setConnectionState(state) {
   connectionState.className = 'connection-state ' + state;
   connectionState.textContent = state === 'running'
-    ? 'Local: running'
-    : (state === 'checking' ? 'Local: checking…' : 'Local: not responding');
+    ? `${connectionLabel}: running`
+    : (state === 'checking' ? `${connectionLabel}: checking…` : `${connectionLabel}: not responding`);
 }
 
 async function readJson(response) {

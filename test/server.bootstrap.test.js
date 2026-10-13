@@ -12,6 +12,16 @@ const test = require('node:test');
 const { LOOPBACK_HOST, startInterlockServer } = require('../src/server.js');
 const { LOCK_FILENAME } = require('../src/instance_lock.js');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
+const { renderGuidePage } = require('../src/guide.js');
+
+const WEB_DIR = path.join(__dirname, '..', 'src', 'web');
+
+// Loopback mode serves each page file exactly as it is on disk.
+function assertServedAsOnDisk(served, expected, label) {
+  const bytes = Buffer.from(served.text, 'utf8');
+  assert.ok(bytes.equals(expected), label + ' is served byte for byte in loopback mode');
+  assert.equal(Number(served.headers['content-length']), expected.length, label + ' content-length');
+}
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -127,6 +137,7 @@ test('the loopback browser transport completes first-owner setup through the pub
       headers: { host: `localhost:${port}` },
     });
     assert.equal(page.status, 200);
+    assertServedAsOnDisk(page, fs.readFileSync(path.join(WEB_DIR, 'setup.html')), 'setup.html');
     assert.match(page.headers['content-security-policy'], /default-src 'self'/);
     assert.match(page.text, /Set up your room/);
     assert.match(page.text, /Confirm password/);
@@ -280,6 +291,7 @@ test('the loopback browser transport completes first-owner setup through the pub
       headers: { host: `localhost:${port}` },
     });
     assert.equal(roomPage.status, 200);
+    assertServedAsOnDisk(roomPage, fs.readFileSync(path.join(WEB_DIR, 'room.html')), 'room.html');
     assert.match(roomPage.text, /Open your room/);
     assert.match(roomPage.text, /Connect an AI/);
     assert.match(roomPage.text, /Conversation/);
@@ -301,6 +313,9 @@ test('the loopback browser transport completes first-owner setup through the pub
     assert.equal(helpPage.status, 200);
     assert.match(helpPage.headers['content-type'], /^text\/html/);
     assert.match(helpPage.text, /The Interlock Guide/);
+    assertServedAsOnDisk(helpPage, Buffer.from(renderGuidePage(
+      fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8'),
+      fs.readFileSync(path.join(WEB_DIR, 'help.html'), 'utf8')), 'utf8'), 'the Help page');
     assert.match(helpPage.text, /src="docs\/screenshots\/connect-an-ai\.png"/);
     assert.doesNotMatch(helpPage.text, /INTERLOCK_GUIDE_CONTENT/,
       'the running Help page must replace its shell marker with GUIDE.md');
@@ -325,6 +340,7 @@ test('the loopback browser transport completes first-owner setup through the pub
     assert.match(sourcePage.text, /Source and license/);
     assert.match(sourcePage.text, /https:\/\/github\.com\/2pigeonsmedia\/interlock/);
     assert.match(sourcePage.headers['content-security-policy'], /default-src 'self'/);
+    assertServedAsOnDisk(sourcePage, fs.readFileSync(path.join(WEB_DIR, 'source.html')), 'source.html');
     const roomLicense = await call(runtime, {
       path: '/license', headers: { host: `localhost:${port}` },
     });

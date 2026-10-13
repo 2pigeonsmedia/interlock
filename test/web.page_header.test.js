@@ -55,11 +55,13 @@ async function settle() {
   await new Promise(resolve => setImmediate(resolve));
 }
 
-function world(fetcher, csrf = 'csrf-token') {
+// The badge's first text is what the server wrote into the page.
+function world(fetcher, csrf = 'csrf-token', badge = 'Local: checking…') {
   const elements = Object.fromEntries([
     '#connection-state', '#connect-ai-button', '#settings-button',
     '#account-label', '#logout-button',
   ].map(selector => [selector, new FakeElement()]));
+  elements['#connection-state'].textContent = badge;
   const assigned = [];
   const storage = new Map(csrf === null ? [] : [['interlock.csrf.v1', csrf]]);
   const timers = [];
@@ -186,4 +188,29 @@ test('secondary header does not claim it can sign out without this tab csrf', as
   assert.match(elements['#logout-button'].title, /sign in before it can securely sign out/);
   await elements['#logout-button'].click();
   assert.deepEqual(assigned, ['/']);
+});
+
+test('the connection badge keeps the label the server wrote: Hosted in hosted mode', async () => {
+  let healthy = true;
+  const fetcher = async url => {
+    if (url === '/api/session') return response(401, { ok: false, error: 'not-authenticated', hosted: true });
+    if (url === '/health') {
+      if (healthy) return response(200, { ok: true });
+      throw new Error('offline');
+    }
+    throw new Error('unexpected fetch: ' + url);
+  };
+  const hosted = world(fetcher, null, 'Hosted: checking…');
+  await settle();
+  assert.equal(hosted.elements['#connection-state'].textContent, 'Hosted: running');
+  healthy = false;
+  const interval = hosted.timers.find(timer => timer.interval === 10_000);
+  assert.ok(interval, 'ARRANGEMENT: the connection check repeats');
+  await interval.callback();
+  assert.equal(hosted.elements['#connection-state'].textContent, 'Hosted: not responding');
+
+  healthy = true;
+  const local = world(fetcher, null);
+  await settle();
+  assert.equal(local.elements['#connection-state'].textContent, 'Local: running');
 });

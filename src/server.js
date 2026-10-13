@@ -18,6 +18,7 @@ const { readRoomSettings } = require('./room_settings.js');
 const { renderGuidePage } = require('./guide.js');
 const { acquireInstanceLock } = require('./instance_lock.js');
 const { parseHostedOrigin, makeSetupCode, setupCodeMatches } = require('./hosted.js');
+const { HOSTED_PAGE_FILES, renderHostedPage } = require('./hosted_pages.js');
 
 const LOOPBACK_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8788;
@@ -148,10 +149,18 @@ function observeWrongSetupCode(observer, count) {
   catch (_) { /* contained */ }
 }
 
-function loadBrowserAssets() {
+// Loopback mode serves every file as it is on disk. Hosted mode serves the
+// shared pages with hosted wording written into the HTML (see hosted_pages.js);
+// the origin is the configured one, rendered once at startup.
+function loadBrowserAssets(hosted) {
   const webDir = path.join(__dirname, 'web');
+  const readPage = filename => {
+    const bytes = fs.readFileSync(path.join(webDir, filename));
+    if (hosted === null || !HOSTED_PAGE_FILES.includes(filename)) return bytes;
+    return Buffer.from(renderHostedPage(filename, bytes.toString('utf8'), hosted.origin), 'utf8');
+  };
   const guideMarkdown = fs.readFileSync(path.join(webDir, '..', '..', 'GUIDE.md'), 'utf8');
-  const helpShell = fs.readFileSync(path.join(webDir, 'help.html'), 'utf8');
+  const helpShell = readPage('help.html').toString('utf8');
   const helpPage = Object.freeze({
     body: Buffer.from(renderGuidePage(guideMarkdown, helpShell), 'utf8'),
     contentType: 'text/html; charset=utf-8',
@@ -200,7 +209,7 @@ function loadBrowserAssets() {
     const loaded = Object.create(null);
     for (const [route, [filename, contentType]] of Object.entries(surfaceFiles)) {
       loaded[route] = Object.freeze({
-        body: fs.readFileSync(path.join(webDir, filename)),
+        body: readPage(filename),
         contentType,
       });
     }
@@ -346,7 +355,7 @@ function claimDataDirOrigin(dataDir, origin) {
 
 async function startInterlockServer(options) {
   const { dataDir, port, hosted, onWrongSetupCode } = requireInterlockOptions(options);
-  const assets = loadBrowserAssets();
+  const assets = loadBrowserAssets(hosted);
   const origin = hosted ? hosted.origin : new URL(`http://localhost:${port}`).origin;
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const instanceLock = acquireInstanceLock({ dataDir });

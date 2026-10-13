@@ -1,10 +1,13 @@
 'use strict';
 
 // Hosted pages must not tell a remote visitor that the room is "on this
-// computer". The static pages are shared by both modes and stay as they are
-// (loopback wording); room.js and setup.js swap the text at runtime only when
-// the server says the room is hosted. This is a source contract: it pins each
-// swapped string and its hosted gate, not browser behaviour.
+// computer". The page files are shared by both modes and keep the loopback
+// wording on disk. In hosted mode the server serves them with hosted wording
+// already in the HTML (hosted_pages.js; tested in hosted_pages.test.js and
+// server.hosted_pages.test.js), and room.js and setup.js still swap the text
+// at runtime when the server says the room is hosted. This is a source
+// contract: it pins each swapped string and its hosted gate, not browser
+// behaviour.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -58,4 +61,15 @@ test('setup.js swaps the recovery hint when hosted and names each setup refusal'
     assert.ok(SETUP_JS.includes(`'${code}': '${text}'`), 'setup.js names ' + code);
   }
   assert.match(SETUP_JS, /SETUP_REFUSALS\[error\.code\]/, 'friendlyFailure looks the code up');
+});
+
+test('room.js keeps the connection badge label the server wrote', () => {
+  assert.ok(ROOM_JS.includes("const connectionLabel = /^Hosted:/.test(connectionState.textContent) ? 'Hosted' : 'Local';"),
+    'the label is read from the served badge');
+  const setter = ROOM_JS.slice(ROOM_JS.indexOf('function setConnectionState('));
+  assert.ok(ROOM_JS.includes('function setConnectionState('), 'ARRANGEMENT: the badge setter exists');
+  for (const text of ['`${connectionLabel}: running`', '`${connectionLabel}: checking…`', '`${connectionLabel}: not responding`']) {
+    assert.ok(setter.slice(0, 400).includes(text), 'badge text: ' + text);
+  }
+  assert.ok(!ROOM_JS.includes("'Local: running'"), 'no fixed Local label remains');
 });
