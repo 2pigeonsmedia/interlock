@@ -88,6 +88,13 @@ test('HOSTING.md schedules a stop, backup and start in a window the operator cho
   assertSentence(HOSTING, '`interlock backup` refuses while the room is running');
 });
 
+test('HOSTING.md keeps the backup window inside the doorbell outage tolerance', () => {
+  assertSentence(HOSTING,
+    'Armed doorbell adapters ride out about two minutes of the room being unreachable, so keep the stop-to-start window shorter than that');
+  assertSentence(HOSTING,
+    'If a backup takes longer, each armed adapter exits with a message saying how long the room was unreachable; re-arm them after the backup.');
+});
+
 test('HOSTING.md describes wrong setup codes as noise the server survives', () => {
   assertSentence(HOSTING,
     'A line such as `interlock: wrong setup code (3 so far)` means a wrong code was submitted; nothing locks and nothing exits.');

@@ -4,10 +4,13 @@ const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { once } = require('node:events');
+
+const profileModule = require('../src/client/profiles.js');
 
 const ROOT = path.join(__dirname, '..');
 const RUNNER = path.join(ROOT, 'integrations', 'doorbell.js');
@@ -535,4 +538,288 @@ test('a second live adapter cannot steal one connection from the first', async (
   assert.match(second.stderr, /another doorbell adapter already owns connection Marlow/);
   const [code] = await once(first, 'exit');
   assert.equal(code, 0);
+});
+
+// A fake room served over HTTP and reached through the real interlock CLI, so
+// the outage classification is exercised exactly as an armed adapter meets it.
+function fakeRoom() {
+  const room = {
+    port: null,
+    afters: [],
+    respond: () => ({ status: 200, body: { ok: true, rings: [], cursor: 0, timed_out: true, connection_session: null } }),
+    server: null,
+  };
+  room.listen = async port => {
+    room.server = http.createServer((request, response) => {
+      const url = new URL(request.url, 'http://localhost');
+      assert.equal(url.pathname, '/api/ai/rings');
+      const after = Number(url.searchParams.get('after'));
+      room.afters.push(after);
+      const answer = room.respond(after, room.afters.length);
+      if (typeof answer.body === 'string') {
+        response.writeHead(answer.status, { 'content-type': 'text/html' });
+        response.end(answer.body);
+      } else {
+        response.writeHead(answer.status, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(answer.body));
+      }
+    });
+    room.server.listen(port, '127.0.0.1');
+    await once(room.server, 'listening');
+    room.port = room.server.address().port;
+  };
+  room.close = async () => {
+    room.server.closeAllConnections();
+    room.server.close();
+    await once(room.server, 'close');
+  };
+  return room;
+}
+
+function ringsAfter(after, rings, cursor) {
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      rings: rings.filter(ring => ring.id > after),
+      cursor: Math.max(after, cursor),
+      timed_out: rings.every(ring => ring.id <= after),
+      connection_session: 3,
+    },
+  };
+}
+
+function gateway(status) {
+  return { status, body: `<html><body>error code: ${status}</body></html>` };
+}
+
+function roomWorld(port, schedule) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-doorbell-outage-'));
+  const connectionDir = path.join(root, 'connections');
+  const profiles = profileModule.openProfiles({ connectionDir });
+  const selector = crypto.randomBytes(16).toString('base64url');
+  const secret = crypto.randomBytes(32).toString('base64url');
+  const identity = {
+    name: 'Marlow', product: 'Codex CLI', product_provenance: 'client-reported',
+  };
+  profiles.createUnadmitted(Object.assign({}, identity, {
+    server_url: `http://localhost:${port}`,
+    request_id: REQUEST_A,
+    token: `${selector}.${secret}`,
+    selector,
+    digest: crypto.createHash('sha256').update(secret, 'utf8').digest('hex'),
+    created_at: 1,
+  }));
+  profiles.markAdmitted('Marlow', Object.assign({}, identity, {
+    request_id: REQUEST_A, subject_id: 'seat-1', admitted_at: 2,
+    expires_at: Date.now() + 60 * 60 * 1000,
+  }));
+  const env = Object.assign({}, process.env, {
+    INTERLOCK_CONNECTION_DIR: connectionDir,
+    INTERLOCK_DOORBELL_RETRY_SCHEDULE_MS: schedule,
+  });
+  delete env.INTERLOCK_DOORBELL_INTERLOCK;
+  return { root, stateDir: path.join(root, 'state'), env };
+}
+
+function startAdapter(world, adapter = 'stdout', extraEnv = {}) {
+  const child = childProcess.spawn(process.execPath, [
+    RUNNER, 'run', '--adapter', adapter, '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir, '--once',
+  ], { cwd: ROOT, env: Object.assign({}, world.env, extraEnv) });
+  const result = { stdout: '', stderr: '', code: null };
+  child.stdout.on('data', chunk => { result.stdout += chunk; });
+  child.stderr.on('data', chunk => { result.stderr += chunk; });
+  result.exited = new Promise(resolve => child.on('close', code => {
+    result.code = code;
+    resolve(result);
+  }));
+  result.child = child;
+  return result;
+}
+
+async function finished(running, milliseconds = 30_000) {
+  let timer;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      running.child.kill('SIGKILL');
+      reject(new Error(`adapter did not finish: ${JSON.stringify(running.stderr)}`));
+    }, milliseconds);
+  });
+  try { return await Promise.race([running.exited, limit]); }
+  finally { clearTimeout(timer); }
+}
+
+async function stderrMatches(running, pattern, milliseconds = 15_000) {
+  const deadline = Date.now() + milliseconds;
+  while (!pattern.test(running.stderr)) {
+    if (running.code !== null || Date.now() > deadline) {
+      assert.fail(`stderr never matched ${pattern}: ${JSON.stringify(running.stderr)}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+
+function savedCursor(stateDir) {
+  const name = onlyStateFile(stateDir);
+  return name === undefined ? null
+    : JSON.parse(fs.readFileSync(path.join(stateDir, name), 'utf8')).cursor;
+}
+
+const RING_SIX = [{ id: 6, ts: 1_788_379_260_000, byline: 'Ana', kind: 'person', session: null }];
+
+test('the stdout adapter rides out a brief room outage and then rings exactly once', async () => {
+  const room = fakeRoom();
+  await room.listen(0);
+  const port = room.port;
+  const world = roomWorld(port, '100,100,100,100,100,100,100,100,100,100,100,100');
+  room.respond = after => ringsAfter(after, [], 5);
+  const seeded = await finished(startAdapter(world));
+  assert.equal(seeded.code, 0, seeded.stderr);
+  assert.equal(seeded.stdout, '');
+  assert.equal(savedCursor(world.stateDir), 5);
+
+  await room.close();
+  room.afters = [];
+  const running = startAdapter(world);
+  await stderrMatches(running, /room is unreachable[^\n]*retry 1 of 12/);
+  assert.equal(running.stdout, '', 'a retry is not a ring');
+  assert.equal(savedCursor(world.stateDir), 5, 'a failed poll must not move the cursor');
+
+  // Ring 6 was posted while the room was down. The front answers 502 and then
+  // 530 before the room itself answers again.
+  room.respond = (after, served) => {
+    if (served === 1) return gateway(502);
+    if (served === 2) return gateway(530);
+    return ringsAfter(after, RING_SIX, 6);
+  };
+  await room.listen(port);
+  const done = await finished(running);
+  await room.close();
+
+  assert.equal(done.code, 0, done.stderr);
+  const lines = done.stdout.split('\n').filter(Boolean);
+  assert.equal(lines.length, 1, done.stdout);
+  assert.match(lines[0], /^Interlock rang for Marlow: message 6 from Ana\. /);
+  assert.deepEqual(room.afters, [5, 5, 5], 'every poll across the outage starts at the saved cursor');
+  assert.match(done.stderr, /HTTP 502/);
+  assert.match(done.stderr, /HTTP 530/);
+  assert.equal(done.stderr.split('\n').filter(line => /retry \d+ of 12/.test(line)).length >= 3, true,
+    done.stderr);
+  assert.equal(savedCursor(world.stateDir), 6);
+  assert.equal(fs.readdirSync(world.stateDir).some(name => name.startsWith('failed-')), false,
+    'a recovered outage leaves no failure record');
+
+  room.respond = after => ringsAfter(after, RING_SIX, 6);
+  room.afters = [];
+  await room.listen(port);
+  const again = await finished(startAdapter(world));
+  await room.close();
+  assert.equal(again.code, 0, again.stderr);
+  assert.equal(again.stdout, '', 'the ring delivered after the outage is not delivered twice');
+  assert.deepEqual(room.afters, [6]);
+});
+
+test('an outage longer than the retry bound exits loud with the cursor unchanged', async () => {
+  const room = fakeRoom();
+  await room.listen(0);
+  const world = roomWorld(room.port, '20,20,20');
+  room.respond = after => ringsAfter(after, [], 5);
+  const seeded = await finished(startAdapter(world));
+  assert.equal(seeded.code, 0, seeded.stderr);
+  await room.close();
+
+  const done = await finished(startAdapter(world));
+  assert.equal(done.code, 1);
+  assert.equal(done.stdout, '');
+  assert.equal(done.stderr.split('\n').filter(line => /retry \d+ of 3/.test(line)).length, 3,
+    done.stderr);
+  assert.match(done.stderr, /the Interlock room was unreachable for [\d.]+ seconds/);
+  assert.match(done.stderr, /could not reach http:\/\/localhost:\d+/);
+  assert.equal(savedCursor(world.stateDir), 5);
+  assert.equal(fs.readdirSync(world.stateDir).some(name => name.startsWith('failed-')), true);
+});
+
+test('refusals and malformed pages from the room are not retried', async () => {
+  const cases = [
+    [401, { ok: false, error: 'unauthorized' }, /expired or revoked/],
+    [403, { ok: false, error: 'forbidden' }, /refused the command/],
+    [404, '<html>not found</html>', /refused the command/],
+    [500, '<html>internal</html>', /refused the command/],
+    [200, { ok: true, rings: 'bad', cursor: 5, timed_out: false, connection_session: 3 },
+      /does not match this CLI version/],
+  ];
+  for (const [status, body, expected] of cases) {
+    const room = fakeRoom();
+    room.respond = () => ({ status, body });
+    await room.listen(0);
+    const world = roomWorld(room.port, '20,20,20,20,20');
+    const done = await finished(startAdapter(world));
+    await room.close();
+    assert.equal(done.code, 1, `${status}: ${done.stderr}`);
+    assert.equal(done.stdout, '', String(status));
+    assert.deepEqual(room.afters, [0], `${status} is answered once, without a retry`);
+    assert.doesNotMatch(done.stderr, /retry \d+ of/, String(status));
+    assert.match(done.stderr, /Interlock poll failed/, String(status));
+    assert.match(done.stderr, expected, String(status));
+    assert.equal(savedCursor(world.stateDir), null, String(status));
+  }
+});
+
+test('a rejected host nudge is not retried and the next run offers the same ring', async () => {
+  const host = fixture(ringPage(), 7);
+  const room = fakeRoom();
+  room.respond = after => ringsAfter(after, RING_SIX, 6);
+  await room.listen(0);
+  const world = roomWorld(room.port, '20,20,20,20,20');
+  const hostEnv = {
+    INTERLOCK_DOORBELL_CODEX: host.host,
+    FAKE_HOST_ARGS: host.hostArgs,
+    FAKE_HOST_EXIT: '7',
+  };
+  const rejected = await finished(startAdapter(world, 'codex', hostEnv));
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.stderr, /Codex rejected the nudge; ring remains eligible/);
+  assert.deepEqual(room.afters, [0], 'a host failure is not an outage');
+  assert.equal(savedCursor(world.stateDir), null);
+
+  const accepted = await finished(startAdapter(world, 'codex',
+    Object.assign({}, hostEnv, { FAKE_HOST_EXIT: '0' })));
+  await room.close();
+  assert.equal(accepted.code, 0, accepted.stderr);
+  const queued = JSON.parse(fs.readFileSync(host.hostArgs, 'utf8'));
+  assert.match(queued[queued.indexOf('--message') + 1], /message 6 from Ana/);
+  assert.equal(savedCursor(world.stateDir), 6);
+});
+
+test('the documented outage tolerance is the schedule the runner uses', () => {
+  const { OUTAGE_RETRY_SCHEDULE_MS } = require(RUNNER);
+  const { EXIT_UNREACHABLE } = require('../src/cli.js');
+  assert.deepEqual(OUTAGE_RETRY_SCHEDULE_MS,
+    [1_000, 2_000, 4_000, 8_000, 15_000, 30_000, 30_000, 30_000]);
+  assert.equal(OUTAGE_RETRY_SCHEDULE_MS.reduce((total, delay) => total + delay, 0), 120_000);
+  const doorbell = fs.readFileSync(path.join(ROOT, 'docs', 'DOORBELL.md'), 'utf8')
+    .replace(/\s+/g, ' ');
+  const authoring = fs.readFileSync(path.join(ROOT, 'docs', 'ADAPTER_AUTHORING.md'), 'utf8')
+    .replace(/\s+/g, ' ');
+  assert.ok(doorbell.includes(
+    `the command exits ${EXIT_UNREACHABLE}; every other failure exits 1`));
+  assert.ok(doorbell.includes(
+    `cursor ${OUTAGE_RETRY_SCHEDULE_MS.length} times, ` +
+    '1, 2, 4, 8, 15, 30, 30 and 30 seconds apart, so it rides out about two minutes of outage.'));
+  assert.ok(doorbell.includes('Each retry prints one line on stderr and nothing on stdout'));
+  assert.ok(doorbell.includes('After the last retry it exits 1, saying how long the room was unreachable, with its cursor unchanged'));
+  assert.ok(authoring.includes(`Treat exit status ${EXIT_UNREACHABLE} from \`interlock doorbell\` as an unreachable room`));
+});
+
+test('an invalid retry schedule refuses before the adapter takes ownership', () => {
+  const world = fixture(ringPage());
+  const result = childProcess.spawnSync(process.execPath, runnerArgs(world, 'stdout'), {
+    cwd: ROOT, encoding: 'utf8',
+    env: Object.assign(runnerEnv(world), { INTERLOCK_DOORBELL_RETRY_SCHEDULE_MS: '10,-1' }),
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /comma-separated list of positive millisecond delays/);
+  assert.equal(fs.existsSync(world.interlockCount), false, 'no poll ran');
+  assert.equal(fs.existsSync(path.join(world.stateDir, '.locks')), false, 'no ownership was taken');
 });

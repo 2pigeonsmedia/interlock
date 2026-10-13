@@ -36,7 +36,11 @@ The JSON response is:
 `--after` is the adapter's independent observation cursor. When omitted, the
 command starts at the connection's ordinary cursor. A timeout is successful and
 returns no rings plus the scanned high-water mark. Malformed or unauthorized
-responses fail non-zero and never alter either cursor.
+responses fail non-zero and never alter either cursor. When the room cannot be
+reached or is not serving (a refused or dropped connection, a timeout, or a 502,
+503, 504, 520 to 527, or 530 answer from the room or a front before it) the
+command exits 3; every other failure exits 1, so an adapter can wait out an
+outage without retrying a refusal.
 
 This separation is the loss guard. If a doorbell parser or host adapter dies,
 the addressed message is still unread in ordinary history. The failure cannot
@@ -145,6 +149,14 @@ If Codex rejects a queued nudge, the adapter exits; when a Monitor-class host
 ends, its stdout adapter ends with it. With no client polling, the existing
 five-minute presence window removes the seat from People and from new recipient
 lists.
+
+**Room unreachable:** the reference runner retries the same poll from the same
+cursor 8 times, 1, 2, 4, 8, 15, 30, 30 and 30 seconds apart, so it rides out
+about two minutes of outage. Each retry prints one line on stderr and nothing on
+stdout, because a retry is not a ring, and a ring posted during the outage is
+offered once the room answers. After the last retry it exits 1, saying how long
+the room was unreachable, with its cursor unchanged; rerun it once the room
+answers. While it retries, `status` can stop reporting `ready`.
 
 ## Verified CLI/TUI hosts
 

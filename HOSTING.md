@@ -154,6 +154,12 @@ room is unreachable while it runs; pick a quiet hour. Backups are plaintext and
 sensitive: see [`BACKUP.md`](BACKUP.md) and keep them somewhere private, ideally
 copied off the machine as well.
 
+Armed doorbell adapters ride out about two minutes of the room being
+unreachable, so keep the stop-to-start window shorter than that: time the script
+once by hand with `time sudo /usr/local/sbin/interlock-nightly-backup` after you
+save it below. If a backup takes longer, each armed adapter exits with a message
+saying how long the room was unreachable; re-arm them after the backup.
+
 ```sh
 sudo install -d -o interlock -g interlock -m 0700 /var/backups/interlock
 ```

@@ -92,6 +92,9 @@ If the reference runners do not fit, preserve all of these properties:
    must not silently leave an old session consuming its rings.
 8. Define what happens when the monitor ends, the adapter fails, the connection
    is replaced and the machine restarts. Fail loudly and preserve the ring.
+9. Treat exit status 3 from `interlock doorbell` as an unreachable room: retry
+   the same poll from the same cursor for a bounded time, then fail loudly.
+   Exit status 1 is never an outage; do not retry it.
 
 Minimal pseudocode for a new API-backed adapter:
 

@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const childProcess = require('node:child_process');
 const { acquireInstanceLock, inspectInstanceLock } = require('../src/instance_lock.js');
+const { EXIT_UNREACHABLE } = require('../src/cli.js');
 
 const SCHEMA = 1;
 const RUNTIME_SCHEMA = 1;
@@ -15,6 +16,16 @@ const MAX_STATUS_FILE = 16 * 1024;
 const FRESH_MS = 75 * 1000;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATE_FILE = /^doorbell-[0-9a-f]{24}\.json$/;
+// A poll that could not reach the room (a restart, a nightly backup, a front
+// answering 502 or 530) is retried after each of these delays in turn. Their
+// sum, two minutes, is the outage the adapter rides out before it exits; each
+// attempt also waits for its own poll to fail.
+const OUTAGE_RETRY_SCHEDULE_MS = Object.freeze([
+  1_000, 2_000, 4_000, 8_000, 15_000, 30_000, 30_000, 30_000,
+]);
+const RETRY_SCHEDULE_ENV = 'INTERLOCK_DOORBELL_RETRY_SCHEDULE_MS';
+const MAX_REASON = 300;
+const SLEEPER = new Int32Array(new SharedArrayBuffer(4));
 
 const HELP = `Interlock doorbell adapter
 
@@ -429,6 +440,33 @@ function command(name, args) {
   });
 }
 
+// Tests shorten the schedule; it accepts only a short list of positive
+// millisecond delays.
+function retrySchedule(env) {
+  if (!Object.prototype.hasOwnProperty.call(env, RETRY_SCHEDULE_ENV)) {
+    return OUTAGE_RETRY_SCHEDULE_MS;
+  }
+  const parts = String(env[RETRY_SCHEDULE_ENV]).split(',');
+  if (parts.length > 32 || !parts.every(part => /^[1-9][0-9]{0,5}$/.test(part))) return null;
+  return Object.freeze(parts.map(Number));
+}
+
+function sleep(milliseconds) {
+  Atomics.wait(SLEEPER, 0, 0, milliseconds);
+}
+
+function seconds(milliseconds) {
+  return String(Math.round(milliseconds / 100) / 10);
+}
+
+// The first line the interlock command wrote to stderr, made safe to repeat.
+function pollReason(polled) {
+  const text = polled.error ? polled.error.message : (polled.stderr || '');
+  const first = String(text).split('\n').map(part => part.trim()).find(Boolean) || '';
+  const safe = first.replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, '');
+  return safe.length > MAX_REASON ? safe.slice(0, MAX_REASON) + '…' : safe;
+}
+
 function nudge(options, rings) {
   const ids = rings.map(ring => ring.id).join(', ');
   const from = [...new Set(rings.map(ring => ring.byline))].join(', ');
@@ -460,6 +498,11 @@ function runAdapter(argv) {
     fail('--replace-connection requires existing adapter state from the superseded connection');
     return;
   }
+  const schedule = retrySchedule(process.env);
+  if (!schedule) {
+    fail(`${RETRY_SCHEDULE_ENV} must be a comma-separated list of positive millisecond delays`);
+    return;
+  }
   let replacementPending = options.replaceConnection;
   let after = replacementPending || state === null ? null : state.cursor;
   let firstPoll = true;
@@ -488,14 +531,39 @@ function runAdapter(argv) {
       fail(`runtime manifest could not be committed: ${error.message}`);
       return;
     }
+    let outageStarted = null;
+    let retries = 0;
     while (true) {
       const args = ['doorbell', '--connection', options.connection, '--json'];
       if (after !== null) args.push('--after', String(after));
+      const pollStarted = Date.now();
       const polled = command(interlock, [...interlockPrefix, ...args]);
+      if (!polled.error && polled.status === EXIT_UNREACHABLE) {
+        // Nothing reached the room, so nothing moves: the same poll, from the
+        // same cursor, runs again. Stdout stays silent because only a ring is
+        // a ring.
+        if (outageStarted === null) outageStarted = pollStarted;
+        const elapsed = Date.now() - outageStarted;
+        if (retries < schedule.length) {
+          const delay = schedule[retries];
+          retries += 1;
+          process.stderr.write('interlock doorbell adapter: the Interlock room is unreachable ' +
+            `(${pollReason(polled)}); retry ${retries} of ${schedule.length} in ${seconds(delay)} s; ` +
+            'the cursor is unchanged.\n');
+          sleep(delay);
+          continue;
+        }
+        const saved = saveFailure(stateDir, polled.stdout || '', polled.stderr || '');
+        fail(`the Interlock room was unreachable for ${seconds(elapsed)} seconds ` +
+          `(${pollReason(polled)}); the cursor is unchanged and any waiting ring stays eligible. ` +
+          `Raw output preserved at ${saved}. Rerun this command once the room answers again.`);
+        return;
+      }
       if (polled.error || polled.status !== 0) {
         const saved = saveFailure(stateDir, polled.stdout || '',
           (polled.stderr || '') + (polled.error ? `\n${polled.error.message}` : ''));
-        fail(`Interlock poll failed; raw output preserved at ${saved}` +
+        const reason = pollReason(polled);
+        fail(`Interlock poll failed${reason ? ` (${reason})` : ''}; raw output preserved at ${saved}` +
           replacementRecoveryHint(state, replacementPending, firstPoll));
         return;
       }
@@ -507,6 +575,8 @@ function runAdapter(argv) {
           replacementRecoveryHint(state, replacementPending, firstPoll));
         return;
       }
+      outageStarted = null;
+      retries = 0;
       if (state !== null && page.connection_request_id !== state.connection_request_id) {
         if (!replacementPending) {
           fail(`the Interlock connection was replaced; refusing to reuse the old adapter cursor at ${file}; confirm the new admission was intentional, then rerun this command once with --replace-connection`);
@@ -608,6 +678,7 @@ if (require.main === module) main();
 module.exports = Object.freeze({
   FRESH_MS,
   HELP,
+  OUTAGE_RETRY_SCHEDULE_MS,
   inspectStatus,
   main,
   parseArgs,
