@@ -62,6 +62,13 @@ test('HOSTING.md routes the tunnel to loopback without overriding the Host heade
   assertSentence(HOSTING,
     'Do not set `httpHostHeader` or any other Host override: Interlock answers 421 to every request whose `Host` is not the hosted origin.');
   assertSentence(HOSTING, 'sudo cloudflared service install');
+  assert.match(config, /^credentials-file: \/etc\/cloudflared\/TUNNEL_ID\.json$/m);
+  const copy = fenced(HOSTING, 'sh', '/etc/cloudflared/TUNNEL_ID.json');
+  assert.match(copy,
+    /^sudo install -o root -g root -m 0600 ~\/\.cloudflared\/TUNNEL_ID\.json \/etc\/cloudflared\/TUNNEL_ID\.json$/m,
+    'the credentials written by tunnel create are copied to where the config points, root-only');
+  assert.ok(HOSTING.indexOf(copy) < HOSTING.indexOf('sudo cloudflared service install'),
+    'the credentials are in place before the service is installed');
   assertSentence(HOSTING,
     'Allow inbound SSH and nothing else: the tunnel makes only outbound connections.');
 });

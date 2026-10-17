@@ -82,7 +82,18 @@ the old one stops working. Once setup completes the code no longer exists.
 
 Create the tunnel and its DNS record with `cloudflared` (`cloudflared tunnel
 login`, `cloudflared tunnel create`, `cloudflared tunnel route dns`; Cloudflare's
-own documentation covers these), then write `/etc/cloudflared/config.yml`:
+own documentation covers these). `cloudflared tunnel create` prints the tunnel's
+ID and writes its credentials to `~/.cloudflared/TUNNEL_ID.json` in the home
+directory of the user who ran it. The configuration below has the service read
+them from `/etc/cloudflared/`, so copy them there, owned by root and readable
+only by root (replace `TUNNEL_ID` with the printed ID, here and below):
+
+```sh
+sudo install -d -m 0755 /etc/cloudflared
+sudo install -o root -g root -m 0600 ~/.cloudflared/TUNNEL_ID.json /etc/cloudflared/TUNNEL_ID.json
+```
+
+Then write `/etc/cloudflared/config.yml`:
 
 ```yaml
 tunnel: TUNNEL_ID
