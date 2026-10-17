@@ -1439,7 +1439,7 @@ test('start in hosted mode prints the front rule and the setup code once; a comp
   assert.match(out, /AI join: interlock join --url https:\/\/app\.example\.test\n/);
   const front = 'Your front on this machine must forward https://app.example.test to http://localhost:8788 and preserve the Host header.\n';
   const code = `\nSetup code (first owner only, shown once): ${SETUP_CODE}\n` +
-    'Open the room in a browser, create the owner account, and type this code when asked. It is never written anywhere else.\n';
+    'Open the room in a browser, create the owner account, and type this code when asked. It is printed only here, on this process\'s output (under systemd, that is the journal), and is not saved to disk.\n';
   assert.ok(out.includes(front + code), out);
   assert.ok(out.indexOf('AI join:') < out.indexOf('Your front on this machine'));
   assert.equal(out.split('Setup code').length - 1, 1, 'the code is printed exactly once');
