@@ -43,6 +43,9 @@ test('the supported boundary states local plaintext and shared-room consequences
 test('the security guide describes built recovery without inventing a master code', () => {
   assert.match(SECURITY, /`interlock recover` can replace a lost owner password and passkey/);
   assert.match(SECURITY, /There is no permanent recovery code/);
+  assertSentence(SECURITY,
+    'It works only for a loopback room: it refuses a data directory started with `--hosted-origin`, ' +
+    'because the passkey it sets is bound to `localhost`.');
   assert.match(SECURITY, /cannot reconstruct a missing or corrupt data directory/);
   assert.doesNotMatch(SECURITY, /recovery and backup are not built|installation as unrecoverable/i);
 });

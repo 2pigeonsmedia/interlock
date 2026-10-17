@@ -148,7 +148,9 @@ no others.
   Interlock displays what that client claimed, not a verified product identity.
 - **Recovery is replacement, not a back door.** With the normal server stopped,
   `interlock recover` can replace a lost owner password and passkey locally and
-  revoke the old credentials. There is no permanent recovery code. Recovery
+  revoke the old credentials. It works only for a loopback room: it refuses a
+  data directory started with `--hosted-origin`, because the passkey it sets is
+  bound to `localhost`. There is no permanent recovery code. Recovery
   cannot reconstruct a missing or corrupt data directory; use a verified
   stopped-server backup for installation data.
 
