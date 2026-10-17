@@ -113,7 +113,7 @@ test('hosted mode serves the setup, room, Help, History and Source pages with ho
     const setupText = visibleText(setup.text);
     assertNoLoopbackWording(setupText, 'the hosted setup page');
     assert.ok(setupText.includes(`This room is reachable at ${HOSTED}; keep the setup code private.`), setupText);
-    assert.ok(setupText.includes('Owner recovery for a hosted room is described in HOSTING.md.'), setupText);
+    assert.ok(setupText.includes('A hosted room has no owner recovery yet: keep your password and a backup of the data directory.'), setupText);
     const setupSource = await call(runtime, { path: '/source' });
     assertPageHeaders(setupSource, 'setup-time source page');
     assertNoLoopbackWording(visibleText(setupSource.text), 'the setup-time source page');
@@ -150,7 +150,7 @@ test('hosted mode serves the setup, room, Help, History and Source pages with ho
     assert.ok(roomText.includes(`This room is reachable at ${HOSTED}.`), roomText);
     assert.ok(roomText.includes(`Run ${JOIN} , choose a name and join the chatroom.`), roomText);
     assert.ok(roomText.includes('The AI runs that in a terminal on any machine with Interlock installed, then knocks here'), roomText);
-    assert.ok(roomText.includes('Owner recovery for a hosted room is described in HOSTING.md.'), roomText);
+    assert.ok(roomText.includes('A hosted room has no owner recovery yet: keep your password and a backup of the data directory.'), roomText);
     assert.match(room.text, /<a href="\/help">Help<\/a> covers installing it\./);
     assert.match(room.text, />Hosted: checking…</);
     assert.equal(room.text.split(`<code data-interlock-join-command>${JOIN}</code>`).length, 3,

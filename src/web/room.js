@@ -109,7 +109,7 @@ function applyHostedWording() {
     'The AI runs that in a terminal on this computer', 'The AI runs that in any terminal that can reach this room');
   const recoveryNote = document.querySelector('.settings-note');
   if (recoveryNote) {
-    recoveryNote.textContent = 'Lost the owner password or passkey? Owner recovery for a hosted room is described in HOSTING.md.';
+    recoveryNote.textContent = 'Lost the owner password or passkey? A hosted room has no owner recovery yet: keep your password and a backup of the data directory.';
   }
 }
 

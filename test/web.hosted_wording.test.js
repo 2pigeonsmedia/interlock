@@ -41,7 +41,7 @@ test('room.js swaps every "this computer" sentence when /api/session says hosted
     "' in any terminal that can reach this room.'",
     '`This room is reachable at ${origin}.`',
     "'The AI runs that in any terminal that can reach this room'",
-    "'Lost the owner password or passkey? Owner recovery for a hosted room is described in HOSTING.md.'",
+    "'Lost the owner password or passkey? A hosted room has no owner recovery yet: keep your password and a backup of the data directory.'",
   ]) assert.ok(swap.includes(text), 'room.js hosted wording: ' + text);
   // The join command already names the origin: `interlock join --url <origin>`.
   assert.match(ROOM_JS, /command\.textContent = `interlock join --url \$\{window\.location\.origin\}`;/);
@@ -50,7 +50,7 @@ test('room.js swaps every "this computer" sentence when /api/session says hosted
 test('setup.js swaps the recovery hint when hosted and names each setup refusal', () => {
   const hostedBranch = SETUP_JS.slice(SETUP_JS.indexOf('if (status.hosted === true) {'));
   assert.ok(SETUP_JS.includes('if (status.hosted === true) {'), 'ARRANGEMENT: the setup page has a hosted branch');
-  assert.ok(hostedBranch.includes("'Interlock does not give you a permanent recovery code. Owner recovery for a hosted room is described in HOSTING.md.'"),
+  assert.ok(hostedBranch.includes("'Interlock does not give you a permanent recovery code. A hosted room has no owner recovery yet: keep your password and a backup of the data directory.'"),
     'the hosted recovery hint');
   for (const [code, text] of [
     ['setup-code-required', 'Enter the setup code printed by the server.'],
