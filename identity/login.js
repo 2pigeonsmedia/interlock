@@ -160,14 +160,19 @@ function createLoginThrottle(opts) {
   function accountKey(a) { return keyOf('a:' + subjects.fold(a)); }
   function sourceKey(s) { return keyOf('s:' + String(s)); }
 
+  // The delay each dimension imposes on its own, counting attempts in flight.
+  function delays(a) {
+    const now = Number.isSafeInteger(a.now) ? a.now : 0;
+    const sk = sourceKey(a.source);
+    const ak = accountKey(a.account);
+    const ds = delayFor(countFor(source, sk, now) + (inflightSource.get(sk) || 0));
+    const da = delayFor(countFor(account, ak, now) + (inflightAccount.get(ak) || 0));
+    return { now, sk, ak, ds, da };
+  }
+
   return Object.freeze({
     check(args) {
-      const a = isPlainObject(args) ? args : {};
-      const now = Number.isSafeInteger(a.now) ? a.now : 0;
-      const sk = sourceKey(a.source);
-      const ak = accountKey(a.account);
-      const ds = delayFor(countFor(source, sk, now) + (inflightSource.get(sk) || 0));
-      const da = delayFor(countFor(account, ak, now) + (inflightAccount.get(ak) || 0));
+      const { ds, da } = delays(isPlainObject(args) ? args : {});
       const delay_ms = Math.max(ds, da);      // both checked; the larger controls
       return Object.freeze({ allowed: delay_ms === 0, delay_ms, retry_after_ms: delay_ms });
     },
@@ -194,6 +199,19 @@ function createLoginThrottle(opts) {
       const now = Number.isSafeInteger(a.now) ? a.now : 0;
       bump(source, sourceKey(a.source), now);
       bump(account, accountKey(a.account), now);
+    },
+    // Records an attempt that check() throttled. It never reached the password
+    // check, so the account name it carries is unverified: the attempt counts
+    // only against the dimension that is throttling it. An address throttled
+    // by its own failures keeps its counter alive while it keeps trying, but
+    // cannot create an account entry for every made-up name it sends — that is
+    // how one address could fill the tables and push the throttle into failing
+    // closed for everyone. An account throttled by its own failures still
+    // counts every attempt against it, from whatever address.
+    recordThrottled(args) {
+      const { now, sk, ak, ds, da } = delays(isPlainObject(args) ? args : {});
+      if (ds > 0) bump(source, sk, now);
+      if (da > 0) bump(account, ak, now);
     },
     recordSuccess(args) {
       const a = isPlainObject(args) ? args : {};
@@ -311,11 +329,12 @@ function createLoginService(opts) {
     if (sec_fetch_site !== INPUT_LIMITS.sec_fetch_site) return INVALID;
 
     // A throttle decision performs no account lookup and may skip the KDF — but
-    // login MUST actually await the delay before returning (M19).
+    // login MUST actually await the delay before returning (M19). The attempt is
+    // recorded only against what throttled it: its name was never checked.
     const decision = throttle.check({ source, account: name, now });
     if (decision && decision.delay_ms > 0) {
       await sleep(decision.delay_ms);
-      throttle.recordFailure({ source, account: name, now });
+      if (typeof throttle.recordThrottled === 'function') throttle.recordThrottled({ source, account: name, now });
       return INVALID;
     }
 
