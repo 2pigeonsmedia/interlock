@@ -105,6 +105,17 @@ test('the hosted setup code and the password door are described as built', () =>
   assertSentence(SECURITY,
     'Anyone who knows an account\'s name can therefore keep that account\'s owner out of password sign-in ' +
     'for as long as they keep guessing; choose a long, unique password, because it is the front door.');
+  assertSentence(SECURITY,
+    'An attempt refused by the throttle counts only against what throttled it, so one address cannot exhaust ' +
+    'the throttle by sending made-up account names.');
+  assertSentence(SECURITY,
+    'Many addresses together can: the throttle keeps bounded tables, and a few thousand distinct client addresses ' +
+    'failing within fifteen minutes (one IPv6 /52 holds 4,096 /64 blocks) can fill them.');
+  assertSentence(SECURITY,
+    'The throttle then cannot tell a new address or account from the attackers\' and fails closed: nearly every ' +
+    'sign-in, the owner\'s included, waits 30 seconds and is refused.');
+  assertSentence(SECURITY,
+    'Sign-in recovers once fifteen minutes pass with no attempt, or when the server restarts.');
 });
 
 test('telemetry is four capped streams, reads are quiet, and the limits are stated', () => {

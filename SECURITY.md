@@ -75,6 +75,15 @@ no others.
   the server restarts. Anyone who knows an account's name can therefore keep
   that account's owner out of password sign-in for as long as they keep
   guessing; choose a long, unique password, because it is the front door.
+  An attempt refused by the throttle counts only against what throttled it, so
+  one address cannot exhaust the throttle by sending made-up account names.
+  Many addresses together can: the throttle keeps bounded tables, and a few
+  thousand distinct client addresses failing within fifteen minutes (one IPv6
+  /52 holds 4,096 /64 blocks) can fill them. The throttle then cannot tell a
+  new address or account from the attackers' and fails closed: nearly every
+  sign-in, the owner's included, waits 30 seconds and is refused. Sessions
+  already signed in keep working. Sign-in recovers once fifteen minutes pass
+  with no attempt, or when the server restarts.
 - **Plaintext local storage.** The transcript, identity state, transcript
   exports, and backups are not encrypted by Interlock. The default data
   directory also contains local AI connection profiles with raw bearer

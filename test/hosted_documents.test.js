@@ -114,6 +114,13 @@ test('HOSTING.md says what throttled sign-in looks like and what clears it', () 
   assert.doesNotMatch(HOSTING, /guesses per account per day/);
   assertSentence(HOSTING,
     'If the owner is refused with the right password after someone else has been guessing, wait fifteen minutes without trying or restart the service: the throttle counters live in memory.');
+  assertSentence(HOSTING,
+    'One address cannot cause this, but the throttle\'s tables are bounded, and a few thousand distinct addresses ' +
+    'failing within fifteen minutes (one IPv6 /52 holds 4,096 /64 blocks) can fill them.');
+  assertSentence(HOSTING,
+    'The throttle then fails closed: nearly every sign-in waits 30 seconds and is refused.');
+  assertSentence(HOSTING,
+    'It clears once fifteen minutes pass with no attempt, or when you restart the service.');
 });
 
 test('README states both shapes and points to the runbook', () => {
