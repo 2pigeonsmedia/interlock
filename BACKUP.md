@@ -94,7 +94,7 @@ See [`RECOVERY.md`](RECOVERY.md).
 
 An adapter state directory outside the restored data can be newer than the
 backup. If its cursor is ahead of the restored transcript while the restored AI
-connection is unchanged, v0.1.5 cannot reset that adapter in place;
+connection is unchanged, v0.2.0 cannot reset that adapter in place;
 `--replace-connection` correctly refuses a matching connection. Do not delete
 or rewrite adapter state. Leave that adapter stopped. If a doorbell is required,
 deliberately admit a fresh AI connection under a different name and arm that

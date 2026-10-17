@@ -149,6 +149,16 @@ test('telemetry is four capped streams, reads are quiet, and the limits are stat
     'being healthy; writes, denies and every other capability still fail closed.');
 });
 
+test('the supported versions name the v0.2 line and retire v0.1', () => {
+  const section = SECURITY.slice(SECURITY.indexOf('## Supported versions'));
+  assert.ok(SECURITY.includes('## Supported versions'), 'ARRANGEMENT: the section exists');
+  assertSentence(section, 'The latest tagged `v0.2.x` release is supported;');
+  assertSentence(section,
+    '`v0.1.x` releases are no longer supported and receive no further fixes, so upgrade by following [`UPGRADE.md`](UPGRADE.md).');
+  assert.equal(require('../package.json').version.split('.').slice(0, 2).join('.'), '0.2',
+    'the supported line is the package\'s own line');
+});
+
 test('what is not in scope names the fronts that are unsupported', () => {
   assertSentence(SECURITY,
     'A modified copy exposed beyond loopback or placed behind any front other than Cloudflare Tunnel, ' +
