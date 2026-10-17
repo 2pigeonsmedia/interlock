@@ -94,14 +94,19 @@ no others.
 - **Audit telemetry is bounded and kept apart.** Telemetry is kept in four
   streams in the identity directory: `authn`, `authz`, and their deny
   counterparts `authn_deny` and `authz_deny`. Denies and sign-in failures are
-  kept separately so a flood of failures cannot erase the evidence of itself.
+  kept separately so a flood of failures cannot age successful sign-ins and
+  allowed actions out of their streams.
   Telemetry rotates at 64 MiB and keeps at most 8 older segments per
   stream, oldest removed first; the mutation record is never pruned. Worst-case
   telemetry disk use is four streams × (8 × 64 MiB + a live file), about
-  2.25 GiB. The trade-off is deliberate: an admitted participant who generates
-  telemetry at volume can age older rows out of that stream, but cannot fill the
-  disk, and cannot touch the mutation record. Copy telemetry elsewhere if you
-  need it longer. A failed removal is a telemetry fault like any failed
+  2.25 GiB. The trade-off is deliberate: whoever generates telemetry at volume
+  can age older rows out of that stream, but cannot fill the disk, and cannot
+  touch the mutation record. In hosted mode that includes anyone who can reach
+  the room, not only an admitted participant: every request to an AI route with
+  an unrecognised bearer credential writes one `authn_deny` row of about 270
+  bytes and is not throttled, so about 2.2 million such requests replace the
+  whole `authn_deny` stream, including the record of earlier failed sign-ins.
+  Copy telemetry elsewhere if you need it longer. A failed removal is a telemetry fault like any failed
   telemetry write: the installation reports unhealthy until the operator resets
   it. Routine successful room reads write no audit row in either shape; every
   deny and every mutation is still written. Because an allowed read is not an

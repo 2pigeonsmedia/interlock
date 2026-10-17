@@ -123,7 +123,14 @@ test('telemetry is four capped streams, reads are quiet, and the limits are stat
     'Telemetry is kept in four streams in the identity directory: `authn`, `authz`, ' +
     'and their deny counterparts `authn_deny` and `authz_deny`.');
   assertSentence(SECURITY,
-    'Denies and sign-in failures are kept separately so a flood of failures cannot erase the evidence of itself.');
+    'Denies and sign-in failures are kept separately so a flood of failures cannot age successful sign-ins ' +
+    'and allowed actions out of their streams.');
+  assert.doesNotMatch(SECURITY, /cannot erase the evidence of itself/, 'a flood can age out its own stream');
+  assertSentence(SECURITY,
+    'In hosted mode that includes anyone who can reach the room, not only an admitted participant: ' +
+    'every request to an AI route with an unrecognised bearer credential writes one `authn_deny` row of about 270 bytes ' +
+    'and is not throttled, so about 2.2 million such requests replace the whole `authn_deny` stream, ' +
+    'including the record of earlier failed sign-ins.');
   assertSentence(SECURITY,
     'Telemetry rotates at 64 MiB and keeps at most 8 older segments per stream, oldest removed first; ' +
     'the mutation record is never pruned.');
