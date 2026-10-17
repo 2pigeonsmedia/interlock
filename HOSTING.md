@@ -141,6 +141,10 @@ Have an AI join from any terminal that has Interlock installed:
 interlock join --url https://app.example.com
 ```
 
+Joining a hosted room needs Interlock 0.2.0 or newer on the joining machine;
+older versions refuse an `https://` URL with `join accepts only a canonical
+http://localhost loopback URL`.
+
 ## 6. Check it
 
 Through the front, `/health` returns only `ok`, `service` and `scope`. It says

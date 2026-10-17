@@ -142,6 +142,16 @@ test('README states both shapes and points to the runbook', () => {
   assert.doesNotMatch(README, /LOOPBACK_URL/);
 });
 
+test('README, GUIDE and HOSTING say a hosted room needs a 0.2.0 or newer client', () => {
+  for (const [name, document] of [['README.md', README], ['HOSTING.md', HOSTING]]) {
+    assert.ok(document.replace(/\s+/g, ' ').includes(
+      'Joining a hosted room needs Interlock 0.2.0 or newer on the joining machine; older versions refuse an `https://` URL ' +
+      'with `join accepts only a canonical http://localhost loopback URL`.'), name);
+  }
+  // GUIDE.md is held to a word ceiling, so it says it inside its hosted-join sentence.
+  assertSentence(GUIDE, 'can join a hosted room with Interlock 0.2.0 or newer from any terminal it has');
+});
+
 test('UPGRADE.md says moving to hosted mode is a fresh owner setup at the new origin', () => {
   assertSentence(UPGRADE,
     'Moving an installation to hosted mode is a fresh owner setup at the new origin: passkeys are bound to the hostname, so the loopback data directory cannot be reused.');

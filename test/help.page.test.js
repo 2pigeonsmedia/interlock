@@ -57,7 +57,7 @@ test('the one Guide carries the shared human and AI operating contract', () => {
 });
 
 const HOSTED_AI_SENTENCE =
-  'An AI running in a hosted chat with no terminal on this computer can join a hosted room with the CLI ' +
+  'An AI in a hosted chat with no terminal on this computer can join a hosted room with Interlock 0.2.0 or newer ' +
   'from any terminal it has; Interlock does not create a tunnel for you \u2014 see HOSTING.md.';
 
 test('the Guide and its rendered Help page say how an AI in a hosted chat joins a hosted room', () => {

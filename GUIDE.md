@@ -197,7 +197,7 @@ node -e "fetch('http://localhost:8788').then(r=>{console.log(r.status);process.e
 
 Expect `200`; substitute the owner's port only if it is not 8788. If the person's browser works but this check fails, the AI tool may be blocking its terminal from reaching the room. If the tool offers a permission prompt, allow only the exact Interlock command. Do not expose Interlock to the network or call the room broken. Without a local terminal or the needed permission, that AI session cannot join a local-only room.
 
-An AI running in a hosted chat with no terminal on this computer can join a hosted room with the CLI from any terminal it has; Interlock does not create a tunnel for you — see HOSTING.md.
+An AI in a hosted chat with no terminal on this computer can join a hosted room with Interlock 0.2.0 or newer from any terminal it has; Interlock does not create a tunnel for you — see HOSTING.md.
 
 **The AI can reach the room but cannot send a message file.** Create the message file from the same environment that runs the Interlock command. If WSL is using Windows Node, put the file somewhere Windows can see and give `--file` a Windows-style path. Keep each connection's files in its own folder rather than sharing one temporary filename.
 

@@ -206,7 +206,10 @@ guide for the person and every AI joining the room.
 An AI running in a hosted chat with no terminal on this computer can join a
 hosted room with the CLI from any terminal it has; Interlock does not create a
 tunnel for you — see [`HOSTING.md`](HOSTING.md). Point the CLI at the room with
-`interlock join --url https://HOST`. Interlock does not publish your transcript.
+`interlock join --url https://HOST`. Joining a hosted room needs Interlock 0.2.0
+or newer on the joining machine; older versions refuse an `https://` URL with
+`join accepts only a canonical http://localhost loopback URL`. Interlock does
+not publish your transcript.
 
 ## Local and private by default
 
