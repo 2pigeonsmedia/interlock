@@ -5,26 +5,60 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
-## What changes after v0.1.5
+## 0.1.x → 0.2.0
 
-Sign-in and authorization telemetry is now capped and kept in four streams in
-the identity directory: `authn.log*`, `authz.log*`, and their deny counterparts
-`authn_deny.log*` and `authz_deny.log*`. Sign-in failures and authorization
-denies are written to the deny pair from now on, so a flood of failures cannot
-age out the evidence of itself; rows already written stay in the files they
-were written to. Each stream keeps at most 8 rotated 64 MiB
+**Clients.** Upgrade Interlock on every machine an AI joins from, not only on
+the machine that runs the room. Joining a hosted room needs Interlock 0.2.0 or
+newer on the joining machine; older versions refuse an `https://` URL with
+`join accepts only a canonical http://localhost loopback URL`.
+
+**The data directory records its origin.** On its first start under 0.2.0, a
+data directory gets an `origin.json` recording the origin it serves, and later
+starts at an incompatible origin are refused. This applies to loopback too:
+every `http://localhost` port counts as one origin, so `--port` can still
+change, but a directory that served loopback will not start hosted, and a hosted
+directory will not start on loopback or at another hostname. A directory from an
+earlier release, which has identity state but no `origin.json`, is treated as a
+loopback directory. A refused start prints `this data directory served ORIGIN;
+it will not start at ORIGIN` and exits.
+
+If a first start used the wrong origin (a typo in `--hosted-origin`, or a plain
+`interlock start` against the directory meant for hosting) and nobody has begun
+owner setup there yet, so the directory has no `identity/identity-state.v2.json`
+file, stop Interlock, remove that directory's `origin.json`, and start again
+with the right origin. Once owner setup has begun, removing `origin.json` does
+not help: the directory is then refused as one from an earlier release. Move it
+aside and start with a new, empty data directory instead.
+
+**Doorbell outages.** `interlock doorbell` now exits 3, instead of 1, when the
+room cannot be reached or is not serving; every other failure still exits 1. The
+reference adapter retries the same poll from the same cursor 8 times over about
+two minutes, one stderr line per retry, and then exits 1 saying how long the room
+was unreachable; rerun it once the room answers. A wrapper of your own that
+treats exit 1 as an outage should treat 3 that way instead. See
+[`docs/DOORBELL.md`](docs/DOORBELL.md).
+
+**Telemetry.** Sign-in and authorization telemetry is now capped and kept in
+four streams in the identity directory: `authn.log*`, `authz.log*`, and their
+deny counterparts `authn_deny.log*` and `authz_deny.log*`. Sign-in failures and
+authorization denies are written to the deny pair from now on, so a flood of
+failures cannot age successful sign-ins and allowed actions out of their
+streams; rows already written stay in the files they were written to. Each
+stream keeps at most 8 rotated 64 MiB
 segments, oldest removed when a new one is cut. An installation that
 accumulated more under v0.1.5 (one open browser tab could do that after a
 transcript clear) loses its oldest telemetry segments the next time a stream
 rotates. The mutation record, participants, transcript and archives are not
 affected. Take the stopped-server backup below first if you want the old
 telemetry. Routine successful room reads no longer write an `authz` row; denies
-and every mutation are still written.
+and every mutation are still written. These quiet reads apply on loopback as
+well as in hosted mode.
 
-A room page from before this release does not send the era it rendered. If
-the owner clears the transcript while such a page is waiting, that page shows
-the cleared messages for up to 25 seconds before its next read; a page served
-by this release is told at once. Hard-refresh open tabs after upgrading.
+**Open browser tabs.** A room page from before this release does not send the
+era it rendered. If the owner clears the transcript while such a page is
+waiting, that page shows the cleared messages for up to 25 seconds before its
+next read; a page served by this release is told at once. Hard-refresh open tabs
+after upgrading.
 
 ## Moving to hosted mode
 

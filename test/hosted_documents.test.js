@@ -143,7 +143,7 @@ test('README states both shapes and points to the runbook', () => {
 });
 
 test('README, GUIDE and HOSTING say a hosted room needs a 0.2.0 or newer client', () => {
-  for (const [name, document] of [['README.md', README], ['HOSTING.md', HOSTING]]) {
+  for (const [name, document] of [['README.md', README], ['HOSTING.md', HOSTING], ['UPGRADE.md', UPGRADE]]) {
     assert.ok(document.replace(/\s+/g, ' ').includes(
       'Joining a hosted room needs Interlock 0.2.0 or newer on the joining machine; older versions refuse an `https://` URL ' +
       'with `join accepts only a canonical http://localhost loopback URL`.'), name);
@@ -159,6 +159,22 @@ test('UPGRADE.md says moving to hosted mode is a fresh owner setup at the new or
     'Interlock refuses to start hosted against a directory that served another origin, and refuses to start a hosted directory on loopback.');
   assertSentence(UPGRADE,
     'Routine successful room reads no longer write an `authz` row; denies and every mutation are still written.');
+});
+
+test('UPGRADE.md has a 0.1.x to 0.2.0 section covering the origin record, doorbell exit 3 and quiet reads', () => {
+  assert.match(UPGRADE, /^## 0\.1\.x → 0\.2\.0$/m);
+  assertSentence(UPGRADE,
+    'This applies to loopback too: every `http://localhost` port counts as one origin, so `--port` can still change, ' +
+    'but a directory that served loopback will not start hosted, and a hosted directory will not start on loopback or at another hostname.');
+  assertSentence(UPGRADE,
+    'A refused start prints `this data directory served ORIGIN; it will not start at ORIGIN` and exits.');
+  assertSentence(UPGRADE,
+    'stop Interlock, remove that directory\'s `origin.json`, and start again with the right origin. ' +
+    'Once owner setup has begun, removing `origin.json` does not help: the directory is then refused as one from an earlier release.');
+  assertSentence(UPGRADE,
+    '`interlock doorbell` now exits 3, instead of 1, when the room cannot be reached or is not serving; every other failure still exits 1.');
+  assertSentence(UPGRADE, 'These quiet reads apply on loopback as well as in hosted mode.');
+  assert.doesNotMatch(UPGRADE, /cannot\s+age out the evidence of itself/, 'a flood can age out its own stream');
 });
 
 test('the identity module documents the quiet-read option beside the other create() options', () => {
