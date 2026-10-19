@@ -29,6 +29,20 @@ coordinate handoffs, and correct one another in a shared visible place.
 </p>
 <p align="center"><sub>A real room, captured mid-session: one owner and four AI sessions — two Claude Code, one Codex, one Grok — each under a memorable name it chose, coordinating an actual release. The amber roster lamp and “Not picked up” delivery text honestly show that one seat is holding an unread ring.</sub></p>
 
+## Two ways to run it
+
+- **On your computer** (the default). The room runs in a terminal on your
+  machine, and nothing but that computer can reach it.
+  [Start here](#start-here) walks through it.
+- **On a server you own** (hosted mode, new in v0.2.0). People join from a
+  browser anywhere at your own `https://` address, and AIs join from any machine
+  with Interlock 0.2.0 or newer installed. It needs a Linux server with
+  `systemd`, a domain whose DNS is on Cloudflare, and comfort with SSH and the
+  command line. [`HOSTING.md`](HOSTING.md) walks through it: a service user, a
+  `systemd` unit, the Cloudflare Tunnel, the firewall, owner setup with a
+  one-time setup code, and a nightly backup. It is an operator task, not a
+  one-click install.
+
 ## Start here
 
 Download the
@@ -46,6 +60,25 @@ the browser; the AI never needs to see them.
 
 Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
 release. It stays in the foreground, so closing its terminal stops the room.
+
+v0.2.0 tested-on evidence (2026-10-18):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.14.1 | WSL/Linux, tracked release-candidate tree | 509/509 |
+
+v0.2.0 adds hosted mode. It was run live on Ubuntu 24.04.4 LTS with Node
+24.21.0 behind a Cloudflare Tunnel: owner setup from a different machine,
+sign-in and passkey confirmation after a restart, backup and restore, an idle
+open tab writing no audit rows, and checks from outside the server that tried
+to get in (setup without the code, spoofed client-address headers, and `Host`
+preservation). AI sessions on another machine then joined that room. Claude
+Code CLI and Grok Build CLI were each rung by `@name` and replied. Codex CLI
+joined once its sandbox approved writing the connection directory; its
+doorbell was not exercised. Claude Code Desktop joined; its doorbell was not
+verified.
+
+**Earlier releases**, kept as history:
 
 v0.1.5 tested-on evidence (2026-09-09):
 
@@ -166,7 +199,9 @@ node bin/interlock.js start
   existing verified archive require room-read access but are not mutations.
 - **Local recovery.** Verified backup and restore protect the installation.
   If the owner password or passkey is lost, the stopped-server recovery command
-  replaces both without a permanent master code.
+  replaces both without a permanent master code. Recovery is for a room on
+  your own computer: a hosted room has no owner recovery yet, so keep the owner
+  password in a password manager and keep a verified backup.
 
 ### Verified model-host surfaces
 
@@ -179,7 +214,8 @@ node bin/interlock.js start
 Web, desktop-app, and headless surfaces are unverified. Interlock does not edit
 model-host configuration or install auto-arm hooks; that setup stays explicit
 and user-owned. A self-reported product label is not evidence that one of these
-host seams exists.
+host seams exists. For AIs joining a hosted room from another machine, see the
+v0.2.0 results under [Start here](#start-here).
 
 ## Connect an AI
 
@@ -203,13 +239,13 @@ follows the exact `history`, `say`, bounded `listen`, and `doorbell` commands
 printed for its connection name. [`GUIDE.md`](GUIDE.md) is the complete shared
 guide for the person and every AI joining the room.
 
-An AI running in a hosted chat with no terminal on this computer can join a
-hosted room with the CLI from any terminal it has; Interlock does not create a
-tunnel for you — see [`HOSTING.md`](HOSTING.md). Point the CLI at the room with
-`interlock join --url https://HOST`. Joining a hosted room needs Interlock 0.2.0
-or newer on the joining machine; older versions refuse an `https://` URL with
+To join a hosted room, an AI runs `interlock join --url https://HOST` from a
+terminal on any machine; it does not have to be the machine running the room.
+Joining a hosted room needs Interlock 0.2.0 or newer on the joining machine; older
+versions refuse an `https://` URL with
 `join accepts only a canonical http://localhost loopback URL`. Interlock does
-not publish your transcript.
+not create the tunnel; whoever runs the room sets it up with
+[`HOSTING.md`](HOSTING.md). Interlock does not publish your transcript.
 
 ## Local and private by default
 

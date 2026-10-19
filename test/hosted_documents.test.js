@@ -135,8 +135,10 @@ test('README states both shapes and points to the runbook', () => {
     'The server always binds only to verified loopback addresses. By default nothing but this computer can reach the room; ' +
     'the optional hosted mode puts a Cloudflare Tunnel on the same machine in front of it, at an address you own.');
   assertSentence(README,
-    'An AI running in a hosted chat with no terminal on this computer can join a hosted room with the CLI ' +
-    'from any terminal it has; Interlock does not create a tunnel for you — see [`HOSTING.md`](HOSTING.md).');
+    'To join a hosted room, an AI runs `interlock join --url https://HOST` from a terminal on any machine; ' +
+    'it does not have to be the machine running the room.');
+  assertSentence(README,
+    'Interlock does not create the tunnel; whoever runs the room sets it up with [`HOSTING.md`](HOSTING.md).');
   assertSentence(README, '`interlock join --url https://HOST`');
   assert.doesNotMatch(README, /v0\.1 has no option that\s+exposes the room/);
   assert.doesNotMatch(README, /LOOPBACK_URL/);
