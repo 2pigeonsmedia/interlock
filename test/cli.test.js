@@ -1963,7 +1963,7 @@ test('message schema skew reports an incompatible CLI instead of a network outag
   const result = await captureCommand(['history', '--connection', 'Marlow'], world.dependencies);
   assert.equal(result.code, EXIT_RUNTIME);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /answered[^]*does not match this CLI version/);
+  assert.match(result.stderr, /answered[^]*could not validate the response[^]*run the command again/);
   assert.match(result.stderr, /same Interlock release as the running room/);
   assert.doesNotMatch(result.stderr, /could not reach|make sure Interlock is running/);
   assert.deepEqual(world.events, [['load', 'Marlow']]);
@@ -1986,7 +1986,7 @@ test('history refuses a multi-message page before acknowledging or advancing', a
   const result = await captureCommand(['history', '--connection', 'Marlow'], world.dependencies);
   assert.equal(result.code, EXIT_RUNTIME);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /response does not match this CLI version/);
+  assert.match(result.stderr, /could not validate the response/);
   assert.equal(calls.length, 1, 'an oversized page must not reach the receipt endpoint');
   assert.equal(calls[0].url,
     'http://localhost:8788/api/ai/messages?after=0&limit=1&wait=0');
@@ -2274,7 +2274,7 @@ test('history --skip-to-current refuses a malformed head envelope without moving
   const result = await captureCommand(
     ['history', '--connection', 'Marlow', '--skip-to-current'], world.dependencies);
   assert.equal(result.code, EXIT_RUNTIME);
-  assert.match(result.stderr, /does not match this CLI version/);
+  assert.match(result.stderr, /could not validate the response/);
   assert.deepEqual(world.events, [['load', 'Marlow']]);
 });
 
@@ -2476,7 +2476,7 @@ test('doorbell rejects malformed pages and option shapes without touching histor
   const malformed = await captureCommand(
     ['doorbell', '--connection', 'Marlow', '--json'], world.dependencies);
   assert.equal(malformed.code, EXIT_RUNTIME);
-  assert.match(malformed.stderr, /does not match this CLI version/);
+  assert.match(malformed.stderr, /could not validate the response/);
   assert.deepEqual(world.events, [['load', 'Marlow']]);
 
   for (const argv of [
@@ -2541,7 +2541,7 @@ test('doorbell keeps refusals and unknown failures apart from an unreachable roo
     ['HTTP 429', async () => fakeResponse(429, { ok: false, error: 'busy' }), /refused the command/],
     ['HTTP 500', async () => gatewayPage(500), /refused the command/],
     ['unclassified failure', async () => { throw new Error('offline'); }, /could not reach/],
-    ['malformed page', async () => fakeResponse(200, { ok: true, rings: 'bad' }), /does not match this CLI version/],
+    ['malformed page', async () => fakeResponse(200, { ok: true, rings: 'bad' }), /could not validate the response/],
   ];
   for (const [label, fetch, expected] of refusals) {
     const world = admittedConnection({ cursor: 4 });

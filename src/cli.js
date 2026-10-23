@@ -623,7 +623,7 @@ function reportRequestError(stderr, error, profile) {
       ? 'interlock: the local Interlock request timed out; run the command again.'
       : `interlock: the request to ${room} timed out; run the command again.`);
   } else if (error && error.code === 'incompatible-response') {
-    line(stderr, `interlock: ${room} answered, but its response does not match this CLI version; use the command from the same Interlock release as the running room.`);
+    line(stderr, `interlock: ${room} answered, but this CLI could not validate the response; run the command again. If it keeps failing, check that this CLI is from the same Interlock release as the running room.`);
   } else if (error && error.exact && UNREACHABLE_STATUSES.has(error.status)) {
     line(stderr, `interlock: ${room} is temporarily unavailable (HTTP ${error.status}); run the command again.`);
   } else if (error && Number.isSafeInteger(error.status) && UNREACHABLE_STATUSES.has(error.status)) {

@@ -827,7 +827,7 @@ test('refusals and malformed pages from the room are not retried', async () => {
     [404, '<html>not found</html>', /refused the command/],
     [500, '<html>internal</html>', /refused the command/],
     [200, { ok: true, rings: 'bad', cursor: 5, timed_out: false, connection_session: 3 },
-      /does not match this CLI version/],
+      /could not validate the response/],
   ];
   for (const [status, body, expected] of cases) {
     const room = fakeRoom();
