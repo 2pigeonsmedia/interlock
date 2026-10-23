@@ -122,6 +122,13 @@ test('the hosted setup code and the password door are described as built', () =>
     'sign-in, the owner\'s included, waits 30 seconds and is refused.');
   assertSentence(SECURITY,
     'Sign-in recovers once fifteen minutes pass with no attempt, or when the server restarts.');
+  assertSentence(SECURITY,
+    'An administrator can do everything the owner can, except grant or remove administrator rights.');
+  assertSentence(SECURITY,
+    'Nobody, the first owner included, can remove, demote or suspend the first owner, or reset or revoke ' +
+    'their password or passkeys.');
+  assertSentence(SECURITY,
+    'Interlock identifies the first owner from the setup record, never from a name.');
 });
 
 test('telemetry is four capped streams, reads are quiet, and the limits are stated', () => {

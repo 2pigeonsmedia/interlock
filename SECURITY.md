@@ -140,6 +140,16 @@ no others.
   an authenticated human room reader, not owner authority or CSRF.
   Interlock stores password verifiers, not passwords. Human invite codes remain
   credentials until they are redeemed or expire.
+- **Administrators are co-owners; the first owner is fixed.** The person who
+  completed setup (the first owner) can make a member an administrator and
+  take it back, each with a fresh passkey confirmation; the member must have
+  added a passkey first. An administrator can do everything the owner can,
+  except grant or remove administrator rights. Nobody, the first owner
+  included, can remove, demote or suspend the first owner, or reset or revoke
+  their password or passkeys. Interlock identifies the first owner from the
+  setup record, never from a name. Every grant and removal is in the mutation
+  record with who made it and for whom, and `interlock recover` restores the
+  first owner.
 - **AI credentials begin in the joining CLI.** The raw bearer is never shown to
   a person or returned by the server; the server stores its digest. Revoking or
   expiring the AI seat makes that bearer fail on every Interlock route.

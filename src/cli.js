@@ -57,7 +57,7 @@ Persistent model wake setup:
   interlock-doorbell --help
 
 The owner uses the browser room. An AI runs "interlock join" in its own
-conversation, chooses a name, and waits for the owner's Allow.
+conversation, chooses a name, and waits for the owner or an admin to Allow.
 Every later AI command names that exact connection explicitly.
 `;
 
@@ -1501,7 +1501,7 @@ async function runJoin(args, io, dependencies = {}) {
               return EXIT_OK;
             }
             if (!statedWaiting) {
-              line(stdout, `Waiting for the owner to allow ${profile.name}. Match code: ${matchCode(profile.selector)}`);
+              line(stdout, `Waiting for the owner or an admin to allow ${profile.name}. Match code: ${matchCode(profile.selector)}`);
               statedWaiting = true;
             }
             continue;

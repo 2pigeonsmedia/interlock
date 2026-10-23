@@ -288,11 +288,23 @@ say when their recipient is no longer in People.
   fresh owner step-up, and immediately revokes that non-owner person's or AI
   seat's authority. It refuses the owner; the browser never receives or submits
   an opaque subject id.
+- `POST /api/participants/admin` accepts one public `name`. Only the first owner
+  (the person who completed setup) may call it, with a fresh passkey step-up.
+  The named member must already have a passkey (`409 passkey-required`). It ends
+  that member's sessions; they sign in again as an administrator, who can do
+  what the owner can except change administrators or the first owner.
+- `POST /api/participants/admin/revoke` accepts one public `name`, first owner
+  only, with a fresh step-up, and ends that person's sessions. It refuses the
+  first owner.
+- `POST /api/account/passkey/options` with `{}` and
+  `POST /api/account/passkey/finish` with `ceremony_id` and `response` let a
+  signed-in person who has never had a passkey add their first one. Anyone who
+  has or had one is refused (`409`).
 - `POST /api/owner/password` accepts `current_password` and `new_password`.
-  Success invalidates every ordinary session for the owner, clears the calling
+  Success invalidates every ordinary session for the caller, clears the calling
   cookie, and requires a fresh sign-in with the new password.
 - `POST /api/owner/sessions/revoke-others` with `{}` invalidates every other
-  browser session for the owner while preserving the calling session.
+  browser session for the caller while preserving the calling session.
 
 ## Stopped-server owner recovery
 
