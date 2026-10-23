@@ -142,8 +142,9 @@ no others.
   credentials until they are redeemed or expire.
 - **Administrators are co-owners; the first owner is fixed.** The person who
   completed setup (the first owner) can make a member an administrator and
-  take it back, each with a fresh passkey confirmation; the member must have
-  added a passkey first. An administrator can do everything the owner can,
+  take it back, each with a fresh passkey confirmation; the member needs the
+  passkey they created when redeeming their invite. That invite is the only
+  thing that can add a member's passkey: a password sign-in never can. An administrator can do everything the owner can,
   except grant or remove administrator rights. Nobody, the first owner
   included, can remove, demote or suspend the first owner, or reset or revoke
   their password or passkeys. Interlock identifies the first owner from the

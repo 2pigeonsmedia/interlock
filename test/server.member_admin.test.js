@@ -122,23 +122,38 @@ test('the owner makes a member with a passkey an administrator', async () => {
     let bea = sessionFrom(redeemed);
     assert.deepEqual(await roles(runtime, bea), ['participant'], 'ARRANGEMENT: Bea is a member');
 
-    // Without a passkey a member cannot be made an administrator.
-    owner = await elevate(runtime, owner, ownerDevice);
-    const early = await post(runtime, '/api/participants/admin', { name: 'Bea' }, owner);
-    assert.equal(early.status, 409, early.text);
-    assert.equal(early.json.error, 'passkey-required');
-
-    // A member adds a first passkey after setup.
+    // Joining hands back the member's first passkey ceremony; Bea makes it.
+    assert.equal(typeof redeemed.json.passkey.ceremony_id, 'string', 'the invite begins the passkey');
     const beaDevice = createDevice({ origin: runtime.url, rpId: 'localhost' });
-    const options = await post(runtime, '/api/account/passkey/options', {}, bea);
-    assert.equal(options.status, 200, options.text);
     const added = await post(runtime, '/api/account/passkey/finish', {
-      ceremony_id: options.json.ceremony_id,
-      response: beaDevice.registration(options.json.options.challenge),
+      ceremony_id: redeemed.json.passkey.ceremony_id,
+      response: beaDevice.registration(redeemed.json.passkey.options.challenge),
     }, bea);
     assert.equal(added.status, 200, added.text);
-    const again = await post(runtime, '/api/account/passkey/options', {}, bea);
-    assert.equal(again.status, 409, 'a second first-passkey enrolment is refused: ' + again.text);
+
+    // Cal joins but skips the passkey. A password sign-in can never add one.
+    owner = await elevate(runtime, owner, ownerDevice);
+    const calInvite = await post(runtime, '/api/invitations', {}, owner);
+    const calPassword = 'cal has only a password';
+    const calJoined = await post(runtime, '/api/invitations/redeem',
+      { secret: calInvite.json.invite_code, name: 'Cal', password: calPassword }, NONE);
+    assert.equal(calJoined.status, 200, calJoined.text);
+    const cal = await login(runtime, 'Cal', calPassword);
+    for (const route of ['/api/account/passkey/options', '/api/bootstrap/registration/options']) {
+      const begun = await post(runtime, route, {}, cal);
+      assert.ok(begun.status === 404 || begun.status === 409, `${route} cannot begin an enrolment: ${begun.text}`);
+      assert.equal(begun.json && begun.json.options, undefined);
+    }
+    const forged = await post(runtime, '/api/account/passkey/finish', {
+      ceremony_id: calJoined.json.passkey.ceremony_id,
+      response: createDevice({ origin: runtime.url, rpId: 'localhost' })
+        .registration(calJoined.json.passkey.options.challenge),
+    }, cal);
+    assert.equal(forged.status, 409, 'a password session cannot finish the ceremony its invite began: ' + forged.text);
+    owner = await elevate(runtime, owner, ownerDevice);
+    const early = await post(runtime, '/api/participants/admin', { name: 'Cal' }, owner);
+    assert.equal(early.status, 409, early.text);
+    assert.equal(early.json.error, 'passkey-required');
 
     // Only the owner, freshly stepped up, can grant.
     const byMember = await post(runtime, '/api/participants/admin', { name: 'Ana' }, bea);
@@ -171,8 +186,8 @@ test('the owner makes a member with a passkey an administrator', async () => {
       return { manage: settings.json.manage_admins,
         rows: Object.fromEntries(rows.map(row => [row.name, [row.admin, row.first_owner, row.passkey]])) };
     };
-    assert.deepEqual(await people(owner), { manage: true, rows: { Ana: [true, true, true], Bea: [true, false, true] } });
-    assert.deepEqual(await people(bea), { manage: false, rows: { Ana: [true, true, true], Bea: [true, false, true] } });
+    assert.deepEqual(await people(owner), { manage: true, rows: { Ana: [true, true, true], Bea: [true, false, true], Cal: [false, false, false] } });
+    assert.deepEqual(await people(bea), { manage: false, rows: { Ana: [true, true, true], Bea: [true, false, true], Cal: [false, false, false] } });
 
     // Only the first owner grants or removes; nobody can remove or demote her.
     for (const [route, name] of [

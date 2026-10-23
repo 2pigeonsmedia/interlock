@@ -296,10 +296,13 @@ say when their recipient is no longer in People.
 - `POST /api/participants/admin/revoke` accepts one public `name`, first owner
   only, with a fresh step-up, and ends that person's sessions. It refuses the
   first owner.
-- `POST /api/account/passkey/options` with `{}` and
-  `POST /api/account/passkey/finish` with `ceremony_id` and `response` let a
-  signed-in person who has never had a passkey add their first one. Anyone who
-  has or had one is refused (`409`).
+- A successful `POST /api/invitations/redeem` also returns `passkey`, the new
+  member's first passkey ceremony (`ceremony_id`, `options`), or `null` if one
+  could not begin. `POST /api/account/passkey/finish` with `ceremony_id` and
+  `response` completes it from that same session within a minute. No route
+  begins a member passkey otherwise. Identity accepts a first passkey only
+  from a session started within a minute of the person's invite redemption,
+  and only within five minutes of it, so a password sign-in never adds one.
 - `POST /api/owner/password` accepts `current_password` and `new_password`.
   Success invalidates every ordinary session for the caller, clears the calling
   cookie, and requires a fresh sign-in with the new password.

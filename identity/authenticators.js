@@ -51,6 +51,11 @@ const ALGORITHM_NAMES = Object.freeze({ '-7': 'ES256', '-257': 'RS256' });
 const USER_VERIFICATION = 'required';
 const ATTESTATION_TYPE = 'none';
 const CEREMONY_TIMEOUT_MS = 60_000;
+// After setup, a person's first passkey is authorised by the invite they
+// redeemed, never by a password: only from the session redemption started
+// (authenticated within a minute of it), and within five minutes of it.
+const INVITE_SESSION_MS = 60 * 1000;
+const INVITE_ENROLMENT_MS = 5 * 60 * 1000;
 const MAX_JSON_DEPTH = 12;
 const MAX_JSON_NODES = 2048;
 const MAX_JSON_STRING_BYTES = 256 * 1024;
@@ -285,6 +290,14 @@ function createService(opts) {
     if (!subj || subj.kind !== 'person' || subj.status !== 'active') return FAIL_UNAVAIL;
     // Zero historical authenticator rows (not merely zero unrevoked).
     if (state.authenticators.some(a => a.tenant === tenant && a.person_subject_id === personId)) {
+      return FAIL_UNAVAIL;
+    }
+    if (state.bootstrap.completed_at !== null && !state.admission_capabilities.some(c =>
+      c.tenant === tenant && c.purpose === 'human_invite' && c.consuming_subject_id === personId &&
+      typeof c.consumed_at === 'number' && env.now >= c.consumed_at &&
+      env.now - c.consumed_at < INVITE_ENROLMENT_MS &&
+      opened.session.authenticated_at >= c.consumed_at &&
+      opened.session.authenticated_at - c.consumed_at < INVITE_SESSION_MS)) {
       return FAIL_UNAVAIL;
     }
 

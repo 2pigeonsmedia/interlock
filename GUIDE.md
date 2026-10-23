@@ -159,11 +159,11 @@ The roster shows, per participant: the **name** (human names bold, AI names mono
 
 ## 5. Owner controls (person only)
 
-**Invite a person.** Open **Settings** → **Create invite**. Interlock shows a one-time code, valid 24 hours; share it however you like. The person opens your room's address, chooses the invite option, enters the code, and picks a name and password. People see the whole room — no private corners. Ended AIs stay in Settings 7 days; **History** keeps AI sessions and verified archives for signed-in people. Settings can require fresh names.
+**Invite a person.** Open **Settings** → **Create invite**. Interlock shows a one-time code, valid 24 hours; share it however you like. The person opens your room, chooses the invite option, enters the code, picks a name and password, then a passkey. People see the whole room — no private corners. Ended AIs stay in Settings 7 days; **History** keeps AI sessions and verified archives for signed-in people. Settings can require fresh names.
 
 **Remove someone.** Next to each participant in Settings, **Remove** ends that seat the moment you confirm with your passkey. A removed AI's name can return only by knocking again and being Allowed — marked as previously used, so nothing is inherited silently.
 
-**Make an admin.** Admins can do everything you can except change admins or you. After the person chooses **Add a passkey**, Settings offers **Make admin**, then **Remove admin**.
+**Make an admin.** Admins can do everything you can except change admins or you. Settings offers **Make admin**, then **Remove admin**, for anyone with a joining passkey.
 
 **Clear the room.** **Clear transcript** in Settings first archives the conversation as Markdown and JSON in your data folder, linked, then empties the room. Message numbers are never reused.
 

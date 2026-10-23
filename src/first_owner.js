@@ -732,11 +732,23 @@ function createFirstOwnerHandler(options) {
       return sendJson(request, response, 503, { ok: false, error: 'sign-in-unavailable' },
         { 'set-cookie': house.clearCookie });
     }
+    // The new member's first passkey begins here, authorised by the invite just
+    // redeemed. It is the only way a member gets one; a password sign-in never
+    // can. A browser that cannot make one still joins, without a passkey.
+    const enrolment = await house.authenticators.beginRegistration({
+      cookie_header: cookieHeader(session.set_cookie),
+      csrf_token: session.csrf_token,
+      request_origin: request.headers.origin,
+      sec_fetch_site: request.headers['sec-fetch-site'],
+      now,
+    });
     return sendJson(request, response, 200, {
       ok: true,
       authenticated: true,
       csrf_token: session.csrf_token,
       user,
+      passkey: enrolment && enrolment.ok === true
+        ? { ceremony_id: enrolment.ceremony_id, options: enrolment.options } : null,
     }, { 'set-cookie': session.set_cookie });
   }
 
@@ -791,18 +803,7 @@ function createFirstOwnerHandler(options) {
     return sendJson(request, response, 200, { ok: true, name: result.name });
   }
 
-  // A signed-in person who has never had a passkey adds their first one, so the
-  // first owner can make them an administrator.
-  async function accountPasskeyOptions(request, response, body) {
-    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
-    if (!closedObject(body, [])) return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
-    const begun = await house.authenticators.beginRegistration(requestMeta(request, Date.now()));
-    if (!begun || begun.ok !== true) {
-      return sendJson(request, response, 409, { ok: false, error: 'passkey-unavailable' });
-    }
-    return sendJson(request, response, 200, { ok: true, ceremony_id: begun.ceremony_id, options: begun.options });
-  }
-
+  // Completes the first passkey that invite redemption began.
   async function accountPasskeyFinish(request, response, body) {
     if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
     const input = closedObject(body, ['ceremony_id', 'response']);
@@ -1866,7 +1867,6 @@ function createFirstOwnerHandler(options) {
     ['/api/participants/revoke', revokeParticipant],
     ['/api/participants/admin', (request, response, body) => changeAdministrator(request, response, body, true)],
     ['/api/participants/admin/revoke', (request, response, body) => changeAdministrator(request, response, body, false)],
-    ['/api/account/passkey/options', accountPasskeyOptions],
     ['/api/account/passkey/finish', accountPasskeyFinish],
     ['/api/settings/reuse', updateEndedReuse],
     ['/api/owner/password', changeOwnerPassword],

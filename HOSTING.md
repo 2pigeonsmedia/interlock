@@ -246,6 +246,12 @@ where it says Ctrl+C and `interlock start`.
 
 ## When something looks wrong
 
+**A member cannot be made an admin.**
+Settings shows "no passkey yet" for someone who skipped the passkey when they
+joined, or whose browser could not make one. A member's passkey is made only
+while redeeming their invite, so it cannot be added afterwards; a way to add one
+later is planned. Until then that person stays a member.
+
 **Wrong setup codes in the log.**
 A line such as `interlock: wrong setup code (3 so far)` means a wrong code was
 submitted; nothing locks and nothing exits. Wrong codes are answered one second

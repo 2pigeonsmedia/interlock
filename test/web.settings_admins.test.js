@@ -36,10 +36,10 @@ test('the page reads the new fields and refuses a response without them', () => 
   assert.match(source, /typeof result\.manage_admins !== 'boolean'/);
 });
 
-test('a member can add a passkey from the room header', () => {
-  assert.match(page, /<button id="add-passkey-button" type="button" class="quiet-action" hidden>Add a passkey<\/button>/);
-  assert.match(source, /addPasskeyButton\.hidden = owner;/, 'shown to members, hidden from owners and admins');
-  assert.match(source, /ownerMutation\('\/api\/account\/passkey\/options', \{\}\)/);
+test('a member makes a passkey only while joining', () => {
+  assert.doesNotMatch(page, /add-passkey-button/, 'no later Add a passkey control');
+  assert.doesNotMatch(source, /\/api\/account\/passkey\/options/, 'the page never begins an enrolment itself');
+  assert.match(source, /const passkey = await joiningPasskey\(result\.passkey\);/,
+    'the invite flow makes the passkey the redeem response began');
   assert.match(source, /ownerMutation\('\/api\/account\/passkey\/finish', \{/);
-  assert.match(source, /addPasskeyButton\.addEventListener\('click', addPasskey\);/);
 });

@@ -23,7 +23,6 @@ const logoutButton = document.querySelector('#logout-button');
 const connectAiButton = document.querySelector('#connect-ai-button');
 const connectAiDialog = document.querySelector('#connect-ai-dialog');
 const settingsButton = document.querySelector('#settings-button');
-const addPasskeyButton = document.querySelector('#add-passkey-button');
 const settingsDialog = document.querySelector('#settings-dialog');
 const createInviteButton = document.querySelector('#create-invite-button');
 const inviteResult = document.querySelector('#invite-result');
@@ -282,7 +281,6 @@ function showRoom(user) {
   connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
   settingsButton.disabled = !owner;
   settingsButton.title = owner ? '' : 'Only the owner or an admin can manage this Interlock';
-  addPasskeyButton.hidden = owner;
   setRoomNotice('');
   loginView.hidden = true;
   roomView.hidden = false;
@@ -907,7 +905,7 @@ function renderSettingsParticipants(settings = null) {
       admin.setAttribute('aria-label', `${admin.textContent}: ${participant.name}`);
       if (!participant.admin && !participant.passkey) {
         admin.disabled = true;
-        admin.title = `${participant.name} needs to add a passkey first`;
+        admin.title = `${participant.name} has no passkey yet. Passkeys are made when joining.`;
       }
       admin.addEventListener('click', () => changeAdmin(participant, !participant.admin, admin));
       row.append(admin);
@@ -1014,43 +1012,9 @@ async function changeAdmin(participant, grant, button) {
       (error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
         ? 'Passkey confirmation was cancelled. Nothing changed.'
         : (error.code === 'passkey-required'
-          ? `${participant.name} needs to add a passkey first, with Add a passkey at the top of the room.`
+          ? `${participant.name} has no passkey yet, so cannot be made an admin. Passkeys are made when joining.`
           : 'Interlock did not change that. Refresh and try again.'), 'error');
     button.disabled = false;
-  }
-}
-
-async function addPasskey() {
-  if (!window.PublicKeyCredential || !navigator.credentials) {
-    setRoomNotice('This browser cannot create a passkey.', 'error');
-    return;
-  }
-  addPasskeyButton.disabled = true;
-  try {
-    const begun = await ownerMutation('/api/account/passkey/options', {});
-    const credential = await navigator.credentials.create({
-      publicKey: passkeyCreationOptions(begun.options),
-    });
-    if (!credential) throw Object.assign(new Error('passkey-cancelled'), { code: 'passkey-cancelled' });
-    await ownerMutation('/api/account/passkey/finish', {
-      ceremony_id: begun.ceremony_id,
-      response: passkeyRegistration(credential),
-    });
-    addPasskeyButton.hidden = true;
-    setRoomNotice('Passkey added. The owner can now make you an admin.', 'success');
-  } catch (error) {
-    if (error.code === 'not-authenticated') {
-      forgetCsrf();
-      showLogin('Your session ended. Sign in again to continue.');
-      return;
-    }
-    setRoomNotice(error.code === 'passkey-unavailable'
-      ? 'You already have a passkey.'
-      : ((error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
-        ? 'Passkey setup was cancelled.'
-        : 'Interlock could not add a passkey. Try again.'), 'error');
-  } finally {
-    addPasskeyButton.disabled = false;
   }
 }
 
@@ -1452,6 +1416,29 @@ showLoginButton.addEventListener('click', () => {
   document.querySelector('#login-name').focus();
 });
 
+// The passkey a new member makes while joining, the only time Interlock
+// offers one. Joining succeeds either way; without a passkey the member
+// cannot be made an admin.
+async function joiningPasskey(ceremony) {
+  if (!ceremony || !window.PublicKeyCredential || !navigator.credentials) {
+    return { message: 'You joined without a passkey, so you cannot be made an admin.', kind: '' };
+  }
+  setLoginStatus('Create a passkey for this room…');
+  try {
+    const credential = await navigator.credentials.create({
+      publicKey: passkeyCreationOptions(ceremony.options),
+    });
+    if (!credential) throw Object.assign(new Error('passkey-cancelled'), { code: 'passkey-cancelled' });
+    await ownerMutation('/api/account/passkey/finish', {
+      ceremony_id: ceremony.ceremony_id,
+      response: passkeyRegistration(credential),
+    });
+    return { message: 'Passkey created.', kind: 'success' };
+  } catch (_) {
+    return { message: 'You joined without a passkey, so you cannot be made an admin.', kind: '' };
+  }
+}
+
 inviteRedeemForm.addEventListener('submit', async event => {
   event.preventDefault();
   inviteRedeemButton.disabled = true;
@@ -1478,7 +1465,9 @@ inviteRedeemForm.addEventListener('submit', async event => {
     }
     storeCsrf(result.csrf_token);
     inviteRedeemForm.reset();
+    const passkey = await joiningPasskey(result.passkey);
     showRoom(result.user);
+    if (passkey) setRoomNotice(passkey.message, passkey.kind);
   } catch (_) {
     setConnectionState('unavailable');
     setLoginStatus('Interlock is not responding. Check that it is still running.', 'error');
@@ -1581,8 +1570,6 @@ messageForm.addEventListener('submit', async event => {
 });
 
 messageBody.addEventListener('input', updateMentionPreview);
-
-addPasskeyButton.addEventListener('click', addPasskey);
 
 logoutButton.addEventListener('click', async () => {
   const logoutCsrf = readCsrf();
