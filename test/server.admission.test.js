@@ -343,7 +343,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     let stdout = '';
     let stderr = '';
     const joining = runJoin([
-      '--product', 'Codex CLI', '--name', 'Quill', '--url', runtime.url,
+      '--product', 'Codex CLI', '--name', 'Scout', '--url', runtime.url,
     ], {
       stdout: { write: value => { stdout += String(value); } },
       stderr: { write: value => { stderr += String(value); } },
@@ -358,7 +358,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
           path: '/api/ai/admissions', headers: { cookie: owner.cookie },
         });
         const row = listed.status === 200
-          ? listed.json.pending.find(item => item.name === 'Quill') : null;
+          ? listed.json.pending.find(item => item.name === 'Scout') : null;
         if (row && row.connected === true) return row;
         await new Promise(resolve => setTimeout(resolve, 10));
       }
@@ -370,21 +370,21 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     );
     assert.equal(cliAllowed.status, 200, cliAllowed.text);
     assert.equal(await joining, EXIT_OK, stderr);
-    assert.match(stdout, /Connected as Quill \(Codex CLI\)/);
-    assert.match(stdout, /interlock listen --connection Quill/);
+    assert.match(stdout, /Connected as Scout \(Codex CLI\)/);
+    assert.match(stdout, /interlock listen --connection Scout/);
     assert.equal(stderr, '');
-    const saved = JSON.parse(fs.readFileSync(path.join(connectionDir, 'quill.json'), 'utf8'));
+    const saved = JSON.parse(fs.readFileSync(path.join(connectionDir, 'scout.json'), 'utf8'));
     assert.equal(saved.state, 'admitted');
     assert.equal(saved.subject_id, cliAllowed.json.enrollment.subject_id);
     assert.equal(stdout.includes(saved.token), false);
 
     const savedBeforeReconnect = fs.readFileSync(
-      path.join(connectionDir, 'quill.json'), 'utf8',
+      path.join(connectionDir, 'scout.json'), 'utf8',
     );
     let reconnectOut = '';
     let reconnectErr = '';
     const reconnected = await runJoin([
-      '--product', 'Codex CLI', '--name', 'Quill', '--url', runtime.url,
+      '--product', 'Codex CLI', '--name', 'Scout', '--url', runtime.url,
     ], {
       stdout: { write: value => { reconnectOut += String(value); } },
       stderr: { write: value => { reconnectErr += String(value); } },
@@ -396,22 +396,22 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     });
     assert.equal(reconnected, EXIT_OK, reconnectErr);
     assert.equal(reconnectErr, '');
-    assert.match(reconnectOut, /Connected as Quill \(Codex CLI\)/);
+    assert.match(reconnectOut, /Connected as Scout \(Codex CLI\)/);
     assert.doesNotMatch(reconnectOut, /Waiting for the owner/);
-    assert.equal(fs.readFileSync(path.join(connectionDir, 'quill.json'), 'utf8'),
+    assert.equal(fs.readFileSync(path.join(connectionDir, 'scout.json'), 'utf8'),
       savedBeforeReconnect, 'the real-server reconnect must not rewrite the local profile');
     const pendingAfterReconnect = await call(runtime, {
       path: '/api/ai/admissions', headers: { cookie: owner.cookie },
     });
     assert.equal(pendingAfterReconnect.status, 200, pendingAfterReconnect.text);
-    assert.equal(pendingAfterReconnect.json.pending.some(row => row.name === 'Quill'), false,
+    assert.equal(pendingAfterReconnect.json.pending.some(row => row.name === 'Scout'), false,
       'the real-server reconnect must not create a pending admission');
 
     for (const text of [
       'ordinary shared history',
       '@Marlow first only',
       '@mArLoW case-folded first only',
-      '@Quill second only',
+      '@Scout second only',
       '@all both listeners',
       '@ALL is ordinary text',
     ]) {
@@ -505,17 +505,17 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     assert.match(marlowCatchup, /ordinary shared history/);
     assert.match(marlowCatchup, /@Marlow first only/);
     assert.match(marlowCatchup, /@mArLoW case-folded first only/);
-    assert.match(marlowCatchup, /@Quill second only/);
+    assert.match(marlowCatchup, /@Scout second only/);
     assert.match(marlowCatchup, /@all both listeners/);
     assert.match(marlowCatchup, /@ALL is ordinary text/);
 
-    const quillCatchup = await listenAndDrain('Quill');
-    assert.match(quillCatchup, /ordinary shared history/);
-    assert.match(quillCatchup, /@Marlow first only/);
-    assert.match(quillCatchup, /@mArLoW case-folded first only/);
-    assert.match(quillCatchup, /@Quill second only/);
-    assert.match(quillCatchup, /@all both listeners/);
-    assert.match(quillCatchup, /@ALL is ordinary text/);
+    const scoutCatchup = await listenAndDrain('Scout');
+    assert.match(scoutCatchup, /ordinary shared history/);
+    assert.match(scoutCatchup, /@Marlow first only/);
+    assert.match(scoutCatchup, /@mArLoW case-folded first only/);
+    assert.match(scoutCatchup, /@Scout second only/);
+    assert.match(scoutCatchup, /@all both listeners/);
+    assert.match(scoutCatchup, /@ALL is ordinary text/);
 
     const browserPage = await call(runtime, {
       path: '/api/messages?after=0&limit=20&wait=0',
@@ -526,7 +526,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     const foldedFirstOnly = browserPage.json.messages.find(
       message => message.text === '@mArLoW case-folded first only',
     );
-    const secondOnly = browserPage.json.messages.find(message => message.text === '@Quill second only');
+    const secondOnly = browserPage.json.messages.find(message => message.text === '@Scout second only');
     const all = browserPage.json.messages.find(message => message.text === '@all both listeners');
     const wrongAll = browserPage.json.messages.find(message => message.text === '@ALL is ordinary text');
     assert.deepEqual(firstOnly.delivery.map(row => [row.name, Number.isSafeInteger(row.acknowledged_at)]),
@@ -534,9 +534,9 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     assert.deepEqual(foldedFirstOnly.delivery.map(
       row => [row.name, Number.isSafeInteger(row.acknowledged_at)]), [['Marlow', true]]);
     assert.deepEqual(secondOnly.delivery.map(row => [row.name, Number.isSafeInteger(row.acknowledged_at)]),
-      [['Quill', true]]);
+      [['Scout', true]]);
     assert.deepEqual(all.delivery.map(row => [row.name, Number.isSafeInteger(row.acknowledged_at)]),
-      [['Marlow', true], ['Quill', true]]);
+      [['Marlow', true], ['Scout', true]]);
     assert.deepEqual(wrongAll.delivery, []);
 
     const roster = await call(runtime, {
@@ -559,7 +559,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
         heard: true, present: true, outstanding: 0, fetched: true, subject_id: undefined,
       },
       {
-        name: 'Quill', product: 'Codex CLI', product_provenance: 'client-reported',
+        name: 'Scout', product: 'Codex CLI', product_provenance: 'client-reported',
         heard: true, present: true, outstanding: 0, fetched: true, subject_id: undefined,
       },
     ]);
@@ -572,14 +572,14 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     assert.equal(deliveries.json.changes.some(row => row.subject_id !== undefined), false);
 
     const said = await cli(['say', '--connection', 'Marlow', '--stdin'], {
-      readStdin: async () => '@Quill reply from Marlow',
+      readStdin: async () => '@Scout reply from Marlow',
     });
     assert.equal(said.code, EXIT_OK, said.stderr);
     assert.match(said.stdout, /Sent as Marlow/);
-    const quillReply = await cli(['listen', '--connection', 'Quill']);
-    assert.equal(quillReply.code, EXIT_OK, quillReply.stderr);
-    assert.match(quillReply.stdout, /Marlow \(Codex CLI, client-reported\):/);
-    assert.match(quillReply.stdout, /@Quill reply from Marlow/);
+    const scoutReply = await cli(['listen', '--connection', 'Scout']);
+    assert.equal(scoutReply.code, EXIT_OK, scoutReply.stderr);
+    assert.match(scoutReply.stdout, /Marlow \(Codex CLI, client-reported\):/);
+    assert.match(scoutReply.stdout, /@Scout reply from Marlow/);
     const marlowOwn = await cli(['history', '--connection', 'Marlow']);
     assert.equal(marlowOwn.code, EXIT_OK, marlowOwn.stderr);
     assert.equal(marlowOwn.stdout, 'No new messages.\n',
@@ -590,14 +590,14 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     });
     assert.equal(rosterAfterPost.status, 200, rosterAfterPost.text);
     const marlowAfterPost = rosterAfterPost.json.participants.find(row => row.name === 'Marlow');
-    const quillAfterFetch = rosterAfterPost.json.participants.find(row => row.name === 'Quill');
+    const scoutAfterFetch = rosterAfterPost.json.participants.find(row => row.name === 'Scout');
     assert.equal(marlowAfterPost.fetched_without_post_at, null,
       'Marlow posted after fetching, so the factual warning must clear');
-    assert.equal(Number.isSafeInteger(quillAfterFetch.fetched_without_post_at), true,
-      'Quill fetched Marlow\'s later post and has not posted since');
+    assert.equal(Number.isSafeInteger(scoutAfterFetch.fetched_without_post_at), true,
+      'Scout fetched Marlow\'s later post and has not posted since');
 
-    assert.notEqual(profiles.load('Marlow').token, profiles.load('Quill').token);
-    assert.equal(profiles.load('Marlow').cursor, profiles.load('Quill').cursor);
+    assert.notEqual(profiles.load('Marlow').token, profiles.load('Scout').token);
+    assert.equal(profiles.load('Marlow').cursor, profiles.load('Scout').cursor);
 
     const emptyListenStarted = Date.now();
     const emptyLiveListen = await cli(['listen', '--connection', 'Marlow']);
@@ -699,7 +699,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       });
       assert.equal(names.status, 200, names.text);
       assert.equal(names.json.sessions.some(row => row.name === 'Marlow'), true);
-      assert.equal(names.json.sessions.some(row => row.name === 'Quill'), true);
+      assert.equal(names.json.sessions.some(row => row.name === 'Scout'), true);
       assert.equal(names.text.includes('subject_id'), false);
       assert.equal(names.text.includes('selector'), false);
       assert.equal(names.text.includes('digest'), false);
@@ -822,7 +822,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       method: 'POST',
       headers: { authorization: `Bearer ${replacementCandidate.token}` },
       body: {
-        text: '@Quill second generation speaks',
+        text: '@Scout second generation speaks',
         client_message_id: cryptoRandomUuid(),
       },
     });
@@ -843,10 +843,10 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     });
     assert.equal(browserAfterReuse.status, 200, browserAfterReuse.text);
     const firstGenerationMessage = browserAfterReuse.json.messages.find(
-      row => row.text === '@Quill reply from Marlow',
+      row => row.text === '@Scout reply from Marlow',
     );
     const secondGenerationMessage = browserAfterReuse.json.messages.find(
-      row => row.text === '@Quill second generation speaks',
+      row => row.text === '@Scout second generation speaks',
     );
     assert.equal(firstGenerationMessage.session, 1,
       'the first generation must become visibly distinct once session 2 exists');
@@ -871,10 +871,10 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     });
     assert.equal(reuseJson.status, 200, reuseJson.text);
     assert.equal(reuseJson.json.messages.find(
-      row => row.text === '@Quill reply from Marlow',
+      row => row.text === '@Scout reply from Marlow',
     ).session, 1);
     assert.equal(reuseJson.json.messages.find(
-      row => row.text === '@Quill second generation speaks',
+      row => row.text === '@Scout second generation speaks',
     ).session, 2);
     assert.match(reuseMarkdown.text, /Marlow · seat[\s\S]*Session: 1/);
     assert.match(reuseMarkdown.text, /mArLoW · seat[\s\S]*Session: 2/);

@@ -1040,7 +1040,7 @@ test('join self-heals when a stale waiting response follows a successful Allow',
   let time = 2_000;
   let admissionCalls = 0;
   let confirmationCalls = 0;
-  const result = await captureJoin(['--product', 'Claude Code', '--name', 'Quailfinch'], {
+  const result = await captureJoin(['--product', 'Claude Code', '--name', 'Atlas'], {
     config: { resolveConnectionDir: () => connectionDir },
     clock: () => ++time,
     sleep: async () => { throw new Error('a confirmed seat must not wait or knock again'); },
@@ -1057,8 +1057,8 @@ test('join self-heals when a stale waiting response follows a successful Allow',
       return fakeResponse(200, {
         ok: true,
         connection: {
-          subject_id: 'seat-quailfinch',
-          name: 'Quailfinch',
+          subject_id: 'seat-atlas',
+          name: 'Atlas',
           product: 'Claude Code',
           product_provenance: 'client-reported',
           expires_at: 60_000,
@@ -1069,11 +1069,11 @@ test('join self-heals when a stale waiting response follows a successful Allow',
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.equal(admissionCalls, 1);
   assert.equal(confirmationCalls, 1);
-  assert.match(result.stdout, /Connected as Quailfinch \(Claude Code\)/);
+  assert.match(result.stdout, /Connected as Atlas \(Claude Code\)/);
   assert.doesNotMatch(result.stdout, /Waiting for the owner/);
-  const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'quailfinch.json'), 'utf8'));
+  const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'atlas.json'), 'utf8'));
   assert.equal(profile.state, 'admitted');
-  assert.equal(profile.subject_id, 'seat-quailfinch');
+  assert.equal(profile.subject_id, 'seat-atlas');
 });
 
 test('an explicit --name that is taken fails fast without prompting', async () => {
@@ -1164,7 +1164,7 @@ test('a declined join deletes only its unadmitted candidate and fails loudly', a
 test('an expired join deletes only its unadmitted candidate and says it expired', async () => {
   const connectionDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-expiry-')), 'profiles');
   let time = 4_000;
-  const result = await captureJoin(['--product', 'Codex CLI', '--name', 'Swift'], {
+  const result = await captureJoin(['--product', 'Codex CLI', '--name', 'Beacon'], {
     config: { resolveConnectionDir: () => connectionDir },
     clock: () => ++time,
     ask: async () => { throw new Error('must not prompt'); },
@@ -1179,7 +1179,7 @@ test('an expired join deletes only its unadmitted candidate and says it expired'
   });
   assert.equal(result.code, EXIT_RUNTIME);
   assert.match(result.stderr, /expired before it was allowed/);
-  assert.equal(fs.existsSync(path.join(connectionDir, 'swift.json')), false);
+  assert.equal(fs.existsSync(path.join(connectionDir, 'beacon.json')), false);
 });
 
 test('the CLI reports the candidate v0.2.0 package version', () => {

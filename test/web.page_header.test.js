@@ -96,7 +96,7 @@ test('secondary header loads owner actions, pending count, panel routes, and sig
     if (url === '/api/session') return response(200, {
       ok: true,
       authenticated: true,
-      user: { name: 'Patti', roles: ['owner'] },
+      user: { name: 'Dana', roles: ['owner'] },
     });
     if (url === '/api/ai/admissions') return response(200, {
       ok: true,
@@ -110,7 +110,7 @@ test('secondary header loads owner actions, pending count, panel routes, and sig
   await settle();
 
   assert.equal(elements['#connection-state'].textContent, 'Local: running');
-  assert.equal(elements['#account-label'].textContent, 'Patti · Owner');
+  assert.equal(elements['#account-label'].textContent, 'Dana · Owner');
   assert.equal(elements['#connect-ai-button'].disabled, false);
   assert.equal(elements['#settings-button'].disabled, false);
   assert.equal(elements['#connect-ai-button'].textContent, 'Connect an AI (2)');
@@ -174,7 +174,7 @@ test('secondary header does not claim it can sign out without this tab csrf', as
     if (url === '/api/session') return response(200, {
       ok: true,
       authenticated: true,
-      user: { name: 'Patti', roles: ['owner'] },
+      user: { name: 'Dana', roles: ['owner'] },
     });
     if (url === '/api/ai/admissions') return response(200, { ok: true, pending: [] });
     if (url === '/health') return response(200, { ok: true });
@@ -183,7 +183,7 @@ test('secondary header does not claim it can sign out without this tab csrf', as
   const { elements, assigned } = world(fetcher, null);
   await settle();
 
-  assert.equal(elements['#account-label'].textContent, 'Patti · Owner');
+  assert.equal(elements['#account-label'].textContent, 'Dana · Owner');
   assert.equal(elements['#logout-button'].textContent, 'Sign in to sign out');
   assert.match(elements['#logout-button'].title, /sign in before it can securely sign out/);
   await elements['#logout-button'].click();

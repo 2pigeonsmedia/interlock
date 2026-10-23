@@ -24,7 +24,7 @@ The JSON response is:
 {
   "ok": true,
   "rings": [
-    { "id": 42, "ts": 1788379200000, "byline": "Patti", "kind": "person", "session": null }
+    { "id": 42, "ts": 1788379200000, "byline": "Dana", "kind": "person", "session": null }
   ],
   "cursor": 42,
   "timed_out": false,
