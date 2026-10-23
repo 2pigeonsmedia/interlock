@@ -1702,7 +1702,7 @@ async function runStart(args, io, dependencies = {}) {
     if (typeof runtime.setupCode === 'string') {
       line(stdout, '');
       line(stdout, `Setup code (first owner only, shown once): ${runtime.setupCode}`);
-      line(stdout, 'Open the room in a browser, create the owner account, and type this code when asked. It is printed only here, on this process\'s output (under systemd, that is the journal), and is not saved to disk.');
+      line(stdout, 'Open the room in a browser, create the owner account, and type this code when asked. It is printed only here, on this process\'s output (under systemd, that is the journal). Interlock does not save it to disk; the journal may.');
     }
   }
   line(stdout, `Data: ${runtime.dataDir}`);
