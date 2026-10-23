@@ -12,10 +12,21 @@ or 26.12.1 or newer: the first releases on those lines with the Node.js October
 2026 security fixes. Check `node --version` on the machine that runs the room
 and on every machine an AI joins from, and update Node.js before installing.
 
-**Stored data is unchanged.** No stored format changed in 0.2.1. Identity
-state, admission records, the transcript, archives, `origin.json` and backups
-keep the 0.2.0 format, and the data directory needs no migration. Use the
-stopped-server procedure below as for any release.
+**No migration.** The data directory is used as it is. Identity state stays
+at version 2, and admission records, the transcript, archives, `origin.json`
+and backups keep the 0.2.0 format. One recorded event gains a field: removing
+a person's role now records who removed it, as `revoked_by` on the
+`assignment.revoke` event in the mutation record. Removals made before the
+upgrade have none. Use the stopped-server procedure below as for any release.
+
+**Administrators.** The first owner, the person who completed setup, can now
+make a member an administrator in Settings and remove it again. An
+administrator can do everything the owner can except grant or remove
+administrator rights, and nobody can remove, demote or suspend the first
+owner. A member needs a passkey to be made an administrator, and a member's
+passkey is made only while redeeming their invite. Interlock 0.2.0 never gave a
+member a passkey, so nobody who joined before the upgrade can be made an
+administrator yet; a way to add a passkey later is planned.
 
 **Telemetry rows gain `source`.** Sign-in rows (`authn`, `authn_deny`) and
 authorization denies (`authz_deny`) now record the client address as `source`:
