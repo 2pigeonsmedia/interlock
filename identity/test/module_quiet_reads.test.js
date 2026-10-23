@@ -86,7 +86,7 @@ test('a non-boolean audit_allowed_reads is an invalid context: a deny, audited, 
 // default and one quiet, each signing the fixture person in through its own
 // session store. The default service proves the arrangement (an allowed read
 // through authorizeRead really is a row); the quiet one proves the switch.
-test('the house-level switch reaches can() through authorizeRead', async () => {
+test('the deployment-level switch reaches can() through authorizeRead', async () => {
   const fx = await F.fixture('identity-quiet-reads-house-');
   grantRoom(fx, 'read');
   const identity = F.load('index.js');
@@ -153,7 +153,7 @@ test('a quiet allowed read stays available while the audit stream is down; loud 
 
 // The AI seat's bearer door takes the capability from its caller, so the host
 // switch must quiet a seat's allowed READ and leave its allowed WRITE a row.
-test('the house-level switch reaches can() through authorizeSeatBearer, for reads only', async () => {
+test('the deployment-level switch reaches can() through authorizeSeatBearer, for reads only', async () => {
   const world = await Step.freshAdmin(F);
   const identity = F.load('index.js');
   const audit = F.load('audit.js');

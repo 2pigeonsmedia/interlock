@@ -376,7 +376,7 @@ test('missing one of the two files is inconsistent, not an empty room', async ()
   assert.throws(() => openStore({ dataDir: dir }), e => codeOf(e) === 'inconsistent-state');
 });
 
-test('B1 — live disappearance of the log refuses and does not recreate history', async () => {
+test('live disappearance of the log refuses and does not recreate history', async () => {
   const dir = freshDir();
   const store = openStore({ dataDir: dir });
   await store.append({ text: 'acknowledged-one' }, ACTOR);
@@ -392,7 +392,7 @@ test('B1 — live disappearance of the log refuses and does not recreate history
   assert.equal(fs.existsSync(chatFiles(dir).messages), false);
 });
 
-test('B2 — persistence failure latches fatal; reopen recovers one extra fsynced row', async () => {
+test('persistence failure latches fatal; reopen recovers one extra fsynced row', async () => {
   const dir = freshDir();
   const store = openStore({ dataDir: dir });
   const origRename = fs.renameSync;
@@ -428,7 +428,7 @@ test('B2 — persistence failure latches fatal; reopen recovers one extra fsynce
   await recovered.close();
 });
 
-test('B2 — torn tail after a committed range is uncommitted residue, not a brick', async () => {
+test('torn tail after a committed range is uncommitted residue, not a brick', async () => {
   const dir = freshDir();
   const store = openStore({ dataDir: dir });
   await store.append({ text: 'kept' }, ACTOR);
@@ -445,7 +445,7 @@ test('B2 — torn tail after a committed range is uncommitted residue, not a bri
   await recovered.close();
 });
 
-test('B2 — a torn committed first line still refuses', async () => {
+test('a torn committed first line still refuses', async () => {
   const dir = freshDir();
   const store = openStore({ dataDir: dir });
   await store.append({ text: 'ok' }, ACTOR);
@@ -455,7 +455,7 @@ test('B2 — a torn committed first line still refuses', async () => {
   assert.throws(() => openStore({ dataDir: dir }), e => codeOf(e) === 'torn-write');
 });
 
-test('B3 — short writeSync returns are looped until the full row is written', async () => {
+test('short writeSync returns are looped until the full row is written', async () => {
   const dir = freshDir();
   const store = openStore({ dataDir: dir });
   const origWrite = fs.writeSync;
@@ -477,7 +477,7 @@ test('B3 — short writeSync returns are looped until the full row is written', 
   await store.close();
 });
 
-test('B4 — first creation fsyncs the parent data directory entry', async () => {
+test('first creation fsyncs the parent data directory entry', async () => {
   const { DIRECTORY_SYNC_SUPPORTED } = require('../src/chat/store.js');
   if (!DIRECTORY_SYNC_SUPPORTED) return;
   const dir = freshDir();
@@ -510,7 +510,7 @@ test('B4 — first creation fsyncs the parent data directory entry', async () =>
   assert.ok(fsynced.includes(dir), 'dataDir must be directory-fsynced after chat/ is created');
 });
 
-test('B5 — unmarked empty, truncated, or gapped logs refuse', async () => {
+test('unmarked empty, truncated, or gapped logs refuse', async () => {
   const emptyEra = freshDir();
   const emptyStore = openStore({ dataDir: emptyEra });
   await emptyStore.close();
@@ -532,7 +532,7 @@ test('B5 — unmarked empty, truncated, or gapped logs refuse', async () => {
   assert.throws(() => openStore({ dataDir: gapped }), e => codeOf(e) === 'inconsistent-state');
 });
 
-test('M1 — cursors beyond the high-water mark refuse, including on an empty store', async () => {
+test('cursors beyond the high-water mark refuse, including on an empty store', async () => {
   const dir = freshDir();
   const store = openStore({ dataDir: dir });
   await assert.rejects(store.read({ after: 999, limit: 10 }), e => codeOf(e) === 'invalid-read');

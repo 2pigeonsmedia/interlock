@@ -53,12 +53,12 @@ function bearerMeta(token) {
   };
 }
 
-test('L8 authorizeBearer — tool can write room:main, not room:guest', async () => {
+test('tool bearer: authorizeBearer — tool can write room:main, not room:guest', async () => {
   const world = await arrangeTool();
   const meta = bearerMeta(world.token);
 
   const main = world.house.authorizeBearer(meta, 'write', 'room:main');
-  assert.strictEqual(main.allow, true, 'house CLI tool opens main: ' + JSON.stringify(main));
+  assert.strictEqual(main.allow, true, 'the CLI tool opens main: ' + JSON.stringify(main));
   assert.strictEqual(main.kind, 'tool');
   assert.strictEqual(main.subject_id, world.tool.id);
 
@@ -66,7 +66,7 @@ test('L8 authorizeBearer — tool can write room:main, not room:guest', async ()
   assert.strictEqual(priv.allow, false, 'private room stays locked without a grant');
 });
 
-test('L8 authorizeBearer — missing header is no-bearer; junk is invalid-bearer', async () => {
+test('tool bearer: authorizeBearer — missing header is no-bearer; junk is invalid-bearer', async () => {
   const world = await arrangeTool();
   const missing = world.house.authorizeBearer({ source: '127.0.0.1', now: Date.now() }, 'write', 'room:main');
   assert.strictEqual(missing.allow, false);
@@ -77,7 +77,7 @@ test('L8 authorizeBearer — missing header is no-bearer; junk is invalid-bearer
   assert.strictEqual(junk.reason, 'invalid-bearer');
 });
 
-test('L8 ensurePair is legal for a tool and refuses a seat', async () => {
+test('tool bearer: ensurePair is legal for a tool and refuses a seat', async () => {
   const world = await arrangeTool();
   const second = world.grants.ensurePair({
     tenant: TENANT, subject_id: world.tool.id, resource: 'room:main', origin: 'any',

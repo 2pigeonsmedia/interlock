@@ -49,7 +49,7 @@ function arrange() {
 
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-member-settings-'));
   assert.deepStrictEqual(fs.readdirSync(stateDir), [],
-    'ARRANGEMENT: the state dir must be EMPTY, or this proves nothing about a fresh house');
+    'ARRANGEMENT: the state dir must be EMPTY, or this proves nothing about a fresh deployment');
 
   const house = identity.create({
     stateDir, tenant: TENANT, cookieName: identity.COOKIE_NAME, originClass: 'local',

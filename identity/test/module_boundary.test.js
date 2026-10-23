@@ -175,7 +175,7 @@ function observedCorpus() {
 }
 
 // ── the corpus test: the denominator is published, not implied ──────────────
-test('L1 check 3 (B0) — the scanned corpus is OBSERVED, non-degenerate, and printed', () => {
+test('module boundary (corpus) — the scanned corpus is OBSERVED, non-degenerate, and printed', () => {
   const corpus = observedCorpus();
   const names = corpus.map(rel).sort();
 
@@ -191,7 +191,7 @@ test('L1 check 3 (B0) — the scanned corpus is OBSERVED, non-degenerate, and pr
   for (const required of ['repo.js', 'subjects.js', 'audit.js']) {
     assert.ok(names.includes(required),
       'the observed corpus must contain ' + required + ' — it is reached every run, and a ' +
-      'leftover door in it was invisible to the hand-written sweep (Jacana Finding 3)');
+      'leftover door in it was invisible to the hand-written sweep');
   }
 
   assert.ok(fs.existsSync(SELF), 'the one excluded file must exist: ' + rel(SELF));
@@ -199,11 +199,11 @@ test('L1 check 3 (B0) — the scanned corpus is OBSERVED, non-degenerate, and pr
 
   console.log('  observed corpus (' + corpus.length + '): ' + names.join(' '));
   console.log('  reached beyond the ' + LAND1_ENTRY_POINTS.length + ' entry points: ' + beyond.join(' '));
-  console.log('  excluded (1): ' + rel(SELF) + ' — declares the token list; covered by B2-self');
+  console.log('  excluded (1): ' + rel(SELF) + ' — declares the token list; covered by the self-count test');
 });
 
 // ── the named leftovers are UNREACHABLE, not merely unswept ─────────────────
-test('L1 check 3 (B0b) — sessions.js is absent from the observed graph', () => {
+test('module boundary (legacy sessions) — sessions.js is absent from the observed graph', () => {
   // An observation promoted to a control. The graph-derived sweep must keep
   // the named leftovers out of reach; this is the assertion that notices the
   // day one is wired in. Note what happens if it ever is: sessions.js carries
@@ -213,7 +213,7 @@ test('L1 check 3 (B0b) — sessions.js is absent from the observed graph', () =>
   const graph = observeGraph();
   const names = graph.members.map(rel);
   assert.ok(!names.includes('sessions.js'),
-    'sessions.js is a NAMED LEFTOVER and must stay out of the land-1 reach — observed graph: ' +
+    'sessions.js is a NAMED LEFTOVER and must stay out of the reach of the boundary — observed graph: ' +
     JSON.stringify(names));
   assert.ok(fs.existsSync(path.join(F.MODULE_DIR, 'sessions.js')),
     'ARRANGEMENT: sessions.js must EXIST on disk — asserting the absence of a file that is ' +
@@ -221,7 +221,7 @@ test('L1 check 3 (B0b) — sessions.js is absent from the observed graph', () =>
 });
 
 // ── the runtime require graph ───────────────────────────────────────────────
-test('L1 check 3 (B1) — loading the land-1 surface pulls in NOTHING outside identity/', () => {
+test('module boundary (runtime graph) — loading the boundary surface pulls in NOTHING outside identity/', () => {
   // ⚠ THIS TEST CONSUMES THE FRESH CHILD'S RESULT. It used to do its own
   // in-process walk — evict, snapshot `require.cache`, diff — and that walk
   // was defeated TWICE. The second time is the instructive one: a fix moved the
@@ -240,7 +240,7 @@ test('L1 check 3 (B1) — loading the land-1 surface pulls in NOTHING outside id
     'control measured a no-op');
 
   assert.deepStrictEqual(graph.escapes, [],
-    'the land-1 surface must not reach outside identity/ — escaped to: ' +
+    'the boundary surface must not reach outside identity/ — escaped to: ' +
     JSON.stringify(graph.escapes));
 
   // Said a second way, aimed at the dispatch's exact noun, so a reader does not
@@ -253,7 +253,7 @@ test('L1 check 3 (B1) — loading the land-1 surface pulls in NOTHING outside id
     'is entirely inside ' + graph.inside);
 });
 
-test('L1 check 3 (B1 immunity) — a POLLUTED parent cache does not move the observation', () => {
+test('module boundary (runtime graph, polluted cache) — a POLLUTED parent cache does not move the observation', () => {
   // The control that stops this being defeated a third time. The attack was
   // a prior in-process load; the defence is that the observation cannot see the
   // parent cache at all. So: pollute the parent deliberately, then prove the
@@ -276,7 +276,7 @@ test('L1 check 3 (B1 immunity) — a POLLUTED parent cache does not move the obs
     'the escape set must be unaffected by parent-cache state');
 });
 
-test('L1 check 3 (B1 arrangement) — the graph control can SEE an escape', () => {
+test('module boundary (runtime graph control) — the graph control can SEE an escape', () => {
   // The hollow question, asked of the graph control itself: if the core
   // surface DID reach outside identity/, would that filter notice? Proved on
   // synthetic paths rather than by trusting the expression — a filter that can never produce a
@@ -323,13 +323,13 @@ function sweep(files) {
   return hits;
 }
 
-test('L1 check 3 (B2) — no host-authority identifier appears in the land-1 corpus', () => {
+test('module boundary (source sweep) — no host-authority identifier appears in the boundary corpus', () => {
   assert.deepStrictEqual(sweep(observedCorpus()), [],
-    'a host authority identifier appears in the land-1 surface — ' +
+    'a host authority identifier appears in the boundary surface — ' +
     JSON.stringify(sweep(observedCorpus()), null, 2));
 });
 
-test('L1 check 3 (B2-self) — the excluded file uses each identifier exactly ONCE, in its declaration', () => {
+test('module boundary (self-count) — the excluded file uses each identifier exactly ONCE, in its declaration', () => {
   // The exclusion above is a hole unless something covers it. This is that
   // cover, by a different rule than the sweep: each identifier may appear once
   // and only once in this file — in the frozen list at the top. A later edit
@@ -344,7 +344,7 @@ test('L1 check 3 (B2-self) — the excluded file uses each identifier exactly ON
   }
 });
 
-test('L1 check 3 (B2 arrangement) — the sweep can SEE a planted identifier', () => {
+test('module boundary (source sweep control) — the sweep can SEE a planted identifier', () => {
   // Without this, a typo in the list, a scan that reads zero bytes, or a corpus
   // that resolved to nothing all present as a clean sweep. This proves the
   // matcher fires on a planted positive of every identifier it claims to hunt,

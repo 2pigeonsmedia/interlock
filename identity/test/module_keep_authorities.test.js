@@ -68,7 +68,7 @@ function unauthenticatedEnvelope(ORIGIN) {
 
 // ── setPassLifetime ─────────────────────────────────────────────────────────
 
-test('KEEP setPassLifetime — INVOKED: refuses a non-integer before any authority work', async () => {
+test('setPassLifetime — INVOKED: refuses a non-integer before any authority work', async () => {
   const { service } = await arrangeService();
   for (const bad of [undefined, null, '43200000', 43200000.5, NaN]) {
     const r = service.setPassLifetime({ pass_lifetime_ms: bad });
@@ -77,7 +77,7 @@ test('KEEP setPassLifetime — INVOKED: refuses a non-integer before any authori
   }
 });
 
-test('KEEP setPassLifetime — INVOKED: a VALID lifetime with no admin session still refuses', async () => {
+test('setPassLifetime — INVOKED: a VALID lifetime with no admin session still refuses', async () => {
   const { service, ORIGIN } = await arrangeService();
   const r = service.setPassLifetime(Object.assign(
     { pass_lifetime_ms: DEFAULT_AI_SEAT_LIFETIME_MS }, unauthenticatedEnvelope(ORIGIN)));
@@ -87,7 +87,7 @@ test('KEEP setPassLifetime — INVOKED: a VALID lifetime with no admin session s
     'of its own, so if this door opens the primitive is unguarded');
 });
 
-test('KEEP setPassLifetime — the wrapper does not open a nested repo.transact (C12)', () => {
+test('setPassLifetime — the wrapper does not open a nested repo.transact', () => {
   const src = fs.readFileSync(path.join(MODULE_DIR, 'administration.js'), 'utf8');
   const start = src.indexOf('function setPassLifetime(');
   assert.ok(start > 0, 'ARRANGEMENT: setPassLifetime must be present to be inspected');
@@ -96,12 +96,12 @@ test('KEEP setPassLifetime — the wrapper does not open a nested repo.transact 
   assert.doesNotMatch(body, /repo\.transact\(/,
     'repo.transact is NON-REENTRANT: policy.setPassLifetimeMs opens its own transaction, ' +
     'so wrapping it in a second one silently loses the commit and makes every in-bounds ' +
-    'set REFUSE. C12 caught exactly that once already');
+    'set REFUSE. This has happened before');
 });
 
 // ── the two authenticator revoke doors ──────────────────────────────────────
 
-test('KEEP revokeOwnAuthenticator — INVOKED: refuses without a session, and never throws', async () => {
+test('revokeOwnAuthenticator — INVOKED: refuses without a session, and never throws', async () => {
   const { service, ORIGIN } = await arrangeService();
   const r = service.revokeOwnAuthenticator(Object.assign(
     { authenticator_id: 'auth_' + 'a'.repeat(20) }, unauthenticatedEnvelope(ORIGIN)));
@@ -111,7 +111,7 @@ test('KEEP revokeOwnAuthenticator — INVOKED: refuses without a session, and ne
     'id exists, which extra keys on the failure would leak');
 });
 
-test('KEEP revokeOtherAuthenticator — INVOKED: refuses without a fresh admin, oracle-safe', async () => {
+test('revokeOtherAuthenticator — INVOKED: refuses without a fresh admin, oracle-safe', async () => {
   const { service, ORIGIN } = await arrangeService();
   const r = service.revokeOtherAuthenticator(Object.assign({
     authenticator_id: 'auth_' + 'b'.repeat(20),
@@ -121,7 +121,7 @@ test('KEEP revokeOtherAuthenticator — INVOKED: refuses without a fresh admin, 
   assert.deepStrictEqual(Object.keys(r), ['ok'], 'the refusal must be oracle-safe');
 });
 
-test('KEEP both revoke doors — INVOKED: argument validation is REAL, not a pass-through', async () => {
+test('both revoke doors — INVOKED: argument validation is REAL, not a pass-through', async () => {
   const { service, ORIGIN } = await arrangeService();
   const env = unauthenticatedEnvelope(ORIGIN);
   // If these returned FAIL only because of the missing session, a deleted
@@ -138,7 +138,7 @@ test('KEEP both revoke doors — INVOKED: argument validation is REAL, not a pas
 
 // ── the authority gate is LOAD-BEARING, proven by direct control ────────────
 
-test('the three KEEP doors all route through withFreshAdmin — deleting it would be visible', () => {
+test('the three retained authority doors all route through withFreshAdmin — deleting it would be visible', () => {
   const src = fs.readFileSync(path.join(MODULE_DIR, 'administration.js'), 'utf8');
   for (const [fn, gate] of [
     ['setPassLifetime', 'withFreshAdmin'],
@@ -159,7 +159,7 @@ test('the three KEEP doors all route through withFreshAdmin — deleting it woul
   const ownBody = own.slice(0, own.indexOf('\n  function '));
   assert.doesNotMatch(ownBody, /withFreshAdmin\(/,
     'revokeOwnAuthenticator must NOT require a fresh admin — a password-holder whose phone ' +
-    'is at the bottom of a lake cannot produce L2 on it, which is the entire point of A2');
+    'is at the bottom of a lake cannot produce L2 on it, which is the entire point of the own-revoke door');
 });
 
 // ── LIMITS — updated when the gap closed, not left standing ────────────────
@@ -191,7 +191,7 @@ test('the three KEEP doors all route through withFreshAdmin — deleting it woul
 
 const StepUp = require('./step_up_fixture.js');
 
-test('KEEP setPassLifetime — SUCCESS: an in-bounds lifetime COMMITS for a fresh admin', async () => {
+test('setPassLifetime — SUCCESS: an in-bounds lifetime COMMITS for a fresh admin', async () => {
   const f = await StepUp.freshAdmin(F);
   const sess = await f.elevate(f.T);
   const before = f.repo.read().policy.pass_lifetime_ms;
@@ -202,10 +202,10 @@ test('KEEP setPassLifetime — SUCCESS: an in-bounds lifetime COMMITS for a fres
     'an in-bounds lifetime from a genuinely fresh L2 admin must COMMIT; got ' + JSON.stringify(r));
   assert.strictEqual(f.repo.read().policy.pass_lifetime_ms, target,
     'and the value must actually be PERSISTED — an ok:true that changes nothing is the ' +
-    'nested-transaction failure C12 caught, wearing a success');
+    'nested-transaction failure, wearing a success');
 });
 
-test('KEEP setPassLifetime — SUCCESS PATH BOUNDS: out-of-bounds FAILS for the same fresh admin', async () => {
+test('setPassLifetime — SUCCESS PATH BOUNDS: out-of-bounds FAILS for the same fresh admin', async () => {
   const f = await StepUp.freshAdmin(F);
   const before = f.repo.read().policy.pass_lifetime_ms;
   for (const [label, value] of [['below MIN', 60_000], ['above MAX', MAX_AI_SEAT_LIFETIME_MS + 1]]) {
@@ -245,7 +245,7 @@ test('Interlock AI-seat lifetime — policy, repository, and audit accept the ru
     'the audit validator must accept the same 90-day ceiling without faulting');
 });
 
-test('KEEP revokeOtherAuthenticator — SELF-TARGET refuses even for a fresh admin', async () => {
+test('revokeOtherAuthenticator — SELF-TARGET refuses even for a fresh admin', async () => {
   const f = await StepUp.freshAdmin(F);
   const sess = await f.elevate(f.T);
   const r = f.service.revokeOtherAuthenticator(Object.assign(
@@ -254,12 +254,12 @@ test('KEEP revokeOtherAuthenticator — SELF-TARGET refuses even for a fresh adm
       target_person_subject_id: f.person_id,          // ← the actor themself
     }));
   assert.strictEqual(r.ok, false,
-    'A is OTHER-ONLY. The person\'s own door is A2 and needs no admin at all; collapsing ' +
+    'A is OTHER-ONLY. The person\'s own door needs no admin at all; collapsing ' +
     'the two would put an L2 requirement back on the lost-phone case by the side door. ' +
     'This guard lives INSIDE withFreshAdmin, so it is only reachable with a real L2 session');
 });
 
-test('KEEP revokeOwnAuthenticator — SUCCESS: a person retires ONE of their own authenticators at L1', async () => {
+test('revokeOwnAuthenticator — SUCCESS: a person retires ONE of their own authenticators at L1', async () => {
   const f = await StepUp.freshAdmin(F);
 
   // ARRANGEMENT, and it is the whole lesson of this test. A first version
@@ -276,17 +276,17 @@ test('KEEP revokeOwnAuthenticator — SUCCESS: a person retires ONE of their own
   const second = StepUp.createDevice();
   const begin = await f.service.beginAdditionalAuthenticator(StepUp.env(sess, f.T + 310));
   assert.strictEqual(begin.ok, true,
-    'KEEP beginAdditionalAuthenticator must work for a fresh admin; got ' + JSON.stringify(begin));
+    'beginAdditionalAuthenticator must work for a fresh admin; got ' + JSON.stringify(begin));
   const fin = await f.service.finishAdditionalAuthenticator(Object.assign(
     StepUp.env(sess, f.T + 311),
     { ceremony_id: begin.ceremony_id, response: second.registration(begin.options.challenge) }));
   assert.strictEqual(fin.ok, true,
-    'KEEP finishAdditionalAuthenticator must bind a REAL second assertion; got ' + JSON.stringify(fin));
+    'finishAdditionalAuthenticator must bind a REAL second assertion; got ' + JSON.stringify(fin));
 
   const live = f.repo.read().authenticators.filter((a) => a.revoked_at === null);
   assert.strictEqual(live.length, 2,
     'ARRANGEMENT: exactly two live authenticators, or the revoke below is refused by ' +
-    'D43 rather than permitted by A2 — and the test would prove the opposite of its name');
+    'the last-admin rule rather than permitted by the own-revoke door — and the test would prove the opposite of its name');
 
   // Deliberately an L1 session: the point of the own-revoke door is that a
   // password-holder whose phone is at the bottom of a lake cannot produce L2
@@ -306,7 +306,7 @@ test('KEEP revokeOwnAuthenticator — SUCCESS: a person retires ONE of their own
     'and it must ACTUALLY be revoked in the store, not merely reported as such');
 });
 
-test('KEEP revokeOwnAuthenticator — D43 still bites: the LAST factor of the last admin is refused', async () => {
+test('revokeOwnAuthenticator — the last-admin rule still bites: the LAST factor of the last admin is refused', async () => {
   const f = await StepUp.freshAdmin(F);
   const live = f.repo.read().authenticators.filter((a) => a.revoked_at === null);
   assert.strictEqual(live.length, 1, 'ARRANGEMENT: exactly one authenticator to be the last one');
@@ -314,8 +314,8 @@ test('KEEP revokeOwnAuthenticator — D43 still bites: the LAST factor of the la
   const r = f.service.revokeOwnAuthenticator(Object.assign(
     StepUp.env(l1s, f.T + 210), { authenticator_id: live[0].id }));
   assert.strictEqual(r.ok, false,
-    'the sole usable administrator must NOT be able to strip their last factor — D43 at the ' +
-    'commit point. This is the refusal my first draft mistook for a bug in the module');
+    'the sole usable administrator must NOT be able to strip their last factor — the last-admin rule at the ' +
+    'commit point. This refusal is easy to mistake for a bug in the module');
   assert.strictEqual(f.repo.read().authenticators.find((a) => a.id === live[0].id).revoked_at, null,
     'and nothing may have been persisted');
 });
@@ -333,7 +333,7 @@ function sessionAlive(f, sess, now) {
   return r && r.ok === true;
 }
 
-test('KEEP revokeOtherAuthenticator — SUCCEEDS, and the TARGET\'s sessions die while the ACTOR\'s lives', async () => {
+test('revokeOtherAuthenticator — SUCCEEDS, and the TARGET\'s sessions die while the ACTOR\'s lives', async () => {
   const f = await StepUp.freshAdmin(F);
   const target = await f.enrolSecondPerson(f.T);
 
@@ -372,7 +372,7 @@ test('KEEP revokeOtherAuthenticator — SUCCEEDS, and the TARGET\'s sessions die
     'a different bug wearing the same green, and only asserting both directions catches it');
 });
 
-test('KEEP revokeOwnAuthenticator — the OWNER\'s sessions die after their own revoke', async () => {
+test('revokeOwnAuthenticator — the OWNER\'s sessions die after their own revoke', async () => {
   const f = await StepUp.freshAdmin(F);
   const sess = await f.elevate(f.T + 300);
   const second = StepUp.createDevice();
@@ -381,7 +381,7 @@ test('KEEP revokeOwnAuthenticator — the OWNER\'s sessions die after their own 
   const fin = await f.service.finishAdditionalAuthenticator(Object.assign(
     StepUp.env(sess, f.T + 311),
     { ceremony_id: begin.ceremony_id, response: second.registration(begin.options.challenge) }));
-  assert.strictEqual(fin.ok, true, 'ARRANGEMENT: it must bind, or D43 refuses the revoke below');
+  assert.strictEqual(fin.ok, true, 'ARRANGEMENT: it must bind, or the last-admin rule refuses the revoke below');
 
   const live = f.repo.read().authenticators.filter((a) => a.revoked_at === null);
   assert.strictEqual(live.length, 2, 'ARRANGEMENT: two live authenticators');

@@ -57,7 +57,7 @@ function metaFrom(session) {
   };
 }
 
-test('L6 authorizeRead — Member can read room:main, not room:guest', async () => {
+test('room access: authorizeRead — Member can read room:main, not room:guest', async () => {
   const world = await arrangeMember();
   await world.passwords.set({
     tenant: TENANT, person_subject_id: world.person.id, password: PASSWORD, now: Date.now(),
@@ -70,13 +70,13 @@ test('L6 authorizeRead — Member can read room:main, not room:guest', async () 
   const meta = metaFrom(signIn);
 
   const main = world.house.authorizeRead(meta, 'read', 'room:main');
-  assert.strictEqual(main.allow, true, 'house Member opens main');
+  assert.strictEqual(main.allow, true, 'a Member opens main');
 
   const priv = world.house.authorizeRead(meta, 'read', 'room:guest');
   assert.strictEqual(priv.allow, false, 'private room stays locked without a grant');
 });
 
-test('L6 grant on room:guest opens that room, not kitchen', async () => {
+test('room access: grant on room:guest opens that room, not kitchen', async () => {
   const world = await arrangeMember();
   await world.passwords.set({
     tenant: TENANT, person_subject_id: world.person.id, password: PASSWORD, now: Date.now(),
@@ -102,7 +102,7 @@ test('L6 grant on room:guest opens that room, not kitchen', async () => {
   assert.strictEqual(world.house.authorizeRead(meta, 'read', 'room:kitchen').allow, false);
 });
 
-test('L6 ensurePair is idempotent and atomic (read+write together)', async () => {
+test('room access: ensurePair is idempotent and atomic (read+write together)', async () => {
   const world = await arrangeMember();
   const first = world.grants.ensurePair({
     tenant: TENANT, subject_id: world.person.id, resource: 'room:guest', origin: 'any',
@@ -116,7 +116,7 @@ test('L6 ensurePair is idempotent and atomic (read+write together)', async () =>
   assert.strictEqual(second.added.length, 0);
 });
 
-test('L6 removeForResource drains grants so a reused room id is closed', async () => {
+test('room access: removeForResource drains grants so a reused room id is closed', async () => {
   const world = await arrangeMember();
   world.grants.ensurePair({
     tenant: TENANT, subject_id: world.person.id, resource: 'room:side', origin: 'any',
@@ -127,7 +127,7 @@ test('L6 removeForResource drains grants so a reused room id is closed', async (
   assert.strictEqual(world.grants.forResource(TENANT, 'room:side').length, 0);
 });
 
-test('L6 grantRoom refuses without an eligible room_kind', async () => {
+test('room access: grantRoom refuses without an eligible room_kind', async () => {
   const world = await arrangeMember();
   await world.passwords.set({
     tenant: TENANT, person_subject_id: world.person.id, password: PASSWORD, now: Date.now(),
@@ -144,7 +144,7 @@ test('L6 grantRoom refuses without an eligible room_kind', async () => {
   assert.strictEqual(houseKind.ok, false);
 });
 
-test('L6 grantRoom — a Member cannot grant (Owner L2 only)', async () => {
+test('room access: grantRoom — a Member cannot grant (Owner L2 only)', async () => {
   const world = await arrangeMember();
   await world.passwords.set({
     tenant: TENANT, person_subject_id: world.person.id, password: PASSWORD, now: Date.now(),

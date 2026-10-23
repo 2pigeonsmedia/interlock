@@ -93,7 +93,7 @@ function hostNames() {
     .filter((n) => !own.has(n));
 }
 
-test('#384 — the module never says the name of the host it lives in', () => {
+test('the module never says the name of the host it lives in', () => {
   const names = hostNames();
   const files = shippingFiles();
 
@@ -104,7 +104,7 @@ test('#384 — the module never says the name of the host it lives in', () => {
     'NO HOST IDENTITY DECLARED. Set IDENTITY_HOST_LABEL, or give the parent directory a ' +
     'package.json with a name. This guard REFUSES rather than reporting clean, because a ' +
     'check with nothing to compare against prints exactly the same green as a clean one — ' +
-    'which is how a planted host name passed under the adoption gate (F3).');
+    'which is how a planted host name passed under the adoption gate.');
   assert.ok(files.length >= 10,
     'ARRANGEMENT: the shipping surface must be non-trivial — got ' + files.length + ' file(s)');
 
@@ -135,7 +135,7 @@ test('#384 — the module never says the name of the host it lives in', () => {
     names.join(', '));
 });
 
-test('#384 — the module contains no absolute URL except loopback', () => {
+test('the module contains no absolute URL except loopback', () => {
   const files = shippingFiles();
   const found = [];
   for (const file of files) {
@@ -149,10 +149,10 @@ test('#384 — the module contains no absolute URL except loopback', () => {
   }
   assert.deepStrictEqual(found, [],
     'an absolute URL IS a host address — a literal one is a host name with punctuation. ' +
-    'The live pin arrives as a construction argument (land 1); nothing here may bake one.');
+    'The live pin arrives as a construction argument; nothing here may bake one.');
 });
 
-test('#384 — the guard BITES: a planted host name is caught', () => {
+test('the guard BITES: a planted host name is caught', () => {
   // A guard nobody has seen fail is a guard nobody has tested. This plants the
   // exact defect in a copy of the real check's input and proves the check fires,
   // without touching the shipping tree.

@@ -48,7 +48,7 @@ function runIn(dest, script, envState) {
 
 // ── the state directory fails CLOSED ────────────────────────────────────────
 
-test('#268 — environment and adjacent state cannot select the store', () => {
+test('environment and adjacent state cannot select the store', () => {
   const { dest, siblingState, envState } = isolatedCopy();
   const out = runIn(dest, `
     const assert = require('assert');
@@ -66,7 +66,7 @@ test('#268 — environment and adjacent state cannot select the store', () => {
   assert.deepStrictEqual(fs.readdirSync(siblingState), [], 'adjacent state directory must stay untouched');
 });
 
-test('#268 — an explicit absolute directory is the one admitted source', () => {
+test('an explicit absolute directory is the one admitted source', () => {
   const { root, dest, siblingState, envState } = isolatedCopy();
   const named = path.join(root, 'named-state');
   fs.mkdirSync(named);
@@ -115,7 +115,7 @@ test('entry point — every required config key REFUSES when absent or wrong', (
   }
 });
 
-test('#268 — repository source contains no executable process.env access', () => {
+test('repository source contains no executable process.env access', () => {
   const src = fs.readFileSync(path.join(MODULE_DIR, 'repo.js'), 'utf8');
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   assert.doesNotMatch(code, /process\s*\.\s*env/,
@@ -165,7 +165,7 @@ test('installTool is absent from a REALLY CONSTRUCTED service, implementation re
     'installTool is DEFER — it must not be on the public service object');
   for (const kept of ['setPassLifetime', 'revokeOwnAuthenticator', 'revokeOtherAuthenticator']) {
     assert.ok(typeof service[kept] === 'function',
-      kept + ' is KEEP — un-exporting installTool must not have taken a KEEP row with it');
+      kept + ' is retained — un-exporting installTool must not have removed a retained method');
   }
 
   const adminSrc = fs.readFileSync(path.join(MODULE_DIR, 'administration.js'), 'utf8');
@@ -230,7 +230,7 @@ test('a caller-supplied authenticatorService is REFUSED, not silently ignored', 
   }
 });
 
-test('#193 — the module serves a tenant that is NOT the old baked name', () => {
+test('the module serves a tenant that is NOT the old baked name', () => {
   const F2 = require('./fixture.js');
   F2.evictModule();
   const identity = F2.load('index.js');
@@ -270,7 +270,7 @@ test('#193 — the module serves a tenant that is NOT the old baked name', () =>
 // would still pass a module that threw *after* re-pointing — so this pins the
 // first instance's view across the attempt.
 
-test('F1 — a second tenant is REFUSED, and the first instance does not flip', () => {
+test('a second tenant is REFUSED, and the first instance does not flip', () => {
   const F2 = require('./fixture.js');
   F2.evictModule();
   const identity = F2.load('index.js');
@@ -291,5 +291,5 @@ test('F1 — a second tenant is REFUSED, and the first instance does not flip', 
   assert.strictEqual(first.service.health().tenant, 'alpha',
     'AND THE FIRST INSTANCE MUST NOT HAVE FLIPPED. This is the assertion that reds if the ' +
     'repointing comes back: a throw that happens AFTER the reassignment would satisfy the ' +
-    'line above and still hand instance A a house its host never chose');
+    'line above and still hand instance A a tenant its host never chose');
 });

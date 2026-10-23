@@ -50,7 +50,7 @@ function arrangePlain() {
 
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-invite-plain-'));
   assert.deepStrictEqual(fs.readdirSync(stateDir), [],
-    'ARRANGEMENT: the state dir must be EMPTY, or this proves nothing about a fresh house');
+    'ARRANGEMENT: the state dir must be EMPTY, or this proves nothing about a fresh deployment');
 
   const house = identity.create({
     stateDir, tenant: TENANT, cookieName: identity.COOKIE_NAME, originClass: 'local',
@@ -100,7 +100,7 @@ test('invite — a signed-in PARTICIPANT (no administrator role) is refused, no 
   const result = world.house.invite(metaFrom(signIn), { name: 'Someone' });
   assert.strictEqual(result.ok, false, 'a non-administrator must be refused: ' + JSON.stringify(result));
   assert.strictEqual(world.repo.read().admission_capabilities.length, before,
-    'a refused invite must mint NOTHING — a capability existing over a denied caller would be the hole D26 exists to close');
+    'a refused invite must mint NOTHING — a capability existing over a denied caller would be the hole server-read authority exists to close');
 });
 
 // ── invite: administrator WITHOUT a fresh L2 step-up is refused ─────────────
@@ -163,12 +163,12 @@ test('invite + redeem — a genuinely fresh L2 administrator mints a working inv
   assert.strictEqual(who.subject_id, redeemed.person_id);
   assert.strictEqual(who.name, 'Willow');
   assert.deepStrictEqual(who.roles.map(r => r.slug), ['participant'],
-    'a redeemed invite must hold exactly participant — never administrator, never nothing (D30)');
+    'a redeemed invite must hold exactly participant — never administrator, never nothing');
 });
 
 // ── invalid-name refuses BEFORE consume, so the secret still works ─────────
 
-test('redeem — José is refused as invalid-name and the same secret still redeems (H8)', async () => {
+test('redeem — José is refused as invalid-name and the same secret still redeems', async () => {
   const f = await StepUp.freshAdmin(F);
   const adminSess = await f.elevate(f.T);
   const invited = f.instance.invite(StepUp.env(adminSess, f.T + 5), { name: 'Willow' });
@@ -205,7 +205,7 @@ test('redeem — a secret already consumed once refuses on the second attempt', 
   const second = await f.instance.redeem({ now: f.T + 20 }, {
     secret: invited.secret, name: 'Reused Again', password: PASSWORD + '2',
   });
-  assert.strictEqual(second.ok, false, 'a SECOND redemption of the same secret must be refused — single-use (D41)');
+  assert.strictEqual(second.ok, false, 'a SECOND redemption of the same secret must be refused — single-use');
 });
 
 // ── redeem: an expired secret refuses ───────────────────────────────────────

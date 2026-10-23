@@ -58,7 +58,7 @@ async function arrange() {
 }
 
 // ── the module carries no host address at all ───────────────────────────────
-test('1b — administration.js contains no baked host URL', () => {
+test('live origin — administration.js contains no baked host URL', () => {
   const source = fs.readFileSync(path.join(F.MODULE_DIR, 'administration.js'), 'utf8');
   assert.ok(!/interlock\.example/i.test(source),
     'the module must carry no host URL — another host importing this folder must not find ' +
@@ -68,7 +68,7 @@ test('1b — administration.js contains no baked host URL', () => {
 });
 
 // ── acceptance 1 — fail closed on absence ───────────────────────────────────
-test('1b — an absent, blank or non-absolute live_origin REFUSES construction', async () => {
+test('live origin — an absent, blank or non-absolute live_origin REFUSES construction', async () => {
   const { administration, base } = await arrange();
   for (const [label, pin] of [
     ['absent', undefined],
@@ -105,7 +105,7 @@ test('1b — an absent, blank or non-absolute live_origin REFUSES construction',
   }
 });
 
-test('1b — the vacuous-compare case: NO pin and NO origin must still refuse', async () => {
+test('live origin — the vacuous-compare case: NO pin and NO origin must still refuse', async () => {
   // This is the specific failure the guard exists to prevent, and it is the one
   // a happy-path test cannot see. With neither field supplied, the admission
   // compare is `undefined !== undefined` — FALSE — so a door would be admitted
@@ -125,7 +125,7 @@ test('1b — the vacuous-compare case: NO pin and NO origin must still refuse', 
 });
 
 // ── acceptance 2 — the pin still bites ──────────────────────────────────────
-test('1b — a WRONG origin is refused while a MATCHING one constructs', async () => {
+test('live origin — a WRONG origin is refused while a MATCHING one constructs', async () => {
   const { administration, base } = await arrange();
 
   // The negative and its own control, in one test on purpose: a refusal is only
@@ -142,7 +142,7 @@ test('1b — a WRONG origin is refused while a MATCHING one constructs', async (
     'pin must succeed, or the refusal above is not attributable to the compare');
 });
 
-test('1b — the compare is EXACT, not a prefix or a host match', async () => {
+test('live origin — the compare is EXACT, not a prefix or a host match', async () => {
   const { administration, base } = await arrange();
   for (const near of [
     'https://other.test',
@@ -157,7 +157,7 @@ test('1b — the compare is EXACT, not a prefix or a host match', async () => {
 });
 
 // ── acceptance 3 — construction argument, never the environment ─────────────
-test('1b — no environment variable can supply or relax the pin', async () => {
+test('live origin — no environment variable can supply or relax the pin', async () => {
   const { administration, base } = await arrange();
   const planted = ['LIVE_ORIGIN', 'IDENTITY_LIVE_ORIGIN', 'ADMINISTRATION_LIVE_ORIGIN', 'ORIGIN'];
   const saved = {};
@@ -167,7 +167,7 @@ test('1b — no environment variable can supply or relax the pin', async () => {
       /harness must be exactly true/,
       'the pin must come from the CONSTRUCTION ARGUMENT only — an env var must not be able ' +
       'to supply it. A weakening flag is inherited by construction and travels wherever the ' +
-      'process goes, which is exactly how a gate goes off house-wide without a diff.');
+      'process goes, which is exactly how a gate goes off deployment-wide without a diff.');
   } finally {
     for (const key of planted) {
       if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
@@ -180,7 +180,7 @@ test('1b — no environment variable can supply or relax the pin', async () => {
 });
 
 // ── the user-visible host name ──────────────────────────────────────────────
-test('1b — RP_NAME carries no host name, and neither does its fallback', () => {
+test('live origin — RP_NAME carries no host name, and neither does its fallback', () => {
   // Mutation found this gap rather than review: RP_NAME was changed with no
   // control at all, so putting a host-specific RP name back stayed 12/12 green.
   // It is the most
@@ -209,7 +209,7 @@ test('1b — RP_NAME carries no host name, and neither does its fallback', () =>
 // NAMED HARM: a remotely reached live admin spending a grant that was only ever
 // issued for the host machine itself. `authzOriginClass()` returned 'local'
 // unconditionally, so every service — tunnel included — spent local-only grants.
-test('1c — observed_origin is REQUIRED and must be exactly local or tunnel', async () => {
+test('observed origin — observed_origin is REQUIRED and must be exactly local or tunnel', async () => {
   const { administration, base } = await arrange();
   for (const [label, value] of [
     ['absent', undefined],
@@ -234,7 +234,7 @@ test('1c — observed_origin is REQUIRED and must be exactly local or tunnel', a
   }
 });
 
-test('1c — the service reports the class the AUTHORIZATION path uses, not the raw argument', async () => {
+test('observed origin — the service reports the class the AUTHORIZATION path uses, not the raw argument', async () => {
   // Reported through authzOriginClass() — the same function can() is fed from —
   // so a mutation that sends the classifier back to an unconditional 'local'
   // is visible here. Reading the constructor variable instead would keep saying
@@ -249,7 +249,7 @@ test('1c — the service reports the class the AUTHORIZATION path uses, not the 
   }
 });
 
-test('1c — health() does not claim to be a harness when it is not', async () => {
+test('observed origin — health() does not claim to be a harness when it is not', async () => {
   // `harness: true` was a literal, so a LIVE service described itself as a
   // harness to anyone who asked — an instrument answering fluently about the
   // wrong thing, and the one a reader would most reasonably trust.
@@ -260,7 +260,7 @@ test('1c — health() does not claim to be a harness when it is not', async () =
     'a live (non-harness) construction must NOT report harness: true');
 });
 
-test('1c — the class is LOAD-BEARING: can() spends a local-only grant only for local', async () => {
+test('observed origin — the class is LOAD-BEARING: can() spends a local-only grant only for local', async () => {
   // The property that makes the unconditional-'local' classifier a security
   // defect rather than a cosmetic one, asserted at the decision itself.
   // Without this, "the class is passed through" is a plumbing claim about a
@@ -277,6 +277,6 @@ test('1c — the class is LOAD-BEARING: can() spends a local-only grant only for
     'ARRANGEMENT: the local-only grant IS spendable by a local-class caller');
   assert.strictEqual(ask('tunnel').allow, false,
     'a local-only grant must NOT be spendable by a tunnel-class caller — this is the harm: ' +
-    'a remotely reached admin spending a grant issued for the house machine');
+    'a remotely reached admin spending a grant issued for the host machine');
   assert.strictEqual(ask('tunnel').reason, 'no-live-grant');
 });
