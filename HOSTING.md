@@ -263,11 +263,14 @@ the service: the throttle counters live in memory.
 
 If everyone, the owner included, is refused at once, many addresses are probably
 guessing together. One address cannot cause this, but the throttle's tables are
-bounded, and a few thousand distinct addresses failing within fifteen minutes
-(one IPv6 /52 holds 4,096 /64 blocks) can fill them. The throttle then fails
+bounded, and a few thousand distinct IPv4 addresses failing within fifteen
+minutes can fill them. IPv6 is counted per /48 block as well, so it takes
+several hundred separate /48 blocks. The throttle then fails
 closed: nearly every sign-in waits 30 seconds and is refused. Sessions already
 signed in keep working. It clears once fifteen minutes pass with no attempt, or
-when you restart the service.
+when you restart the service. To keep a guessing crowd from reaching Interlock
+at all, add a rate limiting rule for the path `/api/login` in Cloudflare's WAF
+settings; Interlock's own throttle stays in place behind it.
 
 **421 or 502 through the front.** A 421 means the `Host` reaching Interlock is not
 the hosted origin: look for a Host override in the tunnel settings, or a request

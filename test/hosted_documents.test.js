@@ -122,8 +122,13 @@ test('HOSTING.md says what throttled sign-in looks like and what clears it', () 
   assertSentence(HOSTING,
     'If the owner is refused with the right password after someone else has been guessing, wait fifteen minutes without trying or restart the service: the throttle counters live in memory.');
   assertSentence(HOSTING,
-    'One address cannot cause this, but the throttle\'s tables are bounded, and a few thousand distinct addresses ' +
-    'failing within fifteen minutes (one IPv6 /52 holds 4,096 /64 blocks) can fill them.');
+    'One address cannot cause this, but the throttle\'s tables are bounded, and a few thousand distinct IPv4 addresses ' +
+    'failing within fifteen minutes can fill them.');
+  assertSentence(HOSTING,
+    'IPv6 is counted per /48 block as well, so it takes several hundred separate /48 blocks.');
+  assertSentence(HOSTING,
+    'To keep a guessing crowd from reaching Interlock at all, add a rate limiting rule for the path `/api/login` ' +
+    'in Cloudflare\'s WAF settings; Interlock\'s own throttle stays in place behind it.');
   assertSentence(HOSTING,
     'The throttle then fails closed: nearly every sign-in waits 30 seconds and is refused.');
   assertSentence(HOSTING,

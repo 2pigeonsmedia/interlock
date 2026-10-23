@@ -16,6 +16,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const net = require('net');
 const repo = require('./repo.js');
 const subjects = require('./subjects.js');
 const passwords = require('./passwords.js');
@@ -47,6 +48,9 @@ const THROTTLE_DECAY_MS = 900_000;        // 15 minutes without a failure
 const THROTTLE_MAX_ENTRIES = 4096;
 const THROTTLE_OVERFLOW_BUCKETS = 64;
 const THROTTLE_OVERFLOW_KEYS = 16384;
+// Failed sign-ins counted per IPv6 /48, the block one site or tunnel account is
+// routinely given. The limit applies only while a primary map is full.
+const THROTTLE_BLOCK_THRESHOLD = 25;
 
 function isPlainObject(o) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
@@ -73,6 +77,24 @@ function boundedText(v, limits) {
 }
 function nonBlank(v) { return typeof v === 'string' && v.trim() !== ''; }
 
+// The /48 an IPv6 source lies in, or null for IPv4, an IPv4-mapped address, or
+// anything that is not an address. A trailing prefix length (a host passes an
+// IPv6 source as its /64) is ignored.
+function ipv6Block(value) {
+  if (typeof value !== 'string') return null;
+  const address = value.replace(/\/\d{1,3}$/, '').replace(/%.*$/, '');
+  if (!net.isIPv6(address)) return null;
+  let host;
+  try { host = new URL('http://[' + address + ']').hostname.slice(1, -1); } catch (_) { return null; }
+  if (host.includes('.') || /^::ffff:/i.test(host)) return null;
+  const [head, tail] = host.includes('::') ? host.split('::') : [host, null];
+  const left = head === '' ? [] : head.split(':');
+  const right = tail === null || tail === '' ? [] : tail.split(':');
+  const groups = left.concat(new Array(8 - left.length - right.length).fill('0'), right);
+  if (groups.length !== 8) return null;
+  return groups.slice(0, 3).map(g => parseInt(g, 16).toString(16)).join(':') + '::/48';
+}
+
 // ── the login throttle ──────────────────────────────────────────────────────
 // passwords.js's createMemoryThrottle stays frozen and exported, but it is not
 // adequate as the login service's public default: its two Maps are unbounded and retain raw source and
@@ -84,6 +106,8 @@ function createLoginThrottle(opts) {
   const baseDelayMs = Number.isSafeInteger(o.baseDelayMs) && o.baseDelayMs > 0 ? o.baseDelayMs : THROTTLE_BASE_MS;
   const maxDelayMs = Number.isSafeInteger(o.maxDelayMs) && o.maxDelayMs > 0 ? o.maxDelayMs : THROTTLE_MAX_MS;
   const decayMs = Number.isSafeInteger(o.decayMs) && o.decayMs > 0 ? o.decayMs : THROTTLE_DECAY_MS;
+  const blockThreshold = Number.isSafeInteger(o.blockThreshold) && o.blockThreshold > 0
+    ? o.blockThreshold : THROTTLE_BLOCK_THRESHOLD;
 
   // Fresh per process, never persisted, never exposed. Its whole job is to make
   // the stored keys unusable to anyone who reads the map.
@@ -108,6 +132,11 @@ function createLoginThrottle(opts) {
   // source bump behind every successful sign-in.
   const inflightSource = new Map();
   const inflightAccount = new Map();
+  // Failures per IPv6 /48. Counted always, so a block that caused the pressure
+  // is already over its limit when the pressure starts. Bounded: once full, an
+  // unseen block is not counted, which leaves the other dimensions as they are.
+  const blocks = new Map();
+  const inflightBlock = new Map();
 
   function keyOf(value) {
     return crypto.createHmac('sha256', HMAC_KEY).update(String(value)).digest('hex');
@@ -155,21 +184,47 @@ function createLoginThrottle(opts) {
   // case variants nor existence-dependent keying bypass or disclose it.
   function accountKey(a) { return keyOf('a:' + subjects.fold(a)); }
   function sourceKey(s) { return keyOf('s:' + String(s)); }
+  function blockKey(s) {
+    const block = ipv6Block(s);
+    return block === null ? null : keyOf('b:' + block);
+  }
+  // A full primary map is when one more distinct source or name starts filling
+  // the overflow set, and a full overflow set refuses everyone. Until then the
+  // block limit stays out of the way.
+  function underPressure() {
+    return source.size >= THROTTLE_MAX_ENTRIES || account.size >= THROTTLE_MAX_ENTRIES;
+  }
+  function bumpBlock(k, now) {
+    if (k === null) return;
+    decay(blocks, now);
+    const cur = blocks.get(k);
+    if (cur) { cur.n += 1; cur.last = now; return; }
+    if (blocks.size < THROTTLE_MAX_ENTRIES) blocks.set(k, { n: 1, last: now });
+  }
+  function blockDelay(k, now) {
+    if (k === null || !underPressure()) return 0;
+    const cur = blocks.get(k);
+    const n = (cur && now - cur.last < decayMs ? cur.n : 0) + (inflightBlock.get(k) || 0);
+    if (n < blockThreshold) return 0;
+    return Math.min(baseDelayMs * Math.pow(2, n - blockThreshold), maxDelayMs);
+  }
 
   // The delay each dimension imposes on its own, counting attempts in flight.
   function delays(a) {
     const now = Number.isSafeInteger(a.now) ? a.now : 0;
     const sk = sourceKey(a.source);
     const ak = accountKey(a.account);
+    const bk = blockKey(a.source);
     const ds = delayFor(countFor(source, sk, now) + (inflightSource.get(sk) || 0));
     const da = delayFor(countFor(account, ak, now) + (inflightAccount.get(ak) || 0));
-    return { now, sk, ak, ds, da };
+    const db = blockDelay(bk, now);
+    return { now, sk, ak, bk, ds, da, db };
   }
 
   return Object.freeze({
     check(args) {
-      const { ds, da } = delays(isPlainObject(args) ? args : {});
-      const delay_ms = Math.max(ds, da);      // both checked; the larger controls
+      const { ds, da, db } = delays(isPlainObject(args) ? args : {});
+      const delay_ms = Math.max(ds, da, db);  // all checked; the largest controls
       return Object.freeze({ allowed: delay_ms === 0, delay_ms, retry_after_ms: delay_ms });
     },
     // Marks one attempt as in flight. Returns the release function; calling it
@@ -178,13 +233,16 @@ function createLoginThrottle(opts) {
       const a = isPlainObject(args) ? args : {};
       const sk = sourceKey(a.source);
       const ak = accountKey(a.account);
+      const bk = blockKey(a.source);
       inflightSource.set(sk, (inflightSource.get(sk) || 0) + 1);
       inflightAccount.set(ak, (inflightAccount.get(ak) || 0) + 1);
+      if (bk !== null) inflightBlock.set(bk, (inflightBlock.get(bk) || 0) + 1);
       let released = false;
       return function release() {
         if (released) return;
         released = true;
-        for (const [map, k] of [[inflightSource, sk], [inflightAccount, ak]]) {
+        for (const [map, k] of [[inflightSource, sk], [inflightAccount, ak], [inflightBlock, bk]]) {
+          if (k === null) continue;
           const n = (map.get(k) || 0) - 1;
           if (n > 0) map.set(k, n); else map.delete(k);
         }
@@ -195,6 +253,7 @@ function createLoginThrottle(opts) {
       const now = Number.isSafeInteger(a.now) ? a.now : 0;
       bump(source, sourceKey(a.source), now);
       bump(account, accountKey(a.account), now);
+      bumpBlock(blockKey(a.source), now);
     },
     // Records an attempt that check() throttled. It never reached the password
     // check, so the account name it carries is unverified: the attempt counts
@@ -205,9 +264,10 @@ function createLoginThrottle(opts) {
     // closed for everyone. An account throttled by its own failures still
     // counts every attempt against it, from whatever address.
     recordThrottled(args) {
-      const { now, sk, ak, ds, da } = delays(isPlainObject(args) ? args : {});
+      const { now, sk, ak, bk, ds, da, db } = delays(isPlainObject(args) ? args : {});
       if (ds > 0) bump(source, sk, now);
       if (da > 0) bump(account, ak, now);
+      if (db > 0) bumpBlock(bk, now);
     },
     recordSuccess(args) {
       const a = isPlainObject(args) ? args : {};
@@ -224,6 +284,9 @@ function createLoginThrottle(opts) {
         cap_overflow_keys: THROTTLE_OVERFLOW_KEYS,
         inflight_source_entries: inflightSource.size,
         inflight_account_entries: inflightAccount.size,
+        block_entries: blocks.size,
+        block_threshold: blockThreshold,
+        under_pressure: underPressure(),
         cap_entries: THROTTLE_MAX_ENTRIES,
         cap_overflow: THROTTLE_OVERFLOW_BUCKETS,
         threshold,

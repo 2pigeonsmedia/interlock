@@ -112,8 +112,11 @@ test('the hosted setup code and the password door are described as built', () =>
     'An attempt refused by the throttle counts only against what throttled it, so one address cannot exhaust ' +
     'the throttle by sending made-up account names.');
   assertSentence(SECURITY,
-    'Many addresses together can: the throttle keeps bounded tables, and a few thousand distinct client addresses ' +
-    'failing within fifteen minutes (one IPv6 /52 holds 4,096 /64 blocks) can fill them.');
+    'Many addresses together can: the throttle keeps bounded tables, and a few thousand distinct IPv4 addresses ' +
+    'failing within fifteen minutes can fill them.');
+  assertSentence(SECURITY,
+    'While a table is full, a block with 25 failures waits and is refused as a whole, so IPv6 addresses fill the ' +
+    'tables only from several hundred separate /48 blocks (about 660, measured).');
   assertSentence(SECURITY,
     'The throttle then cannot tell a new address or account from the attackers\' and fails closed: nearly every ' +
     'sign-in, the owner\'s included, waits 30 seconds and is refused.');
