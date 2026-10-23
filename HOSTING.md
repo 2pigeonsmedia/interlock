@@ -16,7 +16,8 @@ own everywhere; where this runbook writes `HOST`, it means that same name.
 ## What you need
 
 - A Linux machine you control, with `systemd`.
-- Node.js 24 or newer on the service's `PATH`, and Interlock installed
+- Node.js 24.22.1 or newer (or 26.12.1 or newer), kept patched, on the
+  service's `PATH`, and Interlock installed
   system-wide so the service user can run it: the install command in
   [`GUIDE.md`](GUIDE.md), run as root. `command -v interlock` shows where it
   landed (for example `/usr/local/bin/interlock`); use that path in the units

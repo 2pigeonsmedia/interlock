@@ -10,7 +10,7 @@ const GUIDE = fs.readFileSync(path.join(ROOT, 'GUIDE.md'), 'utf8');
 const ADAPTER_GUIDE = fs.readFileSync(path.join(ROOT, 'docs', 'ADAPTER_AUTHORING.md'), 'utf8');
 
 test('GUIDE gives one portable installation and a retained local server', () => {
-  assert.match(GUIDE, /Node\.js 24 or newer/);
+  assert.match(GUIDE, /Node\.js 24\.22\.1\+ or 26\.12\.1\+/);
   assert.match(GUIDE, /npm install --global --install-links=true \./);
   assert.match(GUIDE, /interlock --version/);
   assert.match(GUIDE, /interlock start/);

@@ -28,7 +28,7 @@ The whole process is:
 
 **AI (or person): install.**
 
-1. Check `node --version` and `npm --version`. Interlock requires Node.js 24 or newer; prefer supported LTS. If needed, install Node through the operating system's normal trusted method and recheck both commands.
+1. Check `node --version` and `npm --version`. Interlock requires Node.js 24.22.1+ or 26.12.1+; prefer supported LTS. If needed, install Node through the operating system's normal trusted method and recheck both commands.
 2. From the extracted directory, run:
 
    ```text

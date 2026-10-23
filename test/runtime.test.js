@@ -7,10 +7,10 @@ const test = require('node:test');
 
 const packageJson = require('../package.json');
 
-test('the private foundation admits Node 24 and newer without claiming an untested ceiling', () => {
+test('the private foundation admits only patched Node 24.22.1+ or 26.12.1+ without claiming an untested ceiling', () => {
   assert.equal(packageJson.private, true);
   assert.equal(packageJson.type, 'commonjs');
-  assert.equal(packageJson.engines.node, '>=24');
+  assert.equal(packageJson.engines.node, '^24.22.1 || >=26.12.1');
   assert.ok(Number(process.versions.node.split('.')[0]) >= 24);
 });
 

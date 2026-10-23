@@ -58,8 +58,11 @@ The helper checks Node.js and installs the local command. You start the room in
 a terminal that stays open, then choose your own name, password, and passkey in
 the browser; the AI never needs to see them.
 
-Interlock requires Node.js 24 or newer. Prefer a currently supported LTS
-release. It stays in the foreground, so closing its terminal stops the room.
+Interlock requires Node.js 24.22.1 or newer on the 24 line, or 26.12.1 or
+newer. Those are the first releases on those lines with the Node.js October
+2026 security fixes. Keep Node.js patched, and prefer a currently supported
+LTS release.
+The room stays in the foreground, so closing its terminal stops it.
 
 v0.2.0 tested-on evidence (2026-10-18):
 
