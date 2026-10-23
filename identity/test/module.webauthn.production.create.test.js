@@ -1,5 +1,5 @@
 // identity/test/module.webauthn.production.create.test.js
-// #398: identity.create() production WebAuthn construction through the public door.
+// identity.create() production WebAuthn construction through the public door.
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');

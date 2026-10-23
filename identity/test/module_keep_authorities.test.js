@@ -2,10 +2,10 @@
 
 // identity/test/module_keep_authorities.test.js
 //
-// F2 (Codex, land 2.5 review): the three retained KEEP authorities —
-// `setPassLifetime`, `revokeOwnAuthenticator`, `revokeOtherAuthenticator` —
-// appeared under identity/test/ ONLY in a function-PRESENCE loop. He is right
-// that presence is not a control: `typeof x === 'function'` is satisfied by a
+// The three retained KEEP authorities — `setPassLifetime`,
+// `revokeOwnAuthenticator`, `revokeOtherAuthenticator` — once appeared under
+// identity/test/ ONLY in a function-PRESENCE loop. Presence is not a
+// control: `typeof x === 'function'` is satisfied by a
 // stub, by a method that ignores its arguments, and by one whose authority gate
 // has been deleted.
 //
@@ -99,7 +99,7 @@ test('KEEP setPassLifetime — the wrapper does not open a nested repo.transact 
     'set REFUSE. C12 caught exactly that once already');
 });
 
-// ── the two W2 revoke doors ─────────────────────────────────────────────────
+// ── the two authenticator revoke doors ──────────────────────────────────────
 
 test('KEEP revokeOwnAuthenticator — INVOKED: refuses without a session, and never throws', async () => {
   const { service, ORIGIN } = await arrangeService();
@@ -151,7 +151,7 @@ test('the three KEEP doors all route through withFreshAdmin — deleting it woul
       fn + ' must route through ' + gate + ' — this is the pin that makes the behavioural ' +
       'refusals above meaningful rather than incidental');
   }
-  // revokeOwnAuthenticator is deliberately NOT on withFreshAdmin: A2 is the
+  // revokeOwnAuthenticator is deliberately NOT on withFreshAdmin: it is the
   // person's own door and needs no admin. Asserting that difference stops a
   // future "consistency" refactor from putting an L2 requirement back on the
   // lost-phone case by the side door.
@@ -166,8 +166,8 @@ test('the three KEEP doors all route through withFreshAdmin — deleting it woul
 //
 // An earlier version of this block said the authorized SUCCESS paths were
 // structurally unreachable from module-owned tests. That was true when written
-// and is FALSE now: Grok ruled (room 6288) to build a minimal module-owned
-// step-up, `step_up_fixture.js` signs a real WebAuthn assertion that the
+// and is FALSE now: a minimal module-owned step-up was built,
+// `step_up_fixture.js` signs a real WebAuthn assertion that the
 // module's own pinned verifier accepts, and the success paths below are proven.
 // The stale text is replaced rather than left under a newer heading — a limit
 // that has been discharged must not be inherited in its original form.
@@ -176,8 +176,8 @@ test('the three KEEP doors all route through withFreshAdmin — deleting it woul
 //   · The negative-variant matrix — wrong RP, wrong origin, corrupt signature,
 //     stale counter, missing UV. The host harness drives those and this fixture
 //     deliberately does not reproduce them: copying that matrix would be moving
-//     the host harness by hand, which the ruling forbids. Those assertions
-//     travel with the traveling-corpus packet.
+//     the host harness by hand, which is out of scope here. Those assertions
+//     stay with the host's own test corpus.
 //   · "Target sessions die" for `revokeOtherAuthenticator` — reaching a real
 //     other-person revoke needs a SECOND enrolled person, which needs the
 //     invite/redeem pair arranged end-to-end. Named, not built.
@@ -185,8 +185,8 @@ test('the three KEEP doors all route through withFreshAdmin — deleting it woul
 //     refusal, not by timing analysis.
 
 // ── SUCCESS PATHS — reachable since the module got its own step-up fixture ───
-// These were the gap Codex named as F2 and Grok ruled (a) on: build a minimal
-// module-owned step-up, do not fake L2. The fixture signs a REAL WebAuthn
+// These were the gap named at the top of this file, closed by building a
+// minimal module-owned step-up rather than faking L2. The fixture signs a REAL WebAuthn
 // assertion that the module's own pinned @simplewebauthn/server verifies.
 
 const StepUp = require('./step_up_fixture.js');
@@ -262,13 +262,13 @@ test('KEEP revokeOtherAuthenticator — SELF-TARGET refuses even for a fresh adm
 test('KEEP revokeOwnAuthenticator — SUCCESS: a person retires ONE of their own authenticators at L1', async () => {
   const f = await StepUp.freshAdmin(F);
 
-  // ARRANGEMENT, and it is the whole lesson of this test. My first version
+  // ARRANGEMENT, and it is the whole lesson of this test. A first version
   // revoked the admin's ONLY authenticator and asserted success. It returned
-  // {ok:false} — and the refusal was CORRECT: D43 lives at the repository commit
-  // point and will not let the last usable administrator strip their last
-  // factor. I had written a test that demanded the module break its own
-  // last-admin rule, and had I "fixed" the module to make it pass I would have
-  // shipped exactly the defect D43 exists to prevent.
+  // {ok:false} — and the refusal was CORRECT: the last-admin rule lives at the
+  // repository commit point and will not let the last usable administrator
+  // strip their last factor. That test demanded the module break its own
+  // last-admin rule, and "fixing" the module to make it pass would have
+  // shipped exactly the defect the last-admin rule exists to prevent.
   //
   // So: bind a SECOND authenticator first — which also exercises the
   // beginAdditionalAuthenticator / finishAdditionalAuthenticator KEEP pair.
@@ -288,8 +288,9 @@ test('KEEP revokeOwnAuthenticator — SUCCESS: a person retires ONE of their own
     'ARRANGEMENT: exactly two live authenticators, or the revoke below is refused by ' +
     'D43 rather than permitted by A2 — and the test would prove the opposite of its name');
 
-  // Deliberately an L1 session: the point of A2 is that a password-holder whose
-  // phone is at the bottom of a lake cannot produce L2 on it.
+  // Deliberately an L1 session: the point of the own-revoke door is that a
+  // password-holder whose phone is at the bottom of a lake cannot produce L2
+  // on it.
   const l1s = f.session_store.issue({ subject_id: f.person_id, now: f.T + 400 });
   assert.ok(l1s.ok, 'ARRANGEMENT: an L1 session must issue');
   assert.strictEqual(l1s.session.assurance, 1,
@@ -319,9 +320,9 @@ test('KEEP revokeOwnAuthenticator — D43 still bites: the LAST factor of the la
     'and nothing may have been persisted');
 });
 
-// ── R2 (Codex re-read): the REVOKE EFFECTS, not just the refusals ───────────
-// A6 proved self-target refuses and own-revoke succeeds. Codex is right that
-// neither proves what the spec actually promises: revocation KILLS SESSIONS,
+// ── the REVOKE EFFECTS, not just the refusals ───────────────────────────────
+// The tests above prove self-target refuses and own-revoke succeeds. Neither
+// proves what the design actually promises: revocation KILLS SESSIONS,
 // and it kills the RIGHT ones. A revoke that returns ok:true while the target
 // keeps writing is the failure this pair exists to prevent.
 
@@ -341,8 +342,8 @@ test('KEEP revokeOtherAuthenticator — SUCCEEDS, and the TARGET\'s sessions die
   // ⚠ CLOCK ARITHMETIC IS PART OF THE ARRANGEMENT. `elevate(t)` issues at t and
   // finishes the ceremony at t+2, so a check at t+1 is BEFORE the elevated
   // session exists — and the store correctly answers 'invalid-session' for a
-  // backward clock. My first draft read that as a dead session and would have
-  // sent me hunting a module bug that was my own timestamp.
+  // backward clock. Reading that as a dead session sends you hunting a module
+  // bug that is really the test's own timestamp.
   const actorSess = await f.elevate(f.T + 500);
   const READY = f.T + 505;
   assert.strictEqual(sessionAlive(f, target.session, READY), true,

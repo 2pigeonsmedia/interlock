@@ -1,16 +1,11 @@
 // identity/test/fixture.js — the module's own arrangement helper.
 //
-// PLAN: docs/plans/PLAN2_MODULE_2026-08-16_GROK.md (land 1, "the module is done")
-// DISPATCH + A1: docs/DISPATCH_PLAN2_MODULE_L1_2026-08-16_GROK.md
-// ASSERTION AUTHOR: Grok (disqualified from building or independently reviewing)
-// BUILDER: Buzzard (Opus 5), 2026-08-17. REVIEWER: unseated — a fresh load.
-//
 // This helper deliberately builds its world through THE MODULE'S OWN CREATION
 // ROUTES — subjects.create, memberships.invite/activate, passwords.set,
 // grants.add — and never by writing a state file behind the module's back. A
 // hand-written fixture state is the harness-structural blind spot: every test
 // that performs the same setup inherits the same lie, and no amount of
-// non-author review sees it, because the reviewer performs the setup too. If
+// independent review sees it, because the reviewer performs the setup too. If
 // the module's own creation path is broken, these tests must fail. That is the
 // point.
 //
@@ -26,8 +21,8 @@ const assert = require('node:assert');
 
 const MODULE_DIR = path.resolve(__dirname, '..');
 
-// The land-1 surface, exactly as A1 names it. Enumerated here ONCE so the
-// boundary controls and the eviction list cannot drift from each other.
+// The module's core sign-in and authorization surface. Enumerated here ONCE so
+// the boundary controls and the eviction list cannot drift from each other.
 const LAND1_SURFACE = Object.freeze([
   'login.js', 'passwords.js', 'l1_sessions.js', 'can.js', 'grants.js', 'memberships.js',
 ]);

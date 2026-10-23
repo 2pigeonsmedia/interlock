@@ -2,10 +2,11 @@
 
 // identity/test/public_construction_probe.js
 //
-// F3 (Codex, land 2.5 review): the adoption gate said the entry point
-// "constructs when given one" and then executed REFUSALS ONLY. A step whose
-// TITLE claims more than its body does cannot catch the finding it appears to
-// cover — and in this case it structurally could not catch F1.
+// The adoption gate once said the entry point "constructs when given one" and
+// then executed REFUSALS ONLY. A step whose TITLE claims more than its body
+// does cannot catch the defect it appears to cover — and in this case it
+// structurally could not catch success paths that were reachable only from
+// module internals, never through the public entry point.
 //
 // This probe is the missing half: it CONSTRUCTS through the public entry point
 // and drives a real sign-in and a real grant-authorized write, using
@@ -32,7 +33,7 @@ async function main() {
 
   const instance = identity.create({
     stateDir: ctx.dir,
-    tenant: 'house',            // #193: the HOST names its house
+    tenant: 'house',            // the HOST names its tenant
     cookieName: identity.COOKIE_NAME,
     originClass: 'local',
     hostLabel: 'adoption-gate',
@@ -90,7 +91,7 @@ async function main() {
 
   // ── 3. GRANT, then the SAME call is allowed ───────────────────────────────
   instance.grants.add({
-    tenant: 'house',            // #193: the HOST names its house
+    tenant: 'house',            // the HOST names its tenant
     subject_id: ctx.person.id,
     capability: 'write',
     resource: 'room:main',
@@ -114,7 +115,7 @@ async function main() {
     'the store must live in the EXPLICIT directory, not somewhere the module chose');
 
   // ── 5. THE README'S OWN EXAMPLE MUST ACTUALLY CONSTRUCT ───────────────────
-  // Codex's R1: the documented canonical example refused immediately
+  // The documented canonical example once refused immediately
   // ("origin must be one bounded canonical HTTPS origin"). A usage contract that
   // cannot run is worse than no example — a reader debugs their own environment
   // against a configuration that never worked.

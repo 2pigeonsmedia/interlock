@@ -104,13 +104,12 @@ test('invite — a signed-in PARTICIPANT (no administrator role) is refused, no 
 });
 
 // ── invite: administrator WITHOUT a fresh L2 step-up is refused ─────────────
-// The exact STOP-CLAUSE this ticket's brief named: capability_policy.js pins
-// 'admin' at minimum_assurance 2, so an ordinary L1 administrator session —
-// which is ALL a webauthn:false house (the live upstream host) can ever produce — is
-// refused by can() itself, before withFreshAdmin's step-up consumption is
-// even reached. This is the module's own design, not a gate this ticket
-// weakened; this test pins that fact so a future change cannot loosen it
-// silently.
+// The stop clause: capability_policy.js pins 'admin' at minimum_assurance 2,
+// so an ordinary L1 administrator session — which is ALL a webauthn:false
+// deployment can ever produce — is refused by can() itself, before
+// withFreshAdmin's step-up consumption is even reached. This is the module's
+// own design, not a gate the invite methods weakened; this test pins that fact
+// so a future change cannot loosen it silently.
 
 test('invite — a signed-in ADMINISTRATOR at ordinary L1 (no WebAuthn step-up) is refused', async () => {
   const f = await StepUp.freshAdmin(F);
@@ -167,7 +166,7 @@ test('invite + redeem — a genuinely fresh L2 administrator mints a working inv
     'a redeemed invite must hold exactly participant — never administrator, never nothing (D30)');
 });
 
-// ── H8: invalid-name refuses BEFORE consume, so the secret still works ─────
+// ── invalid-name refuses BEFORE consume, so the secret still works ─────────
 
 test('redeem — José is refused as invalid-name and the same secret still redeems (H8)', async () => {
   const f = await StepUp.freshAdmin(F);

@@ -82,7 +82,7 @@ test('a non-boolean audit_allowed_reads is an invalid context: a deny, audited, 
   assert.equal((await authzRows(fx.audit)).length, before + 4, 'every invalid-context deny is a row');
 });
 
-// The house-level switch: two services over the same state directory, one
+// The deployment-level switch: two services over the same state directory, one
 // default and one quiet, each signing the fixture person in through its own
 // session store. The default service proves the arrangement (an allowed read
 // through authorizeRead really is a row); the quiet one proves the switch.

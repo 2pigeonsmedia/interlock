@@ -2,13 +2,13 @@
 
 // identity/test/step_up_fixture.js — MINIMAL module-owned L2 step-up.
 //
-// F2 (Codex): the three retained KEEP authorities had no proof they ever WORK,
+// The three retained authority methods once had no proof they ever WORK,
 // only that they refuse. Every success path needs `consumeFreshAdminStepUp`,
-// i.e. a genuine WebAuthn assertion. Until now the only machinery that could
-// produce one lived in the HOST tree, shared by ten host suites.
+// i.e. a genuine WebAuthn assertion, and the only machinery that could produce
+// one lived in the HOST tree, shared by ten host suites.
 //
-// Grok ruled (room 6288): build a MINIMAL module-owned step-up fixture. Do not
-// fake L2. Do not move the host harness.
+// Hence a MINIMAL module-owned step-up fixture: it does not fake L2, and it
+// does not move the host harness.
 //
 // So this signs for real. The device below generates a P-256 key pair and
 // produces genuine WebAuthn registration and assertion payloads that
@@ -19,7 +19,7 @@
 // host harness additionally drives a negative-variant matrix (wrong RP, wrong
 // origin, corrupt signature, stale counter, missing UV). Those belong with the
 // suites that use them and are NOT reproduced here — copying them would be
-// moving the harness by hand, which is the thing the ruling forbids.
+// moving the harness by hand, which is exactly what this fixture avoids.
 
 const assert = require('node:assert');
 const crypto = require('node:crypto');
@@ -131,10 +131,11 @@ async function freshAdmin(F) {
   assert.strictEqual(repo.initialize({ tenant: 'house' }).ready, true, 'ARRANGEMENT: state must load CLEAN');
   await audit.start();
 
-  // ── BUILT THROUGH THE PUBLIC ENTRY POINT (Codex re-read, F1) ──────────────
-  // A6 assembled the session store, challenge store and authenticator service
-  // from internals — so the success paths it proved were reached by a route the
-  // public contract did not offer. That is a contract nobody's own tests use.
+  // ── BUILT THROUGH THE PUBLIC ENTRY POINT ──────────────────────────────────
+  // An earlier version assembled the session store, challenge store and
+  // authenticator service from internals — so the success paths it proved
+  // were reached by a route the public contract did not offer. That is a
+  // contract nobody's own tests use.
   // Everything the module can construct is now constructed by `create()`.
   const identity = F.load('index.js');
   const instance = identity.create({
@@ -201,7 +202,7 @@ async function freshAdmin(F) {
   // ── a SECOND enrolled person, with their own bound authenticator ──────────
   // Needed to prove the OTHER-person revoke actually succeeds and that the
   // TARGET's sessions die while the ACTOR's survive. Built entirely through
-  // public KEEP methods: issueHumanInvite -> redeemHumanInvite.
+  // public methods: issueHumanInvite -> redeemHumanInvite.
   async function enrolSecondPerson(now) {
     const adminSess = await elevate(now);
     const invite = service.issueHumanInvite(env(adminSess, now + 5));

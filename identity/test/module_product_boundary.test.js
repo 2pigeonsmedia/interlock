@@ -2,13 +2,12 @@
 
 // identity/test/module_product_boundary.test.js
 //
-// LAND 2.5, step 1's controls. Owner GO for a per-commit gate path
-// (hooks/pre-commit:794 globs identity/test/*.test.js), relayed by Grok, 6276.
+// Controls for the product boundary of the identity module.
 //
-// These exist because this packet has now shipped the SAME defect twice — a
-// repair for a NAMED escape with no control pointed at it (the RP_NAME miss,
-// then Lapwing's F1 on the pin validator). Step 1 deleted a fail-open branch,
-// closed a public door, and added an entry point, and every one of those was
+// These exist because the same defect shipped twice — a repair for a NAMED
+// escape with no control pointed at it (the RP_NAME miss, then a gap in the
+// pin validator). The boundary work deleted a fail-open branch, closed a
+// public door, and added an entry point, and every one of those was
 // green-by-absence until this file existed.
 //
 // Interlock closes the source module's remaining state-directory ladder. These
@@ -47,7 +46,7 @@ function runIn(dest, script, envState) {
   });
 }
 
-// ── #268 — the state directory fails CLOSED ─────────────────────────────────
+// ── the state directory fails CLOSED ────────────────────────────────────────
 
 test('#268 — environment and adjacent state cannot select the store', () => {
   const { dest, siblingState, envState } = isolatedCopy();
@@ -90,7 +89,7 @@ test('entry point — every required config key REFUSES when absent or wrong', (
   const identity = require('../index.js');
   const good = {
     stateDir: path.join(os.tmpdir(), 'irrelevant-but-absolute'),
-    tenant: 'house',            // #193: the HOST names its house
+    tenant: 'house',            // the HOST names its tenant
     cookieName: identity.COOKIE_NAME,
     originClass: 'local',
     hostLabel: 'control',
@@ -101,7 +100,7 @@ test('entry point — every required config key REFUSES when absent or wrong', (
   const cases = [
     ['stateDir absent',      Object.assign({}, good, { stateDir: undefined }),      /stateDir is REQUIRED/],
     ['stateDir relative',    Object.assign({}, good, { stateDir: 'rel/ative' }),    /must be ABSOLUTE/],
-    // #193: the contract CHANGED. A tenant is no longer pinned to one name; it
+    // The contract CHANGED. A tenant is no longer pinned to one name; it
     // must be a valid name and the repository is told it. Asserting the old
     // 'implements exactly one' message here would be asserting the defect.
     ['tenant malformed',  Object.assign({}, good, { tenant: 'Not A House!' }), /must be 1-63 chars|tenant is REQUIRED/],
@@ -191,10 +190,10 @@ test('the manifest pin matches the module\'s OWN self-declared dependency', () =
 });
 
 // ── the adopter-facing security contract that had no control ────────────────
-// This promise was deleted once, by the builder, in a commit labelled "docs
-// only" — and nothing noticed: README still promised it, corpus 45/45, adoption
-// gate green, pre-commit green. Codex found it with a four-line probe. The
-// deletion was silent because no assertion existed; this is that assertion.
+// This promise was deleted once, in a commit labelled "docs only" — and
+// nothing noticed: the README still promised it and every existing test and
+// gate stayed green. A four-line probe found it. The deletion was silent
+// because no assertion existed; this is that assertion.
 
 test('a caller-supplied authenticatorService is REFUSED, not silently ignored', () => {
   const F2 = require('./fixture.js');
@@ -202,7 +201,7 @@ test('a caller-supplied authenticatorService is REFUSED, not silently ignored', 
   const identity = F2.load('index.js');
   const base = {
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'identity-caller-auth-')),
-    tenant: 'house',            // #193: the HOST names its house
+    tenant: 'house',            // the HOST names its tenant
     cookieName: identity.COOKIE_NAME,
     originClass: 'local',
     hostLabel: 'control',
@@ -239,7 +238,7 @@ test('#193 — the module serves a tenant that is NOT the old baked name', () =>
 
   const house = identity.create({
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), 'identity-t193-')),
-    tenant: 'firsthouse',                     // deliberately NOT 'house'
+    tenant: 'firsthouse',                     // deliberately NOT the old baked `house`
     cookieName: identity.COOKIE_NAME,
     originClass: 'local',
     hostLabel: 'control',
@@ -261,7 +260,7 @@ test('#193 — the module serves a tenant that is NOT the old baked name', () =>
     'initialize without a tenant must refuse — fail-closed, no default');
 });
 
-// ── F1 (Pitohui, land 2.6 review) — the tenant is WRITE-ONCE ────────────────
+// ── the tenant is WRITE-ONCE ────────────────────────────────────────────────
 // The defect this replaces: a second create() on the SAME state dir with a
 // DIFFERENT tenant constructed happily, and the ALREADY-RUNNING instance's
 // health().tenant flipped under it. Every repo guard compares tenant(), so

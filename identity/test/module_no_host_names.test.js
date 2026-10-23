@@ -1,12 +1,12 @@
 'use strict';
 
-// identity/test/module_no_host_names.test.js — #384, land 2.6
+// identity/test/module_no_host_names.test.js
 //
-// Grok's instruction was exact: "a general no-host-name guard, NOT another
-// enum." The thing being replaced was a hand-written list of ceremony keys —
-// and a hand-written list is the wrong shape for this job twice over. It only
-// ever catches the names somebody already thought of, and it goes stale the
-// moment the module is adopted by a house nobody had in mind.
+// The requirement is a general no-host-name guard, NOT another enum. The thing
+// being replaced was a hand-written list of ceremony keys — and a hand-written
+// list is the wrong shape for this job twice over. It only ever catches the
+// names somebody already thought of, and it goes stale the moment the module
+// is adopted by a host nobody had in mind.
 //
 // So this guard does not hard-code any host label. It asks the HOST ITSELF what
 // it is called, and requires that the module never says it. Vendor the folder into
@@ -17,7 +17,7 @@
 //   1. the module must not contain the adopting host's own name;
 //   2. the module must not contain an absolute URL for anything but loopback —
 //      a URL IS a host address, so a literal one is a host name with extra
-//      punctuation. Loopback is exempt because it names no house.
+//      punctuation. Loopback is exempt because it names no host.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -29,16 +29,16 @@ const HOST_DIR = path.resolve(MODULE_DIR, '..');
 
 // SHIPPING code only, and CODE ONLY — comments are stripped before matching.
 //
-// That is a deliberate line, not a convenience. On its first real-corpus run
-// this guard flagged 20 hits and every one was PROSE: comments explaining which
-// host this module grew up in and why the pins were removed — including, with
-// some irony, a comment claiming the module never names its host. Failing on those
-// would push the next builder to delete the record of WHY, and this house runs
-// on that record. The defect class #384 names is behavioural: pins, literals,
-// enumerations. Comments cannot pin anything.
+// That is a deliberate line, not a convenience. Run against the real corpus,
+// a version that also matched comments flagged 20 hits and every one was PROSE:
+// comments explaining which host this module grew up in and why the pins were
+// removed — including, with some irony, a comment claiming the module never
+// names its host. Failing on those would push the next contributor to delete
+// the record of WHY. The defect class this guard targets is behavioural: pins,
+// literals, enumerations. Comments cannot pin anything.
 //
-// The module's own tests also legitimately name a house — a caller must pick one
-// — so a guard that forbade that would forbid the tests from testing anything.
+// The module's own tests also legitimately name a tenant — a caller must pick
+// one — so a guard that forbade that would forbid the tests from testing anything.
 function shippingFiles() {
   return fs.readdirSync(MODULE_DIR)
     .filter((f) => f.endsWith('.js'))
@@ -55,16 +55,16 @@ const DECLARED_LEFTOVERS = Object.freeze([]);
 
 // What is the host called? Ask the host — never a list, and never the FOLDER.
 //
-// ── F3 (Pitohui, land 2.6 review): the folder name was the blind spot ───────
+// ── the folder name was the blind spot ─────────────────────────────────────
 // This used to derive from `path.basename(HOST_DIR)`. Under the adoption gate
 // the module is extracted into a temp sandbox, so the "host name" became
 // `identity-adoption-simgaa2` — non-empty, so the arrangement assertion was
 // satisfied, and nobody's actual host name, so a PLANTED host name went GREEN in
-// exactly the context the gate certifies. Mutation pair he ran, same planted
+// exactly the context the gate certifies. A mutation pair with the same planted
 // line: derivable host -> 2 pass/1 fail, gate-like extraction -> 3 pass/0 fail.
 //
 // A temp directory is not an identity. So the host must DECLARE itself, by the
-// same rule the module applies to every other host fact in this land:
+// same rule the module applies to every other host fact:
 //   1. IDENTITY_HOST_LABEL — the host states its own name, explicitly;
 //   2. the parent's package.json "name" — a real manifest, not a folder.
 // If neither exists there is NO host identity to check against, and this guard
@@ -118,7 +118,7 @@ test('#384 — the module never says the name of the host it lives in', () => {
     for (const name of names) {
       let i = src.indexOf(name);
       while (i !== -1) {
-        // word-ish boundary, so "housekeeping" does not read as "house"
+        // word-ish boundary, so "acmestore" does not read as "acme"
         const before = i === 0 ? ' ' : src[i - 1];
         const after = src[i + name.length] === undefined ? ' ' : src[i + name.length];
         if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) {
@@ -142,7 +142,7 @@ test('#384 — the module contains no absolute URL except loopback', () => {
     const src = fs.readFileSync(file, 'utf8');
     for (const m of codeOnly(src).matchAll(/https?:\/\/[A-Za-z0-9._:-]+/g)) {
       const url = m[0];
-      // Loopback names no house, and the module legitimately pattern-matches it.
+      // Loopback names no host, and the module legitimately pattern-matches it.
       if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(url)) continue;
       found.push(path.basename(file) + ': ' + url);
     }

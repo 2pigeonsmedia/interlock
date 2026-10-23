@@ -1,12 +1,8 @@
-// identity/test/module_live_origin.test.js — land 1b: the live-origin pin.
-//
-// PACKET: A2 `e3fd2a9` · A3 `9959bb9` · A4 `89150d1` (acceptance lines binding)
-// ASSERTION AUTHOR: Grok. REVIEWER: Jacana (his three acceptance lines are §A4).
-// BUILDER: Buzzard (Opus 5), 2026-08-17.
+// identity/test/module_live_origin.test.js — the live-origin pin.
 //
 // Run: node identity/test/run.js
 //
-// WHY THIS FILE EXISTS. Land 1b takes the host URL out of `identity/` —
+// WHY THIS FILE EXISTS. The host URL is out of `identity/` —
 // `administration.js` no longer bakes an upstream address. That is host decoupling on
 // its face and an AUTHORITY CHANGE underneath: the string it deleted was the
 // operand of the live door's exact-equality admission check. "The caller
@@ -14,7 +10,7 @@
 // and the difference is invisible in a diff that only shows a constant leaving.
 //
 // So the pin is asserted here, not assumed. The controls below are written to
-// A4's acceptance lines, which are the reviewer's words promoted to the packet:
+// three acceptance conditions:
 //   1. fail closed on absence — including the case where the guard's ABSENCE
 //      would make the compare vacuous;
 //   2. a negative proving the pin still bites, mutation-proven;
@@ -32,7 +28,7 @@ const F = require('./fixture.js');
 // only admit a loopback origin, so the door under test is constructed at a
 // loopback origin with an explicit pin — the branch is selected by the ABSENCE
 // of harness/contained, not by the shape of the URL.
-// A REAL https origin (1c / Codex Finding 3): the pin is a LIVE-door contract,
+// A REAL https origin: the pin is a LIVE-door contract,
 // so exercising it against `http://localhost` proved the happy path of a door
 // that cannot exist. The challenge store is harness-only and still demands a
 // loopback origin — that is a separate module limitation, stated rather than
@@ -71,7 +67,7 @@ test('1b — administration.js contains no baked host URL', () => {
     'the baked live-origin constant must be gone, not merely unused');
 });
 
-// ── A4 acceptance 1 — fail closed on absence ────────────────────────────────
+// ── acceptance 1 — fail closed on absence ───────────────────────────────────
 test('1b — an absent, blank or non-absolute live_origin REFUSES construction', async () => {
   const { administration, base } = await arrange();
   for (const [label, pin] of [
@@ -81,7 +77,7 @@ test('1b — an absent, blank or non-absolute live_origin REFUSES construction',
     ['relative', '/login'],
     ['bare host', 'example.test'],
     ['non-string', 42],
-    // ── 1c / Codex Finding 3: a regex on a URL matches a PREFIX ──────────
+    // ── a regex on a URL matches a PREFIX, so each of these must refuse ──
     ['plaintext http', 'http://live.test'],
     ['credentials in the url', 'https://user:pass@live.test'],
     ['a path', 'https://live.test/login'],
@@ -95,8 +91,8 @@ test('1b — an absent, blank or non-absolute live_origin REFUSES construction',
     const opts = Object.assign({}, base);
     if (pin !== undefined) opts.live_origin = pin;
     // ⚠ ASSERT THE DISTINGUISHING TEXT, NOT THE SHARED PREFIX. Both refusals
-    // deliberately carry 'harness must be exactly true' so the host's R7 M45
-    // claim keeps reading true — which means that phrase CANNOT tell which
+    // deliberately carry 'harness must be exactly true' so a host check that
+    // matches that phrase keeps reading true — which means it CANNOT tell which
     // guard fired. Mutation proved it: deleting the absence guard left a blank
     // pin refused anyway by the compare (' ' !== the origin), and a control
     // matching only the shared phrase stayed GREEN over a removed guard. Two
@@ -128,7 +124,7 @@ test('1b — the vacuous-compare case: NO pin and NO origin must still refuse', 
     'GUARD — the compare cannot be what refuses it, because the compare is vacuous here');
 });
 
-// ── A4 acceptance 2 — the pin still bites ───────────────────────────────────
+// ── acceptance 2 — the pin still bites ──────────────────────────────────────
 test('1b — a WRONG origin is refused while a MATCHING one constructs', async () => {
   const { administration, base } = await arrange();
 
@@ -160,7 +156,7 @@ test('1b — the compare is EXACT, not a prefix or a host match', async () => {
   }
 });
 
-// ── A4 acceptance 3 — construction argument, never the environment ──────────
+// ── acceptance 3 — construction argument, never the environment ─────────────
 test('1b — no environment variable can supply or relax the pin', async () => {
   const { administration, base } = await arrange();
   const planted = ['LIVE_ORIGIN', 'IDENTITY_LIVE_ORIGIN', 'ADMINISTRATION_LIVE_ORIGIN', 'ORIGIN'];
@@ -209,9 +205,9 @@ test('1b — RP_NAME carries no host name, and neither does its fallback', () =>
     'the recovery rpName fallback must not introduce a baked host name');
 });
 
-// ── LAND 1c — the observed-origin class (Codex blocker 1) ───────────────────
+// ── the observed-origin class ───────────────────────────────────────────────
 // NAMED HARM: a remotely reached live admin spending a grant that was only ever
-// issued for the house machine. `authzOriginClass()` returned 'local'
+// issued for the host machine itself. `authzOriginClass()` returned 'local'
 // unconditionally, so every service — tunnel included — spent local-only grants.
 test('1c — observed_origin is REQUIRED and must be exactly local or tunnel', async () => {
   const { administration, base } = await arrange();
@@ -265,9 +261,10 @@ test('1c — health() does not claim to be a harness when it is not', async () =
 });
 
 test('1c — the class is LOAD-BEARING: can() spends a local-only grant only for local', async () => {
-  // The property that makes blocker 1 a security defect rather than a cosmetic
-  // one, asserted at the decision itself. Without this, "the class is passed
-  // through" is a plumbing claim about a value nobody has shown matters.
+  // The property that makes the unconditional-'local' classifier a security
+  // defect rather than a cosmetic one, asserted at the decision itself.
+  // Without this, "the class is passed through" is a plumbing claim about a
+  // value nobody has shown matters.
   const fx = await F.fixture('identity-1c-originclass-');
   fx.grants.add({
     tenant: 'house', subject_id: fx.person.id, capability: 'write', resource: 'board',

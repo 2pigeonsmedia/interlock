@@ -1,39 +1,31 @@
 // identity/test/run.js — the module's OWN test runner.
 //
-// PLAN: docs/plans/PLAN2_MODULE_2026-08-16_GROK.md (land 1)
-// DISPATCH + A1: docs/DISPATCH_PLAN2_MODULE_L1_2026-08-16_GROK.md
-//   A1, narrowed: land 1 CREATES the module's own suites under identity/test/
-//   on their own runner. It does NOT relocate the host's test/identity.*.test.js.
-// BUILDER: Buzzard (Opus 5), 2026-08-17.
+// The module's suites live under identity/test/ and run on their own runner.
+// The host's test/identity.*.test.js suites stay where they are.
 //
 //   node identity/test/run.js          # from anywhere; paths are self-resolved
 //
 // It needs node >= 20 and nothing else: no host package.json script, no host
 // harness, no server, no network, no room key. That is the point — a stranger
-// who is handed this folder can run its tests without meeting the house it
-// currently lives in.
+// who is handed this folder can run its tests without meeting the deployment
+// it currently lives in.
 //
-// ⚠ WHAT RUNS THIS (#270 law 2: a check without a scheduled runner is
-// decoration). These suites ARE scheduled, both ways, since `0f96946`
-// (owner GO, 2026-08-17):
-//   · per-commit — hooks/pre-commit selects identity/test/*.test.js by PATH
-//     whenever the identity surface is staged, and fail-closes if the
+// ⚠ WHAT RUNS THIS (a check without a scheduled runner is decoration). These
+// suites ARE scheduled, both ways:
+//   · per-commit — the host's pre-commit hook selects identity/test/*.test.js
+//     by PATH whenever the identity surface is staged, and fail-closes if the
 //     selection is empty;
 //   · nightly — the upstream host's nightly runner globs
 //     identity/test/*.test.js beside the host estate.
 //
-// An earlier version of this header said the opposite, and kept saying it for
-// hours after it stopped being true: the wiring landed twenty minutes after
-// this file did, the closure was announced in the room, and it was never folded
-// back into the paper. A room post is not the artifact. Jacana caught it on
-// review (Finding 2, 49a7d30) — the record was UNDER-claiming its own coverage,
-// which wears the costume of rigor and so goes unchallenged, and which would
-// have had a future seat archive a live suite under #270 law 2.
+// A header that UNDER-claims its own coverage is as wrong as one that
+// over-claims: it reads as caution and so goes unchallenged, and it invites
+// someone to retire a live suite as unscheduled. Keep this list true.
 //
-// The honest remaining gap, narrower and his: what nothing invokes is THIS FILE.
+// The honest remaining gap, narrower: what nothing invokes is THIS FILE.
 // Both schedulers glob the suites directly, so the zero-match refusal below is
 // a guard for a human typing the command, not one on the scheduled path.
-// THE ZERO-MATCH LAW: a glob that matches nothing makes the loop body run zero
+// THE ZERO-MATCH RULE: a glob that matches nothing makes the loop body run zero
 // times and the runner exit 0 — a silent no-op wearing a tick. So the corpus is
 // resolved, asserted non-empty, and PRINTED before anything runs.
 'use strict';

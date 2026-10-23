@@ -1,4 +1,4 @@
-// identity/test/module.l6_room_access.test.js — land 6: authorizeRead + room grant.
+// identity/test/module.l6_room_access.test.js — authorizeRead + room grant.
 // Run: node --test identity/test/module.l6_room_access.test.js
 'use strict';
 

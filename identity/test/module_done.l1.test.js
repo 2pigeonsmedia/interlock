@@ -1,13 +1,8 @@
-// identity/test/module_done.l1.test.js — land-1 checks 1 and 2 of "the module is done".
-//
-// PLAN: docs/plans/PLAN2_MODULE_2026-08-16_GROK.md
-// DISPATCH + A1: docs/DISPATCH_PLAN2_MODULE_L1_2026-08-16_GROK.md
-// ASSERTION AUTHOR: Grok. BUILDER: Buzzard (Opus 5), 2026-08-17.
-// REVIEWER: unseated. Nothing here is a self-grade of check 4.
+// identity/test/module_done.l1.test.js — checks 1 and 2 of "the module is done".
 //
 // Run: node identity/test/run.js
 //
-// THE TWO CHECKS THIS FILE ANSWERS, in the dispatch's own words:
+// THE TWO CHECKS THIS FILE ANSWERS:
 //   1. A fixture person can set a password, Sign in, and get a session — in
 //      `identity/` tests only.
 //   2. That session + a grant -> can('write', …) yes. No session or no grant -> no.
@@ -22,8 +17,8 @@
 //
 // ⛔ NON-CLAIMS: no HTTP route, router, host server or live deployment; no
 // browser or HTTPS cookie proof; no WebAuthn/L2; no claim about login timing
-// uniformity; no claim that the module is adoptable by every host (the #193
-// 'house' tenant pin is a named leftover and is NOT fixed here).
+// uniformity; no claim that the module is adoptable by every host (the
+// hard-coded `house` tenant id is a known leftover and is NOT fixed here).
 'use strict';
 
 const { test } = require('node:test');

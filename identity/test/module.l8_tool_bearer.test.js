@@ -1,4 +1,4 @@
-// identity/test/module.l8_tool_bearer.test.js — land 8: Bearer tool + room:main grant.
+// identity/test/module.l8_tool_bearer.test.js — Bearer tool + room:main grant.
 // Run: node --test identity/test/module.l8_tool_bearer.test.js
 'use strict';
 

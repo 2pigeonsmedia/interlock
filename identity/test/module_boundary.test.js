@@ -1,36 +1,34 @@
-// identity/test/module_boundary.test.js — land-1 check 3 of "the module is done".
+// identity/test/module_boundary.test.js — the module's boundary check.
 //
-// PLAN: docs/plans/PLAN2_MODULE_2026-08-16_GROK.md
-// DISPATCH + A1: docs/DISPATCH_PLAN2_MODULE_L1_2026-08-16_GROK.md
-// LAW: docs/LAW_SECURITY_MODULE_2026-08-16.md ("no leftover door in the module")
-// ASSERTION AUTHOR: Grok. BUILDER: Buzzard (Opus 5), 2026-08-17.
+// Requirement: no leftover authority door in the module.
 //
 // Run: node identity/test/run.js
 //
-// THE CHECK: the module must not require a host server file, and the land-1
-// surface must be free of the five host-authority identifiers the dispatch
-// names. Those five are declared exactly once in this file, in the frozen list
-// below. They are referred to BY DESCRIPTION everywhere else on purpose: a
-// guard that quotes its own subject in prose is a guard that fires on itself,
-// which is exactly what the first run of this file did.
+// THE CHECK: the module must not require a host server file, and the core
+// surface must be free of five host-authority identifiers. Those five are
+// declared exactly once in this file, in the frozen list below. They are
+// referred to BY DESCRIPTION everywhere else on purpose: a guard that quotes
+// its own subject in prose is a guard that fires on itself, which is exactly
+// what an earlier version of this file did.
 //
-// A1 NARROWS THE SUBJECT: the surface for *done* is the land-1 set —
+// THE SUBJECT IS NARROWED: the surface for *done* is the core set —
 // login.js, passwords.js, l1_sessions.js, can.js, grants.js, memberships.js,
 // plus the files in identity/test/. `identity/sessions.js` still holds a legacy
-// scheme list and the host still requires it; that is a NAMED LEFTOVER until
-// land 2 and is deliberately NOT in this denominator. This file states that
+// scheme list and the host still requires it; that is a NAMED LEFTOVER for now
+// and is deliberately NOT in this denominator. This file states that
 // denominator out loud rather than letting a green imply folder-wide coverage.
 //
-// ⚠ WHAT EACH CONTROL CAN DO — B1 and B2 are aimed at DIFFERENT things, and
-// neither is a second brace on the other:
-//   - B1 (runtime require graph) can CONFIRM and REFUTE. It observes what the
+// ⚠ WHAT EACH CONTROL CAN DO — the runtime-graph control and the source-text
+// sweep are aimed at DIFFERENT things, and neither is a second brace on the
+// other:
+//   - the runtime require graph can CONFIRM and REFUTE. It observes what the
 //     module actually loaded, so it sees a dynamic or computed require that no
 //     source scan can see.
-//   - B2 (source text) can REFUTE ONLY. A hit is a real finding; a clean result
-//     is NOT proof that no leftover authority path exists under some other
-//     name. A source-text control read as proof of a runtime property is a
-//     shape this house has already shipped green over a false property, and it
-//     is not being asked to carry that weight here.
+//   - the source-text sweep can REFUTE ONLY. A hit is a real finding; a clean
+//     result is NOT proof that no leftover authority path exists under some
+//     other name. A source-text control read as proof of a runtime property
+//     can ship green over a false property, and it is not being asked to carry
+//     that weight here.
 'use strict';
 
 const { test } = require('node:test');
@@ -41,26 +39,28 @@ const { spawnSync } = require('child_process');
 const F = require('./fixture.js');
 
 // ⛔ THE ONE DECLARATION. Each of these strings must appear EXACTLY ONCE in
-// this file — B2-self below asserts that, so a later edit cannot bury a real
-// use of one of these identifiers inside the very file excused from the scan.
+// this file — the self-count test below asserts that, so a later edit cannot
+// bury a real use of one of these identifiers inside the very file excused
+// from the scan.
 const FORBIDDEN_AUTHORITY_TOKENS = Object.freeze([
   'checkKey', 'X-Room-Key', 'ROOM_KEY', 'admin_key', 'MCP_TOKEN',
 ]);
 
 // This file declares the tokens, so it cannot be its own subject. It is the
-// ONLY exclusion, it is named here, and B2-self covers it by a different rule.
+// ONLY exclusion, it is named here, and the self-count test covers it by a
+// different rule.
 const SELF = path.join(__dirname, path.basename(__filename));
 
 const rel = f => path.relative(F.MODULE_DIR, f);
 
 // A declared dependency lives under a directory named EXACTLY `node_modules`.
 //
-// ⚠ This was `p.includes('node_modules')` — a SUBSTRING test — until Codex
-// broke it (land 1c, blocker 2). `../node_modules_shadow/leak.js` contains the
+// ⚠ This was `p.includes('node_modules')` — a SUBSTRING test — until an
+// adversarial probe broke it. `../node_modules_shadow/leak.js` contains the
 // substring, so a file planted one directory over was silently reclassified as
 // a trusted dependency and exempted from the escape check. The control was
-// real, rigorous, and matching an unrelated token: exactly the class this house
-// has filed before, and it took an adversary outside the packet to find it.
+// real, rigorous, and matching an unrelated token — and it took an adversary
+// to find it.
 //
 // Segments, never substrings. Compared case-sensitively, because the exemption
 // is for the real directory and not for anything that resembles it.
@@ -74,10 +74,10 @@ function makeEscapeFilter(insideDir) {
   return p => !p.startsWith(insideDir) && !isDeclaredDependency(p);
 }
 
-// THE DENOMINATOR IS OBSERVED, NOT HAND-WRITTEN (Jacana Finding 3, 49a7d30).
+// THE DENOMINATOR IS OBSERVED, NOT HAND-WRITTEN.
 //
 // The first version of this file scanned a hand-written list of six modules.
-// A non-author proved that wrong the only way it can be proved — by escape:
+// An independent probe proved that wrong the only way it can be proved — by escape:
 // `require('./sessions.js')` added to can.js stayed 12/12 GREEN, and a planted
 // identifier in `repo.js` (which grants.js:12 genuinely requires) stayed 12/12
 // GREEN. The scanned surface was smaller than the surface the module actually
@@ -85,25 +85,25 @@ function makeEscapeFilter(insideDir) {
 // every run. That is a control aimed one artifact off: real, rigorous, and
 // pointed next to the risk rather than at it.
 //
-// The corpus is therefore whatever the land-1 entry points ACTUALLY pull in,
+// The corpus is therefore whatever the core entry points ACTUALLY pull in,
 // read from the runtime graph, plus this folder's own test files. A file that
 // enters the module's reach enters the sweep in the same instant — including
-// the named leftovers, which is exactly the property A2 asks be kept: they are
+// the named leftovers, which is exactly the property required here: they are
 // out of the graph today, and if one is ever wired in, the sweep meets it.
 const LAND1_ENTRY_POINTS = F.LAND1_SURFACE;
 
 // The observed graph, read from a FRESH CHILD PROCESS.
 //
-// ⚠ THIS USED TO RUN IN-PROCESS AND WAS BLIND. Codex broke it (1c blocker 2,
-// re-read at `977be45`): with a hostile `require('../node_modules_shadow/leak.js')`
-// planted in can.js, the suite stayed **24/24 GREEN**. The mechanism is test
-// ORDER, not weak logic — B0 runs first and loads the outside module;
-// `F.evictModule()` only walks identity/, so it cannot evict what lives outside
-// it; the outside entry is therefore already in `require.cache` when B1 takes
-// its `before` snapshot, and B1's `pulled` set — new entries only — excludes
-// the very escape it exists to find. Run alone, B1 went red. Run in the suite,
-// it went green. Correct in isolation and false in company, which is the worst
-// combination there is, because the suite is what everyone reads.
+// ⚠ THIS USED TO RUN IN-PROCESS AND WAS BLIND. With a hostile
+// `require('../node_modules_shadow/leak.js')` planted in can.js, the suite
+// stayed **24/24 GREEN**. The mechanism is test ORDER, not weak logic — the
+// corpus test runs first and loads the outside module; `F.evictModule()` only
+// walks identity/, so it cannot evict what lives outside it; the outside entry
+// is therefore already in `require.cache` when the runtime-graph control takes
+// its `before` snapshot, and its `pulled` set — new entries only — excludes
+// the very escape it exists to find. Run alone, that control went red. Run in
+// the suite, it went green. Correct in isolation and false in company, which
+// is the worst combination there is, because the suite is what everyone reads.
 //
 // No in-process eviction can fix this honestly: the observation would still
 // depend on every module any earlier test happened to touch. So the observation
@@ -174,14 +174,14 @@ function observedCorpus() {
   return corpus;
 }
 
-// ── B0 — the denominator is published, not implied ──────────────────────────
+// ── the corpus test: the denominator is published, not implied ──────────────
 test('L1 check 3 (B0) — the scanned corpus is OBSERVED, non-degenerate, and printed', () => {
   const corpus = observedCorpus();
   const names = corpus.map(rel).sort();
 
   // The corpus must be STRICTLY WIDER than the entry points. If it ever equals
   // them, the graph observation silently collapsed back to the hand-written
-  // list this repair replaced, and Jacana's two escapes come back with it.
+  // list this repair replaced, and both escapes described above come back with it.
   const entryNames = LAND1_ENTRY_POINTS.slice().sort();
   const beyond = names.filter(n => !entryNames.includes(n) && !n.startsWith('test' + path.sep));
   assert.ok(beyond.length > 0,
@@ -202,14 +202,14 @@ test('L1 check 3 (B0) — the scanned corpus is OBSERVED, non-degenerate, and pr
   console.log('  excluded (1): ' + rel(SELF) + ' — declares the token list; covered by B2-self');
 });
 
-// ── B0b — the named leftovers are UNREACHABLE, not merely unswept ───────────
+// ── the named leftovers are UNREACHABLE, not merely unswept ─────────────────
 test('L1 check 3 (B0b) — sessions.js is absent from the observed graph', () => {
-  // Jacana's bonus finding, promoted from an observation to a control. A2 asks
-  // that the graph-derived sweep KEEP the named leftovers out of reach; this is
-  // the assertion that notices the day one is wired in. Note what happens if it
-  // ever is: sessions.js carries a legacy scheme list, so entering the graph
-  // puts it in the corpus and B2 fires on it. Unreachable is a stronger claim
-  // than unswept, and this is the control that holds it.
+  // An observation promoted to a control. The graph-derived sweep must keep
+  // the named leftovers out of reach; this is the assertion that notices the
+  // day one is wired in. Note what happens if it ever is: sessions.js carries
+  // a legacy scheme list, so entering the graph puts it in the corpus and the
+  // source-text sweep fires on it. Unreachable is a stronger claim than
+  // unswept, and this is the control that holds it.
   const graph = observeGraph();
   const names = graph.members.map(rel);
   assert.ok(!names.includes('sessions.js'),
@@ -220,20 +220,19 @@ test('L1 check 3 (B0b) — sessions.js is absent from the observed graph', () =>
     'not there proves nothing about reachability');
 });
 
-// ── B1 — the runtime require graph ──────────────────────────────────────────
+// ── the runtime require graph ───────────────────────────────────────────────
 test('L1 check 3 (B1) — loading the land-1 surface pulls in NOTHING outside identity/', () => {
-  // ⚠ THIS ASSERTION CONSUMES THE FRESH CHILD'S RESULT. It used to do its own
-  // in-process walk — evict, snapshot `require.cache`, diff — and that is what
-  // Codex defeated TWICE. The second time is the instructive one: A2 moved the
+  // ⚠ THIS TEST CONSUMES THE FRESH CHILD'S RESULT. It used to do its own
+  // in-process walk — evict, snapshot `require.cache`, diff — and that walk
+  // was defeated TWICE. The second time is the instructive one: a fix moved the
   // observation into a child process and computed `graph.escapes` there, and
   // then this test went on using the parent walk anyway. The right answer was
-  // computed and thrown away. Built is not the same as wired, which is a
-  // sentence sitting in this repo's own pre-commit accept list.
+  // computed and thrown away. Built is not the same as wired.
   //
-  // A single in-process `require` of any land-1 module before this test — which
-  // B0 performs as a matter of course — put the outside leak in the parent
-  // cache, so the parent's `before` snapshot contained it and its `pulled` diff
-  // excluded it. The suite returned 24/24 GREEN with a hostile module resident.
+  // A single in-process `require` of any core module before this test —
+  // which the corpus test performs as a matter of course — put the outside
+  // leak in the parent cache, so the parent's `before` snapshot contained it
+  // and its `pulled` diff excluded it. The suite returned 24/24 GREEN with a hostile module resident.
   const graph = observeGraph();
 
   assert.ok(graph.pulled.length > 0,
@@ -255,13 +254,13 @@ test('L1 check 3 (B1) — loading the land-1 surface pulls in NOTHING outside id
 });
 
 test('L1 check 3 (B1 immunity) — a POLLUTED parent cache does not move the observation', () => {
-  // The control that stops this being defeated a third time. Codex's attack was
+  // The control that stops this being defeated a third time. The attack was
   // a prior in-process load; the defence is that the observation cannot see the
   // parent cache at all. So: pollute the parent deliberately, then prove the
   // answer is byte-identical.
   //
-  // Without this, the next person who "simplifies" B1 back into the parent
-  // process gets a green and the defect returns silently.
+  // Without this, the next person who "simplifies" the graph control back into
+  // the parent process gets a green and the defect returns silently.
   const clean = observeGraph();
 
   F.evictModule();
@@ -278,15 +277,15 @@ test('L1 check 3 (B1 immunity) — a POLLUTED parent cache does not move the obs
 });
 
 test('L1 check 3 (B1 arrangement) — the graph control can SEE an escape', () => {
-  // The hollow question, asked of B1 itself: if the land-1 surface DID reach
-  // outside identity/, would that filter notice? Proved on synthetic paths
-  // rather than by trusting the expression — a filter that can never produce a
+  // The hollow question, asked of the graph control itself: if the core
+  // surface DID reach outside identity/, would that filter notice? Proved on
+  // synthetic paths rather than by trusting the expression — a filter that can never produce a
   // non-empty list is a control that can only ever pass.
   const inside = fs.realpathSync(F.MODULE_DIR) + path.sep;
   const isEscape = makeEscapeFilter(inside);
   const outsideDir = path.dirname(fs.realpathSync(F.MODULE_DIR));
 
-  // CODEX'S ARRANGEMENT (land 1c, blocker 2). The substring version exempted
+  // THE ADVERSARIAL ARRANGEMENT. The substring version exempted
   // every one of these; the segment version flags them all. If this assertion
   // is ever loosened back to a substring test, these are the specimens that
   // die first.
@@ -311,7 +310,7 @@ test('L1 check 3 (B1 arrangement) — the graph control can SEE an escape', () =
     'a host file OUTSIDE identity/ must be flagged — if this is false the control is hollow');
 });
 
-// ── B2 — the source-text sweep ──────────────────────────────────────────────
+// ── the source-text sweep ───────────────────────────────────────────────────
 function sweep(files) {
   const hits = [];
   for (const file of files) {
