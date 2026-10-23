@@ -13,8 +13,12 @@ const repo = require('./repo.js');
 const EPOCH_KEY = 'unverified-legacy';
 const STREAMS = Object.freeze(['authn', 'authz', 'mutation', 'authn_deny', 'authz_deny']);
 // Failure rows of each telemetry stream go to a sibling `<stream>_deny` stream,
-// so a flood of failures cannot age out the evidence of itself (the segment cap
-// is per stream). Routing is by a SUCCESS allowlist: the producers' success
+// so a flood of failures cannot age successful rows out of the parent stream
+// (the segment cap is per stream). It can still age out earlier failures: an
+// unthrottled request with an unrecognised bearer credential writes one
+// `authn_deny` row of about 270 bytes, so about 2.2 million of them replace the
+// whole `authn_deny` stream (SECURITY.md documents this trade-off).
+// Routing is by a SUCCESS allowlist: the producers' success
 // values ('allow' from `can()`, 'ok' from password verification, 'success' from
 // session verification) stay in the parent stream; every other result — any
 // failure word, present or future, and a missing result — goes to the sibling.
