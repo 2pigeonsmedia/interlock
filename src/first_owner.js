@@ -325,6 +325,9 @@ function createFirstOwnerHandler(options) {
       typeof house.listAiSeatHistory !== 'function' ||
       typeof house.invite !== 'function' ||
       typeof house.redeem !== 'function' || typeof house.revokeParticipant !== 'function' ||
+      typeof house.administrators !== 'function' ||
+      typeof house.grantAdministrator !== 'function' ||
+      typeof house.revokeAdministrator !== 'function' ||
       typeof house.endOwnSeat !== 'function' ||
       typeof house.changePassword !== 'function' ||
       typeof house.signOutOtherSessions !== 'function' ||
@@ -755,6 +758,65 @@ function createFirstOwnerHandler(options) {
       });
     }
     return sendJson(request, response, 200, result);
+  }
+
+  // The first owner makes a member an administrator, or takes it back. The
+  // identity module decides; this maps its refusal to a status.
+  const ADMIN_REFUSALS = Object.freeze({
+    'invalid-request': [400, 'invalid-participant'],
+    'not-authorized': [403, 'not-authorized'],
+    'not-found': [404, 'not-found'],
+    'already-admin': [409, 'already-admin'],
+    'not-admin': [409, 'not-admin'],
+    'passkey-required': [409, 'passkey-required'],
+    'fresh-step-up-required': [403, 'fresh-step-up-required'],
+  });
+
+  function changeAdministrator(request, response, body, grant) {
+    if (!completed()) {
+      return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    }
+    const input = closedObject(body, ['name']);
+    if (!input || typeof input.name !== 'string' || input.name.length === 0 ||
+        input.name.includes('\0') || Buffer.byteLength(input.name, 'utf8') > 256) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-participant' });
+    }
+    if (!ownerSession(request, response, true)) return;
+    const meta = requestMeta(request, Date.now());
+    const result = grant ? house.grantAdministrator(meta, input) : house.revokeAdministrator(meta, input);
+    if (!result || result.ok !== true) {
+      const [status, error] = ADMIN_REFUSALS[result && result.reason] || [403, 'not-authorized'];
+      return sendJson(request, response, status, { ok: false, error });
+    }
+    return sendJson(request, response, 200, { ok: true, name: result.name });
+  }
+
+  // A signed-in person who has never had a passkey adds their first one, so the
+  // first owner can make them an administrator.
+  async function accountPasskeyOptions(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!closedObject(body, [])) return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    const begun = await house.authenticators.beginRegistration(requestMeta(request, Date.now()));
+    if (!begun || begun.ok !== true) {
+      return sendJson(request, response, 409, { ok: false, error: 'passkey-unavailable' });
+    }
+    return sendJson(request, response, 200, { ok: true, ceremony_id: begun.ceremony_id, options: begun.options });
+  }
+
+  async function accountPasskeyFinish(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const input = closedObject(body, ['ceremony_id', 'response']);
+    if (!input || typeof input.ceremony_id !== 'string' || !input.response) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    const result = await house.authenticators.finishRegistration(Object.assign(
+      requestMeta(request, Date.now()),
+      { ceremony_id: input.ceremony_id, response: input.response },
+    ));
+    if (!result || result.ok !== true) {
+      return sendJson(request, response, 409, { ok: false, error: 'passkey-failed' });
+    }
+    return sendJson(request, response, 200, { ok: true });
   }
 
   async function changeOwnerPassword(request, response, body) {
@@ -1688,10 +1750,23 @@ function createFirstOwnerHandler(options) {
       const seats = live.filter(row => row.kind === 'seat').map(row =>
         publicSettingsSeat(Object.assign({}, row, { ended_at: null }), stateById.get(row.subject_id), now));
       const endedSeats = ended.map(row => publicSettingsSeat(row, stateById.get(row.subject_id), now));
+      // Who is an administrator, who has a passkey, and whether this viewer
+      // (the first owner only) may change that.
+      const roster = house.administrators(requestMeta(request, now));
+      const byName = new Map(roster && roster.ok === true ? roster.people.map(row => [row.name, row]) : []);
+      const withFlags = row => {
+        const person = row.kind === 'person' ? byName.get(row.name) : null;
+        return Object.freeze(Object.assign({}, row, {
+          admin: Boolean(person && person.admin),
+          first_owner: Boolean(person && person.first_owner),
+          passkey: Boolean(person && person.passkey),
+        }));
+      };
       sendJson(request, response, 200, {
         ok: true,
         allow_ended_reuse: readRoomSettings(dataDir).allow_ended_reuse,
-        participants: Object.freeze([...people, ...seats, ...endedSeats]),
+        manage_admins: Boolean(roster && roster.ok === true && roster.manage === true),
+        participants: Object.freeze([...people, ...seats, ...endedSeats].map(withFlags)),
       });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
@@ -1789,6 +1864,10 @@ function createFirstOwnerHandler(options) {
     ['/api/invitations', issueInvitation],
     ['/api/invitations/redeem', redeemInvitation],
     ['/api/participants/revoke', revokeParticipant],
+    ['/api/participants/admin', (request, response, body) => changeAdministrator(request, response, body, true)],
+    ['/api/participants/admin/revoke', (request, response, body) => changeAdministrator(request, response, body, false)],
+    ['/api/account/passkey/options', accountPasskeyOptions],
+    ['/api/account/passkey/finish', accountPasskeyFinish],
     ['/api/settings/reuse', updateEndedReuse],
     ['/api/owner/password', changeOwnerPassword],
     ['/api/owner/sessions/revoke-others', signOutOtherSessions],

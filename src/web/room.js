@@ -23,6 +23,7 @@ const logoutButton = document.querySelector('#logout-button');
 const connectAiButton = document.querySelector('#connect-ai-button');
 const connectAiDialog = document.querySelector('#connect-ai-dialog');
 const settingsButton = document.querySelector('#settings-button');
+const addPasskeyButton = document.querySelector('#add-passkey-button');
 const settingsDialog = document.querySelector('#settings-dialog');
 const createInviteButton = document.querySelector('#create-invite-button');
 const inviteResult = document.querySelector('#invite-result');
@@ -278,9 +279,10 @@ function showRoom(user) {
     expires_at: null, last_heard: null, outstanding: 0, fetched_without_post_at: null,
   }]);
   connectAiButton.disabled = !owner;
-  connectAiButton.title = owner ? '' : 'Only the owner can connect an AI';
+  connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
   settingsButton.disabled = !owner;
-  settingsButton.title = owner ? '' : 'Only the owner can manage this Interlock';
+  settingsButton.title = owner ? '' : 'Only the owner or an admin can manage this Interlock';
+  addPasskeyButton.hidden = owner;
   setRoomNotice('');
   loginView.hidden = true;
   roomView.hidden = false;
@@ -331,6 +333,33 @@ function passkeyRequestOptions(options) {
     allowCredentials: (options.allowCredentials || []).map(item =>
       Object.assign({}, item, { id: base64urlToBytes(item.id) })),
   });
+}
+
+function passkeyCreationOptions(options) {
+  return Object.assign({}, options, {
+    challenge: base64urlToBytes(options.challenge),
+    user: Object.assign({}, options.user, { id: base64urlToBytes(options.user.id) }),
+    excludeCredentials: (options.excludeCredentials || []).map(item =>
+      Object.assign({}, item, { id: base64urlToBytes(item.id) })),
+  });
+}
+
+function passkeyRegistration(credential) {
+  const response = {
+    clientDataJSON: bytesToBase64url(credential.response.clientDataJSON),
+    attestationObject: bytesToBase64url(credential.response.attestationObject),
+  };
+  if (typeof credential.response.getTransports === 'function') {
+    response.transports = credential.response.getTransports();
+  }
+  return {
+    id: credential.id,
+    rawId: bytesToBase64url(credential.rawId),
+    type: credential.type,
+    authenticatorAttachment: credential.authenticatorAttachment,
+    clientExtensionResults: credential.getClientExtensionResults(),
+    response,
+  };
 }
 
 function passkeyAssertion(credential) {
@@ -850,9 +879,8 @@ function renderSettingsParticipants(settings = null) {
     const name = document.createElement('strong');
     name.textContent = participant.name;
     const detail = document.createElement('small');
-    const isOwner = currentUser && participant.kind === 'person' &&
-      participant.name === currentUser.name && Array.isArray(currentUser.roles) &&
-      currentUser.roles.includes('owner');
+    const isOwner = participant.kind === 'person' && participant.first_owner;
+    const manage = Boolean(settings && settings.manage_admins);
     const endedDay = Number.isSafeInteger(participant.ended_at)
       ? formatEndedDay(participant.ended_at) : null;
     detail.textContent = isOwner
@@ -860,7 +888,8 @@ function renderSettingsParticipants(settings = null) {
       : (participant.kind === 'seat'
         ? `${participant.product} · ${participant.product_provenance}` +
           (endedDay ? ` · ended ${endedDay}` : ` · ${quietWords(participant.last_heard, now)}`)
-        : 'Person');
+        : (participant.admin ? 'Admin'
+          : (manage && !participant.passkey ? 'Person · no passkey yet' : 'Person')));
     facts.append(name);
     if (participant.session !== null) {
       const session = document.createElement('small');
@@ -870,7 +899,20 @@ function renderSettingsParticipants(settings = null) {
     }
     facts.append(detail);
     row.append(facts);
-    if (!isOwner && participant.live !== false) {
+    if (manage && participant.kind === 'person' && !isOwner && participant.live !== false) {
+      const admin = document.createElement('button');
+      admin.type = 'button';
+      admin.className = 'quiet-action';
+      admin.textContent = participant.admin ? 'Remove admin' : 'Make admin';
+      admin.setAttribute('aria-label', `${admin.textContent}: ${participant.name}`);
+      if (!participant.admin && !participant.passkey) {
+        admin.disabled = true;
+        admin.title = `${participant.name} needs to add a passkey first`;
+      }
+      admin.addEventListener('click', () => changeAdmin(participant, !participant.admin, admin));
+      row.append(admin);
+    }
+    if (!isOwner && !participant.admin && participant.live !== false) {
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'quiet-action remove';
@@ -886,13 +928,14 @@ function renderSettingsParticipants(settings = null) {
 function validSettingsParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 8 || ![
+  if (keys.length !== 11 || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
-    'last_heard', 'ended_at', 'live',
+    'last_heard', 'ended_at', 'live', 'admin', 'first_owner', 'passkey',
   ].every(key => keys.includes(key))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
-    typeof value.live === 'boolean' &&
+    typeof value.live === 'boolean' && typeof value.admin === 'boolean' &&
+    typeof value.first_owner === 'boolean' && typeof value.passkey === 'boolean' &&
     (value.last_heard === null || Number.isSafeInteger(value.last_heard)) &&
     (value.ended_at === null || Number.isSafeInteger(value.ended_at));
 }
@@ -909,6 +952,7 @@ async function loadSettingsParticipants() {
   }
   if (!response.ok || !result || result.ok !== true ||
       typeof result.allow_ended_reuse !== 'boolean' ||
+      typeof result.manage_admins !== 'boolean' ||
       !Array.isArray(result.participants) ||
       result.participants.some(row => !validSettingsParticipant(row))) {
     throw new Error('invalid-settings');
@@ -947,6 +991,66 @@ async function removeParticipant(participant, button) {
         ? 'Passkey confirmation was cancelled. Nobody was removed.'
         : 'Interlock did not remove that participant. Refresh and try again.', 'error');
     button.disabled = false;
+  }
+}
+
+async function changeAdmin(participant, grant, button) {
+  button.disabled = true;
+  setSettingsStatus(settingsPeopleStatus, 'Confirm with your passkey…');
+  try {
+    await freshAdminMutation(grant ? '/api/participants/admin' : '/api/participants/admin/revoke',
+      { name: participant.name });
+    await loadSettingsParticipants();
+    setSettingsStatus(settingsPeopleStatus, grant
+      ? `${participant.name} is now an admin. They sign in again to use it.`
+      : `${participant.name} is no longer an admin.`, 'success');
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    setSettingsStatus(settingsPeopleStatus,
+      (error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
+        ? 'Passkey confirmation was cancelled. Nothing changed.'
+        : (error.code === 'passkey-required'
+          ? `${participant.name} needs to add a passkey first, with Add a passkey at the top of the room.`
+          : 'Interlock did not change that. Refresh and try again.'), 'error');
+    button.disabled = false;
+  }
+}
+
+async function addPasskey() {
+  if (!window.PublicKeyCredential || !navigator.credentials) {
+    setRoomNotice('This browser cannot create a passkey.', 'error');
+    return;
+  }
+  addPasskeyButton.disabled = true;
+  try {
+    const begun = await ownerMutation('/api/account/passkey/options', {});
+    const credential = await navigator.credentials.create({
+      publicKey: passkeyCreationOptions(begun.options),
+    });
+    if (!credential) throw Object.assign(new Error('passkey-cancelled'), { code: 'passkey-cancelled' });
+    await ownerMutation('/api/account/passkey/finish', {
+      ceremony_id: begun.ceremony_id,
+      response: passkeyRegistration(credential),
+    });
+    addPasskeyButton.hidden = true;
+    setRoomNotice('Passkey added. The owner can now make you an admin.', 'success');
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    setRoomNotice(error.code === 'passkey-unavailable'
+      ? 'You already have a passkey.'
+      : ((error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
+        ? 'Passkey setup was cancelled.'
+        : 'Interlock could not add a passkey. Try again.'), 'error');
+  } finally {
+    addPasskeyButton.disabled = false;
   }
 }
 
@@ -1477,6 +1581,8 @@ messageForm.addEventListener('submit', async event => {
 });
 
 messageBody.addEventListener('input', updateMentionPreview);
+
+addPasskeyButton.addEventListener('click', addPasskey);
 
 logoutButton.addEventListener('click', async () => {
   const logoutCsrf = readCsrf();

@@ -62,9 +62,9 @@ function showUser(user) {
   currentUser = user;
   accountLabel.textContent = `${user.name} · ${owner ? 'Owner' : 'Person'}`;
   connectAiButton.disabled = !owner;
-  connectAiButton.title = owner ? '' : 'Only the owner can connect an AI';
+  connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
   settingsButton.disabled = !owner;
-  settingsButton.title = owner ? '' : 'Only the owner can manage this Interlock';
+  settingsButton.title = owner ? '' : 'Only the owner or an admin can manage this Interlock';
   const canSignOut = Boolean(readCsrf());
   logoutButton.textContent = canSignOut ? 'Sign out' : 'Sign in to sign out';
   logoutButton.dataset.action = canSignOut ? 'sign-out' : 'sign-in';
