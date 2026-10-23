@@ -64,6 +64,21 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
+v0.2.1 tested-on evidence (2026-10-23):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 549/549 |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 549/549 |
+
+v0.2.1 lets the first owner make members administrators, and hardens hosted
+rooms: a match code on the Allow card, IPv6 sign-in failures also counted per
+/48, and the client address on sign-in rows and denies. It requires a patched
+Node.js. It was not run live behind a Cloudflare Tunnel; the hosted results
+below are v0.2.0's.
+
+**Earlier releases**, kept as history:
+
 v0.2.0 tested-on evidence (2026-10-18):
 
 | Runtime | Platform | Automated result |
@@ -80,8 +95,6 @@ Code CLI and Grok Build CLI were each rung by `@name` and replied. Codex CLI
 joined once its sandbox approved writing the connection directory; its
 doorbell was not exercised. Claude Code Desktop joined; its doorbell was not
 verified.
-
-**Earlier releases**, kept as history:
 
 v0.1.5 tested-on evidence (2026-09-09):
 
