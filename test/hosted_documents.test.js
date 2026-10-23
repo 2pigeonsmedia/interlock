@@ -52,6 +52,8 @@ test('HOSTING.md has the operator read the setup code from the journal and keep 
   assertSentence(HOSTING,
     '`interlock start` prints the code only while first-owner setup is incomplete; every start prints a fresh one and the old one stops working.');
   assertSentence(HOSTING, 'Once setup completes the code no longer exists.');
+  assertSentence(HOSTING,
+    'Finish owner setup soon after the first start: until it completes, anyone who can reach the room can see that it has no owner yet.');
 });
 
 test('HOSTING.md routes the tunnel to loopback without overriding the Host header', () => {

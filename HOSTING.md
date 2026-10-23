@@ -78,6 +78,9 @@ You need root or membership in the `systemd-journal` group to read the journal,
 and anyone who can read it can read the code. `interlock start` prints the code
 only while first-owner setup is incomplete; every start prints a fresh one and
 the old one stops working. Once setup completes the code no longer exists.
+Finish owner setup soon after the first start: until it completes, anyone who
+can reach the room can see that it has no owner yet. The code still guards the
+claim, and the correct code is never delayed.
 
 ## 3. Put the tunnel in front
 
