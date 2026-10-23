@@ -65,6 +65,14 @@ function post(runtime, route, body, session = {}) {
   return call(runtime, { path: route, method: 'POST', body, headers });
 }
 
+// A start that is expected to be refused. If it starts anyway, close the server
+// before failing, so a regression ends this file red instead of holding it open.
+async function refusedStart(starting) {
+  const runtime = await starting;
+  await runtime.close();
+  throw new Error('the server started, but this start was expected to be refused');
+}
+
 async function completeOwnerSetup(runtime, password, device) {
   const redeemed = await post(runtime, '/api/bootstrap/redeem', {
     name: 'Ana', password,
@@ -98,25 +106,29 @@ test('recovery-only loopback server replaces the owner sign-in and retires with 
   const oldDevice = createDevice({ origin: `http://localhost:${port}`, rpId: 'localhost' });
   const newDevice = createDevice({ origin: `http://localhost:${port}`, rpId: 'localhost' });
 
-  await assert.rejects(startRecoveryServer({ dataDir, port }), error =>
+  await assert.rejects(refusedStart(startRecoveryServer({ dataDir, port })), error =>
     error && error.code === 'installation-missing',
   'recovery must not turn an empty data directory into an installation');
-  await assert.rejects(startRecoveryServer({ dataDir, port, host: '0.0.0.0' }), error =>
+  await assert.rejects(refusedStart(startRecoveryServer({ dataDir, port, host: '0.0.0.0' })), error =>
     error && error.code === 'invalid-options',
   'the recovery constructor must have no bind-widening option');
 
   const normal = await startInterlockServer({ dataDir, port });
-  await completeOwnerSetup(normal, oldPassword, oldDevice);
-  const oldLogin = await post(normal, '/api/login', { name: 'Ana', password: oldPassword });
-  assert.equal(oldLogin.status, 200, oldLogin.text);
-  const oldCookie = oldLogin.headers['set-cookie'][0].split(';', 1)[0];
-  await normal.close();
+  let oldCookie;
+  try {
+    await completeOwnerSetup(normal, oldPassword, oldDevice);
+    const oldLogin = await post(normal, '/api/login', { name: 'Ana', password: oldPassword });
+    assert.equal(oldLogin.status, 200, oldLogin.text);
+    oldCookie = oldLogin.headers['set-cookie'][0].split(';', 1)[0];
+  } finally {
+    await normal.close();
+  }
 
   const recovery = await startRecoveryServer({ dataDir, port });
   let recoveryFailure = null;
   recovery.failure.then(error => { recoveryFailure = error; });
   try {
-    await assert.rejects(startInterlockServer({ dataDir, port }), /already-running/,
+    await assert.rejects(refusedStart(startInterlockServer({ dataDir, port })), /already-running/,
       'the recovery process must hold the same installation lock as the normal server');
 
     const page = await call(recovery);
