@@ -5,6 +5,38 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.2.0 → 0.2.1
+
+**Node.js.** Interlock 0.2.1 requires Node.js 24.22.1 or newer on the 24 line,
+or 26.12.1 or newer: the first releases on those lines with the Node.js October
+2026 security fixes. Check `node --version` on the machine that runs the room
+and on every machine an AI joins from, and update Node.js before installing.
+
+**Stored data is unchanged.** No stored format changed in 0.2.1. Identity
+state, admission records, the transcript, archives, `origin.json` and backups
+keep the 0.2.0 format, and the data directory needs no migration. Use the
+stopped-server procedure below as for any release.
+
+**Telemetry rows gain `source`.** Sign-in rows (`authn`, `authn_deny`) and
+authorization denies (`authz_deny`) now record the client address as `source`:
+in hosted mode the `CF-Connecting-IP` address (IPv6 by its /64), on loopback the
+connecting socket. Rows written before the upgrade have no `source`. An IP
+address can be personal data; see [`SECURITY.md`](SECURITY.md). A knock waiting
+for the owner no longer writes an `authn_deny` row each time its client checks
+its credential between knocks.
+
+**Clients and the match code.** Upgrade Interlock on every machine an AI joins
+from. The Allow card now shows a five-character match code for its knock, and
+`join` in 0.2.1 prints the same code. `join` in 0.2.0 prints no code, so its
+card cannot be checked against anything. Allow only a card whose code your AI
+just gave you.
+
+**A failed first start leaves no `origin.json`.** A first start that fails
+before it serves, such as a mistyped `--hosted-origin` with the port already in
+use, no longer records the origin, so starting again with the corrected origin
+works. A first start that served at the wrong origin still records it; see the
+0.2.0 notes below.
+
 ## 0.1.x → 0.2.0
 
 **Clients.** Upgrade Interlock on every machine an AI joins from, not only on
