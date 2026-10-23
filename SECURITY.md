@@ -103,10 +103,13 @@ no others.
   can age older rows out of that stream, but cannot fill the disk, and cannot
   touch the mutation record. In hosted mode that includes anyone who can reach
   the room, not only an admitted participant: every request to an AI route with
-  an unrecognised bearer credential writes one `authn_deny` row of about 270
-  bytes and is not throttled, so about 2.2 million such requests replace the
+  an unrecognised bearer credential writes one `authn_deny` row of up to about
+  310 bytes and is not throttled, so about 1.9 million such requests replace the
   whole `authn_deny` stream, including the record of earlier failed sign-ins.
-  Copy telemetry elsewhere if you need it longer. A failed removal is a telemetry fault like any failed
+  Copy telemetry elsewhere if you need it longer. Sign-in rows and denies record
+  the client address as `source`: in hosted mode the CF-Connecting-IP address
+  (IPv6 by its /64), on loopback the connecting socket. An IP address can be
+  personal data; it stays in the telemetry until its segment is removed. A failed removal is a telemetry fault like any failed
   telemetry write: the installation reports unhealthy until the operator resets
   it. Routine successful room reads write no audit row in either shape; every
   deny and every mutation is still written. Because an allowed read is not an

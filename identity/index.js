@@ -346,7 +346,7 @@ function create(config) {
     }
     const decision = can(authenticated.session.subject_id, capability, resource,
       { tenant, origin: originClass, assurance: authenticated.session.assurance,
-        audit_allowed_reads: auditAllowedReads });
+        audit_allowed_reads: auditAllowedReads, source: meta.source });
     return {
       allow: decision.allow,
       rung: 'authorization',
@@ -374,7 +374,8 @@ function create(config) {
     // a known defect: correct on a loopback host and wrong the moment the same
     // code is reached over a tunnel. New code does not inherit a known defect.
     const decision = can(authenticated.session.subject_id, capability, resource,
-      { tenant, origin: originClass, assurance: authenticated.session.assurance });
+      { tenant, origin: originClass, assurance: authenticated.session.assurance,
+        source: meta.source });
     return {
       allow: decision.allow,
       rung: 'authorization',
@@ -399,6 +400,7 @@ function create(config) {
     const authenticated = bearerAuth.authenticate({
       headers: { authorization: header },
       remoteAddress: typeof meta.source === 'string' ? meta.source : meta.remoteAddress,
+      source: meta.source,
       acceptedGenerations: [1],
     });
     if (!authenticated || typeof authenticated.subject_id !== 'string') {
@@ -408,7 +410,7 @@ function create(config) {
       return { allow: false, rung: 'credential', reason: 'not-a-tool' };
     }
     const decision = can(authenticated.subject_id, capability, resource,
-      { tenant, origin: originClass, assurance: authenticated.assurance });
+      { tenant, origin: originClass, assurance: authenticated.assurance, source: meta.source });
     return {
       allow: decision.allow,
       rung: 'authorization',
@@ -433,6 +435,7 @@ function create(config) {
     const authenticated = bearerAuth.authenticate({
       headers: { authorization: header },
       remoteAddress: typeof meta.source === 'string' ? meta.source : meta.remoteAddress,
+      source: meta.source,
       acceptedGenerations: [1],
       // A quiet allowed read writes no authz row (can() below); the bearer's
       // successful authentication for that read is quiet too, or every AI poll
@@ -449,7 +452,7 @@ function create(config) {
     // can() skips the row only for an allowed 'read', never for anything else.
     const decision = can(authenticated.subject_id, capability, resource,
       { tenant, origin: originClass, assurance: authenticated.assurance,
-        audit_allowed_reads: auditAllowedReads });
+        audit_allowed_reads: auditAllowedReads, source: meta.source });
     const subject = subjects.get(authenticated.subject_id);
     return {
       allow: decision.allow,

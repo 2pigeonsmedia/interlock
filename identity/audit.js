@@ -16,7 +16,7 @@ const STREAMS = Object.freeze(['authn', 'authz', 'mutation', 'authn_deny', 'auth
 // so a flood of failures cannot age successful rows out of the parent stream
 // (the segment cap is per stream). It can still age out earlier failures: an
 // unthrottled request with an unrecognised bearer credential writes one
-// `authn_deny` row of about 270 bytes, so about 2.2 million of them replace the
+// `authn_deny` row of up to about 310 bytes, so about 1.9 million of them replace the
 // whole `authn_deny` stream (SECURITY.md documents this trade-off).
 // Routing is by a SUCCESS allowlist: the producers' success
 // values ('allow' from `can()`, 'ok' from password verification, 'success' from
@@ -37,6 +37,9 @@ const MAX_FIELD = 4096;
 const MAX_SCHEMES = 32;
 const MAX_SCHEME = 256;
 const MAX_READ_LIMIT = 1000;
+// The client address a host derived for the request: an IPv4 address, an IPv6
+// /64, or a socket address. Anything longer is not an address.
+const MAX_SOURCE = 256;
 const SEGMENT_RE = /^(authn|authz|mutation|authn_deny|authz_deny)\.log\.(\d{12})-(\d+)-([a-z0-9]+)$/;
 
 const FIELDS = Object.freeze([
@@ -51,7 +54,7 @@ const FIELDS = Object.freeze([
 const AUTHN_FIELDS = Object.freeze([
   'tenant', 'subject_id', 'subject_name', 'kind', 'origin', 'assurance',
   'result', 'reason', 'attribution', 'scheme', 'schemes', 'generation',
-  'credential_id', 'event_id', 'truncated',
+  'credential_id', 'event_id', 'truncated', 'source',
 ]);
 const AUTHZ_FIELDS = Object.freeze([
   'tenant', 'subject_id', 'subject_name', 'kind', 'principal', 'capability',
@@ -63,6 +66,8 @@ const AUTHZ_FIELDS = Object.freeze([
   // `{accepted:true, queued:1}`, and wrote an audit trail with no attribution at
   // all. These four names, and nothing else in this module's shape.
   'decision_source', 'grant_id', 'role_id', 'assignment_id',
+  // The client address, on denies only (see sourceField).
+  'source',
 ]);
 const NULLABLE = new Set([
   // The reason for these entries is load-bearing: naming a field in
@@ -460,9 +465,9 @@ function targetStream(stream, row) {
 function telemetryPlaceholder(stream, source, result, reason) {
   const allowed = schemaStream(stream) === 'authn'
     ? ['tenant', 'subject_id', 'subject_name', 'kind', 'origin', 'attribution',
-      'scheme', 'credential_id', 'event_id']
+      'scheme', 'credential_id', 'event_id', 'source']
     : ['tenant', 'subject_id', 'subject_name', 'kind', 'principal', 'capability',
-      'resource', 'origin', 'event_id'];
+      'resource', 'origin', 'event_id', 'source'];
   return Object.assign({
     ts: Date.now(),
   }, safeIdentity(source, allowed), {
@@ -565,6 +570,15 @@ function enqueue(stream, row) {
     setFault('telemetry', 'audit: telemetry enqueue fault');
     return { accepted: false, reason: 'fault' };
   }
+}
+
+// The `source` field for a telemetry row, or nothing. A producer adds it only
+// through this check: an invalid value in a row replaces the whole row with a
+// placeholder, and a malformed address must never cost the record of a deny.
+function sourceField(value) {
+  return typeof value === 'string' && value.trim() !== '' && !value.includes('\x00') &&
+    Buffer.byteLength(value, 'utf8') <= MAX_SOURCE
+    ? { source: value } : {};
 }
 
 function authn(row) {
@@ -1267,6 +1281,7 @@ module.exports = {
   health,
   resetHealth,
   read,
+  sourceField,
   EPOCH_KEY,
   FIELDS,
   STREAMS,

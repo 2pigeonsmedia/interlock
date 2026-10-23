@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const audit = require('../identity/audit.js');
 const { startInterlockServer } = require('../src/server.js');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
 
@@ -109,6 +110,15 @@ test('loopback mode: the sign-in throttle ignores CF-Connecting-IP and keys on t
     assert.equal(other.response.status, 401, other.response.text);
     assert.ok(other.ms >= THROTTLED_FLOOR_MS,
       `a different CF-Connecting-IP is the same source in loopback mode (${Math.round(other.ms)} ms)`);
+
+    // The audit rows name the same source the throttle keyed on: the socket.
+    await audit.drain();
+    const rows = audit.read('authn_deny', { limit: 1000 }).filter(row => row.scheme === 'password');
+    // Only the five attempts that reached the password check write a row; the
+    // throttled ones never get that far.
+    assert.equal(rows.length, 5, 'ARRANGEMENT: one deny row per checked failure');
+    assert.deepEqual([...new Set(rows.map(row => row.source))], ['127.0.0.1'],
+      'every failed sign-in records the socket address, never the header');
   } finally {
     await runtime.close();
   }

@@ -290,6 +290,7 @@ function originOf(input) {
 
 function fixedRow({
   subject = null,
+  source,
   origin,
   result,
   reason,
@@ -312,6 +313,7 @@ function fixedRow({
     schemes: schemes.slice(),
     generation: credential ? credential.generation : null,
     credential_id: credential ? credential.id : null,
+    ...audit.sourceField(source),
   };
 }
 
@@ -383,9 +385,14 @@ function authenticate(input) {
   // and every other success is still written.
   const quietField = topField(top, 'quietSeatSuccess');
   const quietSeatSuccess = quietField.ok && quietField.present && quietField.value === true;
+  // The client address the host derived, recorded on every row and used for
+  // nothing else.
+  const sourceInput = topField(top, 'source');
+  const source = sourceInput.ok && sourceInput.present ? sourceInput.value : undefined;
 
   if (header.auth.state === 'invalid') {
     emit(fixedRow({
+      source,
       origin,
       result: 'failure',
       reason: 'invalid-authorization',
@@ -402,6 +409,7 @@ function authenticate(input) {
       const subject = verifiedSubject(verification);
       if (!subject) {
         emit(fixedRow({
+          source,
           origin,
           result: 'failure',
           reason: 'subject-rejected',
@@ -410,6 +418,7 @@ function authenticate(input) {
         return null;
       }
       if (!(quietSeatSuccess && subject.kind === 'seat')) emit(fixedRow({
+        source,
         subject,
         origin,
         result: 'success',
@@ -433,6 +442,7 @@ function authenticate(input) {
     }
     if (legacy.state === 'valid' && legacy.valid && legacy.viaBearer) {
       emit(fixedRow({
+        source,
         origin,
         result: 'success',
         reason: 'legacy-accepted',
@@ -442,6 +452,7 @@ function authenticate(input) {
       return legacySession(origin);
     }
     emit(fixedRow({
+      source,
       origin,
       result: 'failure',
       reason: 'credential-rejected',
@@ -452,6 +463,7 @@ function authenticate(input) {
 
   if (legacy.state === 'invalid' || (legacy.state === 'valid' && legacy.viaBearer)) {
     emit(fixedRow({
+      source,
       origin,
       result: 'failure',
       reason: 'invalid-legacy-descriptor',
@@ -462,6 +474,7 @@ function authenticate(input) {
   if (legacy.state === 'valid') {
     if (legacy.valid) {
       emit(fixedRow({
+        source,
         origin,
         result: 'success',
         reason: 'legacy-accepted',
@@ -471,6 +484,7 @@ function authenticate(input) {
       return legacySession(origin);
     }
     emit(fixedRow({
+      source,
       origin,
       result: 'failure',
       reason: 'legacy-rejected',
@@ -480,6 +494,7 @@ function authenticate(input) {
   }
 
   emit(fixedRow({
+    source,
     origin,
     result: 'failure',
     reason: 'no-credential',

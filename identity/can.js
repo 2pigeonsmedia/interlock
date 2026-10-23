@@ -57,6 +57,13 @@ function contextValues(context) {
       }
       out.audit_allowed_reads = quiet.value;
     }
+    // Optional client address, recorded on a deny and used for nothing else:
+    // it never decides, so a malformed one is dropped rather than refused, and
+    // an accessor is never invoked.
+    const source = Object.getOwnPropertyDescriptor(context, 'source');
+    if (source && Object.prototype.hasOwnProperty.call(source, 'value')) {
+      out.source = source.value;
+    }
     return out;
   } catch (_) {
     return null;
@@ -351,6 +358,7 @@ function can(subject_id, capability, resource, context) {
     grant_id: attribution.grant_id,
     role_id: attribution.role_id,
     assignment_id: attribution.assignment_id,
+    ...(allow ? {} : audit.sourceField(values && values.source)),
   };
   return finalFromAudit(row, candidate);
 }

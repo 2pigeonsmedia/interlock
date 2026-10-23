@@ -383,8 +383,8 @@ function createFirstOwnerHandler(options) {
   function ownerSession(request, response, mutation) {
     const at = Date.now();
     const authorized = mutation
-      ? house.authorizeWrite(requestMeta(request, at), 'write', CHAT_RESOURCE)
-      : house.authorizeRead(requestMeta(request, at), 'read', CHAT_RESOURCE);
+      ? house.authorizeWrite(authorizationMeta(request, at), 'write', CHAT_RESOURCE)
+      : house.authorizeRead(authorizationMeta(request, at), 'read', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true) {
       const sessionState = mutation ? house.resolveSession({
         cookie_header: request.headers.cookie,
@@ -962,7 +962,7 @@ function createFirstOwnerHandler(options) {
   }
 
   function roomReader(request, response, now) {
-    const authorization = house.authorizeRead(requestMeta(request, now), 'read', CHAT_RESOURCE);
+    const authorization = house.authorizeRead(authorizationMeta(request, now), 'read', CHAT_RESOURCE);
     if (!authorization || authorization.allow !== true) {
       refuseAuthorization(request, response, authorization);
       return null;
@@ -1041,7 +1041,7 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const now = Date.now();
-    const authorized = house.authorizeRead(requestMeta(request, now), 'read', CHAT_RESOURCE);
+    const authorized = house.authorizeRead(authorizationMeta(request, now), 'read', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true) {
       refuseAuthorization(request, response, authorized);
       return;
@@ -1080,7 +1080,7 @@ function createFirstOwnerHandler(options) {
     }
     if (response.destroyed) return;
 
-    const reauthorized = house.authorizeRead(requestMeta(request, Date.now()), 'read', CHAT_RESOURCE);
+    const reauthorized = house.authorizeRead(authorizationMeta(request, Date.now()), 'read', CHAT_RESOURCE);
     if (!reauthorized || reauthorized.allow !== true ||
         reauthorized.subject_id !== authorized.subject_id) {
       // This request may have been retained across a successful passkey
@@ -1115,7 +1115,7 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const now = Date.now();
-    const authorized = house.authorizeWrite(requestMeta(request, now), 'write', CHAT_RESOURCE);
+    const authorized = house.authorizeWrite(authorizationMeta(request, now), 'write', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true) {
       const sessionState = house.resolveSession({
         cookie_header: request.headers.cookie,
@@ -1228,6 +1228,12 @@ function createFirstOwnerHandler(options) {
         expires_at: authorized.expires_at,
       },
     });
+  }
+
+  // A cookie-session authorization carries the client address too, so a deny
+  // names where it came from. Other requestMeta consumers do not take it.
+  function authorizationMeta(request, now) {
+    return Object.assign(requestMeta(request, now), { source: clientSource(request, hostedMode) });
   }
 
   function seatAuthorization(request, capability) {
@@ -1614,7 +1620,7 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const now = Date.now();
-    const authorized = house.authorizeRead(requestMeta(request, now), 'read', CHAT_RESOURCE);
+    const authorized = house.authorizeRead(authorizationMeta(request, now), 'read', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true) {
       refuseAuthorization(request, response, authorized);
       return;
@@ -1708,7 +1714,7 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-delivery-query' });
       return;
     }
-    const authorized = house.authorizeRead(requestMeta(request, Date.now()), 'read', CHAT_RESOURCE);
+    const authorized = house.authorizeRead(authorizationMeta(request, Date.now()), 'read', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true) {
       refuseAuthorization(request, response, authorized);
       return;

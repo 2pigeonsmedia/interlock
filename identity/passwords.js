@@ -325,9 +325,9 @@ const INVALID = Object.freeze({ ok: false, reason: 'invalid-credentials' });
 function emitAuthn(row) {
   try { audit.authn(row); } catch (_) { /* the audit producer is best-effort */ }
 }
-function denyRow(tenant, reason) {
-  return { tenant, subject_id: null, subject_name: null, kind: null, assurance: null,
-    result: 'denied', reason, scheme: 'password', attribution: audit.EPOCH_KEY };
+function denyRow(tenant, reason, source) {
+  return Object.assign({ tenant, subject_id: null, subject_name: null, kind: null, assurance: null,
+    result: 'denied', reason, scheme: 'password', attribution: audit.EPOCH_KEY }, audit.sourceField(source));
 }
 
 // The ONLY public failure reasons are 'invalid-credentials' and 'throttled'.
@@ -343,7 +343,7 @@ async function verify(opts) {
   if (throttles && typeof throttles.check === 'function') {
     const d = throttles.check({ source, account: name, now: at });
     if (d && d.allowed === false) {
-      emitAuthn(denyRow(tenant, 'throttled'));
+      emitAuthn(denyRow(tenant, 'throttled', source));
       return Object.freeze({ ok: false, reason: 'throttled', retry_after_ms: d.retry_after_ms });
     }
   }
@@ -367,7 +367,7 @@ async function verify(opts) {
     if (throttles && typeof throttles.recordFailure === 'function') {
       throttles.recordFailure({ source, account: name, now: at });
     }
-    emitAuthn(denyRow(tenant, 'invalid-credentials'));
+    emitAuthn(denyRow(tenant, 'invalid-credentials', source));
     return INVALID;
   }
 
@@ -376,7 +376,7 @@ async function verify(opts) {
     if (throttles && typeof throttles.recordFailure === 'function') {
       throttles.recordFailure({ source, account: name, now: at });
     }
-    emitAuthn(denyRow(tenant, 'invalid-credentials'));
+    emitAuthn(denyRow(tenant, 'invalid-credentials', source));
     return INVALID;
   }
 
@@ -406,8 +406,9 @@ async function verify(opts) {
   if (throttles && typeof throttles.recordSuccess === 'function') {
     throttles.recordSuccess({ source, account: name, now: at });
   }
-  emitAuthn({ tenant, subject_id: subj.id, subject_name: subj.name, kind: 'person',
-    assurance: 'L1', result: 'ok', reason: null, scheme: 'password', attribution: audit.EPOCH_KEY });
+  emitAuthn(Object.assign({ tenant, subject_id: subj.id, subject_name: subj.name, kind: 'person',
+    assurance: 'L1', result: 'ok', reason: null, scheme: 'password', attribution: audit.EPOCH_KEY },
+  audit.sourceField(source)));
   return Object.freeze({
     ok: true, tenant, subject_id: subj.id, subject_name: subj.name,
     assurance: 1, scheme: 'password', upgraded,

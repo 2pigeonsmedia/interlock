@@ -131,9 +131,14 @@ test('telemetry is four capped streams, reads are quiet, and the limits are stat
   assert.doesNotMatch(SECURITY, /cannot erase the evidence of itself/, 'a flood can age out its own stream');
   assertSentence(SECURITY,
     'In hosted mode that includes anyone who can reach the room, not only an admitted participant: ' +
-    'every request to an AI route with an unrecognised bearer credential writes one `authn_deny` row of about 270 bytes ' +
-    'and is not throttled, so about 2.2 million such requests replace the whole `authn_deny` stream, ' +
+    'every request to an AI route with an unrecognised bearer credential writes one `authn_deny` row of up to about 310 bytes ' +
+    'and is not throttled, so about 1.9 million such requests replace the whole `authn_deny` stream, ' +
     'including the record of earlier failed sign-ins.');
+  assertSentence(SECURITY,
+    'Sign-in rows and denies record the client address as `source`: in hosted mode the CF-Connecting-IP address ' +
+    '(IPv6 by its /64), on loopback the connecting socket.');
+  assertSentence(SECURITY,
+    'An IP address can be personal data; it stays in the telemetry until its segment is removed.');
   assertSentence(SECURITY,
     'Telemetry rotates at 64 MiB and keeps at most 8 older segments per stream, oldest removed first; ' +
     'the mutation record is never pruned.');
