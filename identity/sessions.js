@@ -389,6 +389,11 @@ function authenticate(input) {
   // nothing else.
   const sourceInput = topField(top, 'source');
   const source = sourceInput.ok && sourceInput.present ? sourceInput.value : undefined;
+  // A host that knows the bearer belongs to a candidate still waiting for
+  // admission passes quietRejected: true. Only the rejection of that bearer is
+  // skipped; a bearer that verifies is handled exactly as any other.
+  const rejectedField = topField(top, 'quietRejected');
+  const quietRejected = rejectedField.ok && rejectedField.present && rejectedField.value === true;
 
   if (header.auth.state === 'invalid') {
     emit(fixedRow({
@@ -451,7 +456,7 @@ function authenticate(input) {
       }));
       return legacySession(origin);
     }
-    emit(fixedRow({
+    if (!quietRejected) emit(fixedRow({
       source,
       origin,
       result: 'failure',

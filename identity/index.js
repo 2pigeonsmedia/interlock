@@ -445,6 +445,9 @@ function create(config) {
       remoteAddress: typeof meta.source === 'string' ? meta.source : meta.remoteAddress,
       source: meta.source,
       acceptedGenerations: [1],
+      // The host has matched this bearer to a knock still waiting for the
+      // owner: if it does not verify, that is waiting, not a failed sign-in.
+      quietRejected: meta.waiting_candidate === true,
       // A quiet allowed read writes no authz row (can() below); the bearer's
       // successful authentication for that read is quiet too, or every AI poll
       // would still be a row.

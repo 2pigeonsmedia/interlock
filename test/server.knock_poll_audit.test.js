@@ -93,6 +93,17 @@ async function bootstrap(runtime) {
   };
 }
 
+async function elevate(runtime, owner, device) {
+  const options = await post(runtime, '/api/elevation/options', {}, owner);
+  assert.equal(options.status, 200, options.text);
+  const finished = await post(runtime, '/api/elevation/finish', {
+    ceremony_id: options.json.ceremony_id,
+    response: device.assertion(options.json.options.challenge),
+  }, owner);
+  assert.equal(finished.status, 200, finished.text);
+  return { cookie: finished.headers['set-cookie'][0].split(';', 1)[0], csrf: finished.json.csrf_token };
+}
+
 async function waitForPending(runtime, owner, requestId) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const response = await call(runtime, { path: '/api/ai/admissions', headers: { cookie: owner.cookie } });
@@ -117,7 +128,7 @@ test('a pending knock checking its candidate credential writes no deny rows; str
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-knock-poll-audit-'));
   const runtime = await startInterlockServer({ port, dataDir });
   try {
-    const { owner } = await bootstrap(runtime);
+    const { owner, device } = await bootstrap(runtime);
     const candidate = identity.newAiCredential();
     const body = {
       request_id: crypto.randomUUID(), name: 'Marlow', product: 'Claude Code',
@@ -154,6 +165,30 @@ test('a pending knock checking its candidate credential writes no deny rows; str
     assert.equal(late.status, 401);
     assert.equal(await denyRowCount() - beforeLate, 1,
       'once the knock is answered, the same credential is an ordinary deny again');
+
+    // A live credential always authenticates, even when a pending knock carries
+    // the same selector and digest (for example a record left pending after its
+    // Allow committed).
+    const admitted = identity.newAiCredential();
+    const first = {
+      request_id: crypto.randomUUID(), name: 'Rowan', product: 'Claude Code',
+      product_provenance: 'client-reported', selector: admitted.selector, digest: admitted.digest,
+    };
+    const firstKnock = post(runtime, '/api/ai/admissions', first);
+    await waitForPending(runtime, owner, first.request_id);
+    const elevated = await elevate(runtime, owner, device);
+    const allowed = await post(runtime, `/api/ai/admissions/${first.request_id}/allow`, {}, elevated);
+    assert.equal(allowed.status, 200, allowed.text);
+    assert.equal((await firstKnock).json.state, 'allowed', 'ARRANGEMENT: the first knock is admitted');
+    const shadow = Object.assign({}, first, { request_id: crypto.randomUUID(), name: 'Sable' });
+    const shadowKnock = post(runtime, '/api/ai/admissions', shadow);
+    await waitForPending(runtime, elevated, shadow.request_id);
+    const live = await session(runtime, admitted.token);
+    assert.equal(live.status, 200, 'the admitted credential still connects: ' + live.text);
+    assert.equal(live.json.connection.name, 'Rowan');
+    const declinedShadow = await post(runtime, `/api/ai/admissions/${shadow.request_id}/decline`, {}, elevated);
+    assert.equal(declinedShadow.status, 200, declinedShadow.text);
+    await shadowKnock;
   } finally {
     await runtime.close();
   }

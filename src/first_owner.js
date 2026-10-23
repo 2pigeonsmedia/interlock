@@ -1203,14 +1203,12 @@ function createFirstOwnerHandler(options) {
     }
     // A knock waiting for the owner checks its own candidate here between
     // knocks. It is not connected yet, and it is not a failed sign-in either:
-    // answer as for any unconnected bearer, without an authentication row.
-    if (waitingCandidate(request.headers.authorization)) {
-      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
-      return;
-    }
+    // the bearer is still authenticated as usual, and only its rejection row is
+    // left out. A live credential is never answered as waiting.
     const authorized = house.authorizeSeatBearer({
       authorization_header: request.headers.authorization,
       source: clientSource(request, hostedMode),
+      waiting_candidate: waitingCandidate(request.headers.authorization),
     }, 'read', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true ||
         typeof authorized.subject_id !== 'string' || typeof authorized.subject_name !== 'string' ||
