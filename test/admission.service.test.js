@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const { matchCode } = require('../src/admission/match_code.js');
 const { openAdmissionService } = require('../src/admission/service.js');
 
 function requestId(number) {
@@ -97,6 +98,7 @@ test('a live digest-only knock is atomically allowed and wakes its exact waiter'
     reuse_session: null,
     created_at: 1_000,
     expires_at: 1_100,
+    match_code: matchCode(body.selector),
     connected: true,
   }]);
 

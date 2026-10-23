@@ -10,6 +10,7 @@ const test = require('node:test');
 
 const identity = require('identity');
 const profileModule = require('../src/client/profiles.js');
+const { matchCode } = require('../src/admission/match_code.js');
 
 const {
   EXIT_OK,
@@ -393,6 +394,10 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /Waiting for the owner to allow Marlow/);
   assert.match(result.stdout, /Requesting admission as Marlow/);
+  const code = matchCode(seen[0].selector);
+  assert.ok(code !== null, 'ARRANGEMENT: the knock carried a selector');
+  assert.ok(result.stdout.includes(`Requesting admission as Marlow. Match code: ${code}\n`), result.stdout);
+  assert.ok(result.stdout.includes(`Waiting for the owner to allow Marlow. Match code: ${code}\n`), result.stdout);
   assert.match(result.stdout, /Interlock target: http:\/\/localhost:8788/);
   assert.ok(result.stdout.indexOf('Interlock target:') <
     result.stdout.indexOf('Requesting admission'),

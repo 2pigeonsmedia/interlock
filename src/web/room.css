@@ -413,6 +413,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }
 .pending-ai-card strong { font-family: var(--font-ai); font-weight: 600; color: var(--ai); }
 .pending-ai-card p { margin-top: 2px; color: var(--ink-3); }
+.pending-ai-card .pending-ai-code { font-family: var(--font-ai); font-weight: 600; letter-spacing: 0.08em; color: var(--ink); }
 .pending-ai-card small { display: block; margin-top: 3px; color: var(--ink-4); }
 .pending-ai-actions { display: flex; gap: 8px; }
 .pending-ai-actions .decline { color: var(--ember); border-color: var(--ember-line); }

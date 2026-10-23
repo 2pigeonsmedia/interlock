@@ -408,10 +408,10 @@ async function freshOwnerStepUp() {
 function validPendingAi(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 11 || ![
+  if (keys.length !== 12 || ![
     'request_id', 'name', 'product', 'product_provenance',
     'previously_used', 'last_ended_at', 'reuse', 'reuse_session',
-    'created_at', 'expires_at', 'connected',
+    'created_at', 'expires_at', 'match_code', 'connected',
   ].every(key => keys.includes(key))) return false;
   return typeof value.request_id === 'string' && typeof value.name === 'string' &&
     typeof value.product === 'string' &&
@@ -428,6 +428,7 @@ function validPendingAi(value) {
       (value.reuse === 'held' && !value.previously_used && value.reuse_session !== null) ||
       (value.reuse === 'ended' && value.previously_used && value.reuse_session !== null)) &&
     Number.isSafeInteger(value.created_at) && Number.isSafeInteger(value.expires_at) &&
+    typeof value.match_code === 'string' && /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5}$/.test(value.match_code) &&
     typeof value.connected === 'boolean';
 }
 
@@ -460,6 +461,12 @@ function renderPendingAis(rows) {
     const provenance = row.product_provenance === 'adapter-reported'
       ? 'reported by adapter' : 'reported by client';
     product.textContent = `${row.product} · ${provenance}`;
+    const code = document.createElement('p');
+    code.className = 'pending-ai-code';
+    code.textContent = `Match code: ${row.match_code}`;
+    const warning = document.createElement('small');
+    warning.textContent =
+      'The name and product are reported by the AI and not verified. Allow only an AI you just asked to join, and check its match code.';
     const priorUse = document.createElement('small');
     if (row.reuse === 'held') {
       priorUse.textContent = `Held by another session · Session ${row.reuse_session}. Allow ends the old session and admits this one.`;
@@ -474,7 +481,7 @@ function renderPendingAis(rows) {
     connection.textContent = row.connected
       ? 'Waiting now · expires in a few minutes'
       : 'The waiting connection is gone; Allow is unavailable.';
-    facts.append(name, product);
+    facts.append(name, product, code, warning);
     if (row.reuse === 'held' || row.reuse === 'ended') {
       facts.append(priorUse);
     }

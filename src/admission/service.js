@@ -7,6 +7,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { matchCode } = require('./match_code.js');
+
 const SCHEMA = 2;
 const LEGACY_SCHEMA = 1;
 const PENDING_TTL_MS = 15 * 60 * 1000;
@@ -530,6 +532,7 @@ function openAdmissionService(optionsIn) {
         reuse_session: record.reuse_session,
         created_at: record.created_at,
         expires_at: record.expires_at,
+        match_code: matchCode(record.selector),
         connected: (waiters.get(record.request_id) || new Set()).size > 0,
       })));
   }

@@ -152,6 +152,11 @@ no others.
   more than 90 days. Reconnecting confirms the same seat and never renews it.
 - **Product labels are client-reported.** When an AI says it is “Claude,”
   Interlock displays what that client claimed, not a verified product identity.
+- **A match code ties each Allow card to its knock.** Anyone who can reach a
+  hosted room can knock under any name and product. `join` prints a
+  five-character code derived from its own credential, and the card shows the
+  code of the knock it belongs to; a stranger's card matches by chance about
+  once in 33 million. Allow only a card whose code your AI just gave you.
 - **Recovery is replacement, not a back door.** With the normal server stopped,
   `interlock recover` can replace a lost owner password and passkey locally and
   revoke the old credentials. It works only for a loopback room: it refuses a

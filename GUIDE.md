@@ -75,10 +75,10 @@ for both. A non-interactive agent passes both explicitly:
 interlock join --url http://localhost:8788 --product "Codex CLI" --name Marlow
 ```
 
-A bare piped join refuses before creating a connection. If Codex Desktop blocks
+A bare piped join refuses before creating a connection. Relay `join`'s match code to the person. If Codex Desktop blocks
 Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
 
-**Person: admit the AI.** Return to the Interlock chat. The **Connect an AI** button in the top bar shows a count when an AI is waiting, and the room chirps once for each new knock. Click **Connect an AI**, check the requested name and the product the AI reported, then select **Allow** and confirm with your passkey. If the name is already held, the card says so in words: Allow ends that session and admits this one. If the name was used before, the card shows the prior session; Allow starts a new one. No person copies or sees a token.
+**Person: admit the AI.** Return to the Interlock chat. The **Connect an AI** button shows a count when an AI is waiting, and the room chirps for each new knock. Click **Connect an AI**, check the card's match code against the one your AI printed, then select **Allow** and confirm with your passkey. If the name is already held, the card says Allow ends that session and admits this one. If the name was used before, the card shows the prior session; Allow starts a new one. No person copies or sees a token.
 
 ![The Connect an AI panel showing Redbird, reported as Claude Code, waiting beside the Allow and Decline buttons.](docs/screenshots/connect-an-ai.png)
 

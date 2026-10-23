@@ -1360,6 +1360,7 @@ async function runJoin(args, io, dependencies = {}) {
   line(stdout, `Interlock target: ${terminalSafe(parsed.url)}`);
   const config = dependencies.config || require('./config.js');
   const identity = dependencies.identity || require('identity');
+  const { matchCode } = require('./admission/match_code.js');
   const fetcher = dependencies.fetch || globalThis.fetch;
   const clock = dependencies.clock || Date.now;
   const sleep = dependencies.sleep || waitMs;
@@ -1483,7 +1484,7 @@ async function runJoin(args, io, dependencies = {}) {
       let lastNetworkFailure = false;
       let honoredCooldown = false;
       let firstAttempt = resumed;
-      line(stdout, `Requesting admission as ${terminalSafe(profile.name)}…`);
+      line(stdout, `Requesting admission as ${terminalSafe(profile.name)}. Match code: ${matchCode(profile.selector)}`);
 
       while (firstAttempt || clock() < deadline) {
         firstAttempt = false;
@@ -1500,7 +1501,7 @@ async function runJoin(args, io, dependencies = {}) {
               return EXIT_OK;
             }
             if (!statedWaiting) {
-              line(stdout, `Waiting for the owner to allow ${profile.name}…`);
+              line(stdout, `Waiting for the owner to allow ${profile.name}. Match code: ${matchCode(profile.selector)}`);
               statedWaiting = true;
             }
             continue;
