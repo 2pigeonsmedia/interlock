@@ -339,18 +339,20 @@ function recordedDataDirOrigin(dataDir) {
   }
 }
 
-// Throws origin-mismatch, or records the origin on a directory's first start.
-function claimDataDirOrigin(dataDir, origin) {
+// Throws origin-mismatch, or returns true when the directory has no record
+// yet. The record is written only once the start serves, so a first start
+// that fails (a mistyped origin plus a port in use) leaves nothing behind.
+function checkDataDirOrigin(dataDir, origin) {
   const recorded = recordedDataDirOrigin(dataDir);
   if (recorded === null) {
     const legacy = LEGACY_IDENTITY_FILES.some(name => fs.existsSync(path.join(dataDir, 'identity', name)));
     if (legacy && originFamily(origin) !== 'http://localhost') {
       throw originMismatch('http://localhost (an earlier release)', origin);
     }
-    writeOriginRecord(dataDir, origin);
-    return;
+    return true;
   }
   if (originFamily(recorded) !== originFamily(origin)) throw originMismatch(recorded, origin);
+  return false;
 }
 
 async function startInterlockServer(options) {
@@ -364,7 +366,7 @@ async function startInterlockServer(options) {
   let chat = null;
   let archive = null;
   try {
-    claimDataDirOrigin(dataDir, origin);
+    const recordOrigin = checkDataDirOrigin(dataDir, origin);
     const stateDir = path.join(dataDir, 'identity');
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     if (process.platform !== 'win32') fs.chmodSync(stateDir, 0o700);
@@ -487,6 +489,7 @@ async function startInterlockServer(options) {
       for (let index = 0; index < servers.length; index += 1) {
         await listen(servers[index], addresses[index], port);
       }
+      if (recordOrigin) writeOriginRecord(dataDir, origin);
     } catch (error) {
       clearInterval(outboxTimer);
       clearInterval(idleTimer);
