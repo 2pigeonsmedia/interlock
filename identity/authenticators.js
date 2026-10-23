@@ -232,7 +232,7 @@ function createService(opts) {
   const session_store = ownData(opts, 'session_store').value;
   const challenge_store = ownData(opts, 'challenge_store').value;
   if (!session_store || typeof session_store.openWebAuthnCeremony !== 'function') {
-    throw new Error('authenticators: session_store must expose R6 ceremony methods');
+    throw new Error('authenticators: session_store must expose the WebAuthn ceremony methods');
   }
   if (!challenge_store || typeof challenge_store.issue !== 'function') {
     throw new Error('authenticators: challenge_store is required');

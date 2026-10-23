@@ -120,7 +120,7 @@ function add(opts) {
     if (!manifestKinds.includes(subject.kind)) {
       throw new Error('grants.add: the protected capability policy allows "' + capability +
         '" only to ' + JSON.stringify([...manifestKinds]) + ' — a "' + subject.kind +
-        '" may not receive it (spec §4/§6.1). Administrative classification comes from the ' +
+        '" may not receive it. Administrative classification comes from the ' +
         'capability, never from a name.');
     }
 

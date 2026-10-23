@@ -208,7 +208,7 @@ function aiSessionDiscriminator(tenant, subjectId) {
 // exists to avoid — refusing loudly is the only cheap moment to enforce it.
 function requireTenant(tenant, where) {
   if (typeof tenant !== 'string' || tenant.trim() === '') {
-    throw new Error('subjects.' + where + ': tenant is required — no method defaults it (I5)');
+    throw new Error('subjects.' + where + ': tenant is required — no method defaults it');
   }
 }
 
@@ -226,15 +226,15 @@ function create(opts) {
   // seat with none would be an independent authority root — exactly what the
   // design forbids. And ONLY a seat delegates: a person or tool naming a
   // principal would smuggle delegation into kinds that must not have it.
-  if (kind === 'seat' && !principal) throw new Error('subjects.create: a seat requires a principal (D6)');
+  if (kind === 'seat' && !principal) throw new Error('subjects.create: a seat requires a principal');
   if (kind !== 'seat' && principal) {
-    throw new Error('subjects.create: only a seat may name a principal — a ' + kind + ' is not a delegate (I12)');
+    throw new Error('subjects.create: only a seat may name a principal — a ' + kind + ' is not a delegate');
   }
   // Pass lifetime is NEVER caller input here — the first credentials.issue()
   // is the binding operation (the seat lifetime coupling). Presence of the key
   // refuses, whatever its value: this module creates unbound seats only.
   if (opts && Object.prototype.hasOwnProperty.call(opts, 'expires_at')) {
-    throw new Error('subjects.create: expires_at is not caller input — pass lifetime binds at credentials.issue(), Task 2 creates unbound seats only (amendment #1, I7)');
+    throw new Error('subjects.create: expires_at is not caller input — pass lifetime binds at credentials.issue(), and subjects.create() makes unbound seats only');
   }
 
   const display = name.trim();          // the display name is stored trimmed
@@ -256,9 +256,9 @@ function createInDraft(state, opts) {
   if (kind === 'seat') {
     const p = state.subjects.find(s => s.id === principal) || null;
     if (!p) throw new Error('subjects.create: principal not found — ' + principal);
-    if (p.kind !== 'person') throw new Error('subjects.create: a principal must be a person, not a ' + p.kind + ' (D6)');
+    if (p.kind !== 'person') throw new Error('subjects.create: a principal must be a person, not a ' + p.kind + '');
     if (p.status !== 'active') throw new Error('subjects.create: principal is revoked — a dead principal delegates nothing');
-    if (p.tenant !== tenant) throw new Error('subjects.create: principal belongs to another tenant (I6)');
+    if (p.tenant !== tenant) throw new Error('subjects.create: principal belongs to another tenant');
   }
   const dup = state.subjects.find(s => s.tenant === tenant && s.status === 'active' && s.name_fold === name_fold);
   if (dup && !(allow_ended_ai_name === true && dup.kind === 'seat' &&

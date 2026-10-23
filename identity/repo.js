@@ -58,7 +58,7 @@ function configureStateDir(dir) {
   if (typeof dir !== 'string' || dir.length === 0 || !path.isAbsolute(dir)) {
     throw new Error('identity/repo: configureStateDir requires an ABSOLUTE path — ' +
       'a relative one resolves against the caller\'s cwd, which is not a property ' +
-      'of the house (got ' + JSON.stringify(dir) + ')');
+      'of the deployment (got ' + JSON.stringify(dir) + ')');
   }
   if (CONFIGURED_STATE_DIR !== null && CONFIGURED_STATE_DIR !== dir) {
     throw new Error('identity/repo: the state directory is already configured as ' +
@@ -217,7 +217,7 @@ function assertShape(d, where, schema) {
   // can exist.
   for (const k of Object.keys(d)) {
     if (k !== 'version' && !s.required.includes(k)) {
-      throw new Error('identity repo: ' + where + ' carries an UNKNOWN top-level field "' + k + '" — the shape is exact (I5)');
+      throw new Error('identity repo: ' + where + ' carries an UNKNOWN top-level field "' + k + '" — the shape is exact');
     }
   }
   for (const k of s.arrays) {
@@ -386,7 +386,7 @@ function assertV2Shapes(state, where) {
     // null ONLY for the operator bootstrap-created membership (proven later
     // at the relational gate against a consumed bootstrap capability).
     if (!(r.invited_by === null || isText(r.invited_by))) {
-      throw bad(at + ' field "invited_by" must be a non-blank NUL-free string or null (D44 bootstrap only)');
+      throw bad(at + ' field "invited_by" must be a non-blank NUL-free string or null (operator bootstrap only)');
     }
     if (!MEMBERSHIP_STATUSES.includes(r.status)) throw bad(at + ' has unknown status "' + r.status + '"');
     if (!isTs(r.invited_at)) throw bad(at + ' invited_at must be a finite non-negative number');
@@ -465,7 +465,7 @@ function assertV2Shapes(state, where) {
       // null issuer is shape-legal; provenance is proven relationally below.
     } else if (!isStr(r.issuer_subject_id)) {
       throw bad(at + ' field "issuer_subject_id" must be a non-empty NUL-free string ' +
-        '(null is reserved for operator bootstrap/offline_recovery — D44)');
+        '(null is reserved for operator bootstrap/offline_recovery)');
     }
     for (const f of ['digest', 'mint_audit_id']) {
       if (!isText(r[f])) throw bad(at + ' field "' + f + '" must be a non-blank NUL-free string');
@@ -486,7 +486,7 @@ function assertV2Shapes(state, where) {
     if (SEAT_ADMISSION_PURPOSES.includes(r.purpose)) {
       if (!Number.isSafeInteger(r.max_seat_ttl) ||
           r.max_seat_ttl < MIN_PASS_LIFETIME_MS || r.max_seat_ttl > MAX_PASS_LIFETIME_MS) {
-        throw bad(at + ' max_seat_ttl must be a safe integer inside the inclusive D19 ttl bounds ' +
+        throw bad(at + ' max_seat_ttl must be a safe integer inside the inclusive ttl bounds ' +
           MIN_PASS_LIFETIME_MS + '..' + MAX_PASS_LIFETIME_MS);
       }
     } else if (r.max_seat_ttl !== null) {
@@ -653,10 +653,10 @@ function assertV2Shapes(state, where) {
     // holding a real revocation timestamp — is caught either way.
     const stamped = typeof r.revoked_at === 'number' && Number.isFinite(r.revoked_at) && r.revoked_at > 0;
     if (r.status === 'revoked' && noRevocation) {
-      throw bad(at + ' status "revoked" requires a revocation timestamp (I-R2.5-3b)');
+      throw bad(at + ' status "revoked" requires a revocation timestamp');
     }
     if (stamped && r.status !== 'revoked') {
-      throw bad(at + ' carries a revocation timestamp while status is "' + r.status + '" (I-R2.5-3b)');
+      throw bad(at + ' carries a revocation timestamp while status is "' + r.status + '"');
     }
 
     // The principal shape rules: only a seat may name a principal, and a seat
@@ -666,14 +666,14 @@ function assertV2Shapes(state, where) {
     // standing rules", and before this there were none at this layer.
     if (r.kind !== 'seat') {
       if (r.principal !== null && r.principal !== undefined) {
-        throw bad(at + ' is a "' + r.kind + '" and may not name a principal — only a seat is a delegate (I12)');
+        throw bad(at + ' is a "' + r.kind + '" and may not name a principal — only a seat is a delegate');
       }
     } else {
       if (!isStr(r.principal)) {
-        throw bad(at + ' is a seat and requires a principal (D6)');
+        throw bad(at + ' is a seat and requires a principal');
       }
       if (r.principal === r.id) {
-        throw bad(at + ' is a seat naming ITSELF as its principal — a seat is a delegate, never an independent authority root (D6)');
+        throw bad(at + ' is a seat naming ITSELF as its principal — a seat is a delegate, never an independent authority root');
       }
     }
 
@@ -785,7 +785,7 @@ function assertExactMigrationEvent(event, where) {
   if (keys.length !== expected.length || keys.some((k, i) => k !== expected[i])) throw bad('its fields must be exact');
   if (typeof event.id !== 'string' || !UUID_V4.test(event.id)) throw bad('its id must be a fresh UUID v4');
   if (typeof event.ts !== 'number' || !Number.isFinite(event.ts)) throw bad('its ts must be finite');
-  if (event.tenant !== tenant()) throw bad('its tenant must be "house"');
+  if (event.tenant !== tenant()) throw bad('its tenant must be the configured tenant');
   if (event.from_version !== 1) throw bad('its from_version must be 1');
   if (event.to_version !== 2) throw bad('its to_version must be 2');
 }
@@ -834,7 +834,7 @@ function exactPolicyEvent(event, previous, next, where) {
     throw bad('policy.pass_lifetime intent kind is exact');
   }
   if (event.tenant !== tenant()) {
-    throw bad('policy.pass_lifetime intent tenant must be "house"');
+    throw bad('policy.pass_lifetime intent tenant must be the configured tenant');
   }
   if (event.previous_pass_lifetime_ms !== previous) {
     throw bad('policy.pass_lifetime intent previous value does not match effective state');
@@ -953,7 +953,7 @@ function assertCredentialInvariants(prev, next) {
 // dictionaries): the cost tests count Map/Array-method calls with exact
 // budgets, and the validator must be invisible to them.
 function assertRelationalInvariants(state, where) {
-  const bad = msg => new Error('identity repo: ' + where + ' violates B4 — ' + msg);
+  const bad = msg => new Error('identity repo: ' + where + ' violates the seat/pass binding rules — ' + msg);
   const subjById = Object.create(null);
   for (let i = 0; i < state.subjects.length; i++) {
     const s = state.subjects[i];
@@ -985,7 +985,7 @@ function assertRelationalInvariants(state, where) {
     if (c.type === 'pass') {
       if (subj.kind !== 'seat') throw bad('a pass credential must attach to a seat, not a ' + subj.kind);
       if (typeof c.expires_at !== 'number' || c.expires_at <= 0) throw bad('a pass credential requires a positive expires_at');
-      if (passBySeat[c.subject_id]) throw bad('SECOND pass credential for seat "' + c.subject_id + '" — one seat, ONE historical pass (L4)');
+      if (passBySeat[c.subject_id]) throw bad('SECOND pass credential for seat "' + c.subject_id + '" — one seat, ONE historical pass');
       passBySeat[c.subject_id] = c;
     }
     if (c.type === 'tool' && subj.kind !== 'tool') throw bad('a tool credential must attach to a tool, not a ' + subj.kind);
@@ -1000,10 +1000,10 @@ function assertRelationalInvariants(state, where) {
     const pass = passBySeat[s.id];
     if (pass) {
       if (s.expires_at !== pass.expires_at) {
-        throw bad('seat/pass expiry MISMATCH for "' + s.id + '" — bound seat expiry must equal its one pass credential expiry (L2)');
+        throw bad('seat/pass expiry MISMATCH for "' + s.id + '" — bound seat expiry must equal its one pass credential expiry');
       }
     } else if (s.expires_at !== 0) {
-      throw bad('seat "' + s.id + '" carries expiry WITHOUT a pass credential — binding is issuance, nothing else (L1)');
+      throw bad('seat "' + s.id + '" carries expiry WITHOUT a pass credential — binding is issuance, nothing else');
     }
   }
   // grants: stable unique id; one closed persisted vocabulary;
@@ -1119,7 +1119,7 @@ function assertV2RelationalInvariants(state, where) {
     if (r.system === true && r.slug === ADMINISTRATOR_SLUG) {
       if (r.allowed_subject_kinds.length !== 1 || r.allowed_subject_kinds[0] !== 'person') {
         throw bad(at + ' is the protected "' + ADMINISTRATOR_SLUG +
-          '" manifest row and must allow exactly ["person"] (D28) — got ' + JSON.stringify(r.allowed_subject_kinds));
+          '" manifest row and must allow exactly ["person"] — got ' + JSON.stringify(r.allowed_subject_kinds));
       }
     }
     // ANTI-SMUGGLING AT STORAGE. `system: true` marks a protected
@@ -1130,7 +1130,7 @@ function assertV2RelationalInvariants(state, where) {
     if (r.system === true && !PROTECTED_ROLE_SLUGS.includes(r.slug)) {
       throw bad(at + ' claims system: true under slug "' + r.slug +
         '" — the protected built-ins are exactly ' + JSON.stringify([...PROTECTED_ROLE_SLUGS]) +
-        ' and no other role may claim that protection (D28, spec §6.2)');
+        ' and no other role may claim that protection');
     }
   });
 
@@ -1160,7 +1160,7 @@ function assertV2RelationalInvariants(state, where) {
             '", which admits ' + JSON.stringify([...role.allowed_subject_kinds]) +
             ' — but the protected capability policy allows "' + r.capability + '" only to ' +
             JSON.stringify([...manifestKinds]) + '; the role could hand a "' + kind +
-            '" an authority the manifest reserves (spec §6.1/§6.2)');
+            '" an authority the manifest reserves');
         }
       }
     }
@@ -1184,11 +1184,11 @@ function assertV2RelationalInvariants(state, where) {
     // is person-only and never expires.
     if (role.system === true && role.slug === ADMINISTRATOR_SLUG) {
       if (subj.kind !== 'person') {
-        throw bad(at + ' assigns the protected "' + ADMINISTRATOR_SLUG + '" role to a ' + subj.kind + ' — it is person-only (D28)');
+        throw bad(at + ' assigns the protected "' + ADMINISTRATOR_SLUG + '" role to a ' + subj.kind + ' — it is person-only');
       }
       if (r.expires_at !== null) {
         throw bad(at + ' is a protected "' + ADMINISTRATOR_SLUG + '" assignment and must carry expires_at === null — ' +
-          'administrator authority cannot lapse by clock (D43)');
+          'administrator authority cannot lapse by clock');
       }
     }
     if (r.revoked_at === null) {
@@ -1210,7 +1210,7 @@ function assertV2RelationalInvariants(state, where) {
     if (r.issuer_subject_id === null) {
       if (r.purpose !== 'bootstrap' && r.purpose !== 'offline_recovery') {
         throw bad(at + ' has null issuer_subject_id but purpose "' + r.purpose +
-          '" is not operator bootstrap/offline_recovery (D44)');
+          '" is not operator bootstrap/offline_recovery');
       }
     } else {
       const issuer = anySubject(r.issuer_subject_id, at, 'issuer_subject_id');
@@ -1228,7 +1228,7 @@ function assertV2RelationalInvariants(state, where) {
     // (already shape-checked for non-seat purposes). They never smuggle authority.
     if ((r.purpose === 'bootstrap' || r.purpose === 'offline_recovery') && r.issuer_subject_id === null) {
       if (r.capability_ceiling.length !== 0 || r.resource_ceiling.length !== 0) {
-        throw bad(at + ' operator ' + r.purpose + ' capability must carry empty capability/resource ceilings (D44)');
+        throw bad(at + ' operator ' + r.purpose + ' capability must carry empty capability/resource ceilings');
       }
       if (r.intended_subject_kind !== 'person') {
         throw bad(at + ' operator ' + r.purpose + ' capability must intend kind person');
@@ -1249,7 +1249,7 @@ function assertV2RelationalInvariants(state, where) {
     if (r.invited_by !== null) return;
     const at = 'membership ' + i;
     if (r.tenant !== tenant()) {
-      throw bad(at + ' has null invited_by outside tenant house — D44 bootstrap only');
+      throw bad(at + ' has null invited_by outside the configured tenant — operator bootstrap only');
     }
     // Find a consumed bootstrap cap naming this person as consumer.
     const caps = state.admission_capabilities.filter(c =>
@@ -1260,17 +1260,17 @@ function assertV2RelationalInvariants(state, where) {
       c.consuming_subject_id === r.person_subject_id);
     if (caps.length === 0) {
       throw bad(at + ' has null invited_by without a consumed bootstrap capability for person "' +
-        r.person_subject_id + '" (D44)');
+        r.person_subject_id + '"');
     }
     // Prefer exact timestamp match when multiple historical caps exist.
     const matched = caps.find(c =>
       c.consumed_at === r.invited_at &&
       c.consumed_at === r.activated_at) || null;
     if (!matched) {
-      throw bad(at + ' null invited_by membership timestamps must equal the consumed bootstrap capability consumed_at (D44)');
+      throw bad(at + ' null invited_by membership timestamps must equal the consumed bootstrap capability consumed_at');
     }
     if (bootstrapNullInviterSeen.has(matched.id)) {
-      throw bad(at + ' two null-inviter memberships claim the same bootstrap capability "' + matched.id + '" (D44)');
+      throw bad(at + ' two null-inviter memberships claim the same bootstrap capability "' + matched.id + '"');
     }
     bootstrapNullInviterSeen.add(matched.id);
     // Active bootstrap candidate: at most one non-revoked null-inviter while
@@ -1283,7 +1283,7 @@ function assertV2RelationalInvariants(state, where) {
     const liveNull = state.memberships.filter(m =>
       m.invited_by === null && m.tenant === tenant() && m.status !== 'revoked');
     if (liveNull.length > 1) {
-      throw bad('at most one non-revoked null-inviter membership may exist while bootstrap is incomplete (D44)');
+      throw bad('at most one non-revoked null-inviter membership may exist while bootstrap is incomplete');
     }
   } else {
     // After completion, no NEW null-inviter memberships: any non-revoked null
@@ -1362,7 +1362,7 @@ function assertUsableAdministrators(state, where) {
   for (const tenant of administratorTenants(state)) {
     if (usableAdministratorsIn(state, tenant) < 1) {
       throw new Error('identity repo: ' + where + ' would leave tenant "' + tenant +
-        '" with ZERO usable administrators after bootstrap completed (D43) — refused. ' +
+        '" with ZERO usable administrators after bootstrap completed — refused. ' +
         'Only the explicit offline administrator recovery ceremony may cross and repair this invariant.');
     }
   }
@@ -1403,12 +1403,12 @@ function assertSystemRoleBundleDeltas(prev, next) {
     const after = nextRoleById[before.id];
     if (!after) {
       throw bad('the protected role "' + before.slug + '" may not be REMOVED — ' +
-        'protected built-ins are assigned and revoked, never deleted (spec §6.2)');
+        'protected built-ins are assigned and revoked, never deleted');
     }
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       throw bad('the protected role row "' + before.slug + '" is immutable at runtime — ' +
         'display_name, status, allowed_subject_kinds and every other field are fixed by the manifest ' +
-        '(presentation never changes authority, D29)');
+        '(presentation never changes authority)');
     }
     const beforePerms = permsFor(prev, before.id);
     const afterPerms = permsFor(next, before.id);
@@ -1496,7 +1496,7 @@ function principalCoversSeatGrant(state, seat, grant, now) {
 // grant lifetimes are never rewritten (removal stays legal); grants ADDED to a
 // seat need it bound, active and unexpired NOW.
 function assertRelationalDeltas(prev, next) {
-  const bad = msg => new Error('identity repo: transaction violates B4 — ' + msg);
+  const bad = msg => new Error('identity repo: transaction violates the seat/pass binding rules — ' + msg);
   // credentials: positions are already pinned by assertCredentialInvariants,
   // so prev[i] and next[i] are the same logical row.
   for (let i = 0; i < prev.credentials.length; i++) {
@@ -1507,7 +1507,7 @@ function assertRelationalDeltas(prev, next) {
     for (const k of Object.keys(keys)) {
       if (k === 'revoked') continue;
       if (a[k] !== b[k]) {
-        throw bad('a transaction may not change credential field "' + k + '" at position ' + i + ' (L6)');
+        throw bad('a transaction may not change credential field "' + k + '" at position ' + i + '');
       }
     }
     if (a.revoked !== b.revoked && !(a.revoked === false && b.revoked === true)) {
@@ -1556,7 +1556,7 @@ function assertRelationalDeltas(prev, next) {
     const b = nextById[a.id];
     // Present in prev, absent from next. Revocation is the
     // lifecycle — subjects.js never splices a subject row.
-    if (!b) throw bad('a transaction may not REMOVE subject row "' + a.id + '" — revocation is the lifecycle (C4)');
+    if (!b) throw bad('a transaction may not REMOVE subject row "' + a.id + '" — revocation is the lifecycle');
 
     const seen = Object.create(null);
     for (const k of Object.keys(a)) seen[k] = true;
@@ -1578,7 +1578,7 @@ function assertRelationalDeltas(prev, next) {
       const how = b.ended_how === 'left' || b.ended_how === 'revoked' || b.ended_how === 'released';
       if (wasLive && noPriorRevocation && nowRevoked && stamped && how) continue;   // legal revocation
       throw bad('subject "' + a.id + '": the only legal status/revoked_at transition is active -> revoked with a ' +
-        'positive timestamp and ended_how left|revoked|released, set together and exactly once — revival and re-stamping are refused (I-R2.5-3a/4)');
+        'positive timestamp and ended_how left|revoked|released, set together and exactly once — revival and re-stamping are refused');
     }
 
     if (shape === T2_KEYS) {
@@ -1590,7 +1590,7 @@ function assertRelationalDeltas(prev, next) {
       const bound = typeof b.expires_at === 'number' && Number.isFinite(b.expires_at) && b.expires_at > 0;
       if (isSeat && wasUnbound && bound) continue;                            // legal binding
       throw bad('subject "' + a.id + '": expires_at may move only 0 -> positive, on a seat, once — ' +
-        'renewal is a NEW seat subject (I-R2.5-9)');
+        'renewal is a NEW seat subject');
     }
 
     if (shape === T3_KEYS || shape === T3_REUSE_KEYS || shape === T3_CASE_KEYS) {
@@ -1633,7 +1633,7 @@ function assertRelationalDeltas(prev, next) {
     // Everything not named above. This line is the guarantee: any subject
     // delta not explicitly allowed is refused here.
     throw bad('subject "' + a.id + '": no legal transition changes {' + diff.join(', ') + '} — ' +
-      'the only permitted subject deltas are revocation, seat binding, and display rename (C1, deny-by-default)');
+      'the only permitted subject deltas are revocation, seat binding, and display rename (deny-by-default)');
   }
   // grants: match next rows against prev by stable grant id. Same-tuple rows with
   // distinct ids are distinct grants; an existing bound-seat id may not rewrite
@@ -1710,7 +1710,7 @@ function assertRelationalDeltas(prev, next) {
   }
   for (const key of Object.keys(prevAuthById)) {
     if (!nextAuthById[key]) {
-      throw bad('a transaction may not REMOVE authenticator "' + key + '" — revocation is the lifecycle (R6 §10)');
+      throw bad('a transaction may not REMOVE authenticator "' + key + '" — revocation is the lifecycle');
     }
   }
   for (const key of Object.keys(nextAuthById)) {
@@ -1826,7 +1826,7 @@ function assertRelationalDeltas(prev, next) {
     }
 
     throw bad('authenticator "' + a.id + '": no legal transition changes {' + diff.join(', ') +
-      '} — only USE and REVOKE are permitted (R6 §10, deny-by-default)');
+      '} — only USE and REVOKE are permitted (deny-by-default)');
   }
 }
 
@@ -1863,7 +1863,7 @@ function tenant() {
   if (TENANT === null) {
     throw new Error('identity repo: no tenant. Pass { tenant } to initialize() — it is ' +
       'REQUIRED and has no default, because the only default available is one ' +
-      'particular house\'s name (#193)');
+      'particular deployment\'s name');
   }
   return TENANT;
 }
@@ -1874,7 +1874,7 @@ function initialize(opts) {
   const t = (opts && typeof opts === 'object') ? opts.tenant : undefined;
   if (!validTenantName(t)) {
     throw new Error('identity repo: initialize({ tenant }) is REQUIRED — 1-63 chars of ' +
-      '[a-z0-9_-] starting alphanumeric, no default (#193). Got ' + JSON.stringify(t));
+      '[a-z0-9_-] starting alphanumeric, no default. Got ' + JSON.stringify(t));
   }
   // ── WRITE-ONCE, exactly like the state dir ─────────────────────────────────
   // This used to assign unconditionally, so a second create() on the SAME state
@@ -1991,7 +1991,7 @@ let IN_TRANSACTION = false;
 function transact(fn) {
   requireReady();
   if (IN_TRANSACTION) {
-    throw new Error('identity repo: transact() is non-reentrant (I17) — a nested transaction would silently lose its commit');
+    throw new Error('identity repo: transact() is non-reentrant — a nested transaction would silently lose its commit');
   }
   const prev = STATE;
   const draft = JSON.parse(JSON.stringify(prev));
@@ -2067,7 +2067,7 @@ function markDelivered(ids) {
   // EVEN for no-op inputs — a "0" answered mid-callback is a false report about
   // state that is still in flight.
   if (IN_TRANSACTION) {
-    throw new Error('identity repo: markDelivered() inside a transaction callback is non-reentrant (I17)');
+    throw new Error('identity repo: markDelivered() inside a transaction callback is non-reentrant');
   }
   const want = new Set(ids || []);
   if (want.size === 0) return 0;
@@ -2094,7 +2094,7 @@ function migrateV1ToV2(opts) {
   const __t = (opts && typeof opts === 'object') ? opts.tenant : undefined;
   if (!validTenantName(__t)) {
     throw new Error('identity repo: migrateV1ToV2({ tenant }) is REQUIRED — migration ' +
-      'writes rows that are validated against the tenant, and there is no default (#193). ' +
+      'writes rows that are validated against the tenant, and there is no default. ' +
       'Got ' + JSON.stringify(__t));
   }
   if (TENANT !== null && TENANT !== __t) {
@@ -2103,7 +2103,7 @@ function migrateV1ToV2(opts) {
   }
   TENANT = __t;
   if (IN_TRANSACTION) {
-    throw new Error('identity repo: migrateV1ToV2() inside a transaction callback is refused (I17) — it is a pre-initialization operation');
+    throw new Error('identity repo: migrateV1ToV2() inside a transaction callback is refused — it is a pre-initialization operation');
   }
   if (MIGRATING) throw new Error('identity repo: migrateV1ToV2() is non-reentrant');
   if (STATE) {
@@ -2148,7 +2148,7 @@ function migrateV1ToV2(opts) {
     if (Object.keys(v1.passwords).length !== 0) {
       throw new Error('identity repo: REFUSING to migrate — the version-1 passwords object is NOT EMPTY (' +
         Object.keys(v1.passwords).length + ' entries). No legal writer for it ever shipped, so its content is ' +
-        'corruption or tampering, never data to carry forward (I-R1-4).');
+        'corruption or tampering, never data to carry forward.');
     }
 
     // (e) Transform: the six v1 collections cross UNCHANGED — same rows, same

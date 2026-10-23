@@ -26,7 +26,7 @@ const capabilityPolicy = require('./capability_policy.js');
 
 function requireTenant(tenant, where) {
   if (typeof tenant !== 'string' || tenant.trim() === '') {
-    throw new Error('assignments.' + where + ': tenant is required — no method defaults it (I5/D3)');
+    throw new Error('assignments.' + where + ': tenant is required — no method defaults it');
   }
 }
 
@@ -115,18 +115,18 @@ function assignInDraft(state, opts) {
     if (!manifestKinds.includes(subject.kind)) {
       throw new Error('assignments.assign: role "' + role.slug + '" carries "' + p.capability +
         '", which the protected capability policy allows only to ' + JSON.stringify([...manifestKinds]) +
-        ' — it may not be assigned to a "' + subject.kind + '" (spec §6.1/§6.2)');
+        ' — it may not be assigned to a "' + subject.kind + '"');
     }
   }
 
   if (role.system === true && role.slug === repo.ADMINISTRATOR_SLUG) {
     if (subject.kind !== 'person') {
       throw new Error('assignments.assign: the protected "' + repo.ADMINISTRATOR_SLUG +
-        '" role is person-only and may not be assigned to a "' + subject.kind + '" (D28)');
+        '" role is person-only and may not be assigned to a "' + subject.kind + '"');
     }
     if (expires_at !== null) {
       throw new Error('assignments.assign: a protected "' + repo.ADMINISTRATOR_SLUG +
-        '" assignment must carry expires_at === null — administrator authority cannot lapse by clock (D43). ' +
+        '" assignment must carry expires_at === null — administrator authority cannot lapse by clock. ' +
         'To end it, revoke it.');
     }
   }
@@ -220,7 +220,7 @@ function liveForSubject(tenant, subject_id, now) {
   requireIdentityString(subject_id, 'subject_id', 'liveForSubject');
   if (typeof now !== 'number' || !Number.isFinite(now)) {
     throw new Error('assignments.liveForSubject: `now` is required and must be a finite number — ' +
-      'this read does not call the clock, so that callers stay deterministic (I-R2-11)');
+      'this read does not call the clock, so that callers stay deterministic');
   }
   return state.role_assignments.filter(a =>
     a.tenant === tenant && a.subject_id === subject_id &&

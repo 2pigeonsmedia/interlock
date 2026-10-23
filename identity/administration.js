@@ -275,13 +275,13 @@ function createService(opts) {
     // canonical serialization. Anything else refuses.
     if (!isCanonicalLiveOrigin(live_origin)) {
       throw new Error('administration: harness must be exactly true (the only non-harness ' +
-        'construction admitted is live W1, and it requires an ABSOLUTE live_origin pin ' +
+        'construction admitted is live, and it requires an ABSOLUTE live_origin pin ' +
         'supplied as a construction argument — the module carries no host default, so an ' +
         'absent, blank or relative pin refuses rather than admits)');
     }
     if (origin !== live_origin) {
       throw new Error('administration: harness must be exactly true (the only non-harness ' +
-        'construction admitted is live W1 with origin exactly the supplied live_origin)');
+        'construction admitted is live with origin exactly the supplied live_origin)');
     }
   }
   const session_store = ownData(opts, 'session_store').value;

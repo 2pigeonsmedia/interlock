@@ -134,7 +134,7 @@ function create(config) {
   if (typeof stateDir !== 'string' || stateDir.length === 0) {
     reject('config.stateDir is REQUIRED and must be a non-empty string. There is no ' +
       'default, because the only defaults available are guesses at the adopting ' +
-      'host\'s own directories — which is the defect #268 names.');
+      'host\'s own directories, and a guessed directory can mix the state of two hosts.');
   }
   if (!path.isAbsolute(stateDir)) {
     reject('config.stateDir must be ABSOLUTE — a relative path resolves against the ' +
@@ -146,7 +146,7 @@ function create(config) {
   if (!repo.validTenantName(tenant)) {
     reject('config.tenant is REQUIRED — 1-63 chars of [a-z0-9_-] starting alphanumeric, '
       + 'and there is no default because the only default available is one particular '
-      + 'house\'s name (#193). Got ' + JSON.stringify(tenant));
+      + 'deployment\'s name. Got ' + JSON.stringify(tenant));
   }
 
   const cookieName = ownString(config, 'cookieName');

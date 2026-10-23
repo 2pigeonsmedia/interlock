@@ -52,8 +52,8 @@ function refuseUnknownKeys(input, allowed, where) {
     if (!allowed.includes(k)) {
       throw new Error('admission.' + where + ': "' + k + '" is not accepted — ' +
         (where === 'mint'
-          ? 'the server generates the secret and its digest, and stamps issuance state; a caller supplies neither (D41)'
-          : 'the server reads tenant, principal, ceilings and lifetime SOLELY from the stored record, never from the caller (D26)'));
+          ? 'the server generates the secret and its digest, and stamps issuance state; a caller supplies neither'
+          : 'the server reads tenant, principal, ceilings and lifetime SOLELY from the stored record, never from the caller'));
     }
   }
 }
@@ -123,7 +123,7 @@ function mint(opts) {
     if (!(Number.isSafeInteger(max_seat_ttl) &&
           max_seat_ttl >= repo.MIN_PASS_LIFETIME_MS && max_seat_ttl <= repo.MAX_PASS_LIFETIME_MS)) {
       throw new Error('admission.mint: purpose "' + purpose + '" is a seat purpose — max_seat_ttl is required and ' +
-        'must be a safe integer inside the inclusive D19 bounds ' + repo.MIN_PASS_LIFETIME_MS + '..' +
+        'must be a safe integer inside the inclusive lifetime bounds ' + repo.MIN_PASS_LIFETIME_MS + '..' +
         repo.MAX_PASS_LIFETIME_MS + ' (got ' + JSON.stringify(max_seat_ttl) + ')');
     }
   } else if (max_seat_ttl !== null) {
@@ -179,7 +179,7 @@ function mint(opts) {
       requireIdentityString(principal_subject_id, 'principal_subject_id', 'mint');
       const p = state.subjects.find(s => s.id === principal_subject_id) || null;
       if (!p) throw new Error('admission.mint: principal subject not found — ' + principal_subject_id);
-      if (p.kind !== 'person') throw new Error('admission.mint: a principal must be a person, not a ' + p.kind + ' (D6)');
+      if (p.kind !== 'person') throw new Error('admission.mint: a principal must be a person, not a ' + p.kind + '');
       if (p.tenant !== tenant) throw new Error('admission.mint: principal belongs to another tenant');
       if (p.status !== 'active') throw new Error('admission.mint: principal is revoked');
     }
@@ -237,7 +237,7 @@ function mintOperatorInDraft(draft, opts) {
   requireIdentityString(tenant, 'tenant', 'mintOperatorInDraft');
   if (!OPERATOR_PURPOSES.includes(purpose)) {
     throw new Error('admission.mintOperatorInDraft: purpose must be bootstrap or offline_recovery — ' +
-      'human-issued purposes use admission.mint() (C52/M49)');
+      'human-issued purposes use admission.mint()');
   }
   requireIdentityString(mint_audit_id, 'mint_audit_id', 'mintOperatorInDraft');
   if (intended_subject_kind !== 'person') {
@@ -415,7 +415,7 @@ function stampConsumption(draft, row, consumer, now) {
   if (consumer.kind !== row.intended_subject_kind) {
     throw new Error('admission.consume: this capability is intended for a "' + row.intended_subject_kind +
       '" and the consuming subject is a "' + consumer.kind +
-      '" — kind is a server-owned fact and the claim fixes it (D23/D26)');
+      '" — kind is a server-owned fact and the claim fixes it');
   }
   row.consumed_at = now;
   row.consuming_subject_id = consumer.id;

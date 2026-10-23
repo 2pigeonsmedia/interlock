@@ -110,7 +110,7 @@ function abandonIncompleteBootstrap(personId) {
   }
   const person = state.subjects.find(s => s.id === personId) || null;
   if (!person || person.kind !== 'person' || person.tenant !== TENANT()) {
-    throw new Error('operator.abandonIncompleteBootstrap: person not found in house');
+    throw new Error('operator.abandonIncompleteBootstrap: person not found in the configured tenant');
   }
   // Must be the bootstrap candidate: null-inviter membership bound to a consumed bootstrap cap.
   const mem = state.memberships.find(m =>
@@ -200,7 +200,7 @@ function mintOfflineRecoveryCapability(personId) {
   // Entry condition: target must be active person, active membership, live non-expiring admin assignment.
   const person = state.subjects.find(s => s.id === personId) || null;
   if (!person || person.kind !== 'person' || person.status !== 'active' || person.tenant !== TENANT()) {
-    throw new Error('operator.mintOfflineRecoveryCapability: target is not an active house person');
+    throw new Error('operator.mintOfflineRecoveryCapability: target is not an active person in the configured tenant');
   }
   const mem = state.memberships.find(m =>
     m.tenant === TENANT() && m.person_subject_id === personId && m.status === 'active');

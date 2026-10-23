@@ -34,7 +34,7 @@ const repo = require('./repo.js');
 
 function requireTenant(tenant, where) {
   if (typeof tenant !== 'string' || tenant.trim() === '') {
-    throw new Error('memberships.' + where + ': tenant is required — no method defaults it (I5/D3)');
+    throw new Error('memberships.' + where + ': tenant is required — no method defaults it');
   }
 }
 
@@ -79,7 +79,7 @@ function inviteInDraft(state, opts) {
   if (!person) throw new Error('memberships.invite: subject not found — ' + person_subject_id);
   if (person.kind !== 'person') {
     throw new Error('memberships.invite: only a person may hold membership — "' + person_subject_id +
-      '" is a ' + person.kind + ' (D22). Membership is a human product relationship, not a role.');
+      '" is a ' + person.kind + '. Membership is a human product relationship, not a role.');
   }
   if (person.tenant !== tenant) throw new Error('memberships.invite: subject belongs to another tenant');
   if (person.status !== 'active') throw new Error('memberships.invite: subject is revoked');
@@ -91,7 +91,7 @@ function inviteInDraft(state, opts) {
   if (state.memberships.some(m => m.tenant === tenant && m.person_subject_id === person_subject_id)) {
     throw new Error('memberships.invite: person "' + person_subject_id + '" already has a membership in tenant "' +
       tenant + '" — at most one membership row per (tenant, person). Re-admitting a revoked person is ' +
-      'R7\'s reset ceremony, not a second row.');
+      'the reset ceremony, not a second row.');
   }
 
   const row = {
@@ -109,7 +109,7 @@ function createBootstrapActiveInDraft(state, opts) {
   const { tenant, person_subject_id, now } = opts || {};
   requireTenant(tenant, 'createBootstrapActiveInDraft');
   if (tenant !== repo.tenant()) {
-    throw new Error('memberships.createBootstrapActiveInDraft: tenant must be house');
+    throw new Error('memberships.createBootstrapActiveInDraft: tenant must be the configured tenant');
   }
   requireIdentityString(person_subject_id, 'person_subject_id', 'createBootstrapActiveInDraft');
   if (typeof now !== 'number' || !Number.isFinite(now)) {
@@ -117,7 +117,7 @@ function createBootstrapActiveInDraft(state, opts) {
   }
   const person = state.subjects.find(s => s.id === person_subject_id) || null;
   if (!person || person.kind !== 'person' || person.tenant !== tenant || person.status !== 'active') {
-    throw new Error('memberships.createBootstrapActiveInDraft: person must be an active house person');
+    throw new Error('memberships.createBootstrapActiveInDraft: person must be an active person in the configured tenant');
   }
   if (state.memberships.some(m => m.tenant === tenant && m.person_subject_id === person_subject_id)) {
     throw new Error('memberships.createBootstrapActiveInDraft: person already has a membership');
@@ -193,7 +193,7 @@ function transition(where, id, kind, from, to, apply) {
     if (!row) throw new Error('memberships.' + where + ': membership not found — ' + id);
     if (row.status === 'revoked') {
       throw new Error('memberships.' + where + ': membership "' + id + '" is revoked, and revoked is TERMINAL — ' +
-        'no path leaves it. Re-admission is R7\'s ceremony.');
+        'no path leaves it. Re-admission is the reset ceremony.');
     }
     if (row.status !== from) {
       throw new Error('memberships.' + where + ': membership "' + id + '" is "' + row.status +

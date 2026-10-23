@@ -74,7 +74,7 @@ const PROTECTED = Object.freeze({
 
 function requireTenant(tenant, where) {
   if (typeof tenant !== 'string' || tenant.trim() === '') {
-    throw new Error('roles.' + where + ': tenant is required — no method defaults it (I5/D3)');
+    throw new Error('roles.' + where + ': tenant is required — no method defaults it');
   }
 }
 
@@ -91,7 +91,7 @@ function seedProtectedRoles(tenant, opts) {
   for (const slug of Object.keys(labels)) {
     if (!PROTECTED[slug]) {
       throw new Error('roles.seedProtectedRoles: display_names names "' + slug +
-        '", which is not a protected role — presentation may be chosen, roles may not be invented (I-R2-8)');
+        '", which is not a protected role — presentation may be chosen, roles may not be invented');
     }
     if (typeof labels[slug] !== 'string' || labels[slug].trim() === '') {
       throw new Error('roles.seedProtectedRoles: display_name for "' + slug + '" must be a non-blank string');
@@ -108,7 +108,7 @@ function seedProtectedRolesInDraft(state, opts) {
   const { tenant, display_names, now } = opts || {};
   requireTenant(tenant, 'seedProtectedRoles');
   if (tenant !== repo.tenant()) {
-    throw new Error('roles.seedProtectedRolesInDraft: first-release seed is house-only (R7-D3)');
+    throw new Error('roles.seedProtectedRolesInDraft: first-release seed is for the configured tenant only');
   }
   if (typeof now !== 'number' || !Number.isFinite(now)) {
     throw new Error('roles.seedProtectedRolesInDraft: now must be a finite number');

@@ -79,7 +79,7 @@ function validateIssueInput(opts, allowedKeys, where) {
   const o = opts || {};
   for (const k of Object.keys(o)) {
     if (!allowedKeys.includes(k)) {
-      throw new Error('credentials.' + where + ': "' + k + '" is not accepted — credential issuance takes only server-side material, never a secret or token (I5)');
+      throw new Error('credentials.' + where + ': "' + k + '" is not accepted — credential issuance takes only server-side material, never a secret or token');
     }
   }
   const { selector, digest, subject_id, type, ttlMs, generation, request_id } = o;
@@ -87,14 +87,14 @@ function validateIssueInput(opts, allowedKeys, where) {
     throw new Error('credentials.' + where + ': malformed selector — ' + repo.SELECTOR_CHARS + ' base64url chars required');
   }
   if (typeof digest !== 'string' || !HEX64.test(digest)) {
-    throw new Error('credentials.' + where + ': malformed digest — one lowercase SHA-256 hex digest of the secret (I4)');
+    throw new Error('credentials.' + where + ': malformed digest — one lowercase SHA-256 hex digest of the secret');
   }
   if (typeof subject_id !== 'string' || subject_id === '') throw new Error('credentials.' + where + ': subject_id is required');
   if (!TYPES.includes(type)) {
-    throw new Error('credentials.' + where + ': unknown type "' + type + '" — pass|tool only (password credentials are D12, not this task)');
+    throw new Error('credentials.' + where + ': unknown type "' + type + '" — pass|tool only (passwords are handled by the password service)');
   }
   if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs) || ttlMs <= 0) {
-    throw new Error('credentials.' + where + ': ttlMs must be an explicit positive finite lifetime — no default exists here (D16)');
+    throw new Error('credentials.' + where + ': ttlMs must be an explicit positive finite lifetime — no default exists here');
   }
   if (!Number.isSafeInteger(generation) || generation < 1) {
     throw new Error('credentials.' + where + ': generation is required (a positive integer)');
@@ -117,7 +117,7 @@ function issueInDraftBody(d, o) {
       existing.subject_id === subject_id && existing.type === type &&
       existing.expires_at === existing.issued_at + ttlMs && existing.generation === generation;
     if (!same) {
-      throw new Error('credentials.issue: request_id "' + request_id + '" was already used with different parameters (I12)');
+      throw new Error('credentials.issue: request_id "' + request_id + '" was already used with different parameters');
     }
     const e = new Error('replay'); e[REPLAY] = meta(existing); throw e;
   }
@@ -133,14 +133,14 @@ function issueInDraftBody(d, o) {
   if (!subj) throw new Error('credentials.issue: subject not found — ' + subject_id);
   if (subj.status !== 'active') throw new Error('credentials.issue: subject is revoked — a dead subject holds no keys');
   if (type === 'pass') {
-    if (subj.kind !== 'seat') throw new Error('credentials.issue: a pass issues only to a seat (D7), not a ' + subj.kind);
+    if (subj.kind !== 'seat') throw new Error('credentials.issue: a pass issues only to a seat, not a ' + subj.kind);
     if (subj.expires_at !== 0) {
-      throw new Error('credentials.issue: seat is already bound — one seat, one historical pass; renewal is a NEW seat subject (B4 L3/L4)');
+      throw new Error('credentials.issue: seat is already bound — one seat, one historical pass; renewal is a NEW seat subject');
     }
     for (let i = 0; i < d.credentials.length; i++) {
       const c = d.credentials[i];
       if (c.subject_id === subject_id && c.type === 'pass') {
-        throw new Error('credentials.issue: seat already holds its one historical pass (B4 L4)');
+        throw new Error('credentials.issue: seat already holds its one historical pass');
       }
     }
   } else if (subj.kind !== 'tool') {
@@ -199,7 +199,7 @@ function normalizeGenerations(acceptedGenerations) {
   if (Array.isArray(acceptedGenerations)) gens = acceptedGenerations;
   else if (acceptedGenerations instanceof Set) gens = [...acceptedGenerations];
   if (!gens || gens.length === 0) {
-    throw new Error('credentials.verify: a non-empty explicit acceptedGenerations set is required — verify() never guesses the current generation (I14)');
+    throw new Error('credentials.verify: a non-empty explicit acceptedGenerations set is required — verify() never guesses the current generation');
   }
   return gens;
 }

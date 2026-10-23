@@ -133,7 +133,7 @@ function assertInstallableTarget(draft, tenant, person_subject_id) {
   if (!subj) throw new Error('passwords: no subject "' + person_subject_id + '" in tenant "' + tenant + '"');
   if (subj.kind !== 'person') {
     throw new Error('passwords: subject "' + person_subject_id + '" is a ' + subj.kind +
-      ' — only a person may hold a password (D22/D28)');
+      ' — only a person may hold a password');
   }
   if (subj.status !== 'active') {
     throw new Error('passwords: subject "' + person_subject_id + '" is ' + subj.status + ', not active');

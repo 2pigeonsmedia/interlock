@@ -796,7 +796,7 @@ function normalizeMutation(event) {
   const out = { event_id: id.value };
   for (const field of fields) out[field] = validateMutationField(event, field, kind);
   if (kind === 'policy.pass_lifetime' && out.tenant !== repo.tenant()) {
-    throw new Error('audit: policy.pass_lifetime tenant must be "house"');
+    throw new Error('audit: policy.pass_lifetime tenant must be the configured tenant');
   }
   // CUTOVER COMPOSE: a delivered repo.migration that is not 1 -> 2 for
   // this deployment's tenant is a failed candidate. validNumber() alone would admit 2.5
@@ -804,7 +804,7 @@ function normalizeMutation(event) {
   // to the numeric path. tenant follows the policy.pass_lifetime precedent above.
   if (kind === 'repo.migration') {
     if (out.tenant !== repo.tenant()) {
-      throw new Error('audit: repo.migration tenant must be "house"');
+      throw new Error('audit: repo.migration tenant must be the configured tenant');
     }
     if (!Number.isSafeInteger(out.from_version) || out.from_version !== 1) {
       throw new Error('audit: repo.migration from_version must be exactly 1 — got ' +
