@@ -1,10 +1,9 @@
-// identity/bootstrap.js — R7 staged first-administrator bootstrap.
-// Binding: docs/audits/CODEX_ASSERTION_PACKET_R7_2026-08-07.md
-// Builder: Grok. Interlock exposes this through identity.create(); there is no
+// identity/bootstrap.js — staged first-administrator bootstrap.
+// Interlock exposes this through identity.create(); there is no
 // host-side reassembly of the ceremony.
 //
 // Stage 1: redeemBootstrap — unprivileged candidate (person+membership+password).
-// Stage 2: real R5 login + R6 register/assertion (outside this module).
+// Stage 2: real password login + WebAuthn register/assertion (outside this module).
 // Stage 3: completeBootstrap — fresh step-up, seed roles, assign both, complete.
 'use strict';
 const crypto = require('crypto');
@@ -18,8 +17,8 @@ const assignments = require('./assignments.js');
 const canMod = require('./can.js');
 
 const BOOTSTRAP_TTL_MS = 900_000;
-// #193: LAZY. Evaluating at module load throws — require() happens long
-// before initialize() has been told the house.
+// LAZY. Evaluating at module load throws — require() happens long
+// before initialize() has been told the tenant.
 const TENANT = () => repo.tenant();
 
 const FAIL = Object.freeze({ ok: false });
@@ -122,7 +121,7 @@ function createService(opts) {
           consuming_subject_id: person.id,
           now,
         });
-        // Verify the consumed row is operator-null issuer (D44).
+        // Verify the consumed row is operator-null issuer (the operator is not a tenant subject).
         const cap = draft.admission_capabilities.find(c =>
           c.purpose === 'bootstrap' && c.consuming_subject_id === person.id && c.consumed_at === now);
         if (!cap || cap.issuer_subject_id !== null) {
@@ -219,7 +218,7 @@ function createService(opts) {
       return FAIL;
     }
 
-    // Revoke actor sessions/challenges BEFORE the durable completion (packet §8.4).
+    // Revoke actor sessions/challenges BEFORE the durable completion.
     session_store.revokeSubject({ subject_id: actorId, now, reason: 'role-change' });
     challenge_store.revokeSubject({ person_subject_id: actorId, now });
 

@@ -1,24 +1,20 @@
 // identity/roles.js — the protected role registry, a LOGICAL module over repo.js.
 //
-// R2 of the Plan 1.5 recovery sequence (desk tickets #173 / build #185).
-// Assertions: Ouzel — ASSERTION_PACKET_R2_2026-08-01_OUZEL.md + AMENDMENT1 +
-// AMENDMENT2 (all three bind; later wins on conflict). Builder: Tailorbird.
-//
-// WHY THIS FILE EXISTS: spec §6.2 adds two protected built-ins that runtime
+// WHY THIS FILE EXISTS: the role model adds two protected built-ins that runtime
 // administration may assign and revoke but CANNOT rewrite. Before this, the
-// The upstream host had no reusable authority at all — every permission was a direct grant
+// product had no reusable authority at all — every permission was a direct grant
 // hung on one subject, so "everyone in main chat" had no expressible form and
 // revoking a class of access meant hunting individual rows.
 //
 // WHAT IT DELIBERATELY DOES NOT DO:
 //   · It creates nothing but the protected built-ins. Custom roles, groups,
 //     inheritance, negative permissions and public role authoring are deferred
-//     (spec §13) and R2 provides no path to any of them (I-R2-8). The ABSENCE
+//     and this module provides no path to any of them. The ABSENCE
 //     is the guarantee — a control pins this module's surface so an addition is
 //     a red test rather than a diff nobody read.
 //   · It makes NO authorization decision. Reads return raw registry rows, the
-//     `grants.js` precedent. can() composition is R3's (packet §10).
-//   · It holds NO state of its own (the subjects.js I2 precedent): no cache, no
+//     `grants.js` precedent. can() composes them, in can.js.
+//   · It holds NO state of its own (as in subjects.js): no cache, no
 //     memo, no seeded copy. That is what makes "revocation bites on the next
 //     request" true by construction rather than by comment.
 //
@@ -30,15 +26,15 @@
 const crypto = require('crypto');
 const repo = require('./repo.js');
 
-// The two protected slugs (D28). Canonical persisted keys, never display labels
-// (D29): `administrator` is always `administrator` on disk, whatever a
+// The two protected slugs. Canonical persisted keys, never display labels:
+// `administrator` is always `administrator` on disk, whatever a
 // deployment calls it on screen. Imported from the repository rather than
-// re-typed — the alignment law (C2), and grants.js:18 is the live specimen of
+// re-typed — one definition, never a copy — and grants.js:18 is the live specimen of
 // what re-typing costs.
 const PARTICIPANT = 'participant';
 const ADMINISTRATOR = repo.ADMINISTRATOR_SLUG;
 
-// ── the protected manifests, verbatim from spec §6.2 / packet C3 ────────────
+// ── the protected manifests ─────────────────────────────────────────────────
 // `participant` carries exactly read+write on the four shared surfaces: no
 // private room or document, no summon, no sponsor, no administrative authority.
 // A document needing stricter handling resolves to `doc:<id>` and therefore does
@@ -65,7 +61,7 @@ const PROTECTED = Object.freeze({
   }),
   [ADMINISTRATOR]: Object.freeze({
     allowed_subject_kinds: Object.freeze(['person']),
-    // D21: never hard-code a person's name, a host-specific display label, one
+    // Never hard-code a person's name, a host-specific display label, one
     // machine, or one domain. The host may display `Owner`; the product default
     // is `admin`.
     default_display_name: 'admin',
@@ -107,7 +103,7 @@ function seedProtectedRoles(tenant, opts) {
   }));
 }
 
-// R7: shared seed body for bootstrap completion (one transaction with assignments).
+// Shared seed body for bootstrap completion (one transaction with assignments).
 function seedProtectedRolesInDraft(state, opts) {
   const { tenant, display_names, now } = opts || {};
   requireTenant(tenant, 'seedProtectedRoles');
@@ -162,7 +158,7 @@ function seedProtectedRolesInDraft(state, opts) {
 
 // ── reads: raw registry data, no authorization decision ─────────────────────
 // repo.read() runs FIRST in each, so readiness and FATAL compose even for
-// malformed arguments (the subjects.js I3 precedent).
+// malformed arguments (as in subjects.js).
 
 function bySlug(tenant, slug) {
   const state = repo.read();

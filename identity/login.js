@@ -1,19 +1,15 @@
-// identity/login.js — R5: the framework-independent human password-login service.
-//
-// ASSERTION AUTHOR: Codex — docs/audits/CODEX_ASSERTION_PACKET_R5_2026-08-05.md
-//   (commit 7823559, SHA-256 3291c77c…). Sole binding source.
-// BUILDER: Nunbird (Opus 5). Desk ticket #176. Owner authorization on #171.
+// identity/login.js — the framework-independent human password-login service.
 //
 // Framework-independent by construction: no HTTP, no router, no request object.
 // `source`, `request_origin`, `sec_fetch_site`, `prior_cookie_header` and `now`
 // are TRUSTED ADAPTER METADATA — a handler may never copy them from a request
-// body. R5's harness builds them field-by-field from the socket, the server
-// clock and named headers; the production adapter must repeat that provenance
-// proof in R8.
+// body. The test harness builds them field-by-field from the socket, the
+// server clock and named headers; the production route adapter must repeat
+// that provenance proof.
 //
-// ⛔ NON-CLAIMS (§13): no live route/router/server.js/deployment; no browser or
-// HTTPS cookie proof; no WebAuthn/L2 (R6); no bootstrap, invitation, password
-// change/reset orchestration or recovery (R7); no CP-2a (R8). Exact login
+// ⛔ NON-CLAIMS: no live route/router/server.js/deployment; no browser or
+// HTTPS cookie proof; no WebAuthn/L2 step-up; no bootstrap, invitation, password
+// change/reset orchestration or recovery; no production route adapter. Exact login
 // TIMING UNIFORMITY IS NOT CLAIMED — the unknown and wrong paths prove KDF
 // liveness and a common public shape only. Process-local rate limiting does not
 // survive restart and is not sufficient for a public Internet service.
@@ -34,7 +30,7 @@ const INPUT_LIMITS = Object.freeze({
   csrf_token: Object.freeze({ min: 1, max: 256 }),
 });
 
-// §5.2: supplied trust fields refuse before lookup, KDF or state change.
+// Supplied trust fields refuse before lookup, KDF or state change.
 const FORBIDDEN_CALLER_KEYS = Object.freeze(['tenant', 'subject_id', 'subject_kind',
   'membership', 'role', 'roles', 'assurance', 'authority', 'session_id',
   'session_id_digest', 'csrf_secret']);
@@ -77,9 +73,9 @@ function boundedText(v, limits) {
 }
 function nonBlank(v) { return typeof v === 'string' && v.trim() !== ''; }
 
-// ── the R5 login throttle (§6 C2) ──────────────────────────────────────────
-// R4's createMemoryThrottle stays frozen and exported, but it is not adequate
-// as R5's public default: its two Maps are unbounded and retain raw source and
+// ── the login throttle ──────────────────────────────────────────────────────
+// passwords.js's createMemoryThrottle stays frozen and exported, but it is not
+// adequate as the login service's public default: its two Maps are unbounded and retain raw source and
 // account strings. This one stores NO raw username or source — only HMACs under
 // a fresh process-local key — and is bounded in both dimensions.
 function createLoginThrottle(opts) {
@@ -216,7 +212,7 @@ function createLoginThrottle(opts) {
     recordSuccess(args) {
       const a = isPlainObject(args) ? args : {};
       // Clears the ACCOUNT only. Clearing the source too would let one valid
-      // credential wipe the limiter for a whole attacking host (D38).
+      // credential wipe the limiter for a whole attacking host.
       account.delete(accountKey(a.account));
     },
     health() {
@@ -250,11 +246,12 @@ function createLoginService(opts) {
   const session_store = opts.session_store;
   const harness = opts.harness === true;
 
-  // #193: a CONSTRUCTOR validates the tenant's SHAPE. It must not consult the
+  // A CONSTRUCTOR validates the tenant's SHAPE. It must not consult the
   // repository — a host legitimately builds its login service BEFORE calling
   // initialize(), which is exactly what the upstream host adapter does. The
-  // repository enforces the match on every row. I fixed this in the two store
-  // constructors and missed this one; the adapter suite is what caught it.
+  // repository enforces the match on every row. The two store constructors
+  // follow the same rule; the adapter suite is what catches a constructor
+  // that does not.
   if (!repo.validTenantName(tenant)) {
     throw new Error('login: tenant must be 1-63 chars of [a-z0-9_-] starting alphanumeric — got '
       + JSON.stringify(tenant));
@@ -284,10 +281,10 @@ function createLoginService(opts) {
       revoked_at: rec.revoked_at, upgraded_at: rec.upgraded_at,
     };
   }
-  // The ONLY admitted difference is the exact R4 version-0-to-current
+  // The ONLY admitted difference is the exact passwords.js version-0-to-current
   // upgrade-on-success delta, and only when verify() actually reported it. This
   // is deliberately NOT a broad "if upgraded, accept" branch: every other field
-  // and timestamp must be unchanged (M27).
+  // and timestamp must be unchanged.
   function verifierUnchanged(before, after, upgraded) {
     if (before === null || after === null) return false;
     const same = (k) => before[k] === after[k];
@@ -329,7 +326,7 @@ function createLoginService(opts) {
     if (sec_fetch_site !== INPUT_LIMITS.sec_fetch_site) return INVALID;
 
     // A throttle decision performs no account lookup and may skip the KDF — but
-    // login MUST actually await the delay before returning (M19). The attempt is
+    // login MUST actually await the delay before returning. The attempt is
     // recorded only against what throttled it: its name was never checked.
     const decision = throttle.check({ source, account: name, now });
     if (decision && decision.delay_ms > 0) {
@@ -350,8 +347,8 @@ function createLoginService(opts) {
   }
 
   async function verifiedLogin(name, password, source, prior_cookie_header, now) {
-    // §6 C1: resolve through the repository's canonical name fold. When the name
-    // is unknown we pass the SUBMITTED bounded name so R4's dummy KDF still runs
+    // Resolve through the repository's canonical name fold. When the name is
+    // unknown we pass the SUBMITTED bounded name so the dummy KDF still runs
     // — skipping it here would be a user-enumeration oracle.
     let subj = null;
     try { subj = subjects.byName(tenant, name); } catch (_) { subj = null; }
@@ -368,7 +365,7 @@ function createLoginService(opts) {
       return INVALID;
     }
 
-    // ── the post-KDF re-read (§6 C1) ────────────────────────────────────────
+    // ── the post-KDF re-read ────────────────────────────────────────────────
     // Everything load-bearing is read AGAIN, from live state, after the async
     // KDF. If any of it moved while verification was in flight, we return the
     // one generic failure and create no session.

@@ -1,20 +1,15 @@
-// identity/l1_sessions.js — R5 L1 sessions + R6 L2 elevation primitives.
+// identity/l1_sessions.js — L1 sessions + L2 WebAuthn elevation primitives.
 //
-// ASSERTION AUTHOR: Codex — R5 packet + R6 packet
-//   docs/audits/CODEX_ASSERTION_PACKET_R5_2026-08-05.md
-//   docs/audits/CODEX_ASSERTION_PACKET_R6_2026-08-06.md
-// BUILDERS: Nunbird (R5) · Grok (R6 L2 extensions, #177, 2026-08-07).
-//
-// ── §4 NAMESPACE RULING, load-bearing ──────────────────────────────────────
+// ── NAMESPACE RULE, load-bearing ───────────────────────────────────────────
 // Three different things stay different. This module is NOT:
-//   · identity/sessions.js  — the closed Task 7 offline Bearer/legacy front door
+//   · identity/sessions.js  — the offline Bearer/legacy front door
 //   · browser_sessions.js   — the legacy persisted room-key cookie-possession mech
 // It must never import, wrap, migrate or claim retirement of either. Calling all
 // three "sessions" does not make their trust models compatible, and the guard for
-// that is this file's require list — checked mechanically by H10/M25/M46.
+// that is this file's require list — checked mechanically by the test suite.
 //
 // ⛔ NON-CLAIMS: no HTTP route/router/server.js; no real-browser/HTTPS cookie proof;
-// no production RP; no R7 admin-mutation composition; no CP-2a. L1 proves person
+// no production RP; no admin-mutation composition. L1 proves person
 // identity at assurance 1; L2 proves a server-earned WebAuthn step-up only — never
 // administrator authority, room access, or any can() result by itself.
 'use strict';
@@ -22,10 +17,10 @@
 const crypto = require('crypto');
 const repo = require('./repo.js');
 
-// ── #193/cookie (land 2.6): THE NAME IS MODULE-OWNED AND HOST-NEUTRAL ──────
+// ── cookie: THE NAME IS MODULE-OWNED AND HOST-NEUTRAL ──────────────────────
 // This used to carry the host's name in the suffix. Another host adopting it
 // would have shipped a cookie named after the wrong host — the wire-visible half of
-// the same defect land 1 fixed everywhere else.
+// the same defect (one host's identity baked into shared code) removed everywhere else.
 //
 // The `__Host-` prefix is NOT decoration and is not configurable: it is the
 // browser contract this module's whole cookie posture rests on (Secure, no
@@ -48,26 +43,26 @@ const COOKIE_ATTRIBUTES = 'Secure; HttpOnly; SameSite=Strict; Path=/';
 const CLEAR_COOKIE = COOKIE_NAME + '=; ' + COOKIE_ATTRIBUTES + '; Max-Age=0';
 const L1_ABSOLUTE_MS = 43_200_000;              // 12h hard ceiling, never extended
 const L1_IDLE_MS = 1_800_000;                   // 30min request-idle
-const L2_IDLE_MS = 900_000;                     // 15min L2 request-idle (R6)
+const L2_IDLE_MS = 900_000;                     // 15min L2 request-idle
 const TOKEN_BYTES = 32;
 const CSRF_BYTES = 32;
 const MAX_SESSIONS_TOTAL = 4096;
 const MAX_SESSIONS_PER_SUBJECT = 16;
 
-const MAX_COOKIE_HEADER = 8192;                 // §6 C3 bounded parse
-const MAX_COLLISION_REROLLS = 8;                // §6 C3 fail-loud bound
+const MAX_COOKIE_HEADER = 8192;                 // bounded parse
+const MAX_COLLISION_REROLLS = 8;                // fail-loud bound
 const B64URL_43 = /^[A-Za-z0-9_-]{43}$/;
 const HEX_64 = /^[0-9a-f]{64}$/;
 
 const ACTIVITY_KINDS = Object.freeze(['ordinary', 'poll', 'sse-reconnect', 'passive-delivery']);
 const IDLE_ADVANCING = Object.freeze(['ordinary', 'poll', 'sse-reconnect']);
 
-// §5.1 / R6 §6.3: no caller may inject any of these. `subject_id` is a legitimate
+// No caller may inject any of these. `subject_id` is a legitimate
 // input to issue()/revokeSubject(). `session_binding` is legitimate only for
 // consumeWebAuthnCeremony; `completion` only for elevateWithWebAuthn — those
 // methods use carriesForbiddenExcept instead of the global set.
 // subject_id is legitimate only on issue()/revokeSubject(); every other public
-// method treats it as a forbidden trust field (M26 / packet §6.3).
+// method treats it as a forbidden trust field.
 const FORBIDDEN_CALLER_KEYS = Object.freeze(['tenant', 'subject_kind', 'membership',
   'role', 'roles', 'assurance', 'authority', 'session_id', 'session_id_digest',
   'csrf_secret', 'elevated_at', 'person_subject_id', 'verified', 'userVerified']);
@@ -76,7 +71,7 @@ const FORBIDDEN_EXCEPT_BINDING = Object.freeze(
 const FORBIDDEN_EXCEPT_COMPLETION = Object.freeze(
   [...FORBIDDEN_CALLER_KEYS, 'session_binding', 'subject_id']);
 
-// The exact eleven-key record (§6 C4 / R6 C10). Order is the validator's contract.
+// The exact eleven-key record. Order is the validator's contract.
 const RECORD_KEYS = Object.freeze(['session_id_digest', 'subject_id', 'tenant', 'origin',
   'assurance', 'authenticated_at', 'elevated_at', 'last_seen_at',
   'idle_deadline', 'absolute_deadline', 'csrf_secret']);
@@ -104,7 +99,7 @@ function invalidWithClear() {
   return Object.freeze({ ok: false, reason: 'invalid-session', clear_cookie: CLEAR_COOKIE });
 }
 
-// ── input hygiene (§5.2 provenance rules, applied at this API too) ──────────
+// ── input hygiene (the login provenance rules, applied at this API too) ─────
 function isPlainObject(o) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
   const p = Object.getPrototypeOf(o);
@@ -130,7 +125,7 @@ function carriesForbidden(o, extraForbidden) {
   for (const k of set) {
     if (Object.prototype.hasOwnProperty.call(o, k)) return true;
   }
-  // session_binding / completion are never legal on ordinary R5 methods.
+  // session_binding / completion are never legal on ordinary L1 session methods.
   if (!extraForbidden) {
     if (Object.prototype.hasOwnProperty.call(o, 'session_binding')) return true;
     if (Object.prototype.hasOwnProperty.call(o, 'completion')) return true;
@@ -141,7 +136,7 @@ function safeTime(v) {
   return Number.isSafeInteger(v) && v >= 0;
 }
 // Every deadline must land inside the safe-integer range, or the comparison that
-// enforces expiry stops being trustworthy (M28).
+// enforces expiry stops being trustworthy.
 function safeSum(a, b) {
   const s = a + b;
   return Number.isSafeInteger(s) ? s : null;
@@ -164,12 +159,11 @@ function isCanonicalOriginShape(v) {
 }
 function harnessLoopbackOrigin(v) {
   if (!boundedString(v, 2048)) return false;
-  // ── #395 — ANCHORED, and the unanchored form was genuinely exploitable ────
+  // ── ANCHORED, and the unanchored form was genuinely exploitable ──────────
   // This was `v.startsWith('http://127.0.0.1')`, and the shape check below does
   // NOT save it: `http://127.0.0.1.evil.com` is its own valid origin, so
   // `v === u.origin` is TRUE and the hostile look-alike constructed a store.
-  // Demonstrated before repair, not reasoned about. Found by Bristlehead's cold
-  // read of the module.
+  // Demonstrated before repair, not reasoned about.
   //
   // The anchored form is the one `harnessLocalhostOrigin`uses two functions
   // below: exact host, or exact host plus an explicit numeric port. Same rule,
@@ -177,18 +171,18 @@ function harnessLoopbackOrigin(v) {
   if (v !== 'http://127.0.0.1' && !/^http:\/\/127\.0\.0\.1:\d+$/.test(v)) return false;
   return isCanonicalOriginShape(v);
 }
-// R6 §6.3: harness mode also admits exact http://localhost[ :port ] for WebAuthn
-// secure-context exception. 127.0.0.1 remains R5-compatible but cannot enter R6
-// ceremonies (P0-D / authenticators service refuses it).
+// Harness mode also admits exact http://localhost[ :port ] for the WebAuthn
+// secure-context exception. 127.0.0.1 remains valid for L1 sessions but cannot
+// enter WebAuthn ceremonies (the authenticators service refuses it).
 function harnessLocalhostOrigin(v) {
   if (!boundedString(v, 2048)) return false;
   if (v !== 'http://localhost' && !/^http:\/\/localhost:\d+$/.test(v)) return false;
   return isCanonicalOriginShape(v);
 }
 
-// ── cookie parsing (§6 C3) ─────────────────────────────────────────────────
+// ── cookie parsing ─────────────────────────────────────────────────────────
 // Returns the single target cookie value, or null. Duplicates return null
-// DELIBERATELY rather than choosing first-or-last (H9/M5): with two candidates
+// DELIBERATELY rather than choosing first-or-last: with two candidates
 // the server cannot know which the browser meant, and picking either is a
 // session-selection primitive handed to whoever can set a second cookie.
 function targetCookie(cookieHeader) {
@@ -237,22 +231,22 @@ function createStore(opts) {
   const tenant = ownData(opts, 'tenant').value;
   const origin = ownData(opts, 'origin').value;
 
-  // #193: a CONSTRUCTOR validates the tenant's SHAPE — it must not consult the
+  // A CONSTRUCTOR validates the tenant's SHAPE — it must not consult the
   // repository, which may legitimately not be initialised yet (stores are built
   // before initialize() in several host paths). The REPOSITORY enforces the
   // row-level match; that is the layer that owns the rule.
   if (!repo.validTenantName(tenant)) {
     throw new Error('l1_sessions: tenant must be 1-63 chars of [a-z0-9_-] starting alphanumeric — got ' + JSON.stringify(tenant));
   }
-  // ── LOGIN-WIRING contained fold (Grok's ruling, upstream ticket 5831) ───────────────
+  // ── LOGIN-WIRING contained mode ────────────────────────────────────────────
   //
   // A third construction shape, and ONLY the origin check changes:
   //
-  //   harness   (R5/R7)  : HTTPS or loopback — plus the harness relaxations
+  //   harness            : HTTPS or loopback — plus the harness relaxations
   //   live               : HTTPS, exactly    — untouched by this fold
   //   contained  (NEW)   : loopback only     — production throttle and sleep
   //
-  // Why it cannot just reuse `harness`: §3 is explicit that contained is NOT the
+  // Why it cannot just reuse `harness`: contained is explicitly NOT the
   // harness — "throttle and sleep stay production". A practice copy a human types
   // a password into must keep the real rate limiting, or the door being practised
   // on is not the door. So this admits the ORIGIN and nothing else.
@@ -277,14 +271,14 @@ function createStore(opts) {
   }
 
   // digest -> record. Ephemeral by construction: a new store is a restart, and
-  // nothing here is ever written to the repository or the filesystem (C19/M16).
+  // nothing here is ever written to the repository or the filesystem.
   const RECORDS = new Map();
-  // R7 §12.2: login-lineage id lives OUTSIDE the exact eleven-field session
+  // The login-lineage id lives OUTSIDE the exact eleven-field session
   // record. Map is digest -> 128-bit hex lineage. Not a bearer; never accepted
   // as input; deleted on logout/expiry/revoke/restart.
   const LINEAGES = new Map();
   let auditFault = null;
-  // Opaque in-process ceremony bindings and elevation completions (R6 §6.3).
+  // Opaque in-process ceremony bindings and elevation completions.
   // Object identity only — never serialized, never browser-visible.
   const CEREMONY_BINDINGS = new WeakMap();
   const COMPLETIONS = new WeakMap();
@@ -302,7 +296,7 @@ function createStore(opts) {
     if (lin) LINEAGES.set(newDigest, lin);
   }
 
-  // ── the exact-record validator (§6 C4) ───────────────────────────────────
+  // ── the exact-record validator ───────────────────────────────────────────
   // Runs before every insertion/update AND again after every lookup. This is the
   // runtime guard that makes a digest-only/exact-record mutation observable
   // without adding a secret-bearing inspector.
@@ -317,7 +311,7 @@ function createStore(opts) {
     if (!boundedString(r.subject_id, 256)) return false;
     if (r.tenant !== tenant) return false;
     if (r.origin !== origin) return false;
-    // R6 C10: L1 assurance===1 elevated_at null; L2 assurance===2 with elevated_at.
+    // L1: assurance===1, elevated_at null; L2: assurance===2 with elevated_at.
     if (r.assurance === 1) {
       if (r.elevated_at !== null) return false;
     } else if (r.assurance === 2) {
@@ -341,9 +335,9 @@ function createStore(opts) {
     return true;
   }
 
-  // ── durable, non-secret lifecycle intent (§6 C9) ──────────────────────────
+  // ── durable, non-secret lifecycle intent ──────────────────────────────────
   // The row is built from non-secret fields only. No cookie, id, digest, CSRF or
-  // password material can ride it — the field set IS the enforcement (M24).
+  // password material can ride it — the field set IS the enforcement.
   function intentRow(kind, subject_id, ts, reason, assurance) {
     const a = assurance === 2 ? 2 : 1;
     return {
@@ -370,7 +364,7 @@ function createStore(opts) {
     }
   }
 
-  // ── current-state validation (§6 C6) ─────────────────────────────────────
+  // ── current-state validation ─────────────────────────────────────────────
   // Issue AND every later use independently re-read the repository. A trusted
   // composition caller must not be able to mint for an inactive or non-person id
   // even though password proof itself belongs to login().
@@ -392,7 +386,7 @@ function createStore(opts) {
     return Object.freeze(out);
   }
 
-  // ── expiry (§6 C5 / R6 C12) ───────────────────────────────────────────────
+  // ── expiry ─────────────────────────────────────────────────────────────────
   // Inclusive: now >= deadline refuses AND removes. A presented now < last_seen_at
   // is a fail-secure clock-regression expiry, never a way to move time backward.
   // L2 idle at/after deadline may DOWNgrade to L1 when the L1 idle bound still
@@ -405,7 +399,7 @@ function createStore(opts) {
     if (now < r.idle_deadline) return null;
     const l1Bound = safeSum(r.last_seen_at, L1_IDLE_MS);
     if (l1Bound !== null && now < l1Bound && now < r.absolute_deadline) {
-      // Downgrade in place: L2 → L1, then continue as L1 (C12).
+      // Downgrade in place: L2 → L1, then continue as L1.
       r.assurance = 1;
       r.elevated_at = null;
       r.idle_deadline = Math.min(l1Bound, r.absolute_deadline);
@@ -473,7 +467,7 @@ function createStore(opts) {
     return out;
   }
 
-  // §6 C8: before applying either capacity rule, lazily sweep everything already
+  // Before applying either capacity rule, lazily sweep everything already
   // expired at `now`, in deterministic digest order, appending ONE matching
   // session.expire intent per removed session in a single transaction. No timer.
   // A sweep append failure leaves the expired sessions invalid and refuses the
@@ -574,7 +568,7 @@ function createStore(opts) {
     if (absolute === null || idleRaw === null) return INVALID;
     if (!principalUsable(subject_id)) return INVALID;
 
-    // §6 C8 prior-cookie handling. Same subject → rotation preserving the
+    // Prior-cookie handling. Same subject → rotation preserving the
     // original authenticated_at and absolute bound; different subject → the old
     // session is revoked before a new one is created; invalid → ignored for
     // identity but never reused.
@@ -626,13 +620,13 @@ function createStore(opts) {
     };
     if (!recordValid(record)) return UNAVAILABLE;
 
-    // §6 C9 ordering: for create/rotate the durable intent must succeed BEFORE
-    // the session becomes observable (M21).
+    // Ordering: for create/rotate the durable intent must succeed BEFORE
+    // the session becomes observable.
     if (!carry && !appendIntents([intentRow(INTENT_CREATE, subject_id, now, 'password-login')])) {
       return UNAVAILABLE;
     }
     RECORDS.set(minted.digest, record);
-    // R7: new login mint gets a fresh lineage; same-subject reauth carries it.
+    // A new login mint gets a fresh lineage; same-subject reauth carries it.
     LINEAGES.set(minted.digest, priorLineage || newLineageId());
     return Object.freeze({
       ok: true,
@@ -643,7 +637,7 @@ function createStore(opts) {
   }
 
   // Resolve a cookie to a live, current-state-valid record. Any failure removes
-  // the session before returning (C6/C20).
+  // the session before returning.
   function resolve(cookie_header, now) {
     const token = targetCookie(cookie_header);
     if (token === null) return { fail: INVALID };
@@ -671,7 +665,7 @@ function createStore(opts) {
     if (got.fail) return got.fail;
 
     // Only a SUCCESSFUL ordinary/poll/sse-reconnect request advances idle.
-    // Passive delivery never does (H4/M8), and no failed request keeps a
+    // Passive delivery never does, and no failed request keeps a
     // session alive.
     if (IDLE_ADVANCING.includes(activity)) {
       const idle = safeSum(now, idleMsFor(got.r));
@@ -683,7 +677,7 @@ function createStore(opts) {
     return Object.freeze({ ok: true, session: project(got.r) });
   }
 
-  // §6 C7. Every check must pass BEFORE idle advances (M9) — otherwise a
+  // Every check must pass BEFORE idle advances — otherwise a
   // cross-origin probe refreshes the very session it is not allowed to use.
   function checkMutationEnvelope(opts, r) {
     const request_origin = ownData(opts, 'request_origin').value;
@@ -738,7 +732,7 @@ function createStore(opts) {
     };
     if (!recordValid(next)) return UNAVAILABLE;
 
-    // The old id must be unusable before this returns (M15).
+    // The old id must be unusable before this returns.
     const oldDigest = got.digest;
     RECORDS.delete(oldDigest);
     if (!appendIntents([intentRow(INTENT_ROTATE, next.subject_id, now, 'password-reauthentication')])) {
@@ -755,9 +749,9 @@ function createStore(opts) {
     });
   }
 
-  // §6 C8. Logout is a browser state change: a valid-session logout applies the
+  // Logout is a browser state change: a valid-session logout applies the
   // SAME current-state, CSRF, Origin and Fetch-Metadata checks as a mutation
-  // (M29) — a CSRF hole in logout is a forced-logout vector. When the target
+  // — a CSRF hole in logout is a forced-logout vector. When the target
   // cookie is absent/malformed/expired/already-logged-out, logout is idempotent
   // and returns the exact clear-cookie header WITHOUT an audit event or oracle.
   function logout(opts) {
@@ -780,7 +774,7 @@ function createStore(opts) {
     if (!checkMutationEnvelope(opts, r)) return INVALID;    // session stays INTACT
 
     const priorAssurance = r.assurance;
-    RECORDS.delete(digest);                                 // invalid first (C29)
+    RECORDS.delete(digest);                                 // invalid first
     dropLineage(digest);
     appendIntents([intentRow(INTENT_LOGOUT, r.subject_id, now, 'user-logout', priorAssurance)]);
     return Object.freeze({ ok: true, clear_cookie: CLEAR_COOKIE });
@@ -876,7 +870,7 @@ function createStore(opts) {
     });
   }
 
-  // ── R6 §6.3 / §9: WebAuthn ceremony binding + L2 elevation / step-up ─────
+  // ── WebAuthn ceremony binding + L2 elevation / step-up ─────────────────────
   const STEPUP_REQUIRED = Object.freeze({ ok: false, reason: 'fresh-stepup-required' });
 
   function openWebAuthnCeremony(opts) {
@@ -887,7 +881,7 @@ function createStore(opts) {
     const got = resolve(ownData(opts, 'cookie_header').value, now);
     if (got.fail) return got.fail;
     if (!checkMutationEnvelope(opts, got.r)) return INVALID;
-    // Advance idle only after all checks (M34).
+    // Advance idle only after all checks.
     const idle = safeSum(now, idleMsFor(got.r));
     if (idle === null) { RECORDS.delete(got.digest); return invalidWithClear(); }
     got.r.last_seen_at = now;
@@ -989,12 +983,12 @@ function createStore(opts) {
     };
     if (!recordValid(next)) return UNAVAILABLE;
 
-    // Kill old id BEFORE any success can return (M27).
+    // Kill old id BEFORE any success can return.
     const oldDigest = meta.digest;
     RECORDS.delete(oldDigest);
     COMPLETIONS.set(completion, Object.freeze({ ...meta, used: true }));
 
-    // Durable elevate intent BEFORE L2 publication (C11/M25/M38).
+    // Durable elevate intent BEFORE L2 publication.
     if (!appendIntents([intentRow(INTENT_ELEVATE, next.subject_id, now, 'webauthn-user-verified', 2)])) {
       dropLineage(oldDigest);
       return UNAVAILABLE;
@@ -1011,7 +1005,7 @@ function createStore(opts) {
     });
   }
 
-  // Trusted in-process workflow keys (R7 §12.2). Not a caller-authority surface —
+  // Trusted in-process workflow keys. Not a caller-authority surface —
   // administration/bootstrap pass a fixed string; unknown keys still consume L2
   // but return no lineage (caller cannot invent lineage).
   const WORKFLOW_KEYS = Object.freeze([
@@ -1034,7 +1028,7 @@ function createStore(opts) {
     if (!checkMutationEnvelope(opts, got.r)) return INVALID;
     if (got.r.assurance !== 2) return STEPUP_REQUIRED;
 
-    // Downgrade to L1 BEFORE return (C13/M33). Second call cannot reuse L2.
+    // Downgrade to L1 BEFORE return. Second call cannot reuse L2.
     const l1Idle = safeSum(now, L1_IDLE_MS);
     if (l1Idle === null) {
       RECORDS.delete(got.digest);

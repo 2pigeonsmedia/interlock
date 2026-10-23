@@ -1,8 +1,5 @@
 // identity/audit.js — bounded telemetry plus durable mutation delivery.
 //
-// Task 5 assertion authority:
-// docs/audits/CODEX_ASSERTION_PACKET_TASK5_2026-07-30.md
-//
 // Authentication telemetry, authorization decisions, and mutation receipts
 // are physically different streams. Telemetry is accepted enqueue only.
 // Mutation delivery is durable, at-least-once, and marked only after the exact
@@ -55,8 +52,8 @@ const AUTHN_FIELDS = Object.freeze([
 const AUTHZ_FIELDS = Object.freeze([
   'tenant', 'subject_id', 'subject_name', 'kind', 'principal', 'capability',
   'resource', 'origin', 'assurance', 'result', 'reason', 'event_id', 'truncated',
-  // R3/C7 (Ouzel, binding): spec 10 requires the decision source and the
-  // non-secret deciding ids on the authorization record. Before this line the
+  // The authorization record must carry the decision source and the
+  // non-secret deciding ids. Before this line the
   // stream could carry NONE of them — `normalizeTelemetry` iterates this array
   // as an allow-list, so `authz` accepted a fully attributed row, answered
   // `{accepted:true, queued:1}`, and wrote an audit trail with no attribution at
@@ -64,15 +61,15 @@ const AUTHZ_FIELDS = Object.freeze([
   'decision_source', 'grant_id', 'role_id', 'assignment_id',
 ]);
 const NULLABLE = new Set([
-  // R3/C7 + Amendment 4, and the reason is load-bearing: naming a field in
+  // The reason for these entries is load-bearing: naming a field in
   // AUTHZ_FIELDS without deciding its NULL POLICY is a half-migration. A null on
   // a field absent from this set sets `invalid = true`, and `invalid` does not
   // drop the field — it REPLACES THE WHOLE ROW with an `audit-input-error`
-  // placeholder. Every deny carries four nulls by design (I-R3-13), so the
+  // placeholder. Every deny carries four nulls by design, so the
   // AUTHZ_FIELDS extension WITHOUT these four names would have made every
   // authorization DENIAL in the system unrecorded — its `result` and `reason`
   // overwritten — while `authz` still reported `{accepted:true, queued:1}`.
-  // Measured before it was written; control 13b reds if this line is reverted.
+  // This was measured before the line was written.
   'decision_source', 'grant_id', 'role_id', 'assignment_id',
   'subject_id', 'subject_name', 'kind', 'principal', 'origin', 'assurance',
   'reason', 'attribution', 'generation', 'credential_id', 'event_id',
@@ -81,26 +78,26 @@ const NULLABLE = new Set([
 const NUMBER_FIELDS = new Set([
   'generation', 'expires_at', 'grants_removed', 'credentials_revoked',
   'previous_pass_lifetime_ms', 'pass_lifetime_ms', 'ts',
-  // F-F1 / #298: role.seed emits numeric bundle_size (roles.js seedProtectedRoles)
+  // role.seed emits numeric bundle_size (roles.js seedProtectedRoles)
   'bundle_size',
 ]);
-// R5/C9: `assurance` is numeric for the session MUTATION kinds only. It is
+// `assurance` is numeric for the session MUTATION kinds only. It is
 // deliberately NOT added to NUMBER_FIELDS above: that Set is shared with the
 // authn/authz telemetry validators (safeIdentity and the per-stream schema
 // path), and widening it there changed the exact per-stream authn schema and
-// turned test/identity.audit.test.js from 14/0 to 13/1 — a measured regression
-// in a §12 protected surface's own control. The narrow, kind-scoped rule below
-// is what §11/§12 authorize; a shared-Set edit was never in scope.
+// failed one of the audit module's own schema tests — a measured regression
+// in a protected surface. The narrow, kind-scoped rule below is the intended
+// design; a shared-Set edit was never in scope.
 // Kind-scoped numeric fields: NOT on the shared NUMBER_FIELDS set (authn/authz
-// telemetry schema protection — R5 measured regression when assurance was shared).
+// telemetry schema protection — a measured regression when assurance was shared).
 const MUTATION_NUMBER_FIELDS_BY_KIND = Object.freeze({
   assurance: true,
   sign_count: true, // authenticator.use only; validated further in normalizeMutation
   authenticators_revoked: true, // recovery.complete only
   // repo.migration only. Deliberately NOT on the shared NUMBER_FIELDS above:
   // that Set is also the authn/authz telemetry schema, and widening it is the
-  // exact R5 measured regression documented there (14/0 -> 13/1 in a protected
-  // surface's own control). Listing a field here is necessary but NOT sufficient
+  // exact measured regression documented there (a failing schema test in a
+  // protected surface). Listing a field here is necessary but NOT sufficient
   // — the kind gate in validateMutationField decides which kinds may take this
   // path, so a field added here without extending that gate does nothing.
   from_version: true,
@@ -110,18 +107,18 @@ const POLICY_NUMBER_FIELDS = new Set([
   'previous_pass_lifetime_ms', 'pass_lifetime_ms',
 ]);
 
-// R5/C9: the one exact field set shared by all five session lifecycle kinds.
+// The one exact field set shared by all five session lifecycle kinds.
 // `event_id` is added by the normalizer from the outbox row's `id`, so it is not
 // listed here — exactly as for the password kinds.
 const SESSION_MUTATION_FIELDS = ['ts', 'kind', 'tenant', 'subject_id', 'origin',
   'assurance', 'reason'];
 
 const MUTATION_FIELDS = Object.freeze({
-  // ── 'first-owner.created' REMOVED (land 2.5 step 4, Codex B4) ─────────────
+  // ── 'first-owner.created' REMOVED ─────────────────────────────────────────
   // This row was registered for a ceremony that no longer exists. Its own
   // comment said the kind is emitted by `identity/first_owner.js` — and that
-  // file is GONE: the Plan 2 restart deleted it and the land-2 packet forbids
-  // resurrecting it. So the registration described an emitter that could not
+  // file is GONE: it was deleted in an earlier redesign and is not to be
+  // resurrected. So the registration described an emitter that could not
   // emit, which is the worse half of dead code: not unused, but ACTIVELY
   // MISLEADING about what this module does. Measured before removing — the only
   // mention of the kind anywhere in the codebase was this block.
@@ -132,8 +129,8 @@ const MUTATION_FIELDS = Object.freeze({
   // `validatePendingSnapshot` rejects the whole snapshot, `runFlush` sets a
   // mutation fault and returns 0, the outbox never drains, and the identity
   // startup barrier then refuses the port. "Create the first owner" becomes
-  // "the house will not start", with the only clue an audit health field nobody
-  // reads. That is open ticket `#298`'s class (six emitted kinds absent from
+  // "the instance will not start", with the only clue an audit health field nobody
+  // reads. That is a known defect class (six emitted kinds were once absent from
   // this table) and it is why the fix is always to DECLARE the kind, never to
   // make the validator tolerant.
   'subject.create': Object.freeze([
@@ -167,14 +164,15 @@ const MUTATION_FIELDS = Object.freeze({
     'ts', 'kind', 'tenant', 'previous_pass_lifetime_ms', 'pass_lifetime_ms',
   ]),
   // ── CUTOVER COMPOSE: the one kind migrateV1ToV2() emits ───────────────────
-  // `identity/repo.js` has minted this event since R1 C6, and this table never
+  // `identity/repo.js` has minted this event since the v1 -> v2 migration was
+  // added, and this table never
   // registered it — so `normalizeMutation` threw "unknown mutation kind", the
   // startup flush faulted, and fail-whole-snapshot drained 0 of N. The barrier
   // then refused the port on EVERY start. The migration CREATED its own blocker:
-  // before it the barrier refuses for HOLD L1 (v1 present, v2 absent), after it
+  // before it the barrier refuses for the v1-present/v2-absent hold, after it
   // for this, with no state in between where the server starts.
   //
-  // R1 C6 fixes the shape: { id, ts, kind, tenant: repo.tenant(), from_version: 1,
+  // The migration fixes the shape: { id, ts, kind, tenant: repo.tenant(), from_version: 1,
   // to_version: 2 }. `id` becomes `event_id` in normalizeMutation, so — as with
   // every other kind — it is NOT listed here (audit.js:182).
   //
@@ -183,29 +181,30 @@ const MUTATION_FIELDS = Object.freeze({
   'repo.migration': Object.freeze([
     'ts', 'kind', 'tenant', 'from_version', 'to_version',
   ]),
-  // ── R4/C7: password mutation intents ──────────────────────────────────────
+  // ── password mutation intents ─────────────────────────────────────────────
   // Deliberately built from EXISTING non-secret fields: `type` carries the KDF
   // algorithm, `generation` the profile version. No new field is introduced, so
-  // there is no new place for a secret to hide. D41 forbids password, plaintext,
-  // salt, derived_value and prepared verifier material anywhere in audit — the
+  // there is no new place for a secret to hide. The no-secrets-in-audit rule
+  // forbids password, plaintext, salt, derived_value and prepared verifier material anywhere in audit — the
   // field list below is the enforcement, because validation is key-exact.
   'password.set': Object.freeze(['ts', 'kind', 'tenant', 'subject_id', 'type', 'generation']),
   'password.change': Object.freeze(['ts', 'kind', 'tenant', 'subject_id', 'type', 'generation']),
   'password.reset': Object.freeze(['ts', 'kind', 'tenant', 'subject_id', 'type', 'generation']),
   'password.revoke': Object.freeze(['ts', 'kind', 'tenant', 'subject_id', 'type', 'generation']),
   'password.upgrade': Object.freeze(['ts', 'kind', 'tenant', 'subject_id', 'type', 'generation']),
-  // ── R5/C9: session lifecycle intents ──────────────────────────────────────
+  // ── session lifecycle intents ─────────────────────────────────────────────
   // The specification requires DURABLE non-secret intent for session lifecycle
   // events. As with the password kinds above, the enforcement is the key-exact
   // field list: there is no field here that can carry cookie material, a session
-  // id, its digest, a CSRF token/secret, or a throttle key, so D41 holds
-  // structurally rather than by the caller's good behaviour (M24).
+  // id, its digest, a CSRF token/secret, or a throttle key, so the
+  // no-secrets-in-audit rule holds structurally rather than by the caller's
+  // good behaviour.
   'session.create': Object.freeze(SESSION_MUTATION_FIELDS),
   'session.rotate': Object.freeze(SESSION_MUTATION_FIELDS),
   'session.logout': Object.freeze(SESSION_MUTATION_FIELDS),
   'session.revoke': Object.freeze(SESSION_MUTATION_FIELDS),
   'session.expire': Object.freeze(SESSION_MUTATION_FIELDS),
-  // ── R6 §11: L2 elevation / downgrade / step-up + authenticator bind/use ──
+  // ── L2 elevation / downgrade / step-up + authenticator bind/use ──────────
   'session.elevate': Object.freeze(SESSION_MUTATION_FIELDS),
   'session.downgrade': Object.freeze(SESSION_MUTATION_FIELDS),
   'session.stepup.consume': Object.freeze(SESSION_MUTATION_FIELDS),
@@ -215,7 +214,7 @@ const MUTATION_FIELDS = Object.freeze({
   'authenticator.use': Object.freeze([
     'ts', 'kind', 'tenant', 'subject_id', 'credential_id', 'type', 'origin', 'sign_count',
   ]),
-  // ── R7 §14: operator / bootstrap / recovery / authenticator.revoke ───────
+  // ── operator / bootstrap / recovery / authenticator.revoke ───────────────
   // Field-exact, secret-free. Null actor slots only on the two operator mint
   // kinds (issuer is the operator control plane, not a tenant subject).
   'operator.bootstrap.mint': Object.freeze([
@@ -239,12 +238,12 @@ const MUTATION_FIELDS = Object.freeze({
   'authenticator.revoke': Object.freeze([
     'ts', 'kind', 'tenant', 'subject_id', 'credential_id', 'authenticator_id',
   ]),
-  // ── F-F1 / #298: product-emitted kinds that were absent from the table ──
+  // ── product-emitted kinds that were absent from the table ──────────────
   // Field lists from emitters (authority). Enumerate identity/ outbox.push kinds —
   // not bootstrap-only. id → event_id in normalizeMutation; not listed here.
   // Nullables: issuer_subject_id, principal_subject_id, from, slug (assignment.revoke
   // when role row missing). Fail-whole-snapshot on unknown kind is permanent
-  // (Codex 2026-08-11: matches packet; per-row quarantine is a design change).
+  // by design; per-row quarantine would be a design change.
   'admission.mint': Object.freeze([
     'ts', 'kind', 'tenant', 'capability_id', 'purpose',
     'issuer_subject_id', 'intended_subject_kind', 'principal_subject_id', 'mint_audit_id',
@@ -283,7 +282,7 @@ const MUTATION_FIELDS = Object.freeze({
   ]),
 });
 
-// R5/R6 reasons are bounded enumerations OWNED BY THE SESSION MODULE; audit is
+// Session reasons are bounded enumerations OWNED BY THE SESSION MODULE; audit is
 // the second, independent gate on them. A kind whose reason is not in its own
 // list fails closed here even if the module that emitted it is wrong.
 const SESSION_REASONS = Object.freeze({
@@ -300,7 +299,7 @@ const SESSION_REASONS = Object.freeze({
   'session.stepup.consume': Object.freeze(['fresh-admin-stepup-consumed']),
 });
 
-// R6: create/rotate stay assurance exactly 1; logout/revoke/expire admit 1|2;
+// create/rotate stay assurance exactly 1; logout/revoke/expire admit 1|2;
 // elevate is exactly 2; downgrade and stepup.consume are exactly 1.
 const SESSION_ASSURANCE_RULE = Object.freeze({
   'session.create': Object.freeze([1]),
@@ -701,7 +700,7 @@ function validateMutationField(event, field, kind) {
     throw new Error('audit: ' + kind + ' missing required field ' + field);
   }
   const value = item.value;
-  // R5/C9 + R6: kind-scoped numeric fields (assurance on session kinds;
+  // Kind-scoped numeric fields (assurance on session kinds;
   // sign_count on authenticator.use). Shared NUMBER_FIELDS stays untouched so
   // authn/authz per-stream schemas keep their exact shape.
   if (MUTATION_NUMBER_FIELDS_BY_KIND[field] &&
@@ -719,7 +718,7 @@ function validateMutationField(event, field, kind) {
     }
     // The gate opens BOTH ways. repo.migration is admitted above for its two
     // version numbers; without this, every other kind on this path would also
-    // be able to carry them, which is the widening the packet forbids. Same
+    // be able to carry them, which is exactly the widening to avoid. Same
     // shape as the sign_count and assurance guards either side of it.
     if ((field === 'from_version' || field === 'to_version') && kind !== 'repo.migration') {
       throw new Error('audit: ' + kind + ' must not carry ' + field);
@@ -734,7 +733,7 @@ function validateMutationField(event, field, kind) {
     }
     return value;
   }
-  // F-F1: emitters legitimately null these slots (operator mint issuer,
+  // Emitters legitimately null these slots (operator mint issuer,
   // bootstrap principal, membership.invite from=null). Key-exact validation
   // still requires the field to be PRESENT; only the value may be null.
   if (field === 'principal' || field === 'cascade_of' ||
@@ -799,8 +798,8 @@ function normalizeMutation(event) {
   if (kind === 'policy.pass_lifetime' && out.tenant !== repo.tenant()) {
     throw new Error('audit: policy.pass_lifetime tenant must be "house"');
   }
-  // CUTOVER COMPOSE §3.2(3): a delivered repo.migration that is not 1 -> 2 for
-  // the house tenant is a failed candidate. validNumber() alone would admit 2.5
+  // CUTOVER COMPOSE: a delivered repo.migration that is not 1 -> 2 for
+  // this deployment's tenant is a failed candidate. validNumber() alone would admit 2.5
   // or 1e30 as a "version", so the exact values are pinned here rather than left
   // to the numeric path. tenant follows the policy.pass_lifetime precedent above.
   if (kind === 'repo.migration') {
@@ -816,12 +815,12 @@ function normalizeMutation(event) {
         JSON.stringify(out.to_version));
     }
   }
-  // R5/C9 + R6 §11: assurance and reason validation for session lifecycle kinds.
+  // Assurance and reason validation for session lifecycle kinds.
   if (SESSION_REASONS[kind]) {
     const allowed = SESSION_ASSURANCE_RULE[kind] || [1];
     if (!allowed.includes(out.assurance)) {
-      // Preserve the R5 C28 exact wording for the create/rotate "exactly 1" gate
-      // so the protected R5 suite stays green; multi-value kinds name the set.
+      // Preserve the exact wording for the create/rotate "exactly 1" gate
+      // so existing session tests stay green; multi-value kinds name the set.
       if (allowed.length === 1 && allowed[0] === 1) {
         throw new Error('audit: ' + kind + ' assurance must be exactly 1 — got ' +
           JSON.stringify(out.assurance));
@@ -834,8 +833,8 @@ function normalizeMutation(event) {
         '" is not in that kind\'s bounded enumeration');
     }
   }
-  // R6: authenticator.use carries a numeric sign_count that must NOT widen the
-  // shared telemetry NUMBER_FIELDS set (same class of regression as R5 assurance).
+  // authenticator.use carries a numeric sign_count that must NOT widen the
+  // shared telemetry NUMBER_FIELDS set (same class of regression as assurance).
   if (kind === 'authenticator.use') {
     if (!Number.isSafeInteger(out.sign_count) || out.sign_count < 0) {
       throw new Error('audit: authenticator.use sign_count must be a non-negative safe integer');
@@ -968,7 +967,7 @@ async function appendDurable(lines) {
       try {
         await handle.truncate(size);
         // An illegal-progress detector has no completed write receipt to sync,
-        // and N5 pins that it cannot smuggle one in through cleanup. Other
+        // and it must not be able to smuggle one in through cleanup. Other
         // write/sync failures best-effort persist the truncate-back.
         if (!/illegal write progress/.test(boundedError(e))) await handle.sync();
       } catch (_) { /* repairTail owns the retained-intent recovery boundary */ }

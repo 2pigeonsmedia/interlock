@@ -1,15 +1,12 @@
-// identity/authenticators.js — R6: framework-independent WebAuthn ceremony service.
+// identity/authenticators.js — framework-independent WebAuthn ceremony service.
 //
-// ASSERTION AUTHOR: Codex — docs/audits/CODEX_ASSERTION_PACKET_R6_2026-08-06.md
-// BUILDER: Grok. Desk ticket #177. Owner builder authorization 2026-08-07.
-//
-// Harness binds localhost. Production construction (#398) binds a canonical
+// Harness binds localhost. Production construction binds a canonical
 // HTTPS origin whose hostname equals the caller-supplied rpId — never a
-// wildcard, never a baked house URL (#384). Uses the pinned
+// wildcard, never a baked-in deployment URL. Uses the pinned
 // @simplewebauthn/server 13.3.2 verifier itself — no caller-supplied verifier
 // or success flag.
 //
-// ⛔ NON-CLAIMS (§18): no live HTTP/server.js from this file; no browser
+// ⛔ NON-CLAIMS: no live HTTP/server.js from this file; no browser
 // enrollment proof here; no claim that L2 alone is admin.
 'use strict';
 
@@ -45,7 +42,7 @@ function isCanonicalHttpsRpPair(rpId, origin) {
   }
   return true;
 }
-// Host-neutral default (A2/A3). This string is USER-VISIBLE in the platform
+// Host-neutral default. This string is USER-VISIBLE in the platform
 // passkey prompt. An adopting host may pass its own bounded display label; the
 // module never derives one from paths, environment, or network input.
 const RP_NAME = 'Identity';
@@ -117,7 +114,7 @@ function isLocalhostHarnessOrigin(v) {
   return isCanonicalOriginShape(v);
 }
 
-// Finite acyclic JSON tree of own data properties only (packet §6.2).
+// Finite acyclic JSON tree of own data properties only.
 function isFiniteJsonTree(value, depth, budget) {
   if (budget.count > MAX_JSON_NODES) return false;
   budget.count += 1;
@@ -148,7 +145,7 @@ function isFiniteJsonTree(value, depth, budget) {
 }
 
 function userHandleFor(personSubjectId) {
-  // SHA-256 of UTF-8: "house" + NUL + person_subject_id
+  // SHA-256 of UTF-8: `house` + NUL + person_subject_id
   return crypto.createHash('sha256')
     .update(Buffer.from('house\u0000' + personSubjectId, 'utf8'))
     .digest();
@@ -343,7 +340,8 @@ function createService(opts) {
     if (!isPlainObject(response) || hasAnyAccessor(response)) return FAIL_FAILED;
     if (!isFiniteJsonTree(response, 0, { count: 0, stringBytes: 0 })) return FAIL_FAILED;
 
-    // Take BEFORE verifier await (C2/M11).
+    // Take BEFORE verifier await, so the challenge stays single-use under
+    // concurrent finishes.
     const taken = challenge_store.take({
       ceremony_id,
       purpose: 'webauthn.register',
@@ -582,7 +580,7 @@ function createService(opts) {
     const algName = algorithmNameFromCose(coseKey);
     if (algName !== row.algorithm) return FAIL_FAILED;
 
-    // Witness pre-await row fields for TOCTOU re-read (C8/C19).
+    // Witness pre-await row fields for TOCTOU re-read.
     const witness = {
       id: row.id,
       tenant: row.tenant,
@@ -622,7 +620,7 @@ function createService(opts) {
 
     const newCounter = info.newCounter;
     if (!Number.isSafeInteger(newCounter) || newCounter < 0) return FAIL_FAILED;
-    // Counter matrix (C8).
+    // Signature-counter matrix.
     if (witness.sign_count === 0 && newCounter === 0) {
       // legal 0->0
     } else if (newCounter > witness.sign_count) {
@@ -697,7 +695,7 @@ function createService(opts) {
     return elevated;
   }
 
-  // ── R7: additional authenticator (self, requires existing usable) ─────────
+  // ── additional authenticator (self, requires existing usable) ─────────────
   async function beginAdditionalRegistration(optsIn) {
     if (refuseInput(optsIn)) return FAIL_UNAVAIL;
     const env = envelopeArgs(optsIn);
@@ -714,7 +712,8 @@ function createService(opts) {
     });
     if (!opened.ok) return FAIL_UNAVAIL;
     if (opened.session.origin !== origin) return FAIL_UNAVAIL;
-    // Additional path requires L2 (packet §11.6 begin: live L2 + existing usable).
+    // Additional path requires L2: begin needs a live L2 session plus an existing
+    // usable authenticator.
     if (opened.session.assurance !== 2) return FAIL_UNAVAIL;
 
     let state;
@@ -838,7 +837,7 @@ function createService(opts) {
     if (!consumed.ok) return FAIL_FAILED;
     if (consumed.session.subject_id !== taken.person_subject_id) return FAIL_FAILED;
 
-    // R7: fresh admin step-up after verifier success, before bind.
+    // Fresh admin step-up after verifier success, before bind.
     const step = session_store.consumeFreshAdminStepUp({
       cookie_header: env.cookie_header,
       csrf_token: env.csrf_token,

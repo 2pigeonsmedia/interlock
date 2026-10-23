@@ -1,12 +1,8 @@
 // identity/assignments.js — role assignment and revocation, a LOGICAL module
 // over repo.js.
 //
-// R2 of the Plan 1.5 recovery sequence (desk tickets #173 / build #185).
-// Assertions: Ouzel — ASSERTION_PACKET_R2_2026-08-01_OUZEL.md + AMENDMENT1 +
-// AMENDMENT2. All three bind; later wins. Builder: Tailorbird.
-//
 // WHY THIS FILE EXISTS: a role that cannot be attached to anyone is a table, not
-// authority. This is the join — and it is where most of the spec's actual
+// authority. This is the join — and it is where most of the design's actual
 // safety rules live, because "who may hold what" is decided here rather than in
 // the role's name.
 //
@@ -15,12 +11,12 @@
 // administrator's person-only and non-expiring rules). That is not redundancy to
 // be tidied away. The repository rule is the one that cannot be walked around;
 // the module rule is the one that can NAME what the caller did wrong, in the
-// caller's terms, before a transaction is opened. Recovery plan §12 requires
-// both boundaries to be probed for exactly this reason, and a module that
+// caller's terms, before a transaction is opened. Both boundaries are
+// tested for exactly this reason, and a module that
 // relied on the repo being the only thing that ever checked would hand callers
 // a storage-level error message for an ordinary mistake.
 //
-// This module holds NO state of its own (the subjects.js I2 precedent) — no
+// This module holds NO state of its own (as in subjects.js) — no
 // cache, no memo, no index. That is what makes "revocation bites on the next
 // request" true by construction rather than by comment.
 'use strict';
@@ -61,7 +57,7 @@ function assign(opts) {
   }
   // scope_id is required and non-blank for BOTH scope types. A tenant-scoped
   // row carries the tenant id: storage and evaluation may never assume that
-  // every assignment is global (recovery plan §6.3).
+  // every assignment is global.
   requireIdentityString(scope_id, 'scope_id', 'assign');
   if (!(expires_at === null || (typeof expires_at === 'number' && Number.isFinite(expires_at) && expires_at > 0))) {
     throw new Error('assignments.assign: expires_at must be null or a positive finite number');
@@ -72,7 +68,7 @@ function assign(opts) {
   }));
 }
 
-// R7 shared assign body.
+// Shared assign body (also used inside bootstrap and administration transactions).
 function assignInDraft(state, opts) {
   const {
     tenant, role_id, subject_id, scope_type, scope_id, assigned_by, expires_at, now,
@@ -168,7 +164,7 @@ function assignInDraft(state, opts) {
 // disk write. An unrevoked target transitions exactly once and the row is NEVER
 // deleted — history stays for audit.
 function revoke(id) {
-  // Read first so readiness/FATAL compose even for a malformed id (I3).
+  // Read first so readiness/FATAL compose even for a malformed id.
   const state = repo.read();
   if (typeof id !== 'string' || id.trim() === '') return false;
   const target = state.role_assignments.find(a => a.id === id) || null;
@@ -215,9 +211,9 @@ function forSubject(tenant, subject_id) {
 }
 
 // The one explicitly clock-TAKING read. `now` is a REQUIRED argument rather than
-// a wall-clock call, so R3 can compose it deterministically and I-R1-21's
-// clock-free discipline is not eroded from above by a module that quietly reads
-// the time on R3's behalf.
+// a wall-clock call, so can() can compose it deterministically and the
+// repository's clock-free discipline is not eroded from above by a module that
+// quietly reads the time on the caller's behalf.
 function liveForSubject(tenant, subject_id, now) {
   const state = repo.read();
   requireTenant(tenant, 'liveForSubject');

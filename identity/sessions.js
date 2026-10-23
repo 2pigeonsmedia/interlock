@@ -1,4 +1,4 @@
-// identity/sessions.js — Task 7's offline authentication front door.
+// identity/sessions.js — the offline authentication front door.
 //
 // A new credential and the legacy paths coexist here, but only as an internal
 // primitive. The route adapter that proves a legacy key is deliberately later
@@ -10,10 +10,10 @@ const net = require('node:net');
 const subjects = require('./subjects.js');
 const credentials = require('./credentials.js');
 const audit = require('./audit.js');
-const __repo = require('./repo.js');   // #193: the repository holds the tenant
+const __repo = require('./repo.js');   // the repository holds the tenant
 
-// #193: LAZY. Evaluating at module load throws — require() happens long
-// before initialize() has been told the house.
+// LAZY. Evaluating at module load throws — require() happens long
+// before initialize() has been told the tenant.
 const TENANT = () => __repo.tenant();
 const AUTH_MAX = 512;
 const BEARER = /^Bearer[ \t]+([A-Za-z0-9._~+/-]+={0,2})$/i;
@@ -316,7 +316,7 @@ function fixedRow({
 }
 
 function emit(row) {
-  try { audit.authn(row); } catch (_) { /* Task 5 producer is best-effort and non-authoritative */ }
+  try { audit.authn(row); } catch (_) { /* the audit producer is best-effort and non-authoritative */ }
 }
 
 function legacySession(origin) {

@@ -1,23 +1,18 @@
 // identity/memberships.js — the human membership lifecycle, a LOGICAL module
 // over repo.js.
 //
-// R2 of the Plan 1.5 recovery sequence (desk tickets #173 / build #185).
-// Assertions: Ouzel — ASSERTION_PACKET_R2_2026-08-01_OUZEL.md + AMENDMENT1 +
-// AMENDMENT2. All three bind; later wins. Builder: Tailorbird.
-//
-// WHY THIS FILE EXISTS: D22 separates two things the upstream host used to conflate.
+// WHY THIS FILE EXISTS: it separates two things an earlier design conflated.
 // "Being a known subject" and "being a member of this product" are different
 // facts, and only the second is a human relationship. A seat is a subject and
 // can never be a member; a person can be a member and still hold no authority
 // at all.
 //
-// THE RULE THAT MATTERS MOST HERE IS AN ABSENCE (D30): activation grants
+// THE RULE THAT MATTERS MOST HERE IS AN ABSENCE: activation grants
 // NOTHING. There is deliberately no function that activates a membership and
 // assigns `participant` in one step. Authentication never implies main-room
 // access, so approved activation and the separate assignment stay two auditable
-// facts, and a caller that wants both composes them. R7 will make that
-// composition atomic through admission.consumeInDraft; it will not make it
-// implicit.
+// facts, and a caller that wants both composes them. admission.consumeInDraft
+// makes that composition atomic; it does not make it implicit.
 //
 // TRANSITIONS — these and no others:
 //
@@ -27,11 +22,12 @@
 //                                               (also from invited)
 //   revoked is TERMINAL.
 //
-// Each transition writes the exact timestamp field R1's shape rule requires AND
-// clears what it requires. `reinstate` is the sharp one: R1 makes `active` with
-// a non-null suspended_at an invalid row, so reinstatement is a FIELD RESET, not
-// a status flip. A builder who "sets status back to active" produces a state the
-// repository refuses — there is a control for exactly that.
+// Each transition writes the exact timestamp field the repository's shape rule
+// requires AND clears what it requires. `reinstate` is the sharp one: the
+// repository treats `active` with a non-null suspended_at as an invalid row, so
+// reinstatement is a FIELD RESET, not a status flip. Code that "sets status
+// back to active" produces a state the repository refuses — there is a control
+// for exactly that.
 'use strict';
 const crypto = require('crypto');
 const repo = require('./repo.js');
@@ -60,8 +56,8 @@ function invite(opts) {
   const { tenant, person_subject_id, invited_by } = opts || {};
   requireTenant(tenant, 'invite');
   requireIdentityString(person_subject_id, 'person_subject_id', 'invite');
-  // Ordinary invite still requires a non-null inviter (C4). Null inviter is
-  // reserved for createBootstrapActiveInDraft under D44.
+  // Ordinary invite still requires a non-null inviter. A null inviter is
+  // reserved for createBootstrapActiveInDraft (the bootstrap path).
   requireIdentityString(invited_by, 'invited_by', 'invite');
 
   return repo.transact(state => inviteInDraft(state, {
@@ -69,7 +65,7 @@ function invite(opts) {
   }));
 }
 
-// R7 shared invite body — public invite() is a thin wrapper.
+// Shared invite body — public invite() is a thin wrapper.
 function inviteInDraft(state, opts) {
   const { tenant, person_subject_id, invited_by, now } = opts;
   requireTenant(tenant, 'invite');
@@ -107,8 +103,8 @@ function inviteInDraft(state, opts) {
   return row;
 }
 
-// R7: bootstrap Stage 1 creates an already-active membership with invited_by
-// null, bound to the consumed bootstrap capability timestamps (D44).
+// Bootstrap Stage 1 creates an already-active membership with invited_by
+// null, bound to the consumed bootstrap capability timestamps.
 function createBootstrapActiveInDraft(state, opts) {
   const { tenant, person_subject_id, now } = opts || {};
   requireTenant(tenant, 'createBootstrapActiveInDraft');
@@ -257,7 +253,7 @@ function revokeInDraft(state, opts) {
 // timestamp, no outbox row, no disk write. It is reachable from every
 // non-terminal state, including `invited`.
 function revoke(id) {
-  const state = repo.read();     // read first so readiness/FATAL compose (I3)
+  const state = repo.read();     // read first so readiness/FATAL compose
   if (typeof id !== 'string' || id.trim() === '') return false;
   const target = state.memberships.find(m => m.id === id) || null;
   if (!target || target.status === 'revoked') return false;

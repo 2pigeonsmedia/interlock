@@ -1,6 +1,6 @@
 # identity
 
-Household identity for a small number of real people: **sign in, or not in.**
+Identity for a small number of real people: **sign in, or not in.**
 
 One door. One authorization path. **No host names inside.**
 
@@ -31,15 +31,15 @@ const identity = require('identity');
 
 const house = identity.create({
   stateDir:       '/absolute/path/you/own',   // REQUIRED. Never guessed.
-  tenant:         'my-house',                 // REQUIRED. YOU name your house (#193).
+  tenant:         'my-tenant',                // REQUIRED. YOU name your tenant.
   cookieName:     identity.COOKIE_NAME,       // REQUIRED. The module owns the name.
   originClass:    'local',                    // REQUIRED. 'local' | 'tunnel'.
   hostLabel:      'my-host',                  // REQUIRED. Names the adopting host.
   rpId:           'localhost',                // REQUIRED. WebAuthn relying-party id.
-  rpName:         'My House',                 // optional passkey-prompt display label
-  origin:         'https://my.house',         // REQUIRED. Your exact service origin.
-  liveOrigin:     'https://my.house',         // the live pin, for a live host
-  challengeOrigin: 'http://localhost',        // REQUIRED in practice — see Limits (#398)
+  rpName:         'My Deployment',            // optional passkey-prompt display label
+  origin:         'https://chat.example.com', // REQUIRED. Your exact service origin.
+  liveOrigin:     'https://chat.example.com', // the live pin, for a live host
+  challengeOrigin: 'http://localhost',        // REQUIRED in practice — see Limits
   webauthn:       false,                      // opt in to the ceremony surface
   auditAllowedReads: true,                    // optional boolean; default true (see Quiet reads)
 });
@@ -115,8 +115,8 @@ themselves. Absent stays absent, and the module refuses.
 
 | config | why there is no default |
 |---|---|
-| `stateDir` | the only defaults available are guesses at *your* directories — how credential material became committable in a host's source tree (`#268`) |
-| `tenant` | the name of YOUR house. The module carries none — a default here would be one particular house's name, which is the defect `#193` removed |
+| `stateDir` | the only defaults available are guesses at *your* directories — a guessed default is how credential material once became committable in a host's source tree |
+| `tenant` | the name of YOUR tenant. The module carries none — a default here would be one particular deployment's name, a defect this module has since removed |
 | `cookieName` | the module owns one cookie name; a host carrying a second copy is a second definition of one rule |
 | `originClass` | it describes how **this process** is reached; the only available default is the unconditional `'local'` a real defect once shipped |
 | `hostLabel` | the module carries no host identity of its own |
@@ -137,7 +137,7 @@ hand in an object that answers `ok: true`. The module builds its own.
 by a host. Knock-and-Allow uses `allowAiAdmission` only.
 
 **`installTool`.** The implementation is still in `administration.js`; the public
-door is shut. It needs module-owned tests and a ruling on `#347`, which says the
+door is shut. It needs module-owned tests and a fix for a known defect: the
 path is non-atomic — a partial failure can squat the tool name and leave a live
 tool credential with no identity. Un-exporting stops new callers; **it does not
 repair that.** Fixing the door is not fixing the room.
@@ -151,17 +151,17 @@ Read these before you rely on anything above.
   a direct internal call without explicit configuration refuses.
 - **The live-origin pin is not exercised by a loopback proof.** A contained
   copy takes the `contained` branch and never consults it.
-- ⚠ **`#398` — non-loopback production WebAuthn is a canonical HTTPS pair.**
+- ⚠ **Non-loopback production WebAuthn is a canonical HTTPS pair.**
   `authenticators.js` and `challenges.createStore` accept the localhost test
   harness, the production-behavior contained localhost pair, or
   `webauthn: true` with a canonical HTTPS `origin` whose hostname equals `rpId` exactly —
   no wildcards or suffix match. The adopting host pins which pair it passes
-  (`#384`: this folder does not bake a house URL). Hosts that leave
+  (this folder does not bake in a deployment URL). Hosts that leave
   `webauthn: false` may still pass a loopback
   `challengeOrigin` beside an HTTPS service origin.
   *Earlier this file said production HTTPS could not opt in at all. That leftover
-  is what #398 retired — not as a wildcard Origin, and not as a baked host URL.*
-- **One tenant PER PROCESS.** The repository is told its house at `initialize({ tenant })` and validates every row against it. Two houses in one process is refused, not silently merged.
+  has been retired — not as a wildcard Origin, and not as a baked host URL.*
+- **One tenant PER PROCESS.** The repository is told its tenant at `initialize({ tenant })` and validates every row against it. Two tenants in one process is refused, not silently merged.
 - **WebAuthn binds `localhost` (contained or harness) or a host-pinned canonical HTTPS `rpId`.**
   `rpId` is required configuration. Wildcards and hostname/origin mismatches refuse.
 - **First-owner completion is passkey-backed.** `firstOwner` is public on the

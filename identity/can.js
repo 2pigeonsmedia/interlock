@@ -1,25 +1,20 @@
 // identity/can.js — the synchronous authorization decision primitive.
 //
-// Task 6 assertion authority:
-// docs/audits/CODEX_ASSERTION_PACKET_TASK6_2026-07-30.md
-//
 // Authentication establishes the supplied subject/session facts before this
 // boundary. This module answers only whether that subject may perform one exact
 // capability on one exact resource in the currently installed local snapshot.
-// R3 (Plan 1.5 recovery, desk ticket #191): this module became the SINGLE
-// composition point for both authorization paths —
+// This module is the SINGLE composition point for both authorization paths —
 //     live direct grant  OR  live assignment -> live role -> live permission
 // — with privilege class and allowed kinds taken from the protected manifest
-// instead of the two hard-coded rules Task 6 shipped (`capability === 'admin'`
-// plus a seat-only check). Assertions: Ouzel, ASSERTION_PACKET_R3_2026-08-01 +
-// Amendments 1-5, all binding, later winning on conflict. Builder: Lyrebird.
+// instead of the two hard-coded rules an earlier version used
+// (`capability === 'admin'` plus a seat-only check).
 //
-// NOTHING IS CACHED HERE, AND THAT IS THE DESIGN (C8/I-R3-12): no effective-
+// NOTHING IS CACHED HERE, AND THAT IS THE DESIGN: no effective-
 // permission memo, no role expansion, no module-local state. Every call re-reads
 // subject, membership, assignment, role, permission and grant rows. That is what
 // makes "revocation bites on the next call" true by construction rather than by
-// comment — and it is what spec 6.3's "sessions never cache effective
-// permissions" will inherit, because there is nothing here to cache into.
+// comment — and it is what the rule "sessions never cache effective
+// permissions" inherits, because there is nothing here to cache into.
 'use strict';
 const subjects = require('./subjects.js');
 const grants = require('./grants.js');
@@ -68,8 +63,8 @@ function contextValues(context) {
   }
 }
 
-// R3: returns the MATCHING ROW rather than a boolean, because C7 requires the
-// deciding grant's id in the audit record. The predicate itself is unchanged.
+// Returns the MATCHING ROW rather than a boolean, because exact attribution
+// requires the deciding grant's id in the audit record. The predicate itself is unchanged.
 function liveGrant(rows, tenant, subjectId, capability, resource, origin, now) {
   for (const row of rows) {
     if (!row || typeof row !== 'object' ||
@@ -88,11 +83,11 @@ function liveGrant(rows, tenant, subjectId, capability, resource, origin, now) {
   return null;
 }
 
-// C6 — SCOPE COVERAGE, exact. `tenant` covers every resource in the tenant;
+// SCOPE COVERAGE, exact. `tenant` covers every resource in the tenant;
 // `room` covers exactly `room:<scope_id>` and `docs:<scope_id>` and NOTHING
 // else, so a room-scoped assignment can never satisfy a tenant-wide resource
-// such as `board`, `tickets`, `membership` or `policy:pass_lifetime`
-// (I-R3-10). An unknown scope_type covers nothing — deny by default extends to
+// such as `board`, `tickets`, `membership` or `policy:pass_lifetime`.
+// An unknown scope_type covers nothing — deny by default extends to
 // values this function does not recognise.
 function scopeCovers(assignment, resource) {
   if (assignment.scope_type === 'tenant') return true;
@@ -103,12 +98,12 @@ function scopeCovers(assignment, resource) {
   return false;
 }
 
-// C4 — the membership gate, ROLE PATH ONLY and PERSON ONLY.
+// The membership gate, ROLE PATH ONLY and PERSON ONLY.
 //
-// Seats and tools are never members (D22); a seat's participation requirement
+// Seats and tools are never members; a seat's participation requirement
 // lives on its principal, through the ceiling below, which is where it belongs.
 // The direct-grant path is deliberately NOT gated here: direct grants are the
-// spec's narrow-exception path (6.1), which exists precisely for subjects that
+// design's narrow-exception path, which exists precisely for subjects that
 // hold no membership — and the entire shipped person corpus is exactly that
 // shape (measured: 46 can() call sites, 0 membership arrangements).
 // `forPerson` answers ONE row or null — membership is unique per (tenant,
@@ -118,20 +113,20 @@ function hasActiveMembership(tenant, personId) {
   return row !== null && row.status === 'active';
 }
 
-// C6 — the role path, composed HERE.
+// The role path, composed HERE.
 //
 // READ THIS BEFORE EDITING: `assignments.liveForSubject` filters TWO of the six
 // conditions an assignment must satisfy — unrevoked, and unexpired at `now`.
 // The other four are composed below and NOWHERE ELSE: the role must be active,
 // the permission row unrevoked, the permission's origin must cover the observed
-// origin, and the assignment's scope must cover the requested resource
-// (I-R3-22). Those four have no natural red — every positive control arranges
+// origin, and the assignment's scope must cover the requested resource.
+// Those four have no natural red — every positive control arranges
 // live rows — so each carries a deliberate negative in
 // test/identity.can.roles.test.js. Deleting any one of them here passes every
 // happy-path control in the corpus.
 //
 // `now` is the caller's single per-call value, passed explicitly: no clock is
-// read on this path (I-R3-11).
+// read on this path.
 function rolePathMatch(tenant, subject, capability, resource, origin, now) {
   if (subject.kind === 'person' && !hasActiveMembership(tenant, subject.id)) return null;
 
@@ -149,10 +144,10 @@ function rolePathMatch(tenant, subject, capability, resource, origin, now) {
   return null;
 }
 
-// C5 — the seat/principal ceiling AT USE, for the role path.
+// The seat/principal ceiling AT USE, for the role path.
 //
-// Spec 4: a seat's grants are a subset of its principal's at issuance AND at
-// use. Task 6 enforced that for direct grants; a seat's role-derived reach needs
+// A seat's grants are a subset of its principal's at issuance AND at
+// use. That was first enforced for direct grants; a seat's role-derived reach needs
 // the same ceiling, and the principal may satisfy it by EITHER of its own paths
 // — otherwise a principal who holds its authority by role would fail to cover a
 // seat it legitimately sponsors. Principal narrowing, membership suspension,
@@ -216,7 +211,7 @@ function can(subject_id, capability, resource, context) {
 
   let reason;
   let principal = null;
-  // C7/I-R3-13 — the deny shape is the DEFAULT: `decision_source` null and all
+  // The deny shape is the DEFAULT: `decision_source` null and all
   // four ids null. Every allow overwrites it with the deciding row's identity.
   let attribution = {
     decision_source: null, grant_id: null, role_id: null, assignment_id: null,
@@ -240,12 +235,12 @@ function can(subject_id, capability, resource, context) {
     reason = 'seat-unbound';
   } else if (subject.kind === 'seat' && subject.expires_at <= now) {
     reason = 'seat-expired';
-  // C2 — PRIVILEGE CLASS AND ALLOWED KINDS COME FROM THE MANIFEST.
+  // PRIVILEGE CLASS AND ALLOWED KINDS COME FROM THE MANIFEST.
   //
-  // Task 6 spelled these two rules as `capability === 'admin'` and "is it a
-  // seat", which is why a TOOL holding an `admin` grant was `granted` at
-  // assurance 2 against spec 6.1's person-only administrative class (the
-  // measured drift, closed here). No slug, display name, resource or substring
+  // An earlier version spelled these two rules as `capability === 'admin'` and
+  // "is it a seat", which is why a TOOL holding an `admin` grant was `granted`
+  // at assurance 2 despite the person-only administrative class (the measured
+  // drift, closed here). No slug, display name, resource or substring
   // participates in this decision — the manifest is asked, never a name.
   //
   // The reason vocabulary is preserved exactly where it existed: a SEAT refused
@@ -262,17 +257,17 @@ function can(subject_id, capability, resource, context) {
     reason = (subject.kind === 'seat' && capabilityPolicy.isAdministrative(capability))
       ? 'seat-admin-forbidden'
       : 'kind-forbidden-for-capability';
-  // C3 — assurance is the manifest's minimum, and R3 CLAIMS NO TRUST IN IT.
-  // Context-supplied assurance stays caller-controlled until R5/R6 build a
-  // producer; a green here is not evidence that L2 can be earned. The shipped
+  // Assurance is the manifest's minimum, and this check CLAIMS NO TRUST IN the
+  // context-supplied value: it is caller-controlled at this boundary, so a
+  // green here is not evidence that L2 can be earned. The shipped
   // reason string is preserved, sourced from `minimum_assurance` rather than a
   // literal 2.
   } else if (values.assurance < capabilityPolicy.minimumAssurance(capability)) {
     reason = 'admin-l2-required';
   } else {
-    // C9 — path resolution: direct grant ELSE role path. Both then face the
+    // Path resolution: direct grant ELSE role path. Both then face the
     // same seat ceiling. Absence of a live matching path on BOTH routes is
-    // deny; there is no default-allow branch (I-R3-1).
+    // deny; there is no default-allow branch.
     const ownRows = grants.forSubject(values.tenant, subject_id);
     const direct = liveGrant(ownRows, values.tenant, subject_id, capability, resource,
       values.origin, now);
@@ -304,7 +299,7 @@ function can(subject_id, capability, resource, context) {
       reason = 'granted';
     }
 
-    // C7 — EXACT ATTRIBUTION, and only on an allow. A denial has no deciding
+    // EXACT ATTRIBUTION, and only on an allow. A denial has no deciding
     // row, and inventing one would attribute a decision that never happened.
     if (reason === 'granted') {
       if (direct) {
@@ -348,10 +343,10 @@ function can(subject_id, capability, resource, context) {
     assurance: validAssurance ? (values.assurance === 2 ? 'L2' : 'L1') : null,
     result: allow ? 'allow' : 'deny',
     reason,
-    // C7: the audit stream could not carry any of these before R3 —
+    // The audit stream once could not carry any of these —
     // `normalizeTelemetry` iterates an allow-list, so they were accepted and
-    // dropped in silence. They are asserted at the WRITTEN ROW, never from this
-    // call's receipt (I-R3-14).
+    // dropped in silence. Tests assert them at the WRITTEN ROW, never from this
+    // call's receipt.
     decision_source: attribution.decision_source,
     grant_id: attribution.grant_id,
     role_id: attribution.role_id,

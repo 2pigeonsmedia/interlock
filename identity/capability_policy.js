@@ -1,12 +1,7 @@
 // identity/capability_policy.js — THE protected capability-policy manifest.
 //
-// R2 of the Plan 1.5 recovery sequence (desk tickets #173 build / #185).
-// Assertions: Ouzel, docs/audits/ASSERTION_PACKET_R2_2026-08-01_OUZEL.md plus
-// docs/audits/ASSERTION_PACKET_R2_AMENDMENT1_2026-08-01_OUZEL.md (the amendment
-// wins on conflict). Both BIND. Builder: Tailorbird.
-//
-// WHY THIS FILE EXISTS, AND WHY IT IS CODE AND NOT A COLLECTION (packet C1,
-// Ouzel pre-ruling 1): spec 6.1 requires ONE protected, versioned, server-owned
+// WHY THIS FILE EXISTS, AND WHY IT IS CODE AND NOT A COLLECTION: the design
+// requires ONE protected, versioned, server-owned
 // manifest to be the authority for privilege class, allowed actor kinds, and
 // minimum assurance — consumed identically by role validation, direct-grant
 // validation, can(), and the later route-policy validator, so that no mutable
@@ -14,24 +9,24 @@
 //
 // It is a frozen module rather than a `capability_policies` row set because a
 // new top-level repository field would change the version-2 shape and re-open
-// R1's exact `REQUIRED` set — and that exactness is what structurally
-// guarantees D37 (no durable `sessions` field can exist, I-R1-16). Storing
+// the repository's exact `REQUIRED` field set — and that exactness is what
+// structurally guarantees that no durable `sessions` field can exist. Storing
 // policy as data would also make the authority mutable by the very transactions
 // it is supposed to govern. A code artifact cannot be edited by a caller at all.
 //
 // It has NO dependencies, deliberately: repo.js imports it at load, so anything
 // it required would be pulled into the repository's own initialization path.
 //
-// THE SPELLING RULE (spec 6.1, D28): administrative classification comes from
+// THE SPELLING RULE: administrative classification comes from
 // the capability, never from a role slug, display label, or a substring such as
 // `admin`. Everything downstream asks THIS TABLE, never a name.
 'use strict';
 
 const MANIFEST_VERSION = 1;
 
-// The whole table. A capability absent from here DOES NOT EXIST (spec 6.1) —
+// The whole table. A capability absent from here DOES NOT EXIST —
 // which is why every accessor below refuses an unknown slug instead of
-// answering a default. Ordered exactly as C2 rules: the v1 four keep their
+// answering a default. Order is fixed: the v1 four keep their
 // order and `sponsor` lands last, so no persisted consumer sees a reordering.
 const MANIFEST = Object.freeze([
   row('read', 'ordinary', ['person', 'seat', 'tool'], 1),
@@ -41,7 +36,7 @@ const MANIFEST = Object.freeze([
   row('sponsor', 'ordinary', ['person'], 1),
 ]);
 
-// Frozen ALL THE WAY DOWN. R1's FOLD F4 is the precedent: a shallow freeze let
+// Frozen ALL THE WAY DOWN. Precedent: elsewhere a shallow freeze let
 // a shared template be poisoned in-process while an `isFrozen()` check on the
 // root stayed green. Here the nested `allowed_subject_kinds` array is the
 // poisonable surface, and a mutable kind list IS a policy surface.
@@ -56,7 +51,7 @@ function row(capability, privilege_class, allowed_subject_kinds, minimum_assuran
 
 // ONE definition of the capability vocabulary, derived from the manifest rather
 // than typed beside it. `repo.GRANT_CAPABILITIES` is this same frozen object
-// (C2/I-R2-2), and `grants.CAPABILITIES` re-exports that in turn — so the three
+// (one shared vocabulary), and `grants.CAPABILITIES` re-exports that in turn — so the three
 // cannot drift, because there is only one array.
 const CAPABILITIES = Object.freeze(MANIFEST.map(r => r.capability));
 
@@ -90,8 +85,8 @@ function allowedKinds(capability) {
   return requirePolicy(capability, 'allowedKinds').allowed_subject_kinds;
 }
 
-// STORED AND EXPORTED ONLY. R2 enforces no assurance anywhere — that is R3's
-// (packet 10). Stated here so a later reader does not mistake the presence of
+// STORED AND EXPORTED ONLY. This module enforces no assurance anywhere — that
+// belongs to the later assurance layer. Stated here so a later reader does not mistake the presence of
 // the number for a live gate.
 function minimumAssurance(capability) {
   return requirePolicy(capability, 'minimumAssurance').minimum_assurance;

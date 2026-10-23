@@ -1,17 +1,13 @@
-// identity/passwords.js — R4 of the Plan 1.5 recovery sequence: the DEDICATED
-// human-password service. Binding assertions: Codex,
-// docs/audits/CODEX_ASSERTION_PACKET_R4_2026-08-05.md, plus
-// docs/audits/CODEX_PACKET_AMENDMENT1_R4_2026-08-05.md (later WINS on conflict).
-// Builder: Eider (Opus 5). Desk ticket #243, parent #171.
+// identity/passwords.js — the DEDICATED human-password service.
 //
-// ⛔ SCOPE, load-bearing (packet §1, §9). This module is an OFFLINE PRIMITIVE.
+// ⛔ SCOPE, load-bearing. This module is an OFFLINE PRIMITIVE.
 // It has NO HTTP route, creates NO session, sets NO cookie, and enforces NO
 // route policy. Nothing here may be cited as a live login, live rate-limit,
 // route-timing, cookie, CSRF, server.js, checkpoint, deployment, or release
-// claim. R5 owns the login service and L1 session creation; R8 proves the
-// localhost harness. Password is L1 and stays L1 (D33).
+// claim. login.js owns the login service and L1 session creation; the route
+// adapter proves the localhost harness. Password is L1 and stays L1.
 //
-// WHY A DEDICATED MODULE AND NOT credentials.js (C1). credentials.js is the
+// WHY A DEDICATED MODULE AND NOT credentials.js. credentials.js is the
 // selector.secret BEARER TOKEN: 256 random bits, so it hashes with ONE SHA-256
 // and a KDF there would just be a request-per-second ceiling. A human password
 // is the opposite object — low entropy, chosen by a person, and the ONLY
@@ -20,27 +16,27 @@
 // create selector-secret rows, and never writes credentials[]. Password records
 // live only in state.passwords{}, keyed by person_subject_id.
 //
-// WHY prepare() + setPreparedInDraft() EXIST (C1). repo.transact() is
-// SYNCHRONOUS and non-reentrant; scrypt is ASYNCHRONOUS by mandate (C2 — no
+// WHY prepare() + setPreparedInDraft() EXIST. repo.transact() is
+// SYNCHRONOUS and non-reentrant; scrypt is ASYNCHRONOUS by mandate (no
 // scryptSync anywhere, ever). You therefore cannot derive inside a transaction.
 // The split is the resolution: derive first (async, outside), then install the
-// already-derived verifier inside somebody else's single transaction. R7 needs
-// exactly this to compose password installation into one bootstrap/invite/reset
+// already-derived verifier inside somebody else's single transaction.
+// Bootstrap/invite/reset orchestration needs exactly this to compose password installation into one bootstrap/invite/reset
 // commit rather than two.
 //
 // This module holds NO durable state of its own. Every read goes through
 // repo.read(); every write through ONE repo.transact(). The throttle is
-// explicitly IN-MEMORY and explicitly not a durable lock (C6, D38: ordinary
-// failures never hard-lock an account).
+// explicitly IN-MEMORY and explicitly not a durable lock (ordinary failures
+// never hard-lock an account).
 'use strict';
 const crypto = require('crypto');
 const repo = require('./repo.js');
 const audit = require('./audit.js');
 
-// ── C2: KDF profiles ────────────────────────────────────────────────────────
+// ── KDF profiles ────────────────────────────────────────────────────────────
 // Native async scrypt, no new dependency. `version` is OUR profile generation,
 // not a scrypt concept: it is what makes algorithm agility auditable.
-// IMPORTED, never re-typed (house law: pin the ALIGNMENT, not just the
+// IMPORTED, never re-typed (design rule: pin the ALIGNMENT, not just the
 // property — a local copy would let this module and the repository gate drift
 // while both stayed internally consistent and every property test stayed green).
 const SUPPORTED_KDFS = repo.PASSWORD_KDF_PROFILES;
@@ -55,14 +51,14 @@ const SALT_BYTES = 32;
 const DERIVED_BYTES = 32;
 const B64URL_32 = repo.PASSWORD_B64URL_32;
 
-// The five audit kinds (C7). Every one carries ONLY non-secret fields.
+// The five audit kinds. Every one carries ONLY non-secret fields.
 const INTENT_SET = 'password.set';
 const INTENT_CHANGE = 'password.change';
 const INTENT_RESET = 'password.reset';
 const INTENT_REVOKE = 'password.revoke';
 const INTENT_UPGRADE = 'password.upgrade';
 
-// Caller-supplied server-side material is REFUSED on key presence (control 3).
+// Caller-supplied server-side material is REFUSED on key presence.
 // Ignoring a smuggled `salt` would train callers to send derived material.
 const FORBIDDEN_CALLER_KEYS = Object.freeze([
   'algorithm', 'salt', 'derived_value', 'parameters', 'version',
@@ -92,10 +88,10 @@ function scryptAsync(password, saltBuf, profile) {
   });
 }
 
-// The dummy verifier (C5). Its ONLY job is to make the failure path perform the
+// The dummy verifier. Its ONLY job is to make the failure path perform the
 // same class of work as the success path, so an unknown user does not answer
 // visibly sooner than a wrong password. This is a LIVENESS requirement, not a
-// timing proof — the packet asserts approximately-uniform behaviour by public
+// timing proof — the design asserts approximately-uniform behaviour by public
 // shape and KDF-call controls, and explicitly does NOT claim exact timing.
 const DUMMY_SALT = Buffer.alloc(SALT_BYTES, 0x5a);
 function dummyKdf(password) {
@@ -108,7 +104,7 @@ function assertNonBlank(v, what) {
   }
 }
 
-// C5/D41: the public projection NEVER carries salt, derived_value, plaintext or
+// The public projection NEVER carries salt, derived_value, plaintext or
 // the prepared verifier. Every public return in this file goes through here.
 function meta(r) {
   if (!r) return null;
@@ -145,7 +141,7 @@ function assertInstallableTarget(draft, tenant, person_subject_id) {
   return subj;
 }
 
-// ── C1: prepare / setPreparedInDraft ────────────────────────────────────────
+// ── prepare / setPreparedInDraft ────────────────────────────────────────────
 // prepare() is repo-free and async: it mints a fresh 32-byte salt and derives
 // with CURRENT_KDF only. It never emits a legacy profile.
 async function prepare(password) {
@@ -222,7 +218,7 @@ function setPreparedInDraft(draft, opts) {
   return meta(row);
 }
 
-// ── C4: set / change / reset / revoke ───────────────────────────────────────
+// ── set / change / reset / revoke ───────────────────────────────────────────
 async function set(opts) {
   const o = opts || {};
   refuseCallerMaterial(o, 'set');
@@ -241,7 +237,7 @@ async function reset(opts) {
   return repo.transact(d => setPreparedInDraft(d, { tenant, person_subject_id, prepared, now, mode: 'reset' }));
 }
 
-// change() carries the TOCTOU guard (C4). We must verify the CURRENT password
+// change() carries the TOCTOU guard. We must verify the CURRENT password
 // before installing a new one, and verification is async — so the stored row
 // can change underneath us between the check and the commit. The guard: capture
 // the exact verified row identity, and abort inside the transaction if the row
@@ -308,7 +304,7 @@ function get(tenant, person_subject_id) {
   return meta(r);
 }
 
-// ── C5: verification ────────────────────────────────────────────────────────
+// ── verification ────────────────────────────────────────────────────────────
 async function verifyAgainstRecord(password, record, profile) {
   const saltBuf = Buffer.from(record.salt, 'base64url');
   const dk = await scryptAsync(password, saltBuf, profile);
@@ -319,15 +315,15 @@ async function verifyAgainstRecord(password, record, profile) {
 
 const INVALID = Object.freeze({ ok: false, reason: 'invalid-credentials' });
 
-// C7: bounded authn telemetry. `audit.AUTHN_FIELDS` is an ALLOW-LIST with no
+// Bounded authn telemetry. `audit.AUTHN_FIELDS` is an ALLOW-LIST with no
 // secret-bearing name in it, so this is structurally incapable of carrying a
 // password, salt, derived value or the dummy verifier — the guarantee is the
 // schema, not this function's good behaviour. On failure we record NO guessed
-// account id (C7): subject_id/subject_name stay null, so a probe for valid
+// account id: subject_id/subject_name stay null, so a probe for valid
 // usernames cannot read the answer back out of the audit stream.
-// Best-effort and non-authoritative, exactly like the Task 7 producer.
+// Best-effort and non-authoritative, exactly like the sessions.js producer.
 function emitAuthn(row) {
-  try { audit.authn(row); } catch (_) { /* Task 5 producer is best-effort */ }
+  try { audit.authn(row); } catch (_) { /* the audit producer is best-effort */ }
 }
 function denyRow(tenant, reason) {
   return { tenant, subject_id: null, subject_name: null, kind: null, assurance: null,
@@ -384,7 +380,7 @@ async function verify(opts) {
     return INVALID;
   }
 
-  // Success. Upgrade-on-verify is an INTERNAL path (C4): never a public command.
+  // Success. Upgrade-on-verify is an INTERNAL path: never a public command.
   let upgraded = false;
   if (profile !== CURRENT_KDF) {
     const prepared = await prepare(password);
@@ -418,8 +414,8 @@ async function verify(opts) {
   });
 }
 
-// ── C6: the in-memory throttle ──────────────────────────────────────────────
-// Explicitly NOT durable. D38: ordinary failures never hard-lock an account, so
+// ── the in-memory throttle ──────────────────────────────────────────────────
+// Explicitly NOT durable. Ordinary failures never hard-lock an account, so
 // nothing here writes to the repository. Source and account counters are
 // INDEPENDENT — one noisy source must not lock out an account, and one attacked
 // account must not lock out a shared source.

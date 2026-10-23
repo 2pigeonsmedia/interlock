@@ -1,33 +1,30 @@
 // identity/subjects.js — the subject registry, a LOGICAL module over repo.js.
-// Task 2 of the #165 build sequence (desk ticket #167). Assertions: Codex,
-// docs/audits/CODEX_ASSERTION_PACKET_TASK2_2026-07-29.md as amended by
-// docs/audits/CODEX_PACKET_AMENDMENT1_TASK2_2026-07-29.md (both binding).
-// Reference: plan §Task 2 — packet-forced departures are marked PACKET below.
 //
-// WHY THIS FILE EXISTS: the upstream host had no concept of WHO YOU ARE — possession of
-// a room key WAS identity, so nothing could be revoked, attributed or audited.
-// This is the record that a credential merely *proves you are* (spec §4).
+// WHY THIS FILE EXISTS: an earlier design had no concept of WHO YOU ARE —
+// possession of a room key WAS identity, so nothing could be revoked,
+// attributed or audited. This is the record that a credential merely
+// *proves you are*.
 //
-// The lifecycle invariants are Codex finding F-06: the superseded draft checked
+// The lifecycle invariants exist because a superseded draft checked
 // only that a seat NAMED a principal — never that the principal existed, was a
 // person, was active, or shared the tenant — and never that a name was unique,
-// so "Woodlark" and "woodlark" were two different subjects.
+// so "Alice" and "alice" were two different subjects.
 //
-// This module holds NO state of its own (packet I2): no cache, no seed, no
+// This module holds NO state of its own: no cache, no seed, no
 // index. Every read goes through repo.read(), every write through ONE
-// repo.transact() — which is also how readiness and FATAL compose (I3): the
+// repo.transact() — which is also how readiness and FATAL compose: the
 // repo's refusals propagate, and nothing here swallows, reinitializes or
-// repairs them. transact() is NON-REENTRANT (Task 1, I17), so create and
+// repairs them. transact() is NON-REENTRANT (repo.js), so create and
 // revoke are each exactly one call, never nested.
 'use strict';
 const crypto = require('crypto');
 const repo = require('./repo.js');
 
-// The closed kind set (I1). Frozen: a mutable kind list would be an enrolment
-// surface, and Task 2 creates none (D15).
+// The closed kind set. Frozen: a mutable kind list would be an enrolment
+// surface, and this module creates none.
 const KINDS = Object.freeze(['person', 'seat', 'tool']);
 
-// Name canonicalization for Task 2 is NFKC + trim + toLowerCase.
+// Name canonicalization is NFKC + trim + toLowerCase.
 // It is deterministic and it makes composed/decomposed or compatibility
 // spellings collide, but it is NOT full Unicode case folding: examples like
 // "Stra\u00dfe"/"STRASSE" and "\u0130stanbul"/"istanbul" do not fold together.
@@ -187,7 +184,7 @@ function aiNameStatus(tenant, input, now = Date.now()) {
 
 // A reused AI name keeps its chosen spelling while immutable seat identity
 // carries the provenance. The ordinal is stored on every new Interlock seat;
-// a pre-ruling first generation without the field is interpreted as session 1.
+// a first generation created before the field existed is interpreted as session 1.
 // Nothing is shown until a second admitted generation exists.
 function aiSessionDiscriminator(tenant, subjectId) {
   requireTenant(tenant, 'aiSessionDiscriminator');
@@ -206,9 +203,9 @@ function aiSessionDiscriminator(tenant, subjectId) {
   return Object.freeze({ session: generations.length > 1 ? ordinal : null });
 }
 
-// Tenant is REQUIRED everywhere it appears (I5): no method defaults it. An
-// unscoped or house-defaulted lookup is the expensive retrofit this design
-// exists to avoid (D3) — refusing loudly is the only cheap moment to enforce it.
+// Tenant is REQUIRED everywhere it appears: no method defaults it. An
+// unscoped or default-tenant lookup is the expensive retrofit this design
+// exists to avoid — refusing loudly is the only cheap moment to enforce it.
 function requireTenant(tenant, where) {
   if (typeof tenant !== 'string' || tenant.trim() === '') {
     throw new Error('subjects.' + where + ': tenant is required — no method defaults it (I5)');
@@ -217,7 +214,7 @@ function requireTenant(tenant, where) {
 
 function create(opts) {
   const { tenant, kind, name, principal } = opts || {};
-  // ── the state-INDEPENDENT input gate (I5, I7, I11-presence, I12) ──────────
+  // ── the state-INDEPENDENT input gate ──────────────────────────────────────
   // Pure argument checks may run outside the transaction: they consult no
   // state, so there is nothing for a concurrent commit to invalidate.
   requireTenant(tenant, 'create');
@@ -225,25 +222,25 @@ function create(opts) {
   if (typeof name !== 'string' || name.trim() === '') {
     throw new Error('subjects.create: name is required and may not be blank');
   }
-  // A seat is a DELEGATE (D6): it always acts on behalf of a principal, and a
+  // A seat is a DELEGATE: it always acts on behalf of a principal, and a
   // seat with none would be an independent authority root — exactly what the
-  // design forbids. And ONLY a seat delegates (I12): a person or tool naming a
+  // design forbids. And ONLY a seat delegates: a person or tool naming a
   // principal would smuggle delegation into kinds that must not have it.
   if (kind === 'seat' && !principal) throw new Error('subjects.create: a seat requires a principal (D6)');
   if (kind !== 'seat' && principal) {
     throw new Error('subjects.create: only a seat may name a principal — a ' + kind + ' is not a delegate (I12)');
   }
-  // AMENDMENT #1 §1 (amended I7): pass lifetime is NEVER caller input here — the
-  // first credentials.issue() is the binding operation (Blocker 4). Presence of
-  // the key refuses, whatever its value: Task 2 creates unbound seats only.
+  // Pass lifetime is NEVER caller input here — the first credentials.issue()
+  // is the binding operation (the seat lifetime coupling). Presence of the key
+  // refuses, whatever its value: this module creates unbound seats only.
   if (opts && Object.prototype.hasOwnProperty.call(opts, 'expires_at')) {
     throw new Error('subjects.create: expires_at is not caller input — pass lifetime binds at credentials.issue(), Task 2 creates unbound seats only (amendment #1, I7)');
   }
 
-  const display = name.trim();          // I4: the display name is stored trimmed
+  const display = name.trim();          // the display name is stored trimmed
   const nameFold = fold(name);
 
-  // ── everything state-DEPENDENT lives inside ONE transact (I13) ────────────
+  // ── everything state-DEPENDENT lives inside ONE transact ──────────────────
   // Principal validation, uniqueness, the subject append and its outbox intent
   // commit together or not at all: validating outside would be a decision made
   // against a state the commit no longer holds.
@@ -252,7 +249,7 @@ function create(opts) {
   }));
 }
 
-// R7: shared body for create — public create() is a thin wrapper; bootstrap/
+// Shared body for create — public create() is a thin wrapper; bootstrap/
 // invite redemption call createPersonInDraft inside a larger transaction.
 function createInDraft(state, opts) {
   const { tenant, kind, name, name_fold, principal, now, allow_ended_ai_name } = opts;
@@ -269,7 +266,7 @@ function createInDraft(state, opts) {
     throw new Error('subjects.create: the name "' + name + '" is already held by an active subject in tenant "' + tenant + '"');
   }
   const s = {
-    id: crypto.randomUUID(),           // stable opaque id (I4) — never derived from the name
+    id: crypto.randomUUID(),           // stable opaque id — never derived from the name
     tenant,
     kind,
     name,
@@ -278,10 +275,9 @@ function createInDraft(state, opts) {
     principal: kind === 'seat' ? principal : null,
     status: 'active',
     created_at: now,
-    revoked_at: 0,                     // 0 while active (I4); positive exactly once, at revocation
-    // AMENDMENT #1 §1 (amended I4): a seat carries expires_at === 0 at
-    // creation — INERT unbound-seat state for the accepted Blocker-4
-    // coupling. The first credentials.issue() is the binding operation and
+    revoked_at: 0,                     // 0 while active; positive exactly once, at revocation
+    // A seat carries expires_at === 0 at creation — INERT unbound-seat state
+    // for the seat lifetime coupling (see credentials.js). The first credentials.issue() is the binding operation and
     // moves it from 0 in its own transaction. This is not a pass-lifetime
     // default, policy, or caller-controlled lifetime (caller-supplied
     // expires_at is refused at the input gate above). Persons and tools do
@@ -289,7 +285,7 @@ function createInDraft(state, opts) {
     ...(kind === 'seat' ? { expires_at: 0 } : {}),
   };
   state.subjects.push(s);
-  // Durable audit INTENT (D4) — same generation as the subject, by construction.
+  // Durable audit INTENT — same generation as the subject, by construction.
   state.outbox.push({
     id: crypto.randomUUID(), ts: now, kind: 'subject.create',
     tenant, subject_id: s.id, subject_name: s.name, subject_kind: kind, principal: s.principal,
@@ -297,7 +293,7 @@ function createInDraft(state, opts) {
   return s;
 }
 
-// R7: person-only draft create used by bootstrap/invite redemption.
+// Person-only draft create used by bootstrap/invite redemption.
 function createPersonInDraft(draft, opts) {
   const { tenant, name, now } = opts || {};
   requireTenant(tenant, 'createPersonInDraft');
@@ -383,7 +379,7 @@ function createAiSeatInDraft(draft, opts) {
   return seat;
 }
 
-// get is by OPAQUE ID and lifecycle-blind (I10): active or revoked, or null.
+// get is by OPAQUE ID and lifecycle-blind: active or revoked, or null.
 // It is the one lookup without a tenant parameter — an id is unguessable and
 // names no cross-tenant enumeration surface, which names do.
 function get(id) {
@@ -391,7 +387,7 @@ function get(id) {
 }
 
 // byName answers "who holds this name NOW": tenant-scoped, case-folded, ACTIVE
-// only (I10). The repo.read() runs first so readiness/FATAL compose (I3) even
+// only. The repo.read() runs first so readiness/FATAL compose even
 // for malformed arguments.
 function byName(tenant, name) {
   const state = repo.read();
@@ -400,7 +396,7 @@ function byName(tenant, name) {
   return state.subjects.find(s => s.tenant === tenant && s.status === 'active' && s.name_fold === f) || null;
 }
 
-// Display rename (T3). Chat byline is the person name; the opaque id does not
+// Display rename. Chat byline is the person name; the opaque id does not
 // change. Name, fold and append-only history move in one transact. Seats refuse.
 function rename(opts) {
   const input = opts || {};
@@ -437,26 +433,26 @@ function rename(opts) {
   });
 }
 
-// list is the tenant's FULL registry, active and revoked (I10) — revoked
-// records stay visible because they are history, not garbage (I9).
+// list is the tenant's FULL registry, active and revoked — revoked
+// records stay visible because they are history, not garbage.
 function list(tenant) {
   const state = repo.read();
   requireTenant(tenant, 'list');
   return state.subjects.filter(s => s.tenant === tenant);
 }
 
-// revoke(id): MONOTONIC (I14). Missing or already-revoked targets are pure
+// revoke(id): MONOTONIC. Missing or already-revoked targets are pure
 // no-ops — false, no timestamp, no outbox, no disk write. An active target
 // transitions exactly once, and its whole CLOSURE goes in ONE transaction:
 //   · the target subject;
 //   · if the target is a person, every ACTIVE same-tenant seat delegated from
-//     it (I15) — a dead principal must not leave live delegates (D6);
-//   · all grants for those ids, removed (I16);
-//   · all their credentials, marked revoked IN PLACE (I16) — never spliced,
+//     it — a dead principal must not leave live delegates;
+//   · all grants for those ids, removed;
+//   · all their credentials, marked revoked IN PLACE — never spliced,
 //     reordered or selector-rewritten, because the repo pins credential
-//     positions for the selector index (Task 1's append invariants make the
-//     wrong cleanup unimplementable, not merely unchosen).
-// Two transactions here would be F-06's resurrection bug: a crash between them
+//     positions for the selector index (the repository's append invariants
+//     make the wrong cleanup unimplementable, not merely unchosen).
+// Two transactions here would be the resurrection bug: a crash between them
 // leaves live keys hanging off a dead subject.
 const ENDED_HOW = Object.freeze(['left', 'revoked', 'released']);
 
@@ -510,14 +506,14 @@ function revokeInDraft(draft, id, endedHow, now) {
 }
 
 function revoke(id, endedHow) {
-  // Readiness composes through repo.read() (I3): this refuses pre-init and
+  // Readiness composes through repo.read(): this refuses pre-init and
   // FATAL before any no-op answer could mask them.
   const how = endedHow === undefined ? 'revoked' : endedHow;
   if (!ENDED_HOW.includes(how)) {
     throw new Error('subjects.revoke: ended_how must be left, revoked, or released');
   }
   const target = get(id);
-  if (!target || target.status !== 'active') return false; // I14: the no-op path never opens a transaction
+  if (!target || target.status !== 'active') return false; // the no-op path never opens a transaction
   return repo.transact(state => {
     const s = state.subjects.find(x => x.id === id);
     if (!s || s.status !== 'active') throw new Error('subjects.revoke: target changed between read and transaction');

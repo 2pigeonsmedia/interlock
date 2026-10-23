@@ -1,21 +1,18 @@
 // identity/grants.js — the keyring.
 //
-// Task 4 assertion authority:
-// docs/audits/CODEX_ASSERTION_PACKET_TASK4_2026-07-30.md
-//
 // A grant is a persisted key hanging on a named subject. This module owns the
 // public add/read/remove surface; repo.js owns the final persisted-state
-// backstop. No function here makes an authorization decision — Task 6's can()
-// will consume this raw keyring and apply use-time subject/origin/expiry rules.
+// backstop. No function here makes an authorization decision — can() (can.js)
+// consumes this raw keyring and apply use-time subject/origin/expiry rules.
 'use strict';
 const crypto = require('crypto');
 const repo = require('./repo.js');
-// R2/C10.1: the protected capability policy — the authority for which actor
-// kinds may hold which capability (spec §6.1).
+// The protected capability policy — the authority for which actor
+// kinds may hold which capability.
 const capabilityPolicy = require('./capability_policy.js');
 
 // One definition with the repository standing validator; re-exported here as
-// the Task 4 public vocabulary.
+// the public grant vocabulary.
 const CAPABILITIES = repo.GRANT_CAPABILITIES;
 const ORIGINS = repo.GRANT_ORIGINS;
 const SUBJECT_KINDS = Object.freeze(['person', 'seat', 'tool']);
@@ -84,7 +81,7 @@ function add(opts) {
   return repo.transact(state => {
     // State-dependent checks stay inside the one committing transaction. A
     // pre-read would make this decision against a subject that can change
-    // before the draft is judged (packet N6).
+    // before the draft is judged.
     const subject = state.subjects.find(s => s && s.id === subject_id) || null;
     if (!subject) throw new Error('grants.add: subject not found — ' + subject_id);
     if (!SUBJECT_KINDS.includes(subject.kind)) {
@@ -103,22 +100,22 @@ function add(opts) {
       throw new Error('grants.add: subject is revoked');
     }
 
-    // R2/C10.1: THE MANIFEST KIND GATE. Spec §4 and §6.1 require that a seat or
-    // tool cannot RECEIVE an administrative-class capability, "enforced from the
+    // THE MANIFEST KIND GATE. The design requires that a seat or tool cannot
+    // RECEIVE an administrative-class capability, "enforced from the
     // protected capability policy at assignment and use" — assignment-time is
     // here, and this is where the legal path lives.
     //
-    // It is also what makes R2's `sponsor` widening safe on the day it lands:
-    // R1 held `sponsor` out of the persisted vocabulary precisely so no sponsor
-    // grant could commit without this gate, so the two arrive together.
+    // It is also what makes the `sponsor` capability safe: `sponsor` was kept
+    // out of the persisted vocabulary until this gate existed, so no sponsor
+    // grant could commit without it — the two arrived together.
     //
-    // Deliberately NOT mirrored in the repository standing validator (packet
-    // C10.2, Ouzel pre-ruling 2): a malformed direct grant must stay
-    // CONSTRUCTIBLE at the repo.transact boundary, because recovery plan §12
-    // requires bypass attempts at both boundaries and because two shipped
-    // use-time controls need that arrangement to be reachable. Making the
-    // counterexample unconstructible would delete the only live proof that
-    // can()'s kind exclusion works. Residual is routed to R3 in the ledger.
+    // Deliberately NOT mirrored in the repository standing validator: a
+    // malformed direct grant must stay CONSTRUCTIBLE at the repo.transact
+    // boundary, because bypass attempts are tested at both boundaries and
+    // because two shipped use-time controls need that arrangement to be
+    // reachable. Making the counterexample unconstructible would delete the only
+    // live proof that can()'s kind exclusion works. The use-time check in can()
+    // covers the residual.
     const manifestKinds = capabilityPolicy.allowedKinds(capability);
     if (!manifestKinds.includes(subject.kind)) {
       throw new Error('grants.add: the protected capability policy allows "' + capability +
@@ -154,7 +151,7 @@ function add(opts) {
       }
     } else {
       // People/tools may hold standing keys. A positive explicit expiry is
-      // preserved as persisted data; Task 6 decides whether it is live at use.
+      // preserved as persisted data; can() decides whether it is live at use.
       expires_at = expirySupplied ? requestedExpiry : 0;
     }
 
@@ -285,8 +282,8 @@ function ensureSeatPairInDraft(state, opts) {
   return { ok: true, added };
 }
 
-// Land 6/8: read+write on one room, one commit. Person (L6 rooms) or tool
-// (L8 house CLI). Does not call add() (that starts its own transact).
+// Read+write on one room, one commit. Person (private/breakout room access) or
+// tool (a local command-line client). Does not call add() (that starts its own transact).
 // Idempotent: a live matching grant is left in place rather than duplicated.
 // Seats still refuse — they go through the principal.
 function ensurePair(opts) {

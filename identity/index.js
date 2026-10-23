@@ -1,13 +1,13 @@
 'use strict';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// identity — THE PUBLIC ENTRY POINT (Plan 2, land 2.5, dispatch step 1)
+// identity — THE PUBLIC ENTRY POINT
 //
 // Before this file, a host adopted the module by reaching into it: requiring
 // `administration.js`, `repo.js`, `sessions.js` individually and inheriting
 // whatever each one happened to resolve from the environment. That is not a
 // product boundary; it is a folder that other code reaches into, and it is why
-// `#383` ("a stranger can run identity/ standalone") was false.
+// the claim "a stranger can run identity/ standalone" was false.
 //
 // ONE public entry point. Everything a host is meant to touch arrives through
 // `create(config)`, and CONFIG IS EXPLICIT: the module states what it needs and
@@ -16,13 +16,13 @@
 // WHAT THIS FILE DELIBERATELY DOES NOT DO
 //   · It does not read `process.env`. Not once. An adopting host declares; it
 //     never inherits. The Interlock copy of repo.js has no legacy fallback.
-//   · It does not export `installTool`. DEFER, per the binding disposition:
+//   · It does not export `installTool`. DEFERRED by design:
 //     the implementation stays, the public door closes until it has
-//     module-owned tests and a `#347` ruling. Un-exporting stops NEW callers;
+//     module-owned tests and an explicit design decision. Un-exporting stops NEW callers;
 //     it does not repair the non-atomic credential path. Fixing the door is not
 //     fixing the room.
-//   · It does not name a house. No URL, no room, no host string lives here.
-//     Land 1 check 4 took those out and this file does not put them back.
+//   · It does not name a deployment. No URL, no room, no host string lives here.
+//     An earlier cleanup took those out and this file does not put them back.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const path = require('path');
@@ -42,20 +42,20 @@ const subjects = require('./subjects.js');
 const credentials = require('./credentials.js');
 const assignments = require('./assignments.js');
 const roles = require('./roles.js');
-// THE BOOT SURFACE (Plan 2 land 4, Grok's A5 ruling 2026-08-18). Required here
+// THE BOOT SURFACE. Required here
 // so a host reaches the SAME audit instance `create()` already initialised.
 const audit = require('./audit.js');
 const bearerAuth = require('./sessions.js');
 const operator = require('./operator.js');
 const bootstrap = require('./bootstrap.js');
 
-// #193 (land 2.6): the tenant is the ADOPTING HOST'S to name. It used to be
+// The tenant is the ADOPTING HOST'S to name. It used to be
 // pinned here because the module carried the literal at 24 sites; those now
 // read the repository's tenant, so the pin is gone and the name is what it
 // always should have been — configuration, with NO default.
 
 // Same honesty for the cookie name. `l1_sessions.js` owns exactly one, the host
-// adapter is required to use the module's own (land 2), and renaming it is a
+// adapter is required to use the module's own, and renaming it is a
 // named leftover. Required, validated, not silently overridden.
 const IMPLEMENTED_COOKIE_NAME = l1Sessions.COOKIE_NAME;
 
@@ -112,10 +112,10 @@ function newAiCredential() {
  *
  * Required config — every one of these REFUSES rather than defaults:
  *   stateDir     absolute path to the durable store. The module never guesses.
- *   tenant       must be the implemented tenant (see #193).
+ *   tenant       must be the implemented tenant (see the tenant note above).
  *   cookieName   must be the module's own cookie name (named leftover).
  *   originClass  'local' | 'tunnel' — how THIS PROCESS is reached, not a
- *                property of any request (land 1c, Codex blocker 1).
+ *                property of any request.
  *   hostLabel    a non-empty string naming the adopting host, for audit and
  *                diagnostics. The module stores no host identity of its own.
  *
@@ -185,10 +185,10 @@ function create(config) {
   // throw that no longer happened.
   //
   // ⚠ THIS GUARD HAS BEEN DELETED ONCE, BY ME, IN A COMMIT LABELLED "DOCS ONLY".
-  // A8 replaced the comment block above it and took the refusal with it. Nothing
-  // caught it: the README still promised the throw, the corpus was 45/45, the
+  // A docs edit replaced the comment block above it and took the refusal with it. Nothing
+  // caught it: the README still promised the throw, the test suite was green, the
   // adoption gate was green, and the pre-commit surface passed — because NO
-  // CONTROL ASSERTED THIS PROMISE. Codex found it with a four-line probe.
+  // CONTROL ASSERTED THIS PROMISE. A four-line probe found it.
   // `module_product_boundary.test.js` now asserts it, so the next deletion reds
   // instead of shipping. A promise with no control is a promise with a countdown.
   if (Object.prototype.hasOwnProperty.call(config, 'authenticatorService')) {
@@ -221,15 +221,15 @@ function create(config) {
   // validates every row against this; nothing else is entitled to hold it.
   repo.initialize({ tenant });
 
-  // ── F1 (Codex, land 2.5 review): THE MODULE BUILDS ITS OWN SECURITY PIECES ─
+  // ── THE MODULE BUILDS ITS OWN SECURITY PIECES ──────────────────────────────
   // The first version of this file required the HOST to hand in `sessionStore`,
   // `challengeStore` and the authentication/authorization composition. That is
-  // not a product boundary — it is a folder with a docstring. Codex's finding
-  // is exact: a Land 3 adapter "must reach into identity/*.js or supply
+  // not a product boundary — it is a folder with a docstring. Stated exactly:
+  // a host adapter "must reach into identity/*.js or supply
   // security-critical store implementations itself, recreating the exact
   // per-host composition problem the module boundary is supposed to remove."
   //
-  // He is right, and the upstream host adapter is the proof: it requires SEVEN internal
+  // The upstream host adapter is the proof: it requires SEVEN internal
   // modules and hand-assembles the login service, the session store and the
   // authorize chain. Every adopting host would have written that again, and the
   // one that got it subtly wrong would not find out from any test in here.
@@ -258,7 +258,7 @@ function create(config) {
   // binding loopback while the service is pinned elsewhere) states it.
   const challengeOriginRaw = ownString(config, 'challengeOrigin');
   const challengeOrigin = challengeOriginRaw === undefined ? origin : challengeOriginRaw;
-  // #398: challenge store accepts the localhost harness pair OR a canonical
+  // The challenge store accepts the localhost harness pair OR a canonical
   // HTTPS origin whose hostname equals rpId. Other values refuse. An HTTPS
   // host that leaves webauthn off may still pass a loopback challengeOrigin.
   let challengeStore;
@@ -277,7 +277,7 @@ function create(config) {
   const wantsWebauthn = ownString(config, 'webauthn') === true;
   const authenticatorService = wantsWebauthn
     // Loading the WebAuthn verifier is intentionally deferred until a host
-    // constructs a WebAuthn-enabled house. The package-root client credential
+    // constructs a WebAuthn-enabled instance. The package-root client credential
     // seam stays pure and fast for `interlock join`; it must not load a browser
     // verification stack merely to generate random bearer material.
     ? require('./authenticators.js').createService({
@@ -322,8 +322,8 @@ function create(config) {
   // ⚠ authorizeMutation, NOT authenticate. For a WRITE the difference is a
   // cross-site hole — `authenticate` resolves the session and stops, so a form
   // posted from any other origin carrying the browser's cookie would be
-  // authorised. The upstream host builder shipped `authenticate` here first and it
-  // passed every check the packet named, because those checks are about who may
+  // authorised. The upstream host adapter shipped `authenticate` here first and it
+  // passed every check it was specified against, because those checks are about who may
   // write and not about who may ASK.
   //
   // TRUSTED METADATA IS THE HOST'S JOB AND STAYS THE HOST'S JOB. This function
@@ -371,7 +371,7 @@ function create(config) {
     }
     // The origin CLASS is the one this service was constructed with — never a
     // literal. The upstream host adapter passes 'local' unconditionally here, which is
-    // filed as `#393`: correct on a loopback host and wrong the moment the same
+    // a known defect: correct on a loopback host and wrong the moment the same
     // code is reached over a tunnel. New code does not inherit a known defect.
     const decision = can(authenticated.session.subject_id, capability, resource,
       { tenant, origin: originClass, assurance: authenticated.session.assurance });
@@ -385,7 +385,7 @@ function create(config) {
 
   // Read-side resolution. Separate function and separate name, so that reaching
   // for the cheap one on a write path is a visible choice rather than a typo.
-  // Land 8: tools are not browsers. A Bearer tool credential is the CSRF
+  // Tools are not browsers. A Bearer tool credential is the CSRF
   // equivalent — the secret is in the header, not a cookie. Cookie sessions
   // still use authorizeWrite. A host must not reassemble verify-then-can.
   function authorizeBearer(meta, capability, resource) {
@@ -593,13 +593,13 @@ function create(config) {
   // of one rule" trap this file already names for changePassword.
   //
   // capability_policy.js pins 'admin' at minimum_assurance 2. Assurance 2 is
-  // reachable ONLY through l1_sessions.js's `elevateWithWebAuthn`. #398 turns
-  // the live house's WebAuthn construction on; a session still cannot invite
-  // until a passkey is bound and a fresh step-up completes. That is D28, not
-  // a gate this function weakens. `identity/test/step_up_fixture.js` proves
+  // reachable ONLY through l1_sessions.js's `elevateWithWebAuthn`. Even with
+  // WebAuthn enabled on a live deployment, a session still cannot invite
+  // until a passkey is bound and a fresh step-up completes. That is by design
+  // (administration is person-only), not a gate this function weakens. `identity/test/step_up_fixture.js` proves
   // the composition end-to-end once a real ceremony exists.
   //
-  // DEVIATION FROM THE LITERAL BRIEF, flagged rather than hidden: `name` is
+  // DEVIATION FROM THE OBVIOUS SHAPE, flagged rather than hidden: `name` is
   // accepted in `invite(meta, { name })`'s signature (so the adapter's form
   // field has somewhere to go) but is NOT bound to the minted capability, and
   // the success reply carries no `person_id` — `issueHumanInvite`'s
@@ -609,7 +609,7 @@ function create(config) {
   // admission.mint(principal_subject_id: …)) or widening
   // admission.js's consumeBoundPersonInDraft purpose gate past
   // member_reset/offline_recovery — both real changes to make deliberately,
-  // with explicit owner approval, not as a side effect of this ticket.
+  // with explicit owner approval, not as a side effect of this change.
   // `redeem` below keeps the module's existing,
   // real, tested shape instead: the REDEEMER names themselves, exactly like
   // `redeemHumanInvite` already does and `identity/test/step_up_fixture.js`
@@ -1257,11 +1257,11 @@ module.exports = Object.freeze({
   createRecovery,
   newAiCredential,
   // One definition of the live-origin rule, re-exported so a host adapter can
-  // refuse exactly what the module refuses (land 2, A1). Never a second copy.
+  // refuse exactly what the module refuses. Never a second copy.
   isCanonicalLiveOrigin: administration.isCanonicalLiveOrigin,
   validDisplayName: subjects.validDisplayName,
   COOKIE_NAME: IMPLEMENTED_COOKIE_NAME,
-  // NOTE: deliberately no exported TENANT. A host NAMES its house; a constant
+  // NOTE: deliberately no exported TENANT. A host NAMES its tenant; a constant
   // here would be a default wearing a different hat.
   validTenantName: repo.validTenantName,
   ORIGIN_CLASSES,

@@ -1,18 +1,15 @@
-// identity/challenges.js — R6: ephemeral single-use WebAuthn challenge store.
-//
-// ASSERTION AUTHOR: Codex — docs/audits/CODEX_ASSERTION_PACKET_R6_2026-08-06.md
-// BUILDER: Grok. Desk ticket #177. Owner builder authorization 2026-08-07.
+// identity/challenges.js — ephemeral single-use WebAuthn challenge store.
 //
 // Process-local only. No repository, filesystem, audit, network, or timer I/O.
 // Requiring this module and constructing a store are inert.
 //
-// ⛔ NON-CLAIMS (§18): no live HTTP/server.js. Production RP is the D35 pair
-// only. Challenges are not durable secrets; D41 still forbids them from
-// audit/telemetry/logs.
+// ⛔ NON-CLAIMS: no live HTTP/server.js. The production RP is the canonical
+// rp_id/origin pair only. Challenges are not durable secrets, but they are
+// still kept out of audit/telemetry/logs.
 'use strict';
 
 const crypto = require('crypto');
-const __repo = require('./repo.js');   // #193: the repository holds the tenant
+const __repo = require('./repo.js');   // the repository holds the tenant
 
 const PURPOSES = Object.freeze(['webauthn.register', 'webauthn.elevate']);
 const CHALLENGE_TTL_MS = 300_000; // 5 minutes
@@ -66,7 +63,7 @@ function isCanonicalOriginShape(v) {
   return u.username === '' && u.password === '';
 }
 
-// P0-D: only exact localhost harness origins. 127.0.0.1, subdomains, paths refuse.
+// Only exact localhost harness origins. 127.0.0.1, subdomains, paths refuse.
 function isLocalhostHarnessOrigin(v) {
   if (!boundedString(v, 2048)) return false;
   if (!v.startsWith('http://localhost')) return false;
@@ -76,7 +73,7 @@ function isLocalhostHarnessOrigin(v) {
 
 // Production pair: canonical HTTPS origin whose hostname equals rp_id exactly.
 // No wildcards, no suffix match, never derived from a request header.
-// The adopting host pins which pair it passes (#384: this folder must not).
+// The adopting host pins which pair it passes (this folder must not).
 function isCanonicalHttpsRpPair(rp_id, origin) {
   if (!boundedString(rp_id, 253) || !boundedString(origin, 2048)) return false;
   if (/[^a-z0-9.-]/i.test(rp_id) || rp_id.startsWith('-') || rp_id.endsWith('-') ||
@@ -102,7 +99,7 @@ function createStore(opts) {
   const tenant = ownData(opts, 'tenant').value;
   const rp_id = ownData(opts, 'rp_id').value;
   const origin = ownData(opts, 'origin').value;
-  // #193: a CONSTRUCTOR validates the tenant's SHAPE — it must not consult the
+  // A CONSTRUCTOR validates the tenant's SHAPE — it must not consult the
   // repository, which may legitimately not be initialised yet (stores are built
   // before initialize() in several host paths). The REPOSITORY enforces the
   // row-level match; that is the layer that owns the rule.
@@ -221,7 +218,8 @@ function createStore(opts) {
 
     const digest = digestOf(ceremony_id);
     const r = RECORDS.get(digest);
-    // Delete synchronously BEFORE returning — before any verifier await (C2/M11).
+    // Delete synchronously BEFORE returning — before any verifier await, so a
+    // concurrent second take cannot succeed.
     if (!r) return FAIL;
     RECORDS.delete(digest);
     if (!recordValid(r)) return FAIL;

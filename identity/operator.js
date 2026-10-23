@@ -1,9 +1,8 @@
-// identity/operator.js — R7 local operator control plane.
-// Binding: docs/audits/CODEX_ASSERTION_PACKET_R7_2026-08-07.md
-// Builder: Grok. Isolated-harness only. No network, no public route.
+// identity/operator.js — local operator control plane.
+// Isolated-harness only. No network, no public route.
 //
 // The operator is NOT a tenant subject. Null issuer/inviter represent this
-// separate control plane (D44). Secrets are generated here, returned once,
+// separate control plane. Secrets are generated here, returned once,
 // and stored only as digests via admission.mintOperatorInDraft.
 'use strict';
 const crypto = require('crypto');
@@ -16,8 +15,8 @@ const l1 = require('./l1_sessions.js');
 const challenges = require('./challenges.js');
 
 const BOOTSTRAP_TTL_MS = 900_000;
-// #193: LAZY. Evaluating at module load throws — require() happens long
-// before initialize() has been told the house.
+// LAZY. Evaluating at module load throws — require() happens long
+// before initialize() has been told the tenant.
 const TENANT = () => repo.tenant();
 
 function requireRepoReady() {
@@ -56,10 +55,11 @@ function mintBootstrapCapability() {
   const live = state.admission_capabilities.some(c =>
     c.tenant === TENANT() && c.purpose === 'bootstrap' && c.consumed_at === null &&
     // treat expired as not live for the "live cap" refusal of a second mint:
-    // packet C6: refuse live unconsumed. An expired unconsumed still blocks
-    // another mint until abandoned or we allow? Packet: "no live unconsumed
-    // bootstrap capability". Expired is not live for redemption, but still
-    // occupies a row — refuse if any unconsumed non-expired exists.
+    // the rule is to refuse while a live unconsumed capability exists. Does an
+    // expired unconsumed one still block another mint until abandoned? The
+    // rule says "no live unconsumed bootstrap capability". Expired is not live
+    // for redemption, but still occupies a row — refuse if any unconsumed
+    // non-expired exists.
     true);
   const now = Date.now();
   const unconsumedLive = state.admission_capabilities.some(c =>
@@ -197,7 +197,7 @@ function mintOfflineRecoveryCapability(personId) {
   if (state.bootstrap.completed_at === null) {
     throw new Error('operator.mintOfflineRecoveryCapability: bootstrap not complete');
   }
-  // §13.1 entry: target must be active person, active membership, live non-expiring admin assignment.
+  // Entry condition: target must be active person, active membership, live non-expiring admin assignment.
   const person = state.subjects.find(s => s.id === personId) || null;
   if (!person || person.kind !== 'person' || person.status !== 'active' || person.tenant !== TENANT()) {
     throw new Error('operator.mintOfflineRecoveryCapability: target is not an active house person');
@@ -247,8 +247,8 @@ function mintOfflineRecoveryCapability(personId) {
     return minted;
   });
 
-  // §13.2 post-mint snapshot: SHA-256 of the published file bytes on disk.
-  // Disposition F-A: no hash of parsed/in-memory state satisfies this.
+  // Post-mint snapshot: SHA-256 of the published file bytes on disk.
+  // No hash of parsed/in-memory state satisfies this.
   const snapshot_sha256 = repo.publishedFileSha256();
 
   return Object.freeze({

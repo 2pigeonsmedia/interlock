@@ -1,30 +1,27 @@
 // identity/admission.js — the admission-capability lifecycle: THE TRUST ROOT.
 //
-// R2 of the Plan 1.5 recovery sequence (desk tickets #173 / build #185).
-// Assertions: Ouzel — ASSERTION_PACKET_R2_2026-08-01_OUZEL.md + AMENDMENT1 +
-// AMENDMENT2 + AMENDMENT3. All bind; later wins. Builder: Tailorbird.
-//
-// WHY THIS FILE EXISTS: spec §5.2a. Every way a new actor enters this system —
+// WHY THIS FILE EXISTS: every way a new actor enters this system —
 // a human invitation, a locally summoned assistant, a remotely running seat, a
 // member reset, the first-administrator bootstrap, offline recovery — passes
 // through ONE governed record. Before this, "who may create an identity" was
 // answered by whoever could reach the enrolment code path.
 //
-// THE ONE RULE EVERYTHING ELSE SERVES (D26): THE SERVER READS AUTHORITY FROM THE
+// THE ONE RULE EVERYTHING ELSE SERVES: THE SERVER READS AUTHORITY FROM THE
 // STORED RECORD, NEVER FROM THE CALLER. The claim — not the request — fixes
 // tenant, principal, allowed permissions, resource ceiling, and maximum
 // lifetime. A caller may present a secret and propose a display name; it may
-// not select who it is acting for or what it may do. That is the F-02 hole, and
-// it is the difference between a delegation and an escalation.
+// not select who it is acting for or what it may do. Letting it would be the
+// caller-authority-substitution hole, and this rule is the difference between
+// a delegation and an escalation.
 //
-// SECRET HANDLING (D41): the raw secret is generated HERE, returned ONCE, and
+// SECRET HANDLING: the raw secret is generated HERE, returned ONCE, and
 // never persisted, logged, returned again, placed in a URL, or written to any
 // audit field. Only the digest is stored, untruncated. Comparison is
 // constant-time. There is deliberately NO read path that validates a secret
 // without consuming it — such a function is an oracle whatever it is called.
 //
 // TTL POLICY: seat, bootstrap, recovery and reset claims keep the inherited
-// 15-minute ceiling (`TTL_MAX_MS`, D19's minimum pass lifetime). Interlock's
+// 15-minute ceiling (`TTL_MAX_MS`, the minimum pass lifetime). Interlock's
 // human invite is deliberately the single 24-hour exception so a person does
 // not have to coordinate enrollment inside a quarter-hour window.
 'use strict';
@@ -34,7 +31,7 @@ const capabilityPolicy = require('./capability_policy.js');
 
 // Bounds for the capability's OWN lifetime — see the header note.
 const TTL_MIN_MS = 60_000;                        // one minute
-const TTL_MAX_MS = repo.MIN_PASS_LIFETIME_MS;     // == D19's floor (900_000)
+const TTL_MAX_MS = repo.MIN_PASS_LIFETIME_MS;     // == the pass-lifetime floor (900_000)
 const HUMAN_INVITE_TTL_MS = 86_400_000;           // exactly 24 hours
 
 // Keys a caller may supply to mint(). Anything else refuses ON PRESENCE — the
@@ -47,7 +44,7 @@ const MINT_KEYS = Object.freeze([
   'secret_label',
 ]);
 // At consume time the caller supplies ONLY these. Every element of authority is
-// read from the stored record (D26).
+// read from the stored record.
 const CONSUME_KEYS = Object.freeze(['tenant', 'purpose', 'secret', 'consuming_subject_id', 'now']);
 
 function refuseUnknownKeys(input, allowed, where) {
@@ -74,7 +71,7 @@ function digestOf(secret) {
 
 // CONSTANT-TIME over the digest. Stated as a contract, not a performance note:
 // a lookup that compares digests with `===` leaks by timing, and this is the one
-// place in R2 where a secret is compared at all. timingSafeEqual throws on
+// place in this module where a secret is compared at all. timingSafeEqual throws on
 // unequal lengths, so the length check is part of the contract, not a shortcut.
 function digestMatches(a, b) {
   const ba = Buffer.from(String(a), 'utf8');
@@ -118,9 +115,9 @@ function mint(opts) {
         : ' — this admission purpose remains short-lived and never outlives the shortest pass it could produce'));
   }
 
-  // max_seat_ttl: required and inside D19's INCLUSIVE bounds for the two seat
-  // purposes, null for the other four. Refused HERE, before the repo refuses
-  // it, with a message that names the purpose (packet C6).
+  // max_seat_ttl: required and inside the pass-lifetime INCLUSIVE bounds for
+  // the two seat purposes, null for the other four. Refused HERE, before the
+  // repo refuses it, with a message that names the purpose.
   const isSeatPurpose = repo.SEAT_ADMISSION_PURPOSES.includes(purpose);
   if (isSeatPurpose) {
     if (!(Number.isSafeInteger(max_seat_ttl) &&
@@ -203,7 +200,7 @@ function mint(opts) {
       mint_audit_id,
     };
     state.admission_capabilities.push(row);
-    // The intent carries NO secret and NO digest (D41, packet C8).
+    // The intent carries NO secret and NO digest.
     state.outbox.push({
       id: crypto.randomUUID(), ts: now, kind: 'admission.mint',
       tenant, capability_id: row.id, purpose,
@@ -217,9 +214,9 @@ function mint(opts) {
   return { record, secret };
 }
 
-// ── R7 operator mint (bootstrap / offline_recovery only) ────────────────────
+// ── operator mint (bootstrap / offline_recovery only) ───────────────────────
 // Shares the secret/digest/intent body with ordinary mint. Null issuer is
-// permitted ONLY here; ordinary mint() still refuses a null issuer (C4/C52).
+// permitted ONLY here; ordinary mint() still refuses a null issuer.
 const OPERATOR_PURPOSES = Object.freeze(['bootstrap', 'offline_recovery']);
 const OPERATOR_MINT_KEYS = Object.freeze([
   'tenant', 'purpose', 'intended_subject_kind', 'principal_subject_id',
@@ -367,15 +364,16 @@ function consumeBoundPersonInDraft(draft, opts) {
 }
 
 // ── consumption ─────────────────────────────────────────────────────────────
-// WHERE ATOMICITY LIVES. repo.transact() is non-reentrant (I17), so a consumer
+// WHERE ATOMICITY LIVES. repo.transact() is non-reentrant, so a consumer
 // that must create a subject, a credential and an assignment IN THE SAME
 // transaction as the consumption cannot call a consume() that opens its own.
-// Hence the draft-level entry point: R7's redemption ceremonies compose with it,
+// Hence the draft-level entry point: the redemption ceremonies compose with it,
 // and consumption plus everything it authorizes commit together or not at all.
 //
 // `consume` is a WRAPPER around `consumeInDraft`, not a second implementation.
-// Two copies of consumption logic is precisely the drift this house names by its
-// own rule, applied inside a single module — so there is one body and one caller.
+// Two copies of consumption logic is precisely the drift the project's
+// one-definition rule forbids, applied inside a single module — so there is one
+// body and one caller.
 function consumableRowInDraft(draft, input) {
   const { tenant, purpose, secret, now } = input;
   requireIdentityString(tenant, 'tenant', 'consume');

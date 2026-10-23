@@ -1,6 +1,5 @@
-// identity/administration.js — R7 post-bootstrap tenant administration.
-// Binding: docs/audits/CODEX_ASSERTION_PACKET_R7_2026-08-07.md
-// Builder: Grok. Harness-only. Composes can() + R6 step-up + existing mutators.
+// identity/administration.js — post-bootstrap tenant administration.
+// Harness-only. Composes can() + WebAuthn step-up + existing mutators.
 'use strict';
 const crypto = require('crypto');
 const repo = require('./repo.js');
@@ -17,8 +16,8 @@ const grants = require('./grants.js');
 
 const HUMAN_INVITE_TTL_MS = admission.HUMAN_INVITE_TTL_MS;
 const MEMBER_RESET_TTL_MS = 900_000;
-// #193: LAZY. Evaluating at module load throws — require() happens long
-// before initialize() has been told the house.
+// LAZY. Evaluating at module load throws — require() happens long
+// before initialize() has been told the tenant.
 const TENANT = () => repo.tenant();
 
 const WORKFLOWS = Object.freeze([
@@ -35,10 +34,10 @@ const WORKFLOWS = Object.freeze([
   'participant.revoke',
   'transcript.clear',
   'authenticator.add',
-  // W2 §1.1 — 'authenticator.revoke' is REMOVED, not aliased. Two revoke doors with
+  // 'authenticator.revoke' is REMOVED, not aliased. Two revoke doors with
   // two threat models must be two workflow names, or the audit log cannot tell a
   // person retiring their own phone from an administrator destroying someone else's
-  // credential. H5 is the hollow that checks exactly this.
+  // credential.
   'authenticator.revoke.own',
   'authenticator.revoke.other',
   'policy.pass_lifetime',
@@ -48,9 +47,9 @@ const WORKFLOWS = Object.freeze([
 
 const FAIL = Object.freeze({ ok: false });
 
-// W4: the closed argument surface of installTool. `kind` is deliberately ABSENT
-// — it is derived (D23), and a caller who sends it gets a refusal, not silence.
-// `actor` is absent too: the installer comes from the authenticated session (I7).
+// The closed argument surface of installTool. `kind` is deliberately ABSENT
+// — it is derived by the server, and a caller who sends it gets a refusal, not
+// silence. `actor` is absent too: the installer comes from the authenticated session.
 const INSTALL_TOOL_KEYS = Object.freeze([
   'name', 'purpose', 'resource', 'expires_at',
   'cookie_header', 'csrf_token', 'request_origin', 'sec_fetch_site', 'now',
@@ -152,32 +151,32 @@ function createService(opts) {
   if (!isPlainObject(opts) || hasAnyAccessor(opts)) {
     throw new Error('administration: options must be a plain object without accessors');
   }
-  // ── W1 constructor fold (Plan 2, packet §3) ───────────────────────────────
-  // Until W1 this constructor admitted exactly one shape: harness === true on a
+  // ── live constructor fold ─────────────────────────────────────────────────
+  // Originally this constructor admitted exactly one shape: harness === true on a
   // localhost origin. That is a CONSTRUCTION gate, not a property of redeem /
   // change / reset, and it is the only thing that stopped live server.js from
   // calling three already-reviewed methods. The fold adds one further admitted
   // shape and changes nothing else:
   //
-  //   isolated (R7/R8, unchanged) : harness === true, origin http://localhost[:port],
+  //   isolated (unchanged)        : harness === true, origin http://localhost[:port],
   //                                 authenticator_service REQUIRED
-  //   live W1                     : harness absent/false, origin EXACTLY the live
+  //   live                        : harness absent/false, origin EXACTLY the live
   //                                 HTTPS origin, authenticator_service may be null
   //
   // The live branch is deliberately an exact string equality against one
   // constant — not a pattern, not a list, not configurable. A relaxable origin
-  // here would undo the CSRF property the whole packet rests on.
+  // here would undo the CSRF property this whole design rests on.
   //
   // The refusal message still leads with "harness must be exactly true" because
-  // that is the correct guidance for every caller that is not live W1, and R7
-  // M45 pins that exact text.
-  // ── LOGIN-WIRING fold (packet §1.1.4) — ONE further admitted shape ────────
+  // that is the correct guidance for every caller that is not the live shape,
+  // and an existing test pins that exact text.
+  // ── LOGIN-WIRING fold — ONE further admitted shape ─────────────────────────
   //
-  //   contained W1 (NEW) : harness absent/false, contained === true,
+  //   contained          : harness absent/false, contained === true,
   //                        origin http://localhost[:port] or http://127.0.0.1[:port],
   //                        authenticator_service may be null
   //
-  // This is the practice-copy door: a loopback copy of the house that a browser
+  // This is the practice-copy door: a loopback copy of the instance that a browser
   // can actually complete a login against. It exists because a contained server
   // constructed at the live HTTPS origin returns 401 on every POST — the Origin
   // compare is exact, and correctly so.
@@ -186,21 +185,21 @@ function createService(opts) {
   //
   //   ① `contained` is admitted ONLY when harness is not set. It is not a second
   //      way to reach the harness relaxations — throttle and sleep stay
-  //      production (§3: "contained is not the R5/R7 harness").
+  //      production ("contained is not the test harness").
   //   ② The origin is still an EXACT pattern match, loopback only. `contained:
   //      true` on a non-loopback origin THROWS, so this cannot become a general
-  //      origin-relaxing switch — which is what A3/A7 forbade and still forbid.
+  //      origin-relaxing switch — which the design forbids.
   //   ③ The LIVE branch still cannot pass `contained`: with contained absent,
   //      the only non-harness construction remains an exact string equality —
   //      now against the caller-supplied `live_origin` pin rather than a baked
-  //      host URL (A3). The compare is the same compare; only the operand moved.
+  //      host URL. The compare is the same compare; only the operand moved.
   //
   // The compare in login.js stays exact either way. One process, one origin —
   // http://localhost:PORT and http://127.0.0.1:PORT are NOT interchangeable.
   const harness = ownData(opts, 'harness').value === true;
   const contained = ownData(opts, 'contained').value === true;
   const origin = ownData(opts, 'origin').value;
-  // A2/A3: the live-origin pin MOVES, it does not vanish. The module carries no
+  // The live-origin pin MOVES, it does not vanish. The module carries no
   // host URL — an upstream-host adapter passes its configured URL; another host
   // passes its own.
   // What must NOT change is that the live branch stays an EXACT string equality
@@ -210,11 +209,11 @@ function createService(opts) {
   // check that silently becomes decoration.
   const live_origin = ownData(opts, 'live_origin').value;
 
-  // ── OBSERVED ORIGIN CLASS (land 1c, Codex blocker 1) ─────────────────────
+  // ── OBSERVED ORIGIN CLASS ───────────────────────────────────────────────
   // `can()` takes an origin CLASS — 'local' or 'tunnel' — and a grant may be
   // scoped to one of them. This service answered `'local'` unconditionally, so
   // a service reached through the tunnel spent grants that were only ever
-  // issued for the house machine. The named harm is exact: a remotely reached
+  // issued for the local machine. The named harm is exact: a remotely reached
   // live admin spending a local-only grant.
   //
   // The class is a CONSTRUCTION ARGUMENT because it is a property of HOW THE
@@ -251,7 +250,7 @@ function createService(opts) {
     // Property ③ preserved: with contained absent, the only non-harness
     // construction admitted remains an exact string equality — against the pin
     // the HOST supplied, instead of against a constant the module baked in.
-    // FAIL CLOSED ON ABSENCE (A4 acceptance 1). Missing, blank or non-absolute
+    // FAIL CLOSED ON ABSENCE. Missing, blank or non-absolute
     // refuses at construction. Note what this specifically prevents: with no
     // pin and no origin, `origin !== live_origin` is `undefined !== undefined`
     // — FALSE — and a live door would have been admitted by a comparison that
@@ -259,13 +258,13 @@ function createService(opts) {
     // reason, and there is a control asserting exactly that pair.
     //
     // The refusal keeps the shipped 'harness must be exactly true' wording so
-    // the host's existing R7 M45 claim still reads true against it: a
+    // the host's existing test claim still reads true against it: a
     // non-harness construction without a valid pin is refused, which is what
     // that control has always asserted. The claim did not change; the reason
     // it can be trusted got stronger.
-    // ── CANONICAL https ORIGIN (land 1c, folds #385 + Codex Finding 3) ────
+    // ── CANONICAL https ORIGIN ────────────────────────────────────────────
     // The first version tested /^https?:/ with a regex. Three things wrong with
-    // that, and only the first was filed as #385:
+    // that, and only the first was originally noticed:
     //   · it admitted `http:` where the constant it replaced was https-only —
     //     a silent policy relaxation on a LIVE door;
     //   · a regex on a URL matches a PREFIX, so credentials, a path, a query or
@@ -294,9 +293,9 @@ function createService(opts) {
   if (!challenge_store || typeof challenge_store.revokeSubject !== 'function') {
     throw new Error('administration: challenge_store required');
   }
-  // Live W1 admits a null authenticator_service: no production WebAuthn service
-  // exists until the Tier 3 bind packet. The methods that need one already
-  // return the ordinary FAIL when it is absent, and W1 attaches none of them.
+  // The live shape admits a null authenticator_service: the production WebAuthn
+  // service may be absent. The methods that need one already return the
+  // ordinary FAIL when it is absent, and the live shape attaches none of them.
   if (harness && !authenticator_service) {
     throw new Error('administration: authenticator_service required');
   }
@@ -308,8 +307,8 @@ function createService(opts) {
     metrics[key] = (metrics[key] || 0) + 1;
   }
 
-  // D8 observed-origin class for can() is 'local' | 'tunnel' — NOT the HTTP
-  // Origin header. Localhost harness maps to 'local' (R3 OBSERVED_ORIGINS).
+  // The observed-origin class for can() is 'local' | 'tunnel' — NOT the HTTP
+  // Origin header. Localhost harness maps to 'local' (see OBSERVED_ORIGINS).
   function authzOriginClass() {
     // Both can() calls in withFreshAdmin route through authzAllow, so this one
     // return governs the pre-consumption check AND the post-step-up re-check.
@@ -324,7 +323,7 @@ function createService(opts) {
     });
   }
 
-  // §7 central order for post-bootstrap admin mutations.
+  // Central order for post-bootstrap admin mutations.
   function withFreshAdmin(optsIn, workflow, resource, body) {
     if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn)) return FAIL;
     const env = envelopeOf(optsIn);
@@ -381,9 +380,9 @@ function createService(opts) {
     }
   }
 
-  // ── Room grant (land 6): put a person on a private/breakout room ──────────
+  // ── Room grant: put a person on a private/breakout room ───────────────────
   // Direct grants, not a role remap: participant's bundle is room:main only.
-  // House rooms stay the Member role. This verb is Owner L2 (admin on rooms).
+  // Ordinary rooms stay the Member role. This verb is Owner L2 (admin on rooms).
   function grantRoomAccess(optsIn) {
     const targetName = ownData(optsIn || {}, 'name').value;
     const roomId = ownData(optsIn || {}, 'room_id').value;
@@ -869,9 +868,9 @@ function createService(opts) {
       Object.freeze({ ok: true }));
   }
 
-  // ── Authenticator self-management (R7 extends R6) ─────────────────────────
+  // ── Authenticator self-management ─────────────────────────────────────────
   async function beginAdditionalAuthenticator(optsIn) {
-    // Requires L2 + at least one existing usable authenticator; uses R6 service.
+    // Requires L2 + at least one existing usable authenticator; uses the WebAuthn service.
     if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn)) return FAIL;
     const env = envelopeOf(optsIn);
     if (typeof env.now !== 'number' || !Number.isFinite(env.now)) return FAIL;
@@ -885,11 +884,11 @@ function createService(opts) {
       a.tenant === TENANT() && a.person_subject_id === pid && a.revoked_at === null)) {
       return FAIL;
     }
-    // R6 beginRegistration refuses when ANY historical authenticator exists.
-    // Additional authenticator is a separate R7 path — for this first land we
-    // surface the limitation as FAIL and document it for amendment if the
-    // R6 service cannot be extended without a packet change. Packet §11.6
-    // requires finish to bind through one transaction after step-up.
+    // The service's beginRegistration refuses when ANY historical authenticator
+    // exists. Adding another authenticator is a separate path — for now we
+    // surface the limitation as FAIL and document it, in case the service
+    // cannot be extended without a design change. Finish must bind through one
+    // transaction after step-up.
     // Implementation: call a dedicated path on authenticator_service if present.
     if (typeof authenticator_service.beginAdditionalRegistration === 'function') {
       return authenticator_service.beginAdditionalRegistration(optsIn);
@@ -905,13 +904,10 @@ function createService(opts) {
     return FAIL;
   }
 
-  // ── W2: TWO revoke doors, two threat models ───────────────────────────────
-  // Packet docs/audits/GROK_ASSERTION_PACKET_W2_ADMIN_2026-08-14.md
-  //   sha256 dbacf90ec06f093360b35a38a66ca9e28f9ca6dce468f52b485a91420198e9a3
-  //   amendment A1 `c90d05e` (waives the §2 pin HOLD; three closed-wave drifts re-pinned)
+  // ── TWO revoke doors, two threat models ───────────────────────────────────
   //
   // The single `revokeAuthenticator` that used to live here is GONE — removed, not
-  // aliased (§1.1). It was self-only AND gated on fresh L2, which is the combination
+  // aliased. It was self-only AND gated on fresh L2, which is the combination
   // that leaves the common case unbuilt: L2 *is* the passkey, so a person whose phone
   // is in a lake cannot earn L2 to retire the authenticator on the phone that is in
   // the lake. Gating self-revoke on L2 deadlocks exactly the person it is for.
@@ -920,21 +916,21 @@ function createService(opts) {
   // LOOKS like the whole job: the old body ended `revokeTargetSessions(actorId, …)`,
   // which was correct only because actor WAS target. Keep that line on the
   // other-person door and you sign the ADMINISTRATOR out while leaving the victim's
-  // sessions alive — the exact inverse of the intent. H2/C6 exist for this.
+  // sessions alive — the exact inverse of the intent. Tests exist for this.
 
-  // A2 — revoke OWN authenticator. L1. No `admin`. No step-up.
+  // OWN door — revoke OWN authenticator. L1. No `admin`. No step-up.
   //
   // Threat model, stated so nobody "hardens" it later: a password-holder can strip
   // the victim's second factor. They gain NOTHING above L1 by doing so — it is
   // denial, not escalation — and the mitigation is a loud audit row, not a gate.
-  // There is no notification channel and the packet forbids building one.
+  // There is no notification channel and the design forbids building one.
   function revokeOwnAuthenticator(optsIn) {
     const opts = optsIn || {};
     const authenticator_id = ownData(opts, 'authenticator_id').value;
     if (typeof authenticator_id !== 'string' || !authenticator_id) return FAIL;
 
     // Deliberately NOT withFreshAdmin: that helper is the L2 + can('admin') door,
-    // and A2 requires neither. But "no L2" must not become "no envelope" — a
+    // and the own door requires neither. But "no L2" must not become "no envelope" — a
     // cross-site POST that strips someone's second factor is the obvious attack on
     // a door this cheap.
     //
@@ -943,7 +939,7 @@ function createService(opts) {
     // session's own secret, at L1, and it advances idle only AFTER every check
     // passes. My first draft hand-rolled `authenticate()` plus a CSRF comparison I
     // invented; that would have been a second copy of a security rule, free to drift
-    // from the one W1 enforces. Do not reimplement a shipped primitive (§1.2).
+    // from the one the live service enforces. Do not reimplement a shipped primitive.
     if (!isPlainObject(opts) || hasAnyAccessor(opts)) return FAIL;
     const env = envelopeOf(opts);
     if (typeof env.now !== 'number' || !Number.isFinite(env.now)) return FAIL;
@@ -960,16 +956,17 @@ function createService(opts) {
 
     const state = repo.read();
     const row = state.authenticators.find(a => a.id === authenticator_id);
-    // Generic on purpose (§1.2): "not yours" and "does not exist" are the SAME
+    // Generic on purpose: "not yours" and "does not exist" are the SAME
     // answer, or this route becomes an oracle for other people's authenticator ids.
     if (!row || row.revoked_at !== null || row.person_subject_id !== actorId) {
       mark(null, 'authenticator.revoke.own', 'refused');
       return FAIL;
     }
 
-    // D43 lives at the repository commit point and is NOT re-implemented here.
-    // The old body carried a `usable`/`would` block that computed two values, used
-    // neither, and fell through — a guard-shaped comment doing nothing. Deleted (C11).
+    // The usable-administrator invariant lives at the repository commit point and
+    // is NOT re-implemented here. The old body carried a `usable`/`would` block that
+    // computed two values, used neither, and fell through — a guard-shaped comment
+    // doing nothing. Deleted.
     try {
       repo.transact(draft => {
         const a = draft.authenticators.find(x => x.id === authenticator_id);
@@ -987,13 +984,13 @@ function createService(opts) {
       mark(null, 'authenticator.revoke.own', 'refused');
       return FAIL;
     }
-    // Spec §5.5 — revocation kills sessions. OWN door: the owner's sessions.
+    // Revocation kills sessions. OWN door: the owner's sessions.
     revokeTargetSessions(actorId, now, 'authenticator-revocation');
     mark(null, 'authenticator.revoke.own', 'committed');
     return Object.freeze({ ok: true });
   }
 
-  // A — revoke ANOTHER person's authenticator. Tier 3. Fresh L2 + can('admin').
+  // OTHER-PERSON door — revoke ANOTHER person's authenticator. Fresh L2 + can('admin').
   function revokeOtherAuthenticator(optsIn) {
     const opts = optsIn || {};
     const authenticator_id = ownData(opts, 'authenticator_id').value;
@@ -1002,8 +999,8 @@ function createService(opts) {
     if (typeof target_person_subject_id !== 'string' || !target_person_subject_id) return FAIL;
 
     return withFreshAdmin(opts, 'authenticator.revoke.other', 'authenticators', ({ actorId, now }) => {
-      // Self-target refuses here even for an administrator: A is other-only, and the
-      // person's own door is A2, which needs no admin at all. Collapsing the two
+      // Self-target refuses here even for an administrator: this door is other-only,
+      // and the person's own door needs no admin at all. Collapsing the two
       // would put an L2 requirement back on the lost-phone case by the side door.
       if (target_person_subject_id === actorId) throw new Error('other-only');
 
@@ -1012,7 +1009,8 @@ function createService(opts) {
       if (!row || row.revoked_at !== null) throw new Error('authenticator missing');
       if (row.person_subject_id !== target_person_subject_id) throw new Error('target mismatch');
 
-      // D43 at the commit point, same as A2. Not re-implemented, not copied.
+      // Usable-administrator invariant at the commit point, same as the own door.
+      // Not re-implemented, not copied.
       repo.transact(draft => {
         const a = draft.authenticators.find(x => x.id === authenticator_id);
         if (!a || a.revoked_at !== null || a.person_subject_id !== target_person_subject_id) {
@@ -1032,7 +1030,7 @@ function createService(opts) {
     });
   }
 
-  // D16 — pass lifetime. The policy primitive is shipped and bounds-checked in
+  // Pass lifetime. The policy primitive is shipped and bounds-checked in
   // policy.js (900_000 .. 7_776_000_000, integer, prospective, no-op if unchanged);
   // policy.js has NO authorization of its own, which is precisely why the HTTP
   // adapter may not call it directly. This is the only authorized door to it.
@@ -1049,8 +1047,8 @@ function createService(opts) {
       // unchanged-is-a-no-op rule all live inside it). `repo.transact` is
       // NON-REENTRANT by design — repo.js says a nested transaction silently loses
       // its commit — so my first draft, which wrapped this call in a second
-      // transaction to add an audit row, made every in-bounds set REFUSE. C12 caught
-      // it, and it is the same non-reentrancy hazard #347 is filed about.
+      // transaction to add an audit row, made every in-bounds set REFUSE. A test caught
+      // it, and it is the same non-reentrancy hazard that makes installTool non-atomic.
       //
       // Bounds are not re-checked here either: a second copy of a rule is a rule
       // plus a future divergence. Out-of-bounds throws inside, and that becomes FAIL.
@@ -1059,16 +1057,16 @@ function createService(opts) {
     });
   }
 
-  // ── W4 tool installation (Plan 2, packet GROK_ASSERTION_PACKET_W4) ────────
+  // ── tool installation ─────────────────────────────────────────────────────
   // ISSUANCE, not a profile line. A tool is a narrowly callable integration; a
-  // conversational collaborator is a SEAT and is not created here (W8/W9).
+  // conversational collaborator is a SEAT and is not created here.
   //
   // The whole point of routing through withFreshAdmin is that the installer is
-  // taken from the AUTHENTICATED SESSION, never from an argument (I7): there is
+  // taken from the AUTHENTICATED SESSION, never from an argument: there is
   // no `actor` parameter to forge, and transport is not an input.
   function installTool(optsIn) {
     if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn)) return FAIL;
-    // The key list is CLOSED (D23/I1, same law as credentials.issue I5): a
+    // The key list is CLOSED (kind is server-derived; same rule as credentials.issue): a
     // smuggled `kind` must REFUSE, not be silently ignored. Ignoring it would
     // train callers to send it and leave the refusal one careless edit from
     // becoming an accept — the caller must never believe kind is theirs.
@@ -1083,18 +1081,18 @@ function createService(opts) {
     if (typeof purpose !== 'string' || !purpose.trim()) return FAIL;
     if (typeof resource !== 'string' || !resource.trim()) return FAIL;
     if (typeof expires_at !== 'number' || !Number.isFinite(expires_at)) return FAIL;
-    // F5 (cold review, Dovekie): the expiry check belongs ABOVE the ladder. Held
+    // The expiry check belongs ABOVE the ladder. Held
     // inside the body it refused only AFTER consuming the one-use WebAuthn
     // step-up, so a mistyped date cost the operator a fresh ceremony — and it was
     // redundant with credentials.issue's own ttl check, hence unobservable. Up
-    // here it is a plain refusal that spends nothing, and C11 can see it.
+    // here it is a plain refusal that spends nothing, and a test can see it.
     const nowIn = ownData(optsIn, 'now').value;
     if (typeof nowIn !== 'number' || !Number.isFinite(nowIn)) return FAIL;
     if (!(expires_at - nowIn > 0)) return FAIL;
 
     return withFreshAdmin(optsIn, 'tool.install', 'tools', ({ actorId, now }) => {
       const ttlMs = expires_at - now;
-      // kind is DERIVED, never chosen (D23/I1) — the literal is the whole point.
+      // kind is DERIVED, never chosen — the literal is the whole point.
       const subj = subjects.create({ tenant: TENANT(), kind: 'tool', name: name.trim() });
       const tok = credentials.newToken();
       const cred = credentials.issue({
@@ -1106,11 +1104,11 @@ function createService(opts) {
         generation: 1,
         request_id: crypto.randomUUID(),
       });
-      // §1.1: the install record is DURABLE — who installed it, what for, on
+      // The install record is DURABLE — who installed it, what for, on
       // what, until when. An outbox row is the place the repo already has; the
       // exact key list is written out here rather than spread from an object,
       // so a future field cannot ride in unnoticed, and `secret`/`digest` are
-      // absent BY CONSTRUCTION rather than by remembering to strip them (I3).
+      // absent BY CONSTRUCTION rather than by remembering to strip them.
       repo.transact(d => {
         d.outbox.push({
           id: crypto.randomUUID(),
@@ -1119,7 +1117,7 @@ function createService(opts) {
           tenant: TENANT(),
           subject_id: subj.id,
           installer_subject_id: actorId,
-          // F4: trimmed, consistently with `name`. Storing one field raw and its
+          // Trimmed, consistently with `name`. Storing one field raw and its
           // neighbours trimmed makes the record's own fields disagree about what
           // a value is, and the audit reader cannot tell which is intended.
           purpose: purpose.trim(),
@@ -1127,12 +1125,12 @@ function createService(opts) {
           expires_at: cred.expires_at,
         });
       });
-      // I4: no grants are written. The installer's grants are NOT copied — there
+      // No grants are written. The installer's grants are NOT copied — there
       // is deliberately no code path here that reads them.
       return Object.freeze({
         ok: true,
         subject_id: subj.id,
-        secret: tok.token,           // I3: returned ONCE; only its digest is stored
+        secret: tok.token,           // returned ONCE; only its digest is stored
         expires_at: cred.expires_at,
       });
     });
@@ -1171,7 +1169,7 @@ function createService(opts) {
     // mutation that sends it back to an unconditional 'local' is visible to a
     // control. A health() that read the variable directly would keep reporting
     // 'tunnel' while the authorization path silently said 'local', which is the
-    // exact shape of the bug this land is repairing.
+    // exact shape of the bug this code repairs.
     return Object.freeze({ ok: true, harness, origin, tenant: TENANT(),
       observed_origin: authzOriginClass() });
   }
@@ -1198,17 +1196,17 @@ function createService(opts) {
     revokeOwnAuthenticator,
     revokeOtherAuthenticator,
     setPassLifetime,
-    // ── installTool: DEFER (land 2.5, binding disposition) ──────────────────
+    // ── installTool: DEFERRED ──────────────────────────────────────────────
     // NOT deleted — the implementation stays exactly where it is, above. It is
     // off the PUBLIC object until it has module-owned tests (fresh L2, secret
-    // once, zero inherited grants, closed key list) AND a ruling on `#347`,
-    // which is RATIFIED and says this path is non-atomic: a partial failure
+    // once, zero inherited grants, closed key list) AND a fix for a confirmed
+    // defect: this path is non-atomic: a partial failure
     // squats the tool name forever and can leave a live tool credential with no
     // identity.
     //
     // Be exact about what this line buys, because the honest version is
     // smaller than it looks: un-exporting stops NEW callers. It does not repair
-    // #347. Fixing the door is not fixing the room, and a wrap-up that reads
+    // the non-atomic path. Fixing the door is not fixing the room, and a wrap-up that reads
     // this as "installTool is safe now" would be wrong.
     //
     // Measured before removing, not assumed: `installTool` had ZERO callers
@@ -1220,7 +1218,7 @@ function createService(opts) {
 
 module.exports = {
   createService,
-  // Land 2, Grok's ruling: EXPORTED so a host adapter can refuse exactly what
+  // EXPORTED so a host adapter can refuse exactly what
   // this module refuses. The adapter must never carry its own copy of this rule
   // — a door that admits what the lock behind it rejects is the wrong way
   // round, and two definitions of one rule is one definition and one liability.

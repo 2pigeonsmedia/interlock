@@ -1,7 +1,5 @@
-// identity/offline_recovery.js — R7 stopped-server recovery gate.
-// Binding: docs/audits/CODEX_ASSERTION_PACKET_R7_2026-08-07.md
-// Disposition: docs/audits/CODEX_DISPOSITION_R7_2026-08-09.md (F-A, §13.3 step 6)
-// Builder: Grok. The verifier began as an isolated localhost harness. Interlock
+// identity/offline_recovery.js — stopped-server recovery gate.
+// The verifier began as an isolated localhost harness. Interlock
 // adds the contained, stopped-server localhost construction at the package root;
 // no public/live-server construction is admitted here.
 'use strict';
@@ -12,8 +10,8 @@ const admission = require('./admission.js');
 const passwords = require('./passwords.js');
 const authenticatorsMod = require('./authenticators.js');
 
-// #193: LAZY. Evaluating at module load throws — require() happens long
-// before initialize() has been told the house.
+// LAZY. Evaluating at module load throws — require() happens long
+// before initialize() has been told the tenant.
 const TENANT = () => repo.tenant();
 const FAIL = Object.freeze({ ok: false });
 const CEREMONY_TIMEOUT_MS = 60000;
@@ -70,7 +68,7 @@ function createService(opts) {
       typeof authenticator_service.verifyRecoveryRegistration !== 'function') {
     throw new Error('offline_recovery: authenticator_service with verifyRecoveryRegistration required');
   }
-  // §13.3 step 6 / disposition: session + challenge revokers required on the surface.
+  // Session + challenge revokers are required on the surface (used after commit).
   const session_store = ownData(opts, 'session_store').value;
   const challenge_store = ownData(opts, 'challenge_store').value;
   if (!session_store || typeof session_store.revokeSubject !== 'function') {
@@ -97,7 +95,7 @@ function createService(opts) {
     if (typeof snapshot_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(snapshot_sha256)) return FAIL;
     if (typeof now !== 'number' || !Number.isFinite(now)) return FAIL;
 
-    // §13.3: current file bytes must match the post-mint SHA receipt.
+    // Current file bytes must match the post-mint SHA receipt.
     let diskSha;
     try { diskSha = fileByteSha(); } catch (_) { return FAIL; }
     if (diskSha !== snapshot_sha256) return FAIL;
@@ -106,7 +104,7 @@ function createService(opts) {
     try { state = repo.read(); } catch (_) { return FAIL; }
 
     const cap = state.admission_capabilities.find(c => c.id === capability_id) || null;
-    // Not a secret oracle — no secret check here (C40).
+    // Not a secret oracle — no secret check here.
     if (!cap || cap.purpose !== 'offline_recovery' || cap.tenant !== TENANT()) return FAIL;
     if (cap.consumed_at !== null) return FAIL;
     if (now >= cap.expires_at) return FAIL;
@@ -120,7 +118,7 @@ function createService(opts) {
       options = await generateRegistrationOptions({
         rpName,
         rpID: rpId,
-        // Match authenticators.userHandleFor: SHA-256("house" + NUL + person id)
+        // Match authenticators.userHandleFor: SHA-256(`house` + NUL + person id)
         userID: crypto.createHash('sha256')
           .update(Buffer.from('house\u0000' + person.id, 'utf8'))
           .digest(),
@@ -172,7 +170,7 @@ function createService(opts) {
     if (typeof now !== 'number' || !Number.isFinite(now)) return FAIL;
     if (!isPlainObject(response)) return FAIL;
 
-    // §13.3 step 2: take the single-use challenge first (including failed finishes).
+    // Take the single-use challenge first (including failed finishes).
     const pend = pending.get(capability_id);
     if (!pend || pend.ceremony_id !== ceremony_id) return FAIL;
     pending.delete(capability_id);
@@ -180,7 +178,7 @@ function createService(opts) {
     // Expiry: ceremony must complete within CEREMONY_TIMEOUT_MS of begin.
     if (now < pend.started_at || now - pend.started_at > CEREMONY_TIMEOUT_MS) return FAIL;
 
-    // §13.3 steps 1–2: async preparation/verification BEFORE the final witness.
+    // Async preparation/verification BEFORE the final witness.
     let prepared;
     try { prepared = await passwords.prepare(new_password); }
     catch (_) { return FAIL; }
@@ -193,7 +191,7 @@ function createService(opts) {
     });
     if (!verified || !verified.ok || !verified.authenticator_row) return FAIL;
 
-    // §13.3 step 3 / F-A TOCTOU: re-read published FILE BYTES immediately before commit.
+    // TOCTOU guard: re-read published FILE BYTES immediately before commit.
     let diskSha;
     try { diskSha = fileByteSha(); } catch (_) { return FAIL; }
     if (diskSha !== pend.snapshot_sha256) return FAIL;
@@ -235,7 +233,7 @@ function createService(opts) {
         });
       });
 
-      // §13.3 step 6: revoke in-process target sessions/challenges; fail-closed on report.
+      // Revoke in-process target sessions/challenges; fail-closed on report.
       const sr = session_store.revokeSubject({
         subject_id: pend.target, now, reason: 'recovery',
       });

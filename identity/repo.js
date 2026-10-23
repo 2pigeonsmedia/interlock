@@ -1,9 +1,8 @@
 // identity/repo.js — THE one transactional store for the identity layer.
-// Task 1 of the #165 build sequence (desk ticket #166). Assertions: Codex,
-// docs/audits/CODEX_ASSERTION_PACKET_TASK1_2026-07-29.md (binding). Reference:
-// plan §Task 1 — one packet-forced departure from it is marked PACKET N1 below.
+// The first piece of the identity layer to be built. One deliberate departure
+// from the original design is marked "DEPARTURE FROM THE ORIGINAL DESIGN" below.
 //
-// WHY THIS FILE EXISTS (Codex finding F-04, 2026-07-21): the superseded design
+// WHY THIS FILE EXISTS: the superseded design
 // gave subjects/credentials/grants a JSON file and a save() each. Three separate
 // writes cannot be made atomic — a crash between them leaves a MIXED generation.
 // Each save() logged its failure while returning success, so a revocation could
@@ -17,33 +16,32 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');   // R1: the migration's audit-intent id (C6)
-// R2/C1: the protected capability-policy manifest — the single authority for
-// privilege class, allowed actor kinds, and minimum assurance (spec 6.1). It has
+const crypto = require('crypto');   // the migration's audit-intent id
+// The protected capability-policy manifest — the single authority for
+// privilege class, allowed actor kinds, and minimum assurance. It has
 // no dependencies of its own, so importing it here pulls nothing else into the
 // repository's initialization path.
 const capabilityPolicy = require('./capability_policy.js');
 
-// ── R1: VERSION 2 ────────────────────────────────────────────────────────────
-// Assertions: Hamerkop, docs/audits/ASSERTION_PACKET_R1_2026-08-01_HAMERKOP.md
-// + ASSERTION_PACKET_R1_AMENDMENT1_2026-08-01_HAMERKOP.md (the amendment wins on
-// conflict). Builder: Motmot. Version 2 adds seven durable collections and a
-// governed passwords{} shape, the D43 schema rule, and the complete-state
-// usable-administrator predicate + commit-point guard.
+// ── VERSION 2 ────────────────────────────────────────────────────────────────
+// Version 2 adds seven durable collections and a
+// governed passwords{} shape, the non-expiring-administrator schema rule, and the
+// complete-state usable-administrator predicate + commit-point guard.
 //
 // The migration is HOUSED HERE rather than in identity/migrate.js, deliberately:
-// every guard it must obey — pre-init refusal, I17 non-reentrancy, the full v1
-// gate, the full v2 gate, temp+fsync+rename, the F7 unlink — is repo-private.
+// every guard it must obey — pre-init refusal, transact() non-reentrancy, the
+// full v1 gate, the full v2 gate, temp+fsync+rename, the unlink of a rejected
+// temp file — is repo-private.
 // A sibling module would have to export all of them, widening this file's
-// surface for no gain and creating exactly the drift the anti-shard rule warns
-// about. Named here per packet §6.
-// ── #268 — THE STATE DIRECTORY FAILS CLOSED (land 2.5) ──────────────────────
+// surface for no gain and creating exactly the drift that splitting one store
+// across modules invites.
+// ── THE STATE DIRECTORY FAILS CLOSED ─────────────────────────────────────────
 // This resolver used to end in `path.join(__dirname, '..')` — the host's SOURCE
-// TREE. Bristlehead demonstrated the consequence: an importing host with no
+// TREE. The consequence, demonstrated: an importing host with no
 // sibling `state/` silently received real scrypt verifiers and salt, written at
 // 0644, into its own repository. On THIS checkout that branch is belted by a
-// .gitignore filename rule, which is exactly why it stayed invisible for 8.9
-// days; an importing host has no such file, so the escape is not the edge case
+// .gitignore filename rule, which is exactly why it stayed invisible for days;
+// an importing host has no such file, so the escape is not the edge case
 // there, it is the DEFAULT.
 //
 // Interlock closes the remaining extraction gap: configureStateDir() is the
@@ -54,8 +52,8 @@ let CONFIGURED_STATE_DIR = null;
 
 // Write-once. A second call with a DIFFERENT directory throws rather than
 // silently re-pointing a live store: two services in one process disagreeing
-// about where the credentials live is the failure this whole land exists to
-// prevent, and last-writer-wins would make it silent.
+// about where the credentials live is the failure this whole mechanism exists
+// to prevent, and last-writer-wins would make it silent.
 function configureStateDir(dir) {
   if (typeof dir !== 'string' || dir.length === 0 || !path.isAbsolute(dir)) {
     throw new Error('identity/repo: configureStateDir requires an ABSOLUTE path — ' +
@@ -84,25 +82,25 @@ const V1_FILE = () => path.join(BASE(), 'identity-state.v1.json');
 const VERSION = 2;
 const V1_VERSION = 1;
 // The six version-1 collections, carried across row-for-row and governed by
-// every v1 rule unchanged (I-R1-14).
+// every v1 rule unchanged.
 const V1_REQUIRED = ['subjects', 'passwords', 'credentials', 'grants', 'policy', 'outbox'];
 const V1_ARRAYS = ['subjects', 'credentials', 'grants', 'outbox'];
 const V1_OBJECTS = ['passwords', 'policy'];
-// The six new ARRAY collections; `bootstrap` is a plain object (C4).
+// The six new ARRAY collections; `bootstrap` is a plain object.
 const V2_NEW_ARRAYS = ['memberships', 'roles', 'role_permissions', 'role_assignments',
   'admission_capabilities', 'authenticators'];
 const REQUIRED = [...V1_REQUIRED, ...V2_NEW_ARRAYS, 'bootstrap'];
-// Task 4 grant vocabulary is owned at the commit point as well as the public
+// The grant vocabulary is owned at the commit point as well as the public
 // module. Exporting these frozen arrays lets grants.js re-export one definition
 // instead of drifting from the persisted-state validator.
 //
-// R2/C2: the vocabulary is now DERIVED from the protected capability-policy
+// The vocabulary is DERIVED from the protected capability-policy
 // manifest rather than typed here — one array, imported, so `capability_policy
 // .CAPABILITIES`, `repo.GRANT_CAPABILITIES` and `grants.CAPABILITIES` cannot
-// drift apart, because there is only one of them. This is the alignment-pinning
-// law: where correctness means matching another component, import it.
+// drift apart, because there is only one of them. The principle: where
+// correctness means matching another component, import it.
 //
-// `sponsor` joins here, discharging R1's C5 routed obligation. R1 held it back
+// `sponsor` joins here. Version 2 originally held it back
 // precisely so no `sponsor` grant could commit without a kind gate — so the
 // gate (grants.add reading the manifest's allowed_subject_kinds, and the
 // role-bundle kind-coherence rule below) lands in this SAME change or neither
@@ -121,18 +119,18 @@ const POLICY_EVENT_KEYS = Object.freeze([
 ]);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-// ── R1 vocabulary — one definition, frozen, for R2+ to reuse (C8) ───────────
+// ── Version 2 vocabulary — one definition, frozen, for later code to reuse ───
 const MEMBERSHIP_STATUSES = Object.freeze(['invited', 'active', 'suspended', 'revoked']);
 const ADMISSION_PURPOSES = Object.freeze(['human_invite', 'summon_seat', 'remote_seat_claim',
   'member_reset', 'bootstrap', 'offline_recovery']);
 const SEAT_ADMISSION_PURPOSES = Object.freeze(['summon_seat', 'remote_seat_claim']);
 const ROLE_ASSIGNMENT_SCOPES = Object.freeze(['tenant', 'room']);
 const SUBJECT_KINDS = Object.freeze(['person', 'seat', 'tool']);
-const ROLE_STATUSES = Object.freeze(['active']);   // extension is a later packet's
-const ADMINISTRATOR_SLUG = 'administrator';        // D29 canonical persisted key
+const ROLE_STATUSES = Object.freeze(['active']);   // extension is future work
+const ADMINISTRATOR_SLUG = 'administrator';        // canonical persisted key
 const PARTICIPANT_SLUG = 'participant';
-// R2/C3: the closed set of protected built-ins (spec §6.2, D28). Custom and
-// authored roles are deferred (spec §13) and R2 provides no path to create one,
+// The closed set of protected built-ins. Custom and
+// authored roles are deferred and no code path creates one,
 // so `system: true` under any other slug is smuggling, not extension.
 const PROTECTED_ROLE_SLUGS = Object.freeze([PARTICIPANT_SLUG, ADMINISTRATOR_SLUG]);
 const MIGRATION_EVENT_KIND = 'repo.migration';
@@ -193,9 +191,9 @@ function load() {
     d = readAndParse(FILE(), V2_SCHEMA, 'state file');
   } catch (e) {
     if (!e || e.code !== 'ENOENT') throw e;
-    // C1/C3: the v2 file is absent. ENOENT on BOTH files — and only that — is
+    // The v2 file is absent. ENOENT on BOTH files — and only that — is
     // first run. A v1 file standing alone is NOT an empty database: refuse and
-    // name the remedy, because initialize() never migrates implicitly (I-R1-6).
+    // name the remedy, because initialize() never migrates implicitly.
     if (fs.existsSync(V1_FILE())) {
       throw new Error('identity repo: a version-1 state file is present and no version-2 file exists — ' +
         'run the explicit migration migrateV1ToV2(); initialize() never migrates implicitly');
@@ -205,7 +203,7 @@ function load() {
   return d;
 }
 
-// FOLD F5 (cold review, probes A+W): presence-only checks let a fully wrong-typed
+// Presence-only checks used to let a fully wrong-typed
 // state load clean and let a transaction commit subjects:"not-an-array". One typed
 // gate, used by BOTH the read path (load) and the write path (transact).
 function assertShape(d, where, schema) {
@@ -213,9 +211,10 @@ function assertShape(d, where, schema) {
   for (const k of s.required) {
     if (d[k] === undefined) throw new Error('identity repo: ' + where + ' has the wrong shape — missing "' + k + '"');
   }
-  // Amendment #1 §4: "exactly" keeps its strict meaning — refuse, never strip or
+  // "Exactly" keeps its strict meaning — refuse, never strip or
   // tolerate-and-preserve, an unknown top-level field. Over v2 this is also what
-  // structurally guarantees D37: no durable `sessions` field can exist (I-R1-16).
+  // structurally guarantees that sessions are never durable: no `sessions` field
+  // can exist.
   for (const k of Object.keys(d)) {
     if (k !== 'version' && !s.required.includes(k)) {
       throw new Error('identity repo: ' + where + ' carries an UNKNOWN top-level field "' + k + '" — the shape is exact (I5)');
@@ -231,36 +230,37 @@ function assertShape(d, where, schema) {
   }
 }
 
-// ── C4: the v2 row shapes (the standing validator's law) ────────────────────
+// ── The v2 row shapes (the standing validator's rules) ──────────────────────
 // Field-exact: unknown fields refuse, missing fields refuse, `null` is written
 // where `null` is meant and `undefined` is never tolerated for it.
 //
-// I-R1-21 (Amendment 1): NOTHING BELOW READS A WALL CLOCK. The standing
+// NOTHING BELOW READS A WALL CLOCK (the clock-free invariant). The standing
 // validator's verdict is a pure function of the state bytes; expiry-as-liveness
 // lives only in the delta path, exactly as in v1.
 const isStr = v => typeof v === 'string' && v !== '' && !v.includes('\x00');
-// R4 (packet §4): the NON-REFERENTIAL v2 string rule. `isStr` stays the rule for
+// The NON-REFERENTIAL v2 string rule. `isStr` stays the rule for
 // REFERENTIAL fields (ids, tenants) — they are matched against other rows, so a
 // blank one dies at the relational gate anyway. The fourteen non-referential
-// fields enumerated in packet §4 carry no such backstop: before this, every one
-// of them admitted '   '. Routed in by R2 Amendment 3 Ruling 1; fixed WHOLE in
+// fields that use `isText` carry no such backstop: before this, every one
+// of them admitted '   '. Fixed WHOLE in
 // one enumerated change because a partial fix reads as a considered boundary.
 const isText = v => typeof v === 'string' && v.trim() !== '' && !v.includes('\x00');
 const isTs = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 const isNullOrTs = v => v === null || isTs(v);
 const isBool = v => typeof v === 'boolean';
 
-// R6 §10: authenticator transport vocabulary (sorted, duplicate-free subset).
+// Authenticator transport vocabulary (sorted, duplicate-free subset).
 const AUTHENTICATOR_TRANSPORTS = Object.freeze([
   'ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb',
 ]);
 const AUTHENTICATOR_TRANSPORT_SET = new Set(AUTHENTICATOR_TRANSPORTS);
 
-// R6 §10: unpadded base64url alphabet + decoded-length bounds.
+// Unpadded base64url alphabet + decoded-length bounds.
 // Round-trip canonicity is enforced at the authenticators service emit path
 // (and by tests that use real verifier material). Load/transact gates accept
 // any alphabet-legal unpadded value inside bounds so protected historical
-// fixtures that mint placeholder credential_ids for D43 remain loadable —
+// fixtures that mint placeholder credential_ids for the usable-administrator
+// rule remain loadable —
 // those placeholders are not a security surface; service-bound rows are.
 function isCanonicalB64url(v, minDecoded, maxDecoded) {
   if (typeof v !== 'string' || v.length === 0 || /[\x00+\/=]/.test(v)) return false;
@@ -295,8 +295,8 @@ function assertExactKeys(row, keys, bad, label) {
   }
 }
 // A ceiling is a set of non-empty NUL-free strings, possibly empty (a purpose
-// that delegates nothing carries an empty ceiling). Semantics are R2's; R1 pins
-// only the container.
+// that delegates nothing carries an empty ceiling). Semantics belong to the
+// capability layer; this gate pins only the container.
 function assertCeiling(value, bad, label, vocabulary) {
   if (!Array.isArray(value)) throw bad(label + ' must be an array');
   const seen = new Set();
@@ -317,9 +317,9 @@ const ROLE_ASSIGNMENT_KEYS = ['id', 'tenant', 'role_id', 'subject_id', 'scope_ty
 const ADMISSION_KEYS = ['id', 'tenant', 'purpose', 'digest', 'issuer_subject_id', 'intended_subject_kind',
   'principal_subject_id', 'capability_ceiling', 'resource_ceiling', 'max_seat_ttl',
   'issued_at', 'expires_at', 'consumed_at', 'consuming_subject_id', 'mint_audit_id'];
-// R4/C3: the password KDF profiles live HERE, not in passwords.js, so the
+// The password KDF profiles live HERE, not in passwords.js, so the
 // repository gate and the service cannot drift apart. passwords.js imports
-// these; nothing re-types them. (R2 Amendment 2 precedent: widen repo exports
+// these; nothing re-types them. (Same pattern as elsewhere: widen repo exports
 // so modules share one vocabulary.) `version` is OUR profile generation.
 const PASSWORD_PARAM_KEYS = Object.freeze(['N', 'r', 'p', 'keylen', 'maxmem']);
 const PASSWORD_KDF_PROFILES = Object.freeze([
@@ -382,7 +382,7 @@ function assertV2Shapes(state, where) {
     for (const f of ['id', 'tenant', 'person_subject_id']) {
       if (!isStr(r[f])) throw bad(at + ' field "' + f + '" must be a non-empty NUL-free string');
     }
-    // R7/D44: invited_by is a non-blank string for ordinary invitations, or
+    // invited_by is a non-blank string for ordinary invitations, or
     // null ONLY for the operator bootstrap-created membership (proven later
     // at the relational gate against a consumed bootstrap capability).
     if (!(r.invited_by === null || isText(r.invited_by))) {
@@ -393,7 +393,7 @@ function assertV2Shapes(state, where) {
     for (const f of ['activated_at', 'suspended_at', 'revoked_at']) {
       if (!isNullOrTs(r[f])) throw bad(at + ' field "' + f + '" must be null or a finite non-negative number');
     }
-    // "consistent with status" (C4), made exact.
+    // "consistent with status", made exact.
     if (r.status === 'invited' && (r.activated_at !== null || r.suspended_at !== null || r.revoked_at !== null)) {
       throw bad(at + ' status "invited" requires activated_at/suspended_at/revoked_at all null');
     }
@@ -457,7 +457,7 @@ function assertV2Shapes(state, where) {
     for (const f of ['id', 'tenant']) {
       if (!isStr(r[f])) throw bad(at + ' field "' + f + '" must be a non-empty NUL-free string');
     }
-    // R7/D44: issuer_subject_id is null ONLY for operator bootstrap/offline_recovery.
+    // issuer_subject_id is null ONLY for operator bootstrap/offline_recovery.
     // Ordinary human-issued purposes still require a real issuer subject id.
     const operatorNullIssuer = (r.purpose === 'bootstrap' || r.purpose === 'offline_recovery') &&
       r.issuer_subject_id === null;
@@ -482,7 +482,7 @@ function assertV2Shapes(state, where) {
     if (!isTs(r.issued_at)) throw bad(at + ' issued_at must be a finite non-negative number');
     if (!isTs(r.expires_at)) throw bad(at + ' expires_at must be a finite non-negative number');
     if (!isNullOrTs(r.consumed_at)) throw bad(at + ' consumed_at must be null or a finite non-negative number');
-    // D19 TTL ceiling for the two seat purposes; null for every other purpose.
+    // Seat-TTL ceiling for the two seat purposes; null for every other purpose.
     if (SEAT_ADMISSION_PURPOSES.includes(r.purpose)) {
       if (!Number.isSafeInteger(r.max_seat_ttl) ||
           r.max_seat_ttl < MIN_PASS_LIFETIME_MS || r.max_seat_ttl > MAX_PASS_LIFETIME_MS) {
@@ -517,10 +517,11 @@ function assertV2Shapes(state, where) {
     for (const f of ['reset_at', 'revoked_at', 'upgraded_at']) {
       if (!isNullOrTs(r[f])) throw bad(at + ' field "' + f + '" must be null or a finite non-negative number');
     }
-    // ── R4/C3: the verifier must be one this house can actually check ───────
+    // ── The verifier must be one this deployment can actually check ─────────
     // Enforced HERE and not only in passwords.js, deliberately: a direct
     // repo.transact caller must not be able to install an unverifiable
-    // password record. (Codex, R4 Amendment 1 §1 — option B rejected.)
+    // password record. (Enforcing it only in the service was considered and
+    // rejected.)
     if (r.algorithm !== 'scrypt') {
       throw bad(at + ' algorithm must be "scrypt" — got "' + r.algorithm + '"');
     }
@@ -547,7 +548,7 @@ function assertV2Shapes(state, where) {
       throw bad(at + ' derived_value must be exactly 32 derived bytes as unpadded base64url');
     }
   }
-  // C3: salt uniqueness is TENANT-LOCAL. Two records sharing a salt means one
+  // Salt uniqueness is TENANT-LOCAL. Two records sharing a salt means one
   // of them was not generated from crypto.randomBytes, which is the whole
   // security argument for having a salt at all.
   {
@@ -572,7 +573,7 @@ function assertV2Shapes(state, where) {
     for (const f of ['credential_id', 'public_key', 'algorithm', 'rp_id']) {
       if (!isText(r[f])) throw bad(at + ' field "' + f + '" must be a non-blank NUL-free string');
     }
-    // R6 §10: credential_id / public_key are canonical unpadded base64url with
+    // credential_id / public_key are canonical unpadded base64url with
     // decoded-length bounds; algorithm is the closed ES256|RS256 vocabulary.
     if (!isCanonicalB64url(r.credential_id, 1, 1024)) {
       throw bad(at + ' credential_id must be canonical unpadded base64url (1..1024 decoded bytes)');
@@ -582,8 +583,8 @@ function assertV2Shapes(state, where) {
     }
     // Algorithm vocabulary ES256|RS256 is enforced at the authenticators service
     // emit path (and by ceremony verification). Load/transact keep isText only so
-    // R4's fourteen-field whitespace/internal-space liveness (P0-C preservation)
-    // remains green; R6 does not re-open a partial isText rewrite here.
+    // the fourteen-field blank/internal-space rule (see isText above) stays
+    // uniform; a partial rewrite of that rule here is deliberately avoided.
     if (r.rp_id !== 'localhost' && !isText(r.rp_id)) {
       throw bad(at + ' rp_id must be a non-blank NUL-free string');
     }
@@ -615,40 +616,40 @@ function assertV2Shapes(state, where) {
     throw bad('bootstrap completed_at must be null or a finite non-negative number');
   }
 
-  // C6: at most one repo.migration intent may sit in the outbox, and if present
+  // At most one repo.migration intent may sit in the outbox, and if present
   // it is field-exact. Corruption cannot smuggle a malformed one past the gate.
   const migrations = state.outbox.filter(e => e && typeof e === 'object' && e.kind === MIGRATION_EVENT_KIND);
   if (migrations.length > 1) throw bad('more than one ' + MIGRATION_EVENT_KIND + ' intent is present');
   if (migrations.length === 1) assertExactMigrationEvent(migrations[0], where);
 
-  // ── R2.5: the two STANDING subject rules (both gates) ────────────────────
+  // ── The two STANDING subject rules (both gates) ─────────────────────────
   // These live here, not in the prev->next delta pass, because they are pure
   // SHAPE — each compares fields within a single row and needs no `prev`. That
   // is what lets them run at the state-file gate too, where no delta exists.
-  // Packet §7 was widened exactly this far, by Amendment 1 §2.1 (the first
-  // rule) and Amendment 3 §1.1 (the second), and no further.
+  // The standing subject rules extend exactly this far — the status/revocation
+  // coherence rule and the principal shape rules — and no further.
   state.subjects.forEach((r, i) => {
     if (!r || typeof r !== 'object') return;   // the standing validator owns malformed-row wording
     const at = 'subject ' + i + ' ("' + (typeof r.id === 'string' ? r.id : '?') + '")';
     parseSubjectNameHistory(r, bad, at);
 
-    // I-R2.5-3b — status <-> revoked_at coherence.
+    // Status <-> revoked_at coherence.
     // ⚠ "no revocation timestamp" has TWO legal spellings in this codebase:
     // subjects.js:104 writes 0 for every subject it creates, while hand-built
     // v2 fixtures write null. A rule spelled `revoked_at !== null` would refuse
     // EVERY row the module has ever created — a guard firing hardest at correct
-    // code. Amendment 1 §2.3; control N17 is the real-corpus arm that proves it.
-    // ⚠ "no revocation timestamp" has THREE legal spellings here, not two.
-    // Amendment 1 §2.3 named `0` (subjects.js:104) and `null` (v2 fixtures).
-    // The FIRST full-regression run found the third: ABSENT — minimal rows
+    // code. A test against the real corpus proves this.
+    // ⚠ "no revocation timestamp" has THREE legal spellings here, not two:
+    // `0` (subjects.js:104) and `null` (v2 fixtures), as above, and a third
+    // found by the first full-regression run: ABSENT — minimal rows
     // across identity.repo.test.js carry neither `status` nor `revoked_at`, and
     // an `undefined !== null && undefined !== 0` rule refused 30+ of them. That
-    // is the §2.3 trap exactly, one spelling over: a guard firing hardest at
+    // is the same trap, one spelling over: a guard firing hardest at
     // correct code, exposed only by the first real-corpus run.
     const noRevocation = r.revoked_at === null || r.revoked_at === 0 || r.revoked_at === undefined;
     // Stated as "a POSITIVE stamp requires status revoked" rather than
     // "non-revoked requires no stamp", so a row carrying neither field is not
-    // judged at all. The footprint 3b exists to catch — a live row still
+    // judged at all. The footprint this rule exists to catch — a live row still
     // holding a real revocation timestamp — is caught either way.
     const stamped = typeof r.revoked_at === 'number' && Number.isFinite(r.revoked_at) && r.revoked_at > 0;
     if (r.status === 'revoked' && noRevocation) {
@@ -658,10 +659,11 @@ function assertV2Shapes(state, where) {
       throw bad(at + ' carries a revocation timestamp while status is "' + r.status + '" (I-R2.5-3b)');
     }
 
-    // I-R2.5-13 — the principal shape rules (I12 and D6).
+    // The principal shape rules: only a seat may name a principal, and a seat
+    // must name one that is not itself.
     // These reach the CREATION route as well as the mutation route, which is
-    // why Amendment 3 ruled (b): C4 defers creations to "the existing standing
-    // rules", and before this there were none at this layer.
+    // why they live here: the delta pass defers creations to "the existing
+    // standing rules", and before this there were none at this layer.
     if (r.kind !== 'seat') {
       if (r.principal !== null && r.principal !== undefined) {
         throw bad(at + ' is a "' + r.kind + '" and may not name a principal — only a seat is a delegate (I12)');
@@ -788,9 +790,10 @@ function assertExactMigrationEvent(event, where) {
   if (event.to_version !== 2) throw bad('its to_version must be 2');
 }
 
-// ── Task 8 policy standing and delta invariants ─────────────────────────────
+// ── Pass-lifetime policy: standing and delta invariants ─────────────────────
 // Absence is the exact legacy/default representation. A present value is never
-// defaulted around: it must be a safe integer inside D19's inclusive bounds.
+// defaulted around: it must be a safe integer inside the inclusive pass-lifetime
+// bounds.
 function effectivePolicyLifetime(policy, where) {
   const bad = message => new Error('identity repo: ' + where + ' violates policy — ' + message);
   if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
@@ -938,16 +941,16 @@ function assertCredentialInvariants(prev, next) {
 // second incremental structure — is one more thing that can drift, which is the
 // class of bug this whole file exists to remove.
 
-// ── B4 relational validation (Task 3 packet, I21/I22) ────────────────────────
-// The Blocker-4 relation: a seat and its ONE historical pass credential expire
+// ── Seat/pass relational validation ──────────────────────────────────────────
+// The seat/pass relation: a seat and its ONE historical pass credential expire
 // at exactly the same instant, forever. credentials.js enforces it on the
 // legal path — but a convention another module can break is not an invariant
-// (same law as the append gate above), so the repo asserts it on EVERY load
-// (B4 L7: corrupt disk refuses to install) and before EVERY commit (B4 L6:
-// direct-transact bypasses refuse unchanged).
+// (same rule as the append gate above), so the repo asserts it on EVERY load
+// (corrupt disk refuses to install) and before EVERY commit
+// (direct-transact bypasses refuse unchanged).
 //
 // Deliberately Map-free and scan-method-free (plain index loops + bare-object
-// dictionaries): the H1 cost probes count Map/Array-method calls with exact
+// dictionaries): the cost tests count Map/Array-method calls with exact
 // budgets, and the validator must be invisible to them.
 function assertRelationalInvariants(state, where) {
   const bad = msg => new Error('identity repo: ' + where + ' violates B4 — ' + msg);
@@ -1003,7 +1006,7 @@ function assertRelationalInvariants(state, where) {
       throw bad('seat "' + s.id + '" carries expiry WITHOUT a pass credential — binding is issuance, nothing else (L1)');
     }
   }
-  // grants (Task 4 + I22): stable unique id; one closed persisted vocabulary;
+  // grants: stable unique id; one closed persisted vocabulary;
   // tenant agreement with a live well-formed holder; numeric lifetime; and a
   // seat grant confined to a BOUND seat's lifetime. Grant ids are the relation
   // key — tuple String() coercion is non-injective and cannot distinguish
@@ -1065,9 +1068,10 @@ function assertRelationalInvariants(state, where) {
   }
 }
 
-// ── C4 relational rules for the seven new collections ───────────────────────
-// Enforced at load AND at transact — the same two-gate law as v1's B4. Like the
-// v1 gate above, and unlike the delta path, this reads NO wall clock (I-R1-21).
+// ── Relational rules for the seven new collections ──────────────────────────
+// Enforced at load AND at transact — the same two-gate rule as v1's seat/pass
+// relation. Like the v1 gate above, and unlike the delta path, this reads NO
+// wall clock (the clock-free invariant).
 function assertV2RelationalInvariants(state, where) {
   const bad = msg => new Error('identity repo: ' + where + ' violates the v2 relation — ' + msg);
 
@@ -1093,7 +1097,7 @@ function assertV2RelationalInvariants(state, where) {
     }
   };
 
-  // memberships — human-only (D22), at most one row per (tenant, person)
+  // memberships — human-only, at most one row per (tenant, person)
   const membershipSeen = new Set();
   state.memberships.forEach((r, i) => {
     const at = 'membership ' + i;
@@ -1105,7 +1109,7 @@ function assertV2RelationalInvariants(state, where) {
   });
 
   // roles — slug unique per tenant; the protected administrator manifest row is
-  // person-only at the REPO, before any use-time check exists (D28).
+  // person-only at the REPO, before any use-time check exists.
   const slugSeen = new Set();
   state.roles.forEach((r, i) => {
     const at = 'role ' + i;
@@ -1118,8 +1122,8 @@ function assertV2RelationalInvariants(state, where) {
           '" manifest row and must allow exactly ["person"] (D28) — got ' + JSON.stringify(r.allowed_subject_kinds));
       }
     }
-    // R2/C3, I-R2-4: ANTI-SMUGGLING AT STORAGE. `system: true` marks a protected
-    // built-in, and protected built-ins are a closed set (spec §6.2, D28) whose
+    // ANTI-SMUGGLING AT STORAGE. `system: true` marks a protected
+    // built-in, and protected built-ins are a closed set whose
     // bundles runtime administration may assign but never rewrite. A role that
     // claims the flag under any other slug is claiming that protection for an
     // authored role — refuse it, at both gates.
@@ -1135,7 +1139,7 @@ function assertV2RelationalInvariants(state, where) {
     const role = roleById[r.role_id];
     if (!role) throw bad(at + ' is an ORPHAN — role_id "' + r.role_id + '" does not resolve to a role');
     if (r.tenant !== role.tenant) throw bad(at + ' tenant does not match the tenant of its role');
-    // R2/C3, I-R2-5: KIND COHERENCE. Every unrevoked permission a role carries
+    // KIND COHERENCE. Every unrevoked permission a role carries
     // must be reachable by every kind the role admits — i.e. the manifest's
     // allowed kinds for that capability must be a SUPERSET of the role's.
     //
@@ -1143,7 +1147,7 @@ function assertV2RelationalInvariants(state, where) {
     // authority to a seat" a STORAGE FACT rather than a naming convention. It is
     // spelled deliberately in capabilities and kinds and NEVER in substrings: a
     // role whose name merely contains "admin" is not denied for its spelling
-    // (spec §6.1 — administrative classification comes from the capability,
+    // (administrative classification comes from the capability,
     // never from a slug, label, or substring).
     //
     // Revoked permission rows are history and are not part of the live bundle,
@@ -1162,8 +1166,8 @@ function assertV2RelationalInvariants(state, where) {
     }
   });
 
-  // role_assignments — kind gate, the D43 schema rule, and clock-free
-  // uniqueness over UNREVOKED rows (Amendment 1, I-R1-18).
+  // role_assignments — kind gate, the non-expiring-administrator schema rule,
+  // and clock-free uniqueness over UNREVOKED rows.
   const assignmentSeen = new Set();
   state.role_assignments.forEach((r, i) => {
     const at = 'role_assignment ' + i;
@@ -1176,7 +1180,8 @@ function assertV2RelationalInvariants(state, where) {
       throw bad(at + ' assigns a "' + subj.kind + '" subject to role "' + role.slug +
         '", whose allowed kinds are ' + JSON.stringify(role.allowed_subject_kinds));
     }
-    // THE RULE R1 EXISTS TO LAND (D43/F1).
+    // THE RULE VERSION 2 EXISTS TO LAND: a protected administrator assignment
+    // is person-only and never expires.
     if (role.system === true && role.slug === ADMINISTRATOR_SLUG) {
       if (subj.kind !== 'person') {
         throw bad(at + ' assigns the protected "' + ADMINISTRATOR_SLUG + '" role to a ' + subj.kind + ' — it is person-only (D28)');
@@ -1199,7 +1204,7 @@ function assertV2RelationalInvariants(state, where) {
 
   state.admission_capabilities.forEach((r, i) => {
     const at = 'admission_capability ' + i;
-    // D44: null issuer is permitted only for bootstrap/offline_recovery, and
+    // A null issuer is permitted only for bootstrap/offline_recovery, and
     // only with a server-generated mint_audit_id already shape-checked above.
     // A null issuer is NOT a tenant subject and is never resolved via anySubject.
     if (r.issuer_subject_id === null) {
@@ -1237,8 +1242,8 @@ function assertV2RelationalInvariants(state, where) {
     }
   });
 
-  // D44: every null invited_by membership is proven by a distinct consumed
-  // bootstrap capability for the same person in tenant house.
+  // Every null invited_by membership is proven by a distinct consumed
+  // bootstrap capability for the same person in the configured tenant.
   const bootstrapNullInviterSeen = new Set();
   state.memberships.forEach((r, i) => {
     if (r.invited_by !== null) return;
@@ -1286,7 +1291,7 @@ function assertV2RelationalInvariants(state, where) {
     // historical first admin — allowed.
   }
 
-  // authenticators — person-only; id + credential_id unique per tenant (D33–D35 / R6 §10)
+  // authenticators — person-only; id + credential_id unique per tenant
   const credSeen = new Set();
   const authIdSeen = new Set();
   state.authenticators.forEach((r, i) => {
@@ -1312,7 +1317,7 @@ function assertV2RelationalInvariants(state, where) {
   }
 }
 
-// ── C7: the D43 usable-administrator predicate ──────────────────────────────
+// ── The usable-administrator predicate ──────────────────────────────────────
 // Pure: evaluates the five conjuncts on a COMPLETE state. Clock-free — an
 // administrator assignment cannot carry an expiry at all (the schema rule
 // above), so "non-expiring" is a byte fact, not a time fact.
@@ -1339,16 +1344,17 @@ function usableAdministratorsIn(state, tenant) {
 }
 
 // Every tenant that has a protected administrator manifest row is a tenant the
-// guard judges. Derived from the state, never hard-coded (D3/D21).
+// guard judges. Derived from the state, never hard-coded.
 function administratorTenants(state) {
   const out = new Set();
   for (const r of state.roles) if (r.system === true && r.slug === ADMINISTRATOR_SLUG) out.add(r.tenant);
   return out;
 }
 
-// C7, the resulting-state guard. Evaluated at the repository's single commit
-// point, where a resulting-state rule belongs — wiring it later would re-create
-// exactly the F1 window Solitaire's condition closed. Before bootstrap
+// The resulting-state guard. Evaluated at the repository's single commit
+// point, where a resulting-state rule belongs — wiring it later would re-open
+// a window in which a commit could leave a tenant with no usable administrator.
+// Before bootstrap
 // completes it is provably armed but vacuously quiet: that is the point of
 // building the ratchet before the load.
 function assertUsableAdministrators(state, where) {
@@ -1362,22 +1368,22 @@ function assertUsableAdministrators(state, where) {
   }
 }
 
-// ── R2/C3, I-R2-6: system-role bundle immutability (a DELTA rule) ───────────
+// ── System-role bundle immutability (a DELTA rule) ──────────────────────────
 // Runtime administration assigns and revokes protected roles but "cannot rewrite
-// their permission bundles" (spec §6.2). That is a statement about CHANGE, so it
+// their permission bundles". That is a statement about CHANGE, so it
 // is enforced here on prev→next and not in the standing validator.
 //
-// GATE ORDER IS BINDING (Amendment 2, Ruling 2): this runs AFTER assertV2Shapes
+// GATE ORDER IS BINDING: this runs AFTER assertV2Shapes
 // and assertV2RelationalInvariants and immediately BEFORE
 // assertUsableAdministrators. A malformed system row is refused by the shape
-// gate in the shape gate's words; a D28-illegal one by the relational gate in
-// its words; so this rule fires only on rows that are well-formed, relationally
-// legal, and illegally CHANGED — the only case where "did this change illegally"
-// is a meaningful question. It also keeps three shipped R1 controls passing
-// verbatim, and follows the habit already in this file of letting the standing
-// validator retain authorship of malformed-row wording.
+// gate in the shape gate's words; a protected-role-illegal one by the relational
+// gate in its words; so this rule fires only on rows that are well-formed,
+// relationally legal, and illegally CHANGED — the only case where "did this
+// change illegally" is a meaningful question. It also keeps existing tests'
+// expected error wording unchanged, and follows the habit already in this file
+// of letting the standing validator retain authorship of malformed-row wording.
 //
-// Rider (Amendment 2): because it is a delta rule there is no `prev` at load, so
+// Caveat: because it is a delta rule there is no `prev` at load, so
 // a state read from disk carrying an illegally-changed bundle is not judged by
 // it. The STANDING protections (protected-slug, kind coherence) run at both
 // gates and are what a loaded state is judged by. That asymmetry is a design
@@ -1435,7 +1441,7 @@ function assertBootstrapDelta(prev, next) {
     'at most once (got ' + JSON.stringify(a) + ' -> ' + JSON.stringify(b) + ')');
 }
 
-// C6: an ordinary transaction may neither MINT nor REWRITE a repo.migration
+// An ordinary transaction may neither MINT nor REWRITE a repo.migration
 // intent. Removal stays legal, or markDelivered() could never drain one — so
 // this inspects only what is PRESENT in next, exactly like assertPolicyDeltas.
 // A count- or length-based guard here would be a defect.
@@ -1459,7 +1465,8 @@ function grantCoversOrigin(grantOrigin, observedOrigin) {
   return grantOrigin === 'any' || grantOrigin === observedOrigin;
 }
 
-// Task 6 issuance-only ceiling. Deliberately NOT part of the standing
+// Issuance-only ceiling (a seat grant may not exceed its principal's).
+// Deliberately NOT part of the standing
 // validator: later principal narrowing/removal is legal and can() closes use.
 function principalCoversSeatGrant(state, seat, grant, now) {
   const principal = state.subjects.find(s => s && s.id === seat.principal) || null;
@@ -1483,7 +1490,8 @@ function principalCoversSeatGrant(state, seat, grant, now) {
       (g.expires_at > now && g.expires_at >= grant.expires_at))));
 }
 
-// The prev→next half of I21/I22: what may CHANGE. Existing credential rows are
+// The prev→next half of the relational rules: what may CHANGE. Existing
+// credential rows are
 // immutable except revoked false→true; a bound seat keeps its kind; bound-seat
 // grant lifetimes are never rewritten (removal stays legal); grants ADDED to a
 // seat need it bound, active and unexpired NOW.
@@ -1511,27 +1519,29 @@ function assertRelationalDeltas(prev, next) {
     const s = next.subjects[i];
     if (s && typeof s.id === 'string') nextById[s.id] = s;
   }
-  // ── R2.5 / C1: the subject prev->next delta contract ─────────────────────
+  // ── The subject prev->next delta contract ────────────────────────────────
   // A LEGAL-TRANSITION ALLOWLIST, DENY BY DEFAULT. For a subject row present in
   // both prev and next, the field-level delta must be exactly one of:
   //
-  //   ∅                          no change
-  //   T1  {ended_how, status, revoked_at}  revocation (C2)
-  //   T2  {expires_at}           seat binding    (C3)
-  //   T3  {name, name_fold, name_history} display rename; returning to an
-  //                                already-reserved fold omits name_history
+  //   ∅                                    no change
+  //   {ended_how, status, revoked_at}      revocation      (`T1_KEYS`)
+  //   {expires_at}                         seat binding    (`T2_KEYS`)
+  //   {name, name_fold, name_history}      display rename  (`T3_KEYS`); returning
+  //                                        to an already-reserved fold omits
+  //                                        name_history
   //
   // and ANY other delta refuses at the final branch below.
   //
-  // ⛔ I-R2.5-11 — WHY THIS IS A KEY-SET TEST AND NOT A LIST OF FORBIDDEN
-  // FIELDS. Thirteen refusals would be a FLOOR: field #14 arrives next month
-  // and is silently mutable while the enumeration still reads complete. The
+  // ⛔ WHY THIS IS A KEY-SET TEST AND NOT A LIST OF FORBIDDEN
+  // FIELDS. Thirteen refusals would be a FLOOR: a fourteenth field arrives next
+  // month and is silently mutable while the enumeration still reads complete. The
   // legality test here is evaluated on the complete changed KEY SET
   // itself, so a field nobody has thought of yet cannot be in either literal
   // set and is refused on arrival, by construction, with no one having to
   // remember it. That is a ceiling rather than a floor, and it is the whole
   // design. A denylist covering today's 13 is a FAILED build even if every
-  // control passes — control N1 is the executable form of that sentence.
+  // test passes — a test that adds an unknown field is the executable form of
+  // that sentence.
   //
   // The diff is taken over the UNION of both key sets, so an ADDED or REMOVED
   // key is itself a difference rather than something the comparison skips.
@@ -1544,7 +1554,7 @@ function assertRelationalDeltas(prev, next) {
     const a = prev.subjects[i];
     if (!a || typeof a.id !== 'string') continue;
     const b = nextById[a.id];
-    // C4 / I-R2.5-10: present in prev, absent from next. Revocation is the
+    // Present in prev, absent from next. Revocation is the
     // lifecycle — subjects.js never splices a subject row.
     if (!b) throw bad('a transaction may not REMOVE subject row "' + a.id + '" — revocation is the lifecycle (C4)');
 
@@ -1557,34 +1567,34 @@ function assertRelationalDeltas(prev, next) {
     const shape = diff.sort().join(',');
 
     if (shape === T1_KEYS) {
-      // T1, revocation (C2). Both halves in the SAME transaction; neither half
+      // Revocation. Both halves in the SAME transaction; neither half
       // alone ever reaches here, because a lone `status` change has the key set
       // {status}, which matches nothing and falls to the refusal below. That is
-      // why I-R2.5-2's atomicity needs no separate rule — it is structural.
+      // why revocation's atomicity needs no separate rule — it is structural.
       const wasLive = a.status === 'active';
       const noPriorRevocation = a.revoked_at === null || a.revoked_at === 0;
       const nowRevoked = b.status === 'revoked';
       const stamped = typeof b.revoked_at === 'number' && Number.isFinite(b.revoked_at) && b.revoked_at > 0;
       const how = b.ended_how === 'left' || b.ended_how === 'revoked' || b.ended_how === 'released';
-      if (wasLive && noPriorRevocation && nowRevoked && stamped && how) continue;   // legal T1
+      if (wasLive && noPriorRevocation && nowRevoked && stamped && how) continue;   // legal revocation
       throw bad('subject "' + a.id + '": the only legal status/revoked_at transition is active -> revoked with a ' +
         'positive timestamp and ended_how left|revoked|released, set together and exactly once — revival and re-stamping are refused (I-R2.5-3a/4)');
     }
 
     if (shape === T2_KEYS) {
-      // T2, seat binding (C3). ONCE: 0 -> positive, on a seat. positive ->
+      // Seat binding. ONCE: 0 -> positive, on a seat. positive ->
       // positive and positive -> 0 both land here and are refused, because
       // "renewal is a NEW seat subject" (credentials.js:132).
       const isSeat = a.kind === 'seat';
       const wasUnbound = a.expires_at === 0;
       const bound = typeof b.expires_at === 'number' && Number.isFinite(b.expires_at) && b.expires_at > 0;
-      if (isSeat && wasUnbound && bound) continue;                            // legal T2
+      if (isSeat && wasUnbound && bound) continue;                            // legal binding
       throw bad('subject "' + a.id + '": expires_at may move only 0 -> positive, on a seat, once — ' +
         'renewal is a NEW seat subject (I-R2.5-9)');
     }
 
     if (shape === T3_KEYS || shape === T3_REUSE_KEYS || shape === T3_CASE_KEYS) {
-      // T3, display rename. A new fold changes name + name_fold + append-only
+      // Display rename. A new fold changes name + name_fold + append-only
       // history together. Returning to a reserved fold leaves history unchanged;
       // a casing-only display change changes name alone. Person/tool only — a
       // seat's name is issuance identity, not a chat byline. name_fold must be
@@ -1620,8 +1630,8 @@ function assertRelationalDeltas(prev, next) {
     }
 
     // ── THE DENY-BY-DEFAULT BRANCH ───────────────────────────────────────
-    // Everything not named above. A reviewer who cannot point at this line
-    // fails the build (I-R2.5-11).
+    // Everything not named above. This line is the guarantee: any subject
+    // delta not explicitly allowed is refused here.
     throw bad('subject "' + a.id + '": no legal transition changes {' + diff.join(', ') + '} — ' +
       'the only permitted subject deltas are revocation, seat binding, and display rename (C1, deny-by-default)');
   }
@@ -1656,7 +1666,7 @@ function assertRelationalDeltas(prev, next) {
       const semanticChanged = ['tenant', 'subject_id', 'capability', 'resource', 'origin']
         .some(field => existing[field] !== g[field]);
       if (!semanticChanged) continue;
-      // D18: the id still identifies the persisted record, but changed grant
+      // The id still identifies the persisted record, but changed grant
       // semantics must not inherit the old row's seat-safety judgment. Re-judge
       // the next identity exactly as an ADD without inventing a public update API.
     }
@@ -1667,7 +1677,7 @@ function assertRelationalDeltas(prev, next) {
       if (subj.status !== 'active') throw bad('a grant may not be added to a revoked seat ("' + g.subject_id + '")');
       if (subj.expires_at <= now) throw bad('a grant may not be added to an expired seat ("' + g.subject_id + '")');
       // Let the standing validator retain authorship of malformed grant
-      // schema/lifetime wording. The Task 6 ceiling judges only an otherwise
+      // schema/lifetime wording. The principal ceiling judges only an otherwise
       // structurally valid proposed seat grant.
       const coverageShapeValid =
         g.tenant === subj.tenant &&
@@ -1683,7 +1693,7 @@ function assertRelationalDeltas(prev, next) {
     }
   }
 
-  // ── R6 §10: authenticator prev→next transition gate, deny by default ─────
+  // ── Authenticator prev→next transition gate, deny by default ────────────
   // Match by stable authenticator id within tenant. Existing rows may not be
   // removed, revived, repointed, or have unknown keys added/removed. Only USE
   // and REVOKE transitions are legal on existing rows; additions must be
@@ -1721,16 +1731,16 @@ function assertRelationalDeltas(prev, next) {
     for (const k of Object.keys(a)) seen[k] = true;
     for (const k of Object.keys(b)) seen[k] = true;
     // Unknown keys (not in AUTHENTICATOR_KEYS) refuse with the same "UNKNOWN field"
-    // wording shape validation uses, so C10's exact/unknown regex still matches
-    // when the delta path sees the row first.
+    // wording shape validation uses, so the error matches the same pattern
+    // whether the delta path or the shape gate sees the row first.
     for (const k of Object.keys(seen)) {
       if (!AUTHENTICATOR_KEYS.includes(k)) {
         throw bad('authenticator "' + a.id + '" carries an UNKNOWN field "' + k +
           '" — the shape is exact');
       }
     }
-    // Prefer shape-gate wording for blank/malformed field VALUES so R4's
-    // whitespace controls (17b) still match /blank|whitespace/ when the delta
+    // Prefer shape-gate wording for blank/malformed field VALUES so the
+    // blank-field tests still match /blank|whitespace/ when the delta
     // path runs before assertV2Shapes.
     for (const f of ['id', 'tenant', 'person_subject_id']) {
       if (!isStr(b[f])) {
@@ -1775,7 +1785,7 @@ function assertRelationalDeltas(prev, next) {
           throw bad('authenticator "' + a.id + '": last_used_at must not move backward');
         }
       }
-      // sign_count matrix (C8) also enforced at service; gate requires non-decrease
+      // sign_count matrix also enforced at service; gate requires non-decrease
       // for positive counters and permits 0->0.
       if (diff.includes('sign_count')) {
         if (!Number.isSafeInteger(b.sign_count) || b.sign_count < 0) {
@@ -1823,13 +1833,13 @@ function assertRelationalDeltas(prev, next) {
 // ── the phase barrier ────────────────────────────────────────────────────────
 // initialize() is the ONLY builder. Every read, transaction and lookup refuses
 // before it has run, so "not initialized" fails loudly instead of being assumed.
-// ── #193 (land 2.6): THE REPOSITORY IS TOLD ITS HOUSE ──────────────────────
-// The tenant used to be the literal `tenant()` at 24 sites across 14 files, most
+// ── THE REPOSITORY IS TOLD ITS TENANT ──────────────────────────────────────
+// The tenant used to be a hard-coded literal at 24 sites across 14 files, most
 // of them guards HERE and in audit.js — the places that decide whether a row may
-// commit. My first attempt made it a process-global adopted at construction; it
+// commit. A first attempt made it a process-global adopted at construction; it
 // failed 160 host tests, because initialize(), migrateV1ToV2() and the
-// outbox validators run BEFORE, or entirely WITHOUT, any constructor. Grok ruled
-// the smaller, truer seam: the component that ENFORCES the rule holds the value.
+// outbox validators run BEFORE, or entirely WITHOUT, any constructor. The
+// smaller, truer seam: the component that ENFORCES the rule holds the value.
 //
 // NOT a process-global: two isolated stores must be able to live in one process,
 // so this is per-initialize state, re-set on every initialize(), never pinned
@@ -1841,7 +1851,8 @@ function validTenantName(v) {
 }
 
 // Every guard reads this. It THROWS when unset rather than defaulting, because
-// the only default available is the host name this whole land exists to delete.
+// the only default available is the old hard-coded tenant name, which this
+// mechanism exists to remove.
 // Descriptive, for a module's EXPORTED constant. Reading an export must never
 // throw — an export-surface test that enumerates keys would die on the getter,
 // which is exactly what happened. The ENFORCING path is tenant(), below, and it
@@ -1865,7 +1876,7 @@ function initialize(opts) {
     throw new Error('identity repo: initialize({ tenant }) is REQUIRED — 1-63 chars of ' +
       '[a-z0-9_-] starting alphanumeric, no default (#193). Got ' + JSON.stringify(t));
   }
-  // ── F1 (Pitohui, land 2.6 review): WRITE-ONCE, exactly like the state dir ──
+  // ── WRITE-ONCE, exactly like the state dir ─────────────────────────────────
   // This used to assign unconditionally, so a second create() on the SAME state
   // dir with a DIFFERENT tenant silently re-pointed the process — and the
   // already-running instance's health().tenant flipped under it. Every guard in
@@ -1873,9 +1884,9 @@ function initialize(opts) {
   // against a name its host never chose. Silently.
   //
   // Re-initialising with the SAME name stays legal: host suites do it constantly,
-  // and it asserts nothing new. A DIFFERENT name is refused, because two houses
+  // and it asserts nothing new. A DIFFERENT name is refused, because two tenants
   // in one process means the validator and the commit point can disagree about
-  // which house a row belongs to.
+  // which tenant a row belongs to.
   if (TENANT !== null && TENANT !== t) {
     throw new Error('identity repo: this process is already serving tenant ' +
       JSON.stringify(TENANT) + ' and cannot also serve ' + JSON.stringify(t) +
@@ -1883,7 +1894,7 @@ function initialize(opts) {
       'including for services already constructed against the first one.');
   }
   TENANT = t;
-  // Amendment #1 §3 (reviewer F3): while FATAL, initialize() must REFUSE — it
+  // While FATAL, initialize() must REFUSE — it
   // previously reinstalled a triple, returned {ready:true}, and left FATAL set,
   // so a startup barrier trusting the return value would boot a repo that
   // reports healthy and serves nothing. reload() is the one recovery door.
@@ -1892,10 +1903,10 @@ function initialize(opts) {
   const next = load();                       // parse + shape-validate
   const idx = buildIndex(next);              // throws on duplicate/malformed
   effectivePolicyLifetime(next.policy, 'state file');
-  assertRelationalInvariants(next, 'state file'); // B4 L7: after the selector gates, before install
-  assertV2Shapes(next, 'state file');             // C4 field-exactness
+  assertRelationalInvariants(next, 'state file'); // seat/pass relation: after the selector gates, before install
+  assertV2Shapes(next, 'state file');             // v2 field-exactness
   assertV2RelationalInvariants(next, 'state file');
-  assertUsableAdministrators(next, 'state file'); // C7: fails CLOSED, before install
+  assertUsableAdministrators(next, 'state file'); // fails CLOSED, before install
   const frozen = deepFreeze(next);
   STATE = frozen; SELECTOR_IDX = idx; INDEX_FOR_STATE = frozen;   // installed together
   return { ready: true, credentials: STATE.credentials.length };
@@ -1911,11 +1922,11 @@ function reload() {
   const next = load();
   const idx = buildIndex(next);              // throws BEFORE anything is swapped
   effectivePolicyLifetime(next.policy, 'state file');
-  assertRelationalInvariants(next, 'state file'); // B4 L7 — same gate as initialize()
+  assertRelationalInvariants(next, 'state file'); // same gate as initialize()
   assertV2Shapes(next, 'state file');
   assertV2RelationalInvariants(next, 'state file');
-  assertUsableAdministrators(next, 'state file'); // C7 — and on failure the
-  // PREVIOUSLY installed triple stays installed, per reload()'s standing law.
+  assertUsableAdministrators(next, 'state file'); // and on failure the
+  // PREVIOUSLY installed triple stays installed, per reload()'s standing rule.
   const frozen = deepFreeze(next);
   STATE = frozen; SELECTOR_IDX = idx; INDEX_FOR_STATE = frozen;
   FATAL = null;
@@ -1949,7 +1960,7 @@ function commit(next) {
   } finally {
     fs.closeSync(fd);
   }
-  // FOLD F7 (cold review, probe Y): a failed rename must not strand the REJECTED
+  // A failed rename must not strand the REJECTED
   // next-state beside the real file — a foot-gun for backup scripts and readers.
   try {
     fs.renameSync(tmp, FILE());
@@ -1960,17 +1971,17 @@ function commit(next) {
   // Best-effort directory fsync so the rename itself survives power loss. Not
   // supported on every filesystem this repo runs on (Windows/DrvFs refuses to
   // open a directory), so a failure here is not fatal — the crash-recovery
-  // controls in Task 9 decide empirically what this host actually guarantees.
+  // tests decide empirically what this host actually guarantees.
   try {
     const dfd = fs.openSync(BASE(), 'r');
     try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); }
-  } catch (e) { /* not supported here; Task 9 measures the real behaviour */ }
+  } catch (e) { /* not supported here; the crash-recovery tests measure the real behaviour */ }
 }
 
 // fn(draft) mutates a private copy. Nothing is visible — in memory or on disk —
 // until the commit succeeds. A throw from fn, or from the commit, leaves the
 // world exactly as it was. "Mutation succeeded" means "durably committed".
-// I17 (amendment #1 §1, reviewer F1 — HIGH): transact() is NON-REENTRANT, fail
+// transact() is NON-REENTRANT (the non-reentrancy rule), fail
 // closed. A nested transact captured a stale `prev` and silently overwrote the
 // inner commit while returning success — measured, not hypothesized. The refusal
 // fires before any nested draft, write, or success return; a caught refusal must
@@ -1992,21 +2003,21 @@ function transact(fn) {
     IN_TRANSACTION = false;
   }
   if (!draft || typeof draft !== 'object') throw new Error('identity repo: transaction destroyed the state object');
-  assertShape(draft, 'transaction'); // FOLD F5: the write path gets the same typed gate as the read path
+  assertShape(draft, 'transaction'); // the write path gets the same typed gate as the read path
   if (draft.version !== VERSION) {
     throw new Error('identity repo: a transaction may not change version (got ' + draft.version + ')');
   }
   effectivePolicyLifetime(draft.policy, 'transaction');
   assertPolicyDeltas(prev, draft);
-  assertBootstrapDelta(prev, draft);         // C7: null -> number, at most once
-  assertMigrationEventDeltas(prev, draft);   // C6: no minting, no rewriting; draining is legal
+  assertBootstrapDelta(prev, draft);         // null -> number, at most once
+  assertMigrationEventDeltas(prev, draft);   // no minting, no rewriting; draining is legal
   assertCredentialInvariants(prev, draft);   // throws BEFORE the disk commit
-  assertRelationalDeltas(prev, draft);              // B4 L6: name illegal CHANGES first…
+  assertRelationalDeltas(prev, draft);              // name illegal CHANGES first…
   assertRelationalInvariants(draft, 'transaction'); // …then enforce the standing relation
-  assertV2Shapes(draft, 'transaction');             // C4 field-exactness, same gate as load
+  assertV2Shapes(draft, 'transaction');             // v2 field-exactness, same gate as load
   assertV2RelationalInvariants(draft, 'transaction');
-  assertSystemRoleBundleDeltas(prev, draft);        // R2/I-R2-6 — ordered here by Amendment 2, Ruling 2
-  assertUsableAdministrators(draft, 'transaction'); // C7 resulting-state guard, at the commit point
+  assertSystemRoleBundleDeltas(prev, draft);        // must run here — see the gate-order note on it
+  assertUsableAdministrators(draft, 'transaction'); // resulting-state guard, at the commit point
   commit(draft);                             // throws on any failure — nothing below runs
 
   // ── publication boundary ──────────────────────────────────────────────────
@@ -2034,7 +2045,7 @@ function transact(fn) {
 
 function read() { requireReady(); return STATE; }
 
-// R7 §13.3 / disposition F-A: SHA-256 over the exact published file bytes on
+// SHA-256 over the exact published file bytes on
 // disk (identity-state.v2.json), not JSON.stringify of the in-memory STATE.
 // Callers that witness drift must use this — hashing repo.read() is weaker.
 function publishedFileSha256() {
@@ -2047,12 +2058,12 @@ function pendingOutbox() { requireReady(); return STATE.outbox; }
 
 // Idempotent by construction: marking an already-delivered id is a no-op, which
 // is what makes at-least-once delivery safe to retry after a crash.
-// PACKET N1 (departure from the plan reference, which checked its args first):
+// DEPARTURE FROM THE ORIGINAL DESIGN (which checked its args first):
 // the ready-guard runs BEFORE any early return — a pre-init markDelivered([])
 // must refuse, not silently answer 0.
 function markDelivered(ids) {
   requireReady();
-  // I17, Codex's strengthening: refuse while a transaction callback is active
+  // The non-reentrancy rule, strengthened: refuse while a transaction callback is active
   // EVEN for no-op inputs — a "0" answered mid-callback is a false report about
   // state that is still in flight.
   if (IN_TRANSACTION) {
@@ -2069,14 +2080,14 @@ function markDelivered(ids) {
   });
 }
 
-// ── C2: the explicit v1 -> v2 migration ─────────────────────────────────────
+// ── The explicit v1 -> v2 migration ─────────────────────────────────────────
 // Pre-initialization only, refused inside a transaction, non-reentrant, and
 // idempotent BY REFUSAL. Never called implicitly: initialize() names it as the
-// remedy and does nothing else (I-R1-6).
+// remedy and does nothing else.
 let MIGRATING = false;
 
 function migrateV1ToV2(opts) {
-  // #193: migration is PRE-INITIALIZATION by contract (it refuses once STATE
+  // Migration is PRE-INITIALIZATION by contract (it refuses once STATE
   // exists), so it cannot lean on initialize() having set the tenant — and it
   // writes rows the validators will check against one. It is told directly, by
   // the same required, fail-closed rule.
@@ -2120,13 +2131,13 @@ function migrateV1ToV2(opts) {
       throw e;
     }
 
-    // (c) VALIDATE THE COMPLETE V1 SOURCE FIRST, with the FULL v1 gate. A v1
+    // (c) VALIDATE THE COMPLETE v1 SOURCE FIRST, with the FULL v1 gate. A v1
     //     source that v1-initialize() would refuse, the migration refuses with
-    //     the same class of loud error (I-R1-2) — never an empty first run.
+    //     the same class of loud error — never an empty first run.
     // buildIndex() carries no `where` of its own, so its refusal is re-thrown
     // with the source named: an operator must be told THEIR v1 file is bad, not
     // that "migrated state" is (and it stops the v2 post-validation silently
-    // covering for a deleted pre-validation — mutation M-C3).
+    // covering for a deleted pre-validation — a mutation test checks this).
     try { buildIndex(v1); }
     catch (e) { throw new Error('identity repo: version-1 state file is invalid — ' + e.message); }
     effectivePolicyLifetime(v1.policy, 'version-1 state file');
@@ -2155,7 +2166,7 @@ function migrateV1ToV2(opts) {
       bootstrap: { completed_at: null },
     };
 
-    // (f) VALIDATE THE COMPLETE V2 RESULT before publication.
+    // (f) VALIDATE THE COMPLETE v2 RESULT before publication.
     assertShape(next, 'migrated state', V2_SCHEMA);
     buildIndex(next);
     effectivePolicyLifetime(next.policy, 'migrated state');
@@ -2164,9 +2175,9 @@ function migrateV1ToV2(opts) {
     assertV2RelationalInvariants(next, 'migrated state');
     assertUsableAdministrators(next, 'migrated state');
 
-    // (g) Publish atomically — same temp + fsync + rename discipline, same F7
+    // (g) Publish atomically — same temp + fsync + rename discipline, same
     //     unlink-on-failed-rename. The v1 file is LEFT IN PLACE, inert: its
-    //     retirement belongs to a later task under its own authority.
+    //     retirement is a separate, later operation.
     commit(next);
 
     return {
@@ -2182,47 +2193,47 @@ function migrateV1ToV2(opts) {
   }
 }
 
-// The installed-state convenience (C7). The pure predicate is exported beside it
-// so R2+ can evaluate a proposed state without installing it.
+// The installed-state convenience. The pure predicate is exported beside it
+// so callers can evaluate a proposed state without installing it.
 function usableAdministrators(tenant) {
   requireReady();
   return usableAdministratorsIn(STATE, tenant);
 }
 
 module.exports = {
-  // #268 / land 2.5: the entry point binds the store through this before it
-  // constructs anything. It was added to this file and NOT exported, so
+  // The entry point binds the store through this before it
+  // constructs anything. It was once added to this file and NOT exported, so
   // `identity.create()` threw for every caller past the config validation —
-  // and every control written for it asserted a REFUSAL, which returns before
-  // this line is reached. Six green controls over a create() that could not
-  // construct. Found by Codex's F3 ("the gate never actually constructs"), which
-  // is exactly the hole he said it was.
+  // and every test written for it asserted a REFUSAL, which returns before
+  // this line is reached. Six green tests over a create() that could not
+  // construct; the gap was "the gate never actually constructs". A test must
+  // exercise the success path too.
   configureStateDir,
   tenant, hasTenant, validTenantName,
   PASSWORD_KDF_PROFILES, PASSWORD_PARAM_KEYS, PASSWORD_B64URL_32, passwordProfileFor,
   initialize, reload, read, transact, credentialBySelector,
   pendingOutbox, markDelivered, FILE, publishedFileSha256,
-  V1_FILE, migrateV1ToV2,                    // R1: explicit, never implicit
-  usableAdministratorsIn, usableAdministrators,  // D43 predicate (pure + installed)
+  V1_FILE, migrateV1ToV2,                    // explicit, never implicit
+  usableAdministratorsIn, usableAdministrators,  // usable-administrator predicate (pure + installed)
   VERSION,
-  // R1 frozen vocabulary — one definition, for R2+ to reuse rather than redeclare
+  // Frozen vocabulary — one definition, for other modules to reuse rather than redeclare
   MEMBERSHIP_STATUSES, ADMISSION_PURPOSES, ROLE_ASSIGNMENT_SCOPES, ADMINISTRATOR_SLUG,
-  // R2/Amendment 2 Ruling 3: the export surface widens for constants that
-  // ALREADY EXIST here frozen — no new constant, no changed value. R2's modules
-  // must refuse before the repository does (C6), and the only alternative was
+  // The export surface widens for constants that
+  // ALREADY EXIST here frozen — no new constant, no changed value. The service
+  // modules must refuse before the repository does, and the only alternative was
   // re-typing five vocabularies the standing validator already owns, which is
-  // the drift C2 exists to forbid (live specimen: grants.js:18 re-types
-  // SUBJECT_KINDS beside :72 below). An alignment control pins each of these to
-  // its consumers by value and order.
-  // Exactly the five Ruling 3 enumerates — DEFAULT_PASS_LIFETIME_MS is
-  // deliberately NOT among them: R2 needs the bounds, not the default, and
-  // widening a ruled enumeration by one convenient extra is the silent
-  // deviation the packet forbids.
+  // exactly the drift that deriving one vocabulary exists to prevent (a live
+  // example: grants.js:18 re-types SUBJECT_KINDS). An alignment test pins each
+  // of these to its consumers by value and order.
+  // Exactly these five — DEFAULT_PASS_LIFETIME_MS is
+  // deliberately NOT among them: the service modules need the bounds, not the
+  // default, and widening a deliberate enumeration by one convenient extra is a
+  // silent deviation.
   SUBJECT_KINDS, ROLE_STATUSES, SEAT_ADMISSION_PURPOSES,
   MIN_PASS_LIFETIME_MS, MAX_PASS_LIFETIME_MS,
   SELECTOR_CHARS, B64URL,                    // one definition — credentials.js imports these
-  GRANT_CAPABILITIES, GRANT_ORIGINS,         // Task 4: one frozen persisted vocabulary
-  // FOLD F4 (cold review, probe B): shallow freeze let EMPTY_STATE.subjects.push()
+  GRANT_CAPABILITIES, GRANT_ORIGINS,         // one frozen persisted vocabulary
+  // A shallow freeze let EMPTY_STATE.subjects.push()
   // poison the template for every consumer in the process, while the guarding test
   // (isFrozen on the root) stayed green. A template must be unpoisonable all the way down.
   EMPTY_STATE: deepFreeze(emptyState()),

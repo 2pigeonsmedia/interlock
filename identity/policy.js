@@ -1,8 +1,4 @@
-// identity/policy.js — bounded pass-lifetime policy state for Plan 1.
-//
-// Task 8 assertion authority:
-// docs/audits/CODEX_ASSERTION_PACKET_TASK8_2026-07-30.md
-// docs/audits/CODEX_PACKET_AMENDMENT1_TASK8_2026-07-31.md
+// identity/policy.js — bounded pass-lifetime policy state.
 //
 // This is a state primitive only. Authorization remains the caller's concern;
 // credentials.issue() still requires an explicit TTL and imports no policy.
