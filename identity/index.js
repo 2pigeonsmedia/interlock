@@ -107,6 +107,14 @@ function newAiCredential() {
   });
 }
 
+// Whether a raw bearer belongs to a candidate the server holds only as
+// selector/digest. Lets a host recognise a waiting candidate without issuing
+// or verifying a credential.
+function aiCredentialMatches(token, candidate) {
+  if (candidate === null || typeof candidate !== 'object') return false;
+  return credentials.candidateMatches(token, candidate.selector, candidate.digest);
+}
+
 /**
  * Construct the identity service for one host.
  *
@@ -1259,6 +1267,7 @@ module.exports = Object.freeze({
   create,
   createRecovery,
   newAiCredential,
+  aiCredentialMatches,
   // One definition of the live-origin rule, re-exported so a host adapter can
   // refuse exactly what the module refuses. Never a second copy.
   isCanonicalLiveOrigin: administration.isCanonicalLiveOrigin,

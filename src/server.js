@@ -410,6 +410,9 @@ async function startInterlockServer(options) {
       allowAiAdmission(meta, body) {
         return house.allowAiAdmission(meta, body);
       },
+      candidateMatches(token, candidate) {
+        return identity.aiCredentialMatches(token, candidate);
+      },
     });
     admission = openAdmissionService({
       dataDir,

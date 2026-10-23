@@ -191,6 +191,17 @@ function parseToken(token) {
   return { selector, secret };
 }
 
+// Whether `token` is the bearer for a client candidate's selector and digest,
+// before any credential is issued for it. The same parse and the one SHA-256
+// verify() uses; never throws.
+function candidateMatches(token, selector, digest) {
+  const parsed = parseToken(token);
+  if (!parsed || parsed.selector !== selector || typeof digest !== 'string' || !HEX64.test(digest)) {
+    return false;
+  }
+  return crypto.timingSafeEqual(sha256(parsed.secret).digest(), Buffer.from(digest, 'hex'));
+}
+
 // acceptedGenerations is EXPLICIT caller input: this module never knows,
 // guesses or defaults a "current" generation — a missing set is a caller bug
 // and throws, unlike a bad token, which is merely null.
@@ -291,6 +302,6 @@ function revokeAllFor(subject_id) {
 }
 
 module.exports = {
-  newToken, validCandidate, issue, issueInDraft, verify, revoke, revokeAllFor,
+  newToken, validCandidate, candidateMatches, issue, issueInDraft, verify, revoke, revokeAllFor,
   SELECTOR_BYTES, SECRET_BYTES, MAX_TOKEN_LEN,
 };

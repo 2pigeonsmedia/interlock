@@ -474,3 +474,48 @@ test('request ids are exact-retry keys and cannot change their admission facts',
   assert.deepEqual(await duplicate, declined);
   world.service.close();
 });
+
+test('waitingCandidate recognises only the bearer of a knock that is still pending', async () => {
+  const identity = require('identity');
+  let time = 1_000;
+  const real = identity.newAiCredential();
+  const house = Object.assign(fakeHouse(), {
+    candidateMatches: (token, candidateIn) => identity.aiCredentialMatches(token, candidateIn),
+  });
+  const service = openAdmissionService({
+    dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-admission-waiting-')),
+    house, clock: () => time, pendingTtlMs: 100, cooldownMs: 50, maxPending: 8,
+  });
+  assert.equal(service.waitingCandidate(real.token), false, 'nothing is pending yet');
+  const body = Object.assign(candidate(1), { selector: real.selector, digest: real.digest });
+  const waiting = service.knock(body, { timeoutMs: 100 });
+  assert.equal(service.list().length, 1, 'ARRANGEMENT: the knock is pending');
+
+  assert.equal(service.waitingCandidate(real.token), true, 'the pending candidate\'s own bearer');
+  const otherSecret = real.selector + '.' + identity.newAiCredential().token.split('.')[1];
+  for (const token of [otherSecret, identity.newAiCredential().token, '', null, 'Bearer ' + real.token]) {
+    assert.equal(service.waitingCandidate(token), false, `not a waiting candidate: ${String(token).slice(0, 12)}`);
+  }
+
+  time = 1_100;
+  assert.equal(service.waitingCandidate(real.token), false, 'a knock past its expiry is not waiting');
+  time = 1_099;
+  assert.equal(service.waitingCandidate(real.token), true, 'ARRANGEMENT: the clock alone made the difference');
+  assert.equal(service.decline(requestId(1)).state, 'declined');
+  assert.equal((await waiting).state, 'declined');
+  assert.equal(service.waitingCandidate(real.token), false, 'an answered knock is not waiting');
+
+  const without = openAdmissionService({
+    dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-admission-nomatch-')),
+    house: fakeHouse(), clock: () => time, pendingTtlMs: 100, cooldownMs: 50, maxPending: 8,
+  });
+  const second = identity.newAiCredential();
+  const pendingWithout = without.knock(Object.assign(candidate(2), { selector: second.selector, digest: second.digest }),
+    { timeoutMs: 100 });
+  assert.equal(without.waitingCandidate(second.token), false,
+    'a host that cannot match candidates recognises none');
+  without.decline(requestId(2));
+  await pendingWithout;
+  service.close();
+  without.close();
+});

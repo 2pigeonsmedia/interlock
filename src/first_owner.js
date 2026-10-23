@@ -1201,6 +1201,13 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
     }
+    // A knock waiting for the owner checks its own candidate here between
+    // knocks. It is not connected yet, and it is not a failed sign-in either:
+    // answer as for any unconnected bearer, without an authentication row.
+    if (waitingCandidate(request.headers.authorization)) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
     const authorized = house.authorizeSeatBearer({
       authorization_header: request.headers.authorization,
       source: clientSource(request, hostedMode),
@@ -1234,6 +1241,12 @@ function createFirstOwnerHandler(options) {
   // names where it came from. Other requestMeta consumers do not take it.
   function authorizationMeta(request, now) {
     return Object.assign(requestMeta(request, now), { source: clientSource(request, hostedMode) });
+  }
+
+  function waitingCandidate(header) {
+    const match = typeof header === 'string' ? /^Bearer ([A-Za-z0-9_.-]+)$/.exec(header) : null;
+    return match !== null && typeof admission.waitingCandidate === 'function' &&
+      admission.waitingCandidate(match[1]) === true;
   }
 
   function seatAuthorization(request, capability) {

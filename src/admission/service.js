@@ -505,6 +505,16 @@ function openAdmissionService(optionsIn) {
     return attach(pending, waitOptions);
   }
 
+  // True when `token` is the bearer of a knock still waiting for the owner.
+  // Its client checks that bearer between knocks; the check is waiting, not a
+  // failed sign-in. Read-only: it expires nothing and writes nothing.
+  function waitingCandidate(token) {
+    if (closed || typeof options.house.candidateMatches !== 'function') return false;
+    const at = now();
+    return records.some(record => record.state === 'pending' && record.expires_at > at &&
+      options.house.candidateMatches(token, { selector: record.selector, digest: record.digest }) === true);
+  }
+
   function list() {
     requireOpen();
     cleanup(now());
@@ -594,7 +604,7 @@ function openAdmissionService(optionsIn) {
   }
 
   cleanup(now());
-  return Object.freeze({ knock, list, allow, decline, close });
+  return Object.freeze({ knock, list, allow, decline, close, waitingCandidate });
 }
 
 module.exports = Object.freeze({
