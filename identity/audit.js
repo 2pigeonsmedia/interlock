@@ -287,7 +287,7 @@ const MUTATION_FIELDS = Object.freeze({
   // assignments.js revokeInDraft — slug may be null if role row is gone
   'assignment.revoke': Object.freeze([
     'ts', 'kind', 'tenant', 'assignment_id', 'role_id', 'slug',
-    'subject_id', 'scope_type', 'scope_id',
+    'subject_id', 'scope_type', 'scope_id', 'revoked_by',
   ]),
 });
 
@@ -714,6 +714,8 @@ function telemetryDrain() {
 
 function validateMutationField(event, field, kind) {
   const item = ownData(event, field);
+  // revoked_by was added after release; a revoke queued before then has none.
+  if (!item.present && kind === 'assignment.revoke' && field === 'revoked_by') return null;
   if (!item.present) {
     throw new Error('audit: ' + kind + ' missing required field ' + field);
   }
@@ -756,7 +758,7 @@ function validateMutationField(event, field, kind) {
   // still requires the field to be PRESENT; only the value may be null.
   if (field === 'principal' || field === 'cascade_of' ||
       field === 'issuer_subject_id' || field === 'principal_subject_id' ||
-      field === 'from' || field === 'slug') {
+      field === 'from' || field === 'slug' || field === 'revoked_by') {
     // slug: assignment.revoke may emit null when the role row is already gone
     if (value !== null && !validString(value)) {
       throw new Error('audit: ' + kind + ' field ' + field + ' must be string or null');

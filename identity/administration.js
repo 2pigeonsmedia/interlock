@@ -324,6 +324,15 @@ function createService(opts) {
   }
 
   // Central order for post-bootstrap admin mutations.
+  // The two locks on the first owner. Only she grants or removes roles, and no
+  // workflow that names a person may name her, whoever asks (she included).
+  function requireFirstOwner(state, actorId) {
+    if (repo.firstOwnerIdIn(state, TENANT()) !== actorId) throw new Error('first owner only');
+  }
+  function refuseFirstOwner(state, subjectId) {
+    if (repo.firstOwnerIdIn(state, TENANT()) === subjectId) throw new Error('first owner is protected');
+  }
+
   function withFreshAdmin(optsIn, workflow, resource, body) {
     if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn)) return FAIL;
     const env = envelopeOf(optsIn);
@@ -665,6 +674,7 @@ function createService(opts) {
     return withFreshAdmin(optsIn, 'member-reset.issue', 'credentials', ({ actorId, now }) => {
       if (target === actorId) throw new Error('cannot reset self via member-reset');
       const state = repo.read();
+      refuseFirstOwner(state, target);
       const person = state.subjects.find(s => s.id === target);
       if (!person || person.kind !== 'person' || person.status !== 'active' || person.tenant !== TENANT()) {
         throw new Error('target not active person');
@@ -738,6 +748,8 @@ function createService(opts) {
     const workflow = slug === 'administrator' ? 'role.assign.administrator' : 'role.assign.participant';
     return withFreshAdmin(optsIn, workflow, 'roles', ({ actorId, now }) => {
       const state = repo.read();
+      requireFirstOwner(state, actorId);
+      refuseFirstOwner(state, target);
       const person = state.subjects.find(s => s.id === target);
       if (!person || person.kind !== 'person' || person.status !== 'active' || person.tenant !== TENANT()) {
         throw new Error('target not active person');
@@ -773,13 +785,15 @@ function createService(opts) {
   function revokeRoleAssignment(optsIn) {
     const assignment_id = ownData(optsIn || {}, 'assignment_id').value;
     if (typeof assignment_id !== 'string' || !assignment_id) return FAIL;
-    return withFreshAdmin(optsIn, 'role.revoke', 'roles', ({ now }) => {
+    return withFreshAdmin(optsIn, 'role.revoke', 'roles', ({ actorId, now }) => {
       const state = repo.read();
+      requireFirstOwner(state, actorId);
       const row = state.role_assignments.find(a => a.id === assignment_id);
       if (!row || row.revoked_at !== null) throw new Error('assignment missing');
       const target = row.subject_id;
+      refuseFirstOwner(state, target);
       revokeTargetSessions(target, now, 'assignment-change');
-      const ok = assignments.revoke(assignment_id);
+      const ok = assignments.revoke(assignment_id, actorId);
       if (!ok) throw new Error('revoke failed');
       return Object.freeze({ ok: true });
     });
@@ -791,6 +805,7 @@ function createService(opts) {
     if (typeof target !== 'string' || !target) return FAIL;
     return withFreshAdmin(optsIn, workflow, 'membership', ({ now }) => {
       const state = repo.read();
+      refuseFirstOwner(state, target);
       const mem = state.memberships.find(m =>
         m.tenant === TENANT() && m.person_subject_id === target);
       if (!mem) throw new Error('membership not found');
@@ -814,6 +829,7 @@ function createService(opts) {
     const target = ownData(optsIn || {}, 'target_person_subject_id').value;
     if (typeof target !== 'string' || !target) return FAIL;
     return withFreshAdmin(optsIn, 'person.revoke', 'membership', ({ now }) => {
+      refuseFirstOwner(repo.read(), target);
       revokeTargetSessions(target, now, 'subject-revocation');
       const ok = subjects.revoke(target);
       if (!ok) throw new Error('person revoke failed');
@@ -840,6 +856,7 @@ function createService(opts) {
         (subject.kind === 'person' || subject.kind === 'seat') &&
         subject.name === targetName);
       if (!target || target.id === actorId) throw new Error('participant cannot be revoked');
+      refuseFirstOwner(state, target.id);
       if (target.kind === 'person') {
         const administrator = state.roles.find(role =>
           role.tenant === TENANT() && role.system === true && role.slug === 'administrator');
@@ -1003,6 +1020,7 @@ function createService(opts) {
       // and the person's own door needs no admin at all. Collapsing the two
       // would put an L2 requirement back on the lost-phone case by the side door.
       if (target_person_subject_id === actorId) throw new Error('other-only');
+      refuseFirstOwner(repo.read(), target_person_subject_id);
 
       const state = repo.read();
       const row = state.authenticators.find(a => a.id === authenticator_id);

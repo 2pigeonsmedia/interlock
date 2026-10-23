@@ -163,18 +163,18 @@ function assignInDraft(state, opts) {
 // already-revoked target is a PURE no-op: false, no timestamp, no outbox row, no
 // disk write. An unrevoked target transitions exactly once and the row is NEVER
 // deleted — history stays for audit.
-function revoke(id) {
+function revoke(id, revokedBy = null) {
   // Read first so readiness/FATAL compose even for a malformed id.
   const state = repo.read();
   if (typeof id !== 'string' || id.trim() === '') return false;
   const target = state.role_assignments.find(a => a.id === id) || null;
   if (!target || target.revoked_at !== null) return false;   // never opens a transaction
 
-  return repo.transact(draft => revokeInDraft(draft, { id, now: Date.now() }));
+  return repo.transact(draft => revokeInDraft(draft, { id, now: Date.now(), revoked_by: revokedBy }));
 }
 
 function revokeInDraft(draft, opts) {
-  const { id, now } = opts || {};
+  const { id, now, revoked_by = null } = opts || {};
   if (typeof id !== 'string' || id.trim() === '') {
     throw new Error('assignments.revokeInDraft: id must be a non-blank string');
   }
@@ -192,6 +192,7 @@ function revokeInDraft(draft, opts) {
     tenant: row.tenant, assignment_id: row.id, role_id: row.role_id,
     slug: role ? role.slug : null, subject_id: row.subject_id,
     scope_type: row.scope_type, scope_id: row.scope_id,
+    revoked_by: typeof revoked_by === 'string' ? revoked_by : null,
   });
   return true;
 }

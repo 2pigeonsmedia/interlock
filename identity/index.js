@@ -887,6 +887,94 @@ function create(config) {
     return Object.freeze({ ok: true, name: result.name, kind: result.kind });
   }
 
+  // ── ADMINISTRATORS: the first owner grants and removes them ──────────────
+  // The rules live in administration.js (only the first owner grants or
+  // removes; nobody can name her). These read the same state first so the
+  // host can say why a request was refused; the service decides.
+  function peopleState(state) {
+    const role = state.roles.find(r => r.tenant === tenant && r.system === true &&
+      r.slug === repo.ADMINISTRATOR_SLUG);
+    const firstOwnerId = repo.firstOwnerIdIn(state, tenant);
+    return state.subjects.filter(s => s.tenant === tenant && s.kind === 'person' &&
+      s.status === 'active').map(person => ({
+      id: person.id,
+      name: person.name,
+      first_owner: person.id === firstOwnerId,
+      admin: Boolean(role) && state.role_assignments.some(a => a.tenant === tenant &&
+        a.subject_id === person.id && a.role_id === role.id && a.revoked_at === null &&
+        a.expires_at === null),
+      admin_assignment_id: (role && (state.role_assignments.find(a => a.tenant === tenant &&
+        a.subject_id === person.id && a.role_id === role.id && a.revoked_at === null &&
+        a.expires_at === null) || {}).id) || null,
+      passkey: state.authenticators.some(a => a.tenant === tenant &&
+        a.person_subject_id === person.id && a.revoked_at === null),
+    }));
+  }
+
+  function callerId(meta) {
+    const authenticated = sessions.authenticate({
+      cookie_header: meta.cookie_header, now: meta.now, activity: 'ordinary',
+    });
+    return authenticated.ok ? authenticated.session.subject_id : null;
+  }
+
+  // Who is an administrator, who has a passkey, and whether the caller may
+  // grant or remove administrator rights.
+  function administrators(meta) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('administrators(meta) requires the trusted metadata object');
+    }
+    const caller = callerId(meta);
+    if (caller === null) return Object.freeze({ ok: false, reason: 'not-authorized' });
+    const people = peopleState(repo.read());
+    const self = people.find(person => person.id === caller);
+    return Object.freeze({
+      ok: true,
+      manage: Boolean(self && self.first_owner),
+      people: Object.freeze(people.map(person => Object.freeze({
+        name: person.name, admin: person.admin, first_owner: person.first_owner, passkey: person.passkey,
+      }))),
+    });
+  }
+
+  function administratorChange(meta, body, grant) {
+    if (meta === null || typeof meta !== 'object') {
+      reject((grant ? 'grantAdministrator' : 'revokeAdministrator') +
+        '(meta, …) requires the trusted metadata object');
+    }
+    const b = closedBody(body, ['name']);
+    if (!b || typeof b.name !== 'string' || b.name.length === 0 || b.name.includes('\0') ||
+        Buffer.byteLength(b.name, 'utf8') > 256) {
+      return Object.freeze({ ok: false, reason: 'invalid-request' });
+    }
+    const caller = callerId(meta);
+    const people = peopleState(repo.read());
+    const self = people.find(person => person.id === caller);
+    if (!self || !self.first_owner) return Object.freeze({ ok: false, reason: 'not-authorized' });
+    const target = people.find(person => person.name === b.name);
+    if (!target || target.first_owner) return Object.freeze({ ok: false, reason: 'not-found' });
+    if (grant && target.admin) return Object.freeze({ ok: false, reason: 'already-admin' });
+    if (!grant && !target.admin) return Object.freeze({ ok: false, reason: 'not-admin' });
+    if (grant && !target.passkey) return Object.freeze({ ok: false, reason: 'passkey-required' });
+    const envelope = {
+      cookie_header: meta.cookie_header,
+      csrf_token: meta.csrf_token,
+      request_origin: meta.request_origin,
+      sec_fetch_site: meta.sec_fetch_site,
+      now: meta.now,
+    };
+    const result = grant
+      ? service.assignProtectedRole(Object.assign(envelope,
+        { target_person_subject_id: target.id, slug: repo.ADMINISTRATOR_SLUG }))
+      : service.revokeRoleAssignment(Object.assign(envelope,
+        { assignment_id: target.admin_assignment_id }));
+    // Every check above passed, so a refusal here is the one-use step-up.
+    if (!result || result.ok !== true) return Object.freeze({ ok: false, reason: 'fresh-step-up-required' });
+    return Object.freeze({ ok: true, name: target.name });
+  }
+  const grantAdministrator = (meta, body) => administratorChange(meta, body, true);
+  const revokeAdministrator = (meta, body) => administratorChange(meta, body, false);
+
   function signOutOtherSessions(meta) {
     if (meta === null || typeof meta !== 'object') {
       reject('signOutOtherSessions(meta) requires the trusted metadata object');
@@ -997,6 +1085,9 @@ function create(config) {
     listAiSeatHistory,
     endOwnSeat,
     revokeParticipant,
+    administrators,
+    grantAdministrator,
+    revokeAdministrator,
     signOutOtherSessions,
     confirmTranscriptClear,
     allowAiAdmission,
@@ -1142,7 +1233,10 @@ function createRecovery(config) {
       row.slug === repo.ADMINISTRATOR_SLUG && row.status === 'active');
     if (!role) throw new Error('identity recovery: no active administrator role exists');
 
-    const candidates = state.subjects.filter(subject =>
+    // Recovery restores the first owner, the person who completed setup. Other
+    // administrators recover through her, never through the operator.
+    const firstOwnerId = repo.firstOwnerIdIn(state, tenant);
+    const candidates = state.subjects.filter(subject => subject.id === firstOwnerId &&
       subject.tenant === tenant && subject.kind === 'person' && subject.status === 'active' &&
       state.memberships.some(membership => membership.tenant === tenant &&
         membership.person_subject_id === subject.id && membership.status === 'active') &&
@@ -1150,8 +1244,7 @@ function createRecovery(config) {
         assignment.role_id === role.id && assignment.subject_id === subject.id &&
         assignment.revoked_at === null && assignment.expires_at === null));
     if (candidates.length !== 1) {
-      throw new Error('identity recovery: expected exactly one active administrator; found ' +
-        candidates.length);
+      throw new Error('identity recovery: the first owner is not an active administrator');
     }
     return Object.freeze({ id: candidates[0].id, name: candidates[0].name });
   }

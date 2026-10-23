@@ -1321,6 +1321,18 @@ function assertV2RelationalInvariants(state, where) {
 // Pure: evaluates the five conjuncts on a COMPLETE state. Clock-free — an
 // administrator assignment cannot carry an expiry at all (the schema rule
 // above), so "non-expiring" is a byte fact, not a time fact.
+// The room's first owner: the person who completed setup. Setup gives them the
+// one membership with no inviter, from the consumed bootstrap capability, and
+// validate() admits a null inviter only with such a capability, so no later
+// write can create or move it. Null until setup completes, or if the state no
+// longer names exactly one such person.
+function firstOwnerIdIn(state, tenantName) {
+  if (!state || !state.bootstrap || state.bootstrap.completed_at === null) return null;
+  const live = state.memberships.filter(m =>
+    m.tenant === tenantName && m.invited_by === null && m.status !== 'revoked');
+  return live.length === 1 ? live[0].person_subject_id : null;
+}
+
 function usableAdministratorsIn(state, tenant) {
   const role = state.roles.find(r => r.tenant === tenant && r.system === true && r.slug === ADMINISTRATOR_SLUG) || null;
   if (!role) return 0;
@@ -2215,6 +2227,7 @@ module.exports = {
   pendingOutbox, markDelivered, FILE, publishedFileSha256,
   V1_FILE, migrateV1ToV2,                    // explicit, never implicit
   usableAdministratorsIn, usableAdministrators,  // usable-administrator predicate (pure + installed)
+  firstOwnerIdIn,
   VERSION,
   // Frozen vocabulary — one definition, for other modules to reuse rather than redeclare
   MEMBERSHIP_STATUSES, ADMISSION_PURPOSES, ROLE_ASSIGNMENT_SCOPES, ADMINISTRATOR_SLUG,
