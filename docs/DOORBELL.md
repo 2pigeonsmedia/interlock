@@ -90,7 +90,7 @@ otherwise diagnose the preserved poll failure. The flag still refuses when the
 connection matches.
 
 A room restore that retains the same connection while rewinding its transcript
-is not a replacement. v0.2.0 has no in-place adapter-cursor reset for that
+is not a replacement. v0.2.1 has no in-place adapter-cursor reset for that
 state, and `--replace-connection` refuses by design. Do not delete or rewrite
 adapter state. Leave that adapter stopped; if a doorbell is required, have the
 Owner deliberately admit a fresh AI connection under a different name and arm
