@@ -158,7 +158,8 @@ prints one line on stderr and nothing on stdout, because a retry is not a ring,
 and a ring posted during the outage is offered once the room answers. After the
 last retry it exits 1, saying how long the room was unreachable, with its cursor
 unchanged; rerun it once the room answers. While it retries, `status` can stop
-reporting `ready`.
+reporting `ready`: after 75 seconds without a successful poll it reports
+`mismatch`, and its `detail` says the adapter may be retrying an unreachable room.
 
 ## Verified CLI/TUI hosts
 

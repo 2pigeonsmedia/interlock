@@ -333,6 +333,46 @@ test('status reports immediate and aged recovery as starting during the first po
   await proveStarting('aged prior state');
 });
 
+test('status explains a live adapter with no recent successful poll', async () => {
+  const world = fixture(ringPage());
+  const seeded = runCommand(world, [
+    'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir, '--once',
+  ]);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  world.delay = 500;
+  const child = childProcess.spawn(process.execPath, [
+    RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir,
+  ], {
+    cwd: ROOT,
+    env: runnerEnv(world),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    await waitForAdapterLock(world.stateDir);
+    let currentRuntime = null;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      currentRuntime = JSON.parse(fs.readFileSync(runtimeFile(world.stateDir), 'utf8'));
+      if (currentRuntime.pid === child.pid) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(currentRuntime.pid, child.pid, 'the runtime must belong to the live adapter');
+    const { FRESH_MS, inspectStatus } = require(RUNNER);
+    const later = Date.now() + FRESH_MS + 10 * 60 * 1000;
+    const status = inspectStatus({
+      adapter: null, connection: 'Marlow', session: null, stateDir: world.stateDir,
+    }, () => later);
+    assert.equal(status.state, 'mismatch',
+      'the state word is a documented value and stays the same');
+    assert.match(status.detail, /no successful poll in the last 75 s/);
+    assert.match(status.detail, /may be retrying an unreachable room/);
+  } finally {
+    child.kill();
+    await once(child, 'exit');
+  }
+});
+
 test('status reports mismatched and unverifiable evidence without mutating ownership', () => {
   const world = fixture(ringPage());
   const completed = runCommand(world, [

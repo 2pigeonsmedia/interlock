@@ -394,7 +394,10 @@ function inspectStatus(options, clock = Date.now) {
   const age = now - stateMtime;
   if (age < -60_000 || age > FRESH_MS) {
     return statusResult(options, Object.assign(common, {
-      state: 'mismatch', detail: 'active adapter state is outside the freshness window',
+      state: 'mismatch',
+      detail: age > FRESH_MS ?
+        `no successful poll in the last ${FRESH_MS / 1000} s; the adapter may be retrying an unreachable room` :
+        'adapter state is dated in the future; check the system clock',
       recovery: null,
     }));
   }
