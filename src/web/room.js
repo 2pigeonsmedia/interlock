@@ -1439,6 +1439,18 @@ async function joiningPasskey(ceremony) {
   }
 }
 
+// Each refusal names its own cause. Only a bad invite blames the invite.
+function joinRefusal(status, result) {
+  const error = result && result.error;
+  if (error === 'invalid-invite') return 'That invite code is invalid, expired, or already used.';
+  if (error === 'invalid-name') return 'That name cannot be used here.';
+  if (error === 'password-too-short') return 'Choose a password of at least 12 characters.';
+  if (error === 'sign-in-unavailable' || status === 503) {
+    return 'Interlock cannot sign anyone in right now. Try again shortly.';
+  }
+  return 'Interlock did not let you join. Try again, or ask for a new invite.';
+}
+
 inviteRedeemForm.addEventListener('submit', async event => {
   event.preventDefault();
   inviteRedeemButton.disabled = true;
@@ -1458,9 +1470,7 @@ inviteRedeemForm.addEventListener('submit', async event => {
     const result = await readJson(response);
     if (!response.ok || result.ok !== true || result.authenticated !== true ||
         typeof result.csrf_token !== 'string' || !result.user) {
-      setLoginStatus(result.error === 'invalid-name'
-        ? 'That name cannot be used here.'
-        : 'That invite code is invalid, expired, or already used.', 'error');
+      setLoginStatus(joinRefusal(response.status, result), 'error');
       return;
     }
     storeCsrf(result.csrf_token);
@@ -1804,7 +1814,9 @@ changePasswordForm.addEventListener('submit', async event => {
     setSettingsStatus(settingsOwnerStatus,
       error.code === 'invalid-current-password'
         ? 'The current password was not accepted.'
-        : 'Interlock did not change the password.', 'error');
+        : (error.code === 'password-too-short'
+          ? 'Choose a password of at least 12 characters.'
+          : 'Interlock did not change the password.'), 'error');
   } finally {
     changePasswordButton.disabled = false;
   }

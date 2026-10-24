@@ -35,6 +35,11 @@ function hostedEdits(origin) {
         `Run ${join} in a terminal on any machine with Interlock installed. <a href="/help">Help</a> covers installing it.</p>`,
       ],
       [
+        '<input id="invite-password" name="password" type="password" autocomplete="new-password" maxlength="1024" required>',
+        '<input id="invite-password" name="password" type="password" autocomplete="new-password" maxlength="1024" minlength="12" aria-describedby="invite-password-hint" required>\n' +
+          '        <p id="invite-password-hint" class="field-hint">At least 12 characters.</p>',
+      ],
+      [
         '<p class="local-note">This room is available only on this computer.</p>',
         `<p class="local-note">This room is reachable at ${at}.</p>`,
       ],
