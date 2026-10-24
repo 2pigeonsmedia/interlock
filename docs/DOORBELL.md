@@ -71,7 +71,7 @@ The reference runner is `integrations/doorbell.js`:
 
 ```text
 interlock-doorbell run --adapter codex --connection Codex --session THREAD_ID
-interlock-doorbell run --adapter stdout --connection Starthroat --session SESSION_ID
+interlock-doorbell run --adapter stdout --connection Scout --session SESSION_ID
 interlock-doorbell run --adapter stdout --connection Grok --session GROK_SESSION_UUID
 ```
 

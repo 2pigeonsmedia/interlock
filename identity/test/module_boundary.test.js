@@ -277,8 +277,8 @@ test('module boundary (runtime graph, polluted cache) — a POLLUTED parent cach
 });
 
 test('module boundary (runtime graph control) — the graph control can SEE an escape', () => {
-  // The hollow question, asked of the graph control itself: if the core
-  // surface DID reach outside identity/, would that filter notice? Proved on
+  // A check on the graph control itself: if the core surface DID reach
+  // outside identity/, would that filter notice? Proved on
   // synthetic paths rather than by trusting the expression — a filter that can never produce a
   // non-empty list is a control that can only ever pass.
   const inside = fs.realpathSync(F.MODULE_DIR) + path.sep;
@@ -307,7 +307,7 @@ test('module boundary (runtime graph control) — the graph control can SEE an e
   assert.strictEqual(isEscape(path.join(outsideDir, 'node_modules', 'x', 'index.js')), false,
     'a declared dependency must NOT be flagged');
   assert.strictEqual(isEscape(path.join(outsideDir, 'server.js')), true,
-    'a host file OUTSIDE identity/ must be flagged — if this is false the control is hollow');
+    'a host file OUTSIDE identity/ must be flagged — if this is false the control can never fail');
 });
 
 // ── the source-text sweep ───────────────────────────────────────────────────

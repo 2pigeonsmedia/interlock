@@ -9,7 +9,7 @@ const path = require('path');
 
 const F = require('./fixture.js');
 
-test('identity.create webauthn:true on the ratified pair builds authenticators', () => {
+test('identity.create webauthn:true with a matching origin and rpId builds authenticators', () => {
   F.evictModule();
   const identity = F.load('index.js');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-398-create-'));
@@ -33,7 +33,7 @@ test('identity.create webauthn:true on the ratified pair builds authenticators',
     'production WebAuthn construction must expose the same public first-owner ceremony');
 });
 
-test('identity.create webauthn:true on an unratified HTTPS origin refuses', () => {
+test('identity.create webauthn:true on an HTTPS origin outside its rpId refuses', () => {
   F.evictModule();
   const identity = F.load('index.js');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-398-refuse-'));
