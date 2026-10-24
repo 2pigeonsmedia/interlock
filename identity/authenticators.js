@@ -59,6 +59,11 @@ const CEREMONY_TIMEOUT_MS = 60_000;
 // of it. The one other authority is a passkey code the first owner issued for
 // that person, spent from their own session when the ceremony begins.
 const INVITE_ENROLMENT_MS = 5 * 60 * 1000;
+// A passkey code is spent only from a session the member signed in to with
+// their password within the last ten minutes: long enough to sign in and paste
+// the code, far shorter than a session stays open. A browser left signed in
+// cannot spend a code on its own.
+const CODE_SIGN_IN_MS = 10 * 60 * 1000;
 const MAX_JSON_DEPTH = 12;
 const MAX_JSON_NODES = 2048;
 const MAX_JSON_STRING_BYTES = 256 * 1024;
@@ -67,6 +72,7 @@ const FAIL_UNAVAIL = Object.freeze({ ok: false, reason: 'webauthn-unavailable' }
 const FAIL_FAILED = Object.freeze({ ok: false, reason: 'webauthn-failed' });
 const PASSKEY_EXISTS = Object.freeze({ ok: false, reason: 'passkey-exists' });
 const CODE_INVALID = Object.freeze({ ok: false, reason: 'code-invalid' });
+const SIGN_IN_REQUIRED = Object.freeze({ ok: false, reason: 'sign-in-required' });
 
 const FORBIDDEN_TOP_KEYS = Object.freeze([
   'tenant', 'person_subject_id', 'subject_id', 'subject_kind', 'membership',
@@ -319,6 +325,9 @@ function createService(opts) {
         m.tenant === tenant && m.person_subject_id === personId && m.status === 'active')) {
         return FAIL_UNAVAIL;
       }
+      // Only a recent password sign-in may spend a code; refused, it stays unspent.
+      const signedInAt = opened.session.authenticated_at;
+      if (!(env.now >= signedInAt && env.now - signedInAt < CODE_SIGN_IN_MS)) return SIGN_IN_REQUIRED;
       let spent;
       try {
         spent = repo.transact(draft => admission.consumePasskeyCodeInDraft(draft, {

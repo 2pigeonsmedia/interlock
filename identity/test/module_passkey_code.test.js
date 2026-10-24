@@ -243,3 +243,23 @@ test('the store refuses a passkey code spent by anyone but the member it names',
   }), /consumed only by the person it names/);
   assert.equal(r.repo.read().admission_capabilities.find(c => c.id === code.capability_id).consumed_at, null);
 });
+
+const SIGN_IN_WINDOW_MS = 10 * 60 * 1000; // a code is spent only this soon after a password sign-in
+
+test('a code needs a recent password sign-in, and a stale session does not spend it', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  const code = r.issue(await r.asOwner(), cal);
+  const signedInAt = r.tick();
+  const stale = await r.signIn(cal, signedInAt);
+  const late = signedInAt + SIGN_IN_WINDOW_MS + 1;
+  const refused = await r.redeem(stale, code.secret, late);
+  assert.equal(refused.ok, false, 'an open session signed in long ago cannot spend a code');
+  assert.equal(refused.reason, 'sign-in-required');
+  assert.equal(refused.options, undefined);
+  assert.equal(r.repo.read().admission_capabilities.find(c => c.id === code.capability_id).consumed_at, null,
+    'the refused attempt leaves the code unspent');
+  const fresh = await r.signIn(cal, late);
+  const begun = await r.redeem(fresh, code.secret, late + 1);
+  assert.equal(begun.ok, true, 'after signing in again the same code works: ' + JSON.stringify(begun));
+});

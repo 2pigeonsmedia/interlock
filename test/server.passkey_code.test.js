@@ -253,13 +253,32 @@ async function codeRefusals({ runtime, ownerDevice }) {
   assert.equal((await begin(fay, forFay)).status, 200, 'ARRANGEMENT: the first use begins');
   refusedWith(await begin(fay, forFay), 'code-used');
 
-  // Expired: a day later the member signs in again and the code is refused.
+  // Two tabs presenting one code at once: exactly one begins a passkey.
+  const shared = await issue('Fay');
+  fay = await login(runtime, 'Fay', fayPassword);
+  const tabs = await Promise.all([begin(fay, shared), begin(fay, shared)]);
+  assert.deepEqual(tabs.map(tab => tab.status).sort(), [200, 409], tabs.map(tab => tab.text).join(' | '));
+  refusedWith(tabs.find(tab => tab.status === 409), 'code-used');
+
+  const replaced = await issue('Fay');
   const fresh = await issue('Fay');
   const realNow = Date.now;
   try {
-    Date.now = () => realNow() + 24 * 60 * 60 * 1000 + 60_000;
+    // Signed in eleven minutes ago: the code is refused and not spent.
     fay = await login(runtime, 'Fay', fayPassword);
-    refusedWith(await begin(fay, fresh), 'code-expired');
+    Date.now = () => realNow() + 11 * 60 * 1000;
+    refusedWith(await begin(fay, fresh), 'sign-in-required');
+    // After signing out and in again, the same code works.
+    assert.equal((await post(runtime, '/api/logout', {}, fay)).status, 200);
+    fay = await login(runtime, 'Fay', fayPassword);
+    assert.equal((await begin(fay, fresh)).status, 200, 'the refused code was not spent');
+    refusedWith(await begin(fay, replaced), 'code-expired'); // a newer code replaced it
+
+    // Expired: a day later the member signs in again and the code is refused.
+    const expiring = await issue('Fay');
+    Date.now = () => realNow() + 11 * 60 * 1000 + 24 * 60 * 60 * 1000 + 60_000;
+    fay = await login(runtime, 'Fay', fayPassword);
+    refusedWith(await begin(fay, expiring), 'code-expired');
   } finally {
     Date.now = realNow;
   }

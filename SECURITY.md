@@ -150,8 +150,9 @@ no others.
   code. A password sign-in alone never adds a member's passkey. A passkey code
   is issued only by the first owner, with a fresh passkey confirmation, for one
   member who has none; it is stored as a digest, works once within 24 hours,
-  and is redeemed only from that member's own signed-in session, so it needs
-  both the code and the member's password. An administrator can do everything the owner can,
+  and is redeemed only from that member's own session, signed in with their
+  password in the last ten minutes, so it needs both the code and the
+  member's password. An administrator can do everything the owner can,
   except grant or remove administrator rights. Nobody, the first owner
   included, can remove, demote or suspend the first owner, or reset or revoke
   their password or passkeys. Interlock identifies the first owner from the

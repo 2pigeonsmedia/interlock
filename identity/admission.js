@@ -25,7 +25,8 @@
 // human invite and passkey code are the two 24-hour exceptions so a person does
 // not have to coordinate enrollment inside a quarter-hour window. A passkey
 // code alone grants nothing: it is redeemed only from a session the member
-// already signed in to, so it needs both the code and their password.
+// signed in to with their password in the last ten minutes, so it needs both
+// the code and their password.
 'use strict';
 const crypto = require('crypto');
 const repo = require('./repo.js');

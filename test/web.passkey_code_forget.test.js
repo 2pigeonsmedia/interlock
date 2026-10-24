@@ -2,8 +2,10 @@
 
 // A passkey code the first owner creates is shown once, like an invite code.
 // It must leave the page when Settings closes and when the page signs out, so
-// a later viewer of the same browser tab cannot read it. This runs the shipped
-// room.js against a minimal stand-in for the page.
+// a later viewer of the same browser tab cannot read it. A member whose
+// sign-in is too old to spend a code is told to sign in again and offered the
+// way to do it. This runs the shipped room.js against a minimal stand-in for
+// the page.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -60,6 +62,7 @@ class Element {
     this.dispatch('close');
   }
   showModal() { this.open = true; }
+  click() { return this.dispatch('click'); }
   reset() {}
   focus() {}
   append() {}
@@ -87,7 +90,8 @@ function loadPage() {
     sessionStorage: storage,
     localStorage: storage,
     // Session and connection checks never answer, so only the test drives the page.
-    fetch: () => new Promise(() => {}),
+    fetched: [],
+    fetch: path => { page.fetched.push(path); return new Promise(() => {}); },
     setInterval: () => 0,
     clearInterval() {},
     setTimeout: () => 0,
@@ -149,4 +153,18 @@ test('a shown passkey code is forgotten when the page signs out', async () => {
   el('#settings-dialog').open = false;
   page.showLogin('You are signed out.');
   assertForgotten(el, 'after sign-out');
+});
+
+test('a member whose sign-in is too old is told to sign in again, and offered it', async () => {
+  const { page, el } = loadPage();
+  page.ownerMutation = async () => {
+    throw Object.assign(new Error('sign-in-required'), { code: 'sign-in-required', status: 409 });
+  };
+  await el('#add-passkey-button').click();
+  assert.equal(el('#add-passkey-signin').hidden, true, 'ARRANGEMENT: the sign-in offer starts hidden');
+  await el('#add-passkey-form').dispatch('submit', { preventDefault() {} });
+  assert.equal(el('#add-passkey-status').textContent, 'Sign in again, then enter the code.');
+  assert.equal(el('#add-passkey-signin').hidden, false, 'the page offers to sign out and in again');
+  el('#add-passkey-signin').click(); // the sign-out it starts never answers here
+  assert.ok(page.fetched.includes('/api/logout'), 'which signs out first, so the next sign-in is fresh');
 });

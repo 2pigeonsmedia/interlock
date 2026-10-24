@@ -10,8 +10,8 @@ your own checks.
 **Passkey codes.** A member without a passkey can now add one. In Settings the
 first owner selects **Send passkey code** on that member's row, confirms with
 their passkey, and sends the one-time code privately; it expires after 24
-hours. The member signs in, selects **Add a passkey**, enters the code and makes
-the passkey. Members who joined before 0.2.1, or whose passkey failed when they
+hours. The member signs in, selects **Add a passkey** within ten minutes, enters
+the code and makes the passkey. Members who joined before 0.2.1, or whose passkey failed when they
 joined, can then be made administrators.
 
 **No migration.** The data directory is used as it is and identity state stays

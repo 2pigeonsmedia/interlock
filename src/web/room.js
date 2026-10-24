@@ -39,6 +39,7 @@ const addPasskeyDialog = document.querySelector('#add-passkey-dialog');
 const addPasskeyForm = document.querySelector('#add-passkey-form');
 const addPasskeySubmit = document.querySelector('#add-passkey-submit');
 const addPasskeyStatus = document.querySelector('#add-passkey-status');
+const addPasskeySignIn = document.querySelector('#add-passkey-signin');
 const settingsParticipantList = document.querySelector('#settings-participant-list');
 const settingsPeopleStatus = document.querySelector('#settings-people-status');
 const allowEndedReuse = document.querySelector('#allow-ended-reuse');
@@ -1106,13 +1107,19 @@ const ADD_PASSKEY_REFUSALS = Object.freeze({
   'code-used': 'That code was already used. Ask the owner for a new one.',
   'code-expired': 'That code has expired or was replaced. Ask the owner for a new one.',
   'passkey-exists': 'You already have a passkey.',
+  'sign-in-required': 'Sign in again, then enter the code.',
 });
 
 addPasskeyButton.addEventListener('click', () => {
   addPasskeyForm.reset();
   setSettingsStatus(addPasskeyStatus, '');
+  addPasskeySignIn.hidden = true;
   addPasskeyDialog.showModal();
 });
+
+// A code is accepted only soon after a password sign-in. Signing out first
+// makes the next sign-in a fresh one.
+addPasskeySignIn.addEventListener('click', () => logoutButton.click());
 
 addPasskeyForm.addEventListener('submit', async event => {
   event.preventDefault();
@@ -1145,6 +1152,7 @@ addPasskeyForm.addEventListener('submit', async event => {
       showLogin('Your session ended. Sign in again to continue.');
       return;
     }
+    addPasskeySignIn.hidden = error.code !== 'sign-in-required';
     // Once the ceremony began the code is spent, so a failed prompt needs a new one.
     setSettingsStatus(addPasskeyStatus, ADD_PASSKEY_REFUSALS[error.code] || (begun
       ? 'No passkey was created, and that code is now used. Ask the owner for a new one.'
