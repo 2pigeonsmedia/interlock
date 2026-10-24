@@ -1445,9 +1445,10 @@ function joinRefusal(status, result) {
   if (error === 'invalid-invite') return 'That invite code is invalid, expired, or already used.';
   if (error === 'invalid-name') return 'That name cannot be used here.';
   if (error === 'password-too-short') return 'Choose a password of at least 12 characters.';
-  if (error === 'sign-in-unavailable' || status === 503) {
-    return 'Interlock cannot sign anyone in right now. Try again shortly.';
+  if (error === 'sign-in-unavailable') {
+    return 'You joined, but Interlock could not sign you in. Sign in with your name and password in a moment.';
   }
+  if (status === 503) return 'Interlock is not available right now. Try again shortly.';
   return 'Interlock did not let you join. Try again, or ask for a new invite.';
 }
 

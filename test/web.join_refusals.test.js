@@ -34,13 +34,11 @@ test('the join form names each refusal instead of blaming the invite', () => {
   assert.equal(joinRefusal(400, { ok: false, error: 'password-too-short' }), TOO_SHORT);
   assert.equal(joinRefusal(400, { ok: false, error: 'invalid-invite' }), INVALID_INVITE);
   assert.equal(joinRefusal(400, { ok: false, error: 'invalid-name' }), 'That name cannot be used here.');
-  for (const [status, result] of [
-    [503, { ok: false, error: 'sign-in-unavailable' }],
-    [503, null],
-  ]) {
-    assert.equal(joinRefusal(status, result),
-      'Interlock cannot sign anyone in right now. Try again shortly.', JSON.stringify(result));
-  }
+  // Only the server's own answer after a successful redemption says "you joined".
+  assert.equal(joinRefusal(503, { ok: false, error: 'sign-in-unavailable' }),
+    'You joined, but Interlock could not sign you in. Sign in with your name and password in a moment.');
+  // A bare 503 (the room unreachable before redemption) must not claim the person joined.
+  assert.equal(joinRefusal(503, null), 'Interlock is not available right now. Try again shortly.');
   for (const [status, result] of [
     [409, { ok: false, error: 'setup-required' }],
     [400, { ok: false, error: 'something-new' }],
