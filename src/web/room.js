@@ -29,6 +29,16 @@ const inviteResult = document.querySelector('#invite-result');
 const inviteResultCode = document.querySelector('#invite-result-code');
 const inviteExpiry = document.querySelector('#invite-expiry');
 const copyInviteButton = document.querySelector('#copy-invite-button');
+const passkeyCodeResult = document.querySelector('#passkey-code-result');
+const passkeyCodeName = document.querySelector('#passkey-code-name');
+const passkeyCodeExpiry = document.querySelector('#passkey-code-expiry');
+const passkeyCodeValue = document.querySelector('#passkey-code-value');
+const copyPasskeyCodeButton = document.querySelector('#copy-passkey-code-button');
+const addPasskeyButton = document.querySelector('#add-passkey-button');
+const addPasskeyDialog = document.querySelector('#add-passkey-dialog');
+const addPasskeyForm = document.querySelector('#add-passkey-form');
+const addPasskeySubmit = document.querySelector('#add-passkey-submit');
+const addPasskeyStatus = document.querySelector('#add-passkey-status');
 const settingsParticipantList = document.querySelector('#settings-participant-list');
 const settingsPeopleStatus = document.querySelector('#settings-people-status');
 const allowEndedReuse = document.querySelector('#allow-ended-reuse');
@@ -251,6 +261,8 @@ function showLogin(message = '') {
   settingsButton.disabled = true;
   if (connectAiDialog.open) connectAiDialog.close();
   if (settingsDialog.open) settingsDialog.close();
+  if (addPasskeyDialog.open) addPasskeyDialog.close();
+  addPasskeyButton.hidden = true;
   renderPendingAis([]);
   roomAttention.reset();
   resetTranscript();
@@ -281,6 +293,8 @@ function showRoom(user) {
   connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
   settingsButton.disabled = !owner;
   settingsButton.title = owner ? '' : 'Only the owner or an admin can manage this Interlock';
+  // A person without a passkey can add one with a code from the owner.
+  addPasskeyButton.hidden = user.kind !== 'person' || user.passkey !== false;
   setRoomNotice('');
   loginView.hidden = true;
   roomView.hidden = false;
@@ -905,10 +919,19 @@ function renderSettingsParticipants(settings = null) {
       admin.setAttribute('aria-label', `${admin.textContent}: ${participant.name}`);
       if (!participant.admin && !participant.passkey) {
         admin.disabled = true;
-        admin.title = `${participant.name} has no passkey yet. Passkeys are made when joining.`;
+        admin.title = `${participant.name} has no passkey yet. Send them a passkey code first.`;
       }
       admin.addEventListener('click', () => changeAdmin(participant, !participant.admin, admin));
       row.append(admin);
+      if (!participant.admin && !participant.passkey) {
+        const code = document.createElement('button');
+        code.type = 'button';
+        code.className = 'quiet-action';
+        code.textContent = 'Send passkey code';
+        code.setAttribute('aria-label', `Send passkey code: ${participant.name}`);
+        code.addEventListener('click', () => sendPasskeyCode(participant, code));
+        row.append(code);
+      }
     }
     if (!isOwner && !participant.admin && participant.live !== false) {
       const remove = document.createElement('button');
@@ -1012,11 +1035,115 @@ async function changeAdmin(participant, grant, button) {
       (error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
         ? 'Passkey confirmation was cancelled. Nothing changed.'
         : (error.code === 'passkey-required'
-          ? `${participant.name} has no passkey yet, so cannot be made an admin. Passkeys are made when joining.`
+          ? `${participant.name} has no passkey yet, so cannot be made an admin. Send them a passkey code first.`
           : 'Interlock did not change that. Refresh and try again.'), 'error');
     button.disabled = false;
   }
 }
+
+// The first owner sends a member without a passkey a one-time code for one.
+// The code is shown once, like an invite.
+const PASSKEY_CODE_REFUSALS = Object.freeze({
+  'passkey-exists': name => `${name} already has a passkey.`,
+  'not-authorized': () => 'Only the owner who set up this Interlock can send a passkey code.',
+  'not-found': name => `${name} is not a member here any more. Refresh Settings.`,
+});
+
+async function sendPasskeyCode(participant, button) {
+  button.disabled = true;
+  setSettingsStatus(settingsPeopleStatus, 'Confirm with your passkey…');
+  try {
+    const result = await freshAdminMutation('/api/participants/passkey-code', { name: participant.name });
+    if (typeof result.passkey_code !== 'string' || !Number.isSafeInteger(result.expires_at) ||
+        result.name !== participant.name) {
+      throw new Error('invalid passkey code response');
+    }
+    passkeyCodeName.textContent = result.name;
+    passkeyCodeValue.textContent = result.passkey_code;
+    passkeyCodeExpiry.textContent = formatFullTime(result.expires_at) || 'the stated expiry';
+    passkeyCodeExpiry.dateTime = new Date(result.expires_at).toISOString();
+    passkeyCodeResult.hidden = false;
+    setSettingsStatus(settingsPeopleStatus,
+      `Passkey code created for ${result.name}. It is shown only here, and replaces any earlier one.`, 'success');
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    const refusal = PASSKEY_CODE_REFUSALS[error.code];
+    setSettingsStatus(settingsPeopleStatus,
+      (error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
+        ? 'Passkey confirmation was cancelled. No code was created.'
+        : (refusal ? refusal(participant.name) : 'Interlock did not create a passkey code. Try again.'), 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+copyPasskeyCodeButton.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(passkeyCodeValue.textContent);
+    setSettingsStatus(settingsPeopleStatus, 'Passkey code copied.', 'success');
+  } catch (_) {
+    setSettingsStatus(settingsPeopleStatus,
+      'The browser could not copy it. Select the code and copy it manually.', 'error');
+  }
+});
+
+// A signed-in member without a passkey redeems that code and makes one.
+const ADD_PASSKEY_REFUSALS = Object.freeze({
+  'code-invalid': 'That code is not right. Check it, or ask the owner for a new one.',
+  'code-used': 'That code was already used. Ask the owner for a new one.',
+  'code-expired': 'That code has expired or was replaced. Ask the owner for a new one.',
+  'passkey-exists': 'You already have a passkey.',
+});
+
+addPasskeyButton.addEventListener('click', () => {
+  addPasskeyForm.reset();
+  setSettingsStatus(addPasskeyStatus, '');
+  addPasskeyDialog.showModal();
+});
+
+addPasskeyForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!window.PublicKeyCredential || !navigator.credentials) {
+    setSettingsStatus(addPasskeyStatus, 'This browser cannot make a passkey. Try another browser.', 'error');
+    return;
+  }
+  addPasskeySubmit.disabled = true;
+  setSettingsStatus(addPasskeyStatus, 'Checking the code…');
+  const code = String(new FormData(addPasskeyForm).get('code') || '').trim();
+  let begun = null;
+  try {
+    begun = await ownerMutation('/api/account/passkey/begin', { code });
+    setSettingsStatus(addPasskeyStatus, 'Create a passkey for this room…');
+    const credential = await navigator.credentials.create({
+      publicKey: passkeyCreationOptions(begun.options),
+    });
+    if (!credential) throw Object.assign(new Error('passkey-cancelled'), { code: 'passkey-cancelled' });
+    await ownerMutation('/api/account/passkey/finish', {
+      ceremony_id: begun.ceremony_id,
+      response: passkeyRegistration(credential),
+    });
+    if (currentUser) currentUser.passkey = true;
+    addPasskeyButton.hidden = true;
+    addPasskeyForm.reset();
+    setSettingsStatus(addPasskeyStatus, 'Passkey created.', 'success');
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    // Once the ceremony began the code is spent, so a failed prompt needs a new one.
+    setSettingsStatus(addPasskeyStatus, ADD_PASSKEY_REFUSALS[error.code] || (begun
+      ? 'No passkey was created, and that code is now used. Ask the owner for a new one.'
+      : 'Interlock could not check that code. Try again.'), 'error');
+  } finally {
+    addPasskeySubmit.disabled = false;
+  }
+});
 
 async function loadRoster() {
   if (rosterLoading || roomView.hidden) return;
@@ -1416,12 +1543,13 @@ showLoginButton.addEventListener('click', () => {
   document.querySelector('#login-name').focus();
 });
 
-// The passkey a new member makes while joining, the only time Interlock
-// offers one. Joining succeeds either way; without a passkey the member
-// cannot be made an admin.
+// The passkey a new member makes while joining. Joining succeeds either way;
+// without a passkey the member cannot be made an admin until they add one
+// with a passkey code from the owner.
+const JOINED_WITHOUT_PASSKEY = 'You joined without a passkey. To add one later, ask the owner for a passkey code.';
 async function joiningPasskey(ceremony) {
   if (!ceremony || !window.PublicKeyCredential || !navigator.credentials) {
-    return { message: 'You joined without a passkey, so you cannot be made an admin.', kind: '' };
+    return { message: JOINED_WITHOUT_PASSKEY, kind: '' };
   }
   setLoginStatus('Create a passkey for this room…');
   try {
@@ -1435,7 +1563,7 @@ async function joiningPasskey(ceremony) {
     });
     return { message: 'Passkey created.', kind: 'success' };
   } catch (_) {
-    return { message: 'You joined without a passkey, so you cannot be made an admin.', kind: '' };
+    return { message: JOINED_WITHOUT_PASSKEY, kind: '' };
   }
 }
 

@@ -80,6 +80,7 @@
         <button id="settings-button" type="button" class="quiet-action" disabled>Settings</button>
         <span class="header-rule" aria-hidden="true"></span>
         <span id="account-label" class="account-label"></span>
+        <button id="add-passkey-button" type="button" class="quiet-action" hidden>Add a passkey</button>
         <button id="logout-button" type="button" class="quiet-action">Sign out</button>
       </div>
     </header>
@@ -164,6 +165,11 @@
         <code id="invite-result-code"></code>
         <button id="copy-invite-button" class="quiet-action" type="button">Copy code</button>
       </div>
+      <div id="passkey-code-result" class="invite-result" hidden>
+        <p>Send this one-time code privately to <strong id="passkey-code-name"></strong>. It expires at <time id="passkey-code-expiry"></time>. They enter it after signing in, with Add a passkey.</p>
+        <code id="passkey-code-value"></code>
+        <button id="copy-passkey-code-button" class="quiet-action" type="button">Copy code</button>
+      </div>
       <div id="settings-participant-list" class="settings-participant-list"></div>
       <p id="settings-people-status" class="status" role="status" aria-live="polite"></p>
     </section>
@@ -198,6 +204,24 @@
       <button id="sign-out-others-button" class="quiet-action" type="button">Sign out other browser sessions</button>
       <p class="settings-note">Lost the owner password or passkey? Stop Interlock, then run <strong>interlock recover</strong> in a terminal on this computer. Recovery replaces both and signs out old sessions.</p>
       <p id="settings-owner-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+  </dialog>
+
+  <dialog id="add-passkey-dialog" class="connect-ai-dialog" aria-labelledby="add-passkey-heading">
+    <header>
+      <div>
+        <h2 id="add-passkey-heading">Add a passkey</h2>
+        <p>Enter the one-time passkey code the owner sent you.</p>
+      </div>
+      <form method="dialog"><button class="quiet-action" type="submit" aria-label="Close">Close</button></form>
+    </header>
+    <section>
+      <form id="add-passkey-form" class="settings-form">
+        <label for="passkey-code-input">Passkey code</label>
+        <input id="passkey-code-input" name="code" autocomplete="off" maxlength="256" required>
+        <button id="add-passkey-submit" class="primary-action" type="submit">Create passkey</button>
+      </form>
+      <p id="add-passkey-status" class="status" role="status" aria-live="polite"></p>
     </section>
   </dialog>
 

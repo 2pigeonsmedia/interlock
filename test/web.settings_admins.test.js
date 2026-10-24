@@ -1,7 +1,7 @@
 'use strict';
 
 // Settings shows who is an administrator and, to the first owner only, the
-// controls to change it; a member can add a passkey. room.js runs only in a
+// controls to change it and to send a passkey code; a member can add a passkey. room.js runs only in a
 // browser, so this pins the wiring in the shipped source text. It is a source
 // contract, not a behaviour test: it catches a deleted line, not a wrong one.
 
@@ -36,10 +36,25 @@ test('the page reads the new fields and refuses a response without them', () => 
   assert.match(source, /typeof result\.manage_admins !== 'boolean'/);
 });
 
-test('a member makes a passkey only while joining', () => {
-  assert.doesNotMatch(page, /add-passkey-button/, 'no later Add a passkey control');
-  assert.doesNotMatch(source, /\/api\/account\/passkey\/options/, 'the page never begins an enrolment itself');
+test('a member makes a first passkey while joining, or later only with a passkey code', () => {
+  assert.doesNotMatch(source, /\/api\/account\/passkey\/options/, 'the page never begins an enrolment without a code');
   assert.match(source, /const passkey = await joiningPasskey\(result\.passkey\);/,
     'the invite flow makes the passkey the redeem response began');
   assert.match(source, /ownerMutation\('\/api\/account\/passkey\/finish', \{/);
+  assert.match(page, /<button id="add-passkey-button" type="button" class="quiet-action" hidden>Add a passkey<\/button>/,
+    'Add a passkey starts hidden');
+  assert.match(source, /addPasskeyButton\.hidden = user\.kind !== 'person' \|\| user\.passkey !== false;/,
+    'and is shown only to a person the server says has no passkey');
+  assert.match(source, /begun = await ownerMutation\('\/api\/account\/passkey\/begin', \{ code \}\);/,
+    'a later passkey begins only from the code the member entered');
+});
+
+test('only the first owner sees Send passkey code, on a member without a passkey', () => {
+  const block = render.slice(render.indexOf("if (manage && participant.kind === 'person'"),
+    render.indexOf("if (!isOwner && !participant.admin && participant.live !== false)"));
+  assert.match(block, /if \(!participant\.admin && !participant\.passkey\) \{\s+const code = document\.createElement\('button'\);/);
+  assert.match(block, /code\.textContent = 'Send passkey code';/);
+  assert.match(source, /freshAdminMutation\('\/api\/participants\/passkey-code', \{ name: participant\.name \}\)/,
+    'sending a code needs a fresh passkey confirmation');
+  assert.match(page, /Send this one-time code privately to <strong id="passkey-code-name"><\/strong>\. It expires at <time id="passkey-code-expiry"><\/time>\./);
 });
