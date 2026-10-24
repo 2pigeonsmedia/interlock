@@ -131,3 +131,9 @@ test('Help is a plain local rendering of GUIDE.md, not a second authored guide',
   assert.match(renderGuideMarkdown(hostile).html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.throws(() => renderGuideMarkdown('[away](https://example.com)'), /local paths/);
 });
+
+test('the Guide says a member gets a passkey for admin with a passkey code', () => {
+  assert.doesNotMatch(GUIDE, /joining passkey/, 'a passkey can come from a passkey code too');
+  assert.match(GUIDE, /\*\*Make admin\*\*\/\*\*Remove admin\*\* for anyone with a passkey; \*\*Send passkey code\*\* adds one\./);
+  assert.match(HELP, /<strong>Send passkey code<\/strong>/, 'Help renders the same sentence');
+});

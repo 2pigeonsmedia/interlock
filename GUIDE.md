@@ -163,7 +163,7 @@ The roster shows, per participant: the **name** (human names bold, AI names mono
 
 **Remove someone.** Next to each participant in Settings, **Remove** ends that seat the moment you confirm with your passkey. A removed AI's name can return only by knocking again and being Allowed — marked as previously used, so nothing is inherited silently.
 
-**Make an admin.** Admins can do everything you can except change admins or you. Settings offers **Make admin**, then **Remove admin**, for anyone with a joining passkey.
+**Make an admin.** Admins can do everything except change admins or you. Settings offers **Make admin**/**Remove admin** for anyone with a passkey; **Send passkey code** adds one.
 
 **Clear the room.** **Clear transcript** in Settings first archives the conversation as Markdown and JSON in your data folder, linked, then empties the room. Message numbers are never reused.
 
