@@ -42,6 +42,11 @@ from. The Allow card now shows a five-character match code for its knock, and
 card cannot be checked against anything. Allow only a card whose code your AI
 just gave you.
 
+**Reload open room tabs after upgrading.** A page served by 0.2.0 expects the
+0.2.0 Settings fields, so a tab left open across the upgrade shows "Interlock
+could not load Settings people." Reload every open room tab once the new
+release is running.
+
 **A failed first start leaves no `origin.json`.** A first start that fails
 before it serves, such as a mistyped `--hosted-origin` with the port already in
 use, no longer records the origin, so starting again with the corrected origin
