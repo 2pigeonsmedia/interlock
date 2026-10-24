@@ -1,7 +1,9 @@
 'use strict';
 
 // After setup, a person's first passkey is authorised by the invite they just
-// redeemed. A password sign-in alone never authorises one, whatever route asks.
+// redeemed, and only from the session that redemption started (issued with the
+// redemption's own time). Any later session, a password sign-in included, is
+// refused at the identity level, whatever route asks.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -9,8 +11,7 @@ const test = require('node:test');
 const F = require('./fixture.js');
 const Step = require('./step_up_fixture.js');
 
-const SESSION_WINDOW_MS = 60 * 1000;      // the session must start this soon after redemption
-const ENROLMENT_WINDOW_MS = 5 * 60 * 1000; // and the passkey must begin this soon
+const ENROLMENT_WINDOW_MS = 5 * 60 * 1000; // the passkey must begin this soon after redemption
 
 async function invitedMember(name) {
   const world = await Step.freshAdmin(F);
@@ -32,23 +33,39 @@ async function invitedMember(name) {
 
 test('a member can add a first passkey right after redeeming their invite', async () => {
   const member = await invitedMember('Bea');
-  const begun = await member.begin(member.redeemedAt + 1_000);
+  const begun = await member.begin(member.redeemedAt, member.redeemedAt + 1_000);
   assert.equal(begun.ok, true, JSON.stringify(begun));
 });
 
-test('a password sign-in after the invite window cannot add a passkey', async () => {
+test('a password sign-in one second after redemption cannot add a first passkey', async () => {
   const member = await invitedMember('Bea');
-  const late = await member.begin(member.redeemedAt + SESSION_WINDOW_MS + 1);
-  assert.notEqual(late.ok, true, 'a password session started after the minute is not an enrolment');
-  const edge = await member.begin(member.redeemedAt + SESSION_WINDOW_MS - 10);
-  assert.equal(edge.ok, true, 'ARRANGEMENT: a session started inside the minute can');
+  const { instance, env } = member.world;
+  const signedIn = await instance.login.login({
+    name: 'Bea', password: Step.PASSWORD + 'Bea', source: '127.0.0.1',
+    request_origin: Step.ORIGIN, sec_fetch_site: 'same-origin', now: member.redeemedAt + 1_000,
+  });
+  assert.equal(signedIn.ok, true, 'ARRANGEMENT: the password sign-in itself succeeds');
+  assert.equal(signedIn.session.authenticated_at, member.redeemedAt + 1_000,
+    'ARRANGEMENT: the session was started by the password, one second after redemption');
+  const begun = await member.world.authenticator_service.beginRegistration(env(signedIn, member.redeemedAt + 2_000));
+  assert.notEqual(begun.ok, true, 'only the session redemption started may add the first passkey');
+});
+
+test('a session started after redemption cannot add a passkey', async () => {
+  const member = await invitedMember('Bea');
+  const late = await member.begin(member.redeemedAt + 60 * 1000 + 1);
+  assert.notEqual(late.ok, true, 'a session started a minute later is not an enrolment');
+  const inside = await member.begin(member.redeemedAt + 1);
+  assert.notEqual(inside.ok, true, 'a session started one millisecond later is not an enrolment either');
+  const own = await member.begin(member.redeemedAt);
+  assert.equal(own.ok, true, 'ARRANGEMENT: the session issued at redemption still can');
 });
 
 test('the session redemption started cannot enrol once five minutes have passed', async () => {
   const member = await invitedMember('Bea');
-  const stale = await member.begin(member.redeemedAt + 1, member.redeemedAt + ENROLMENT_WINDOW_MS + 1);
+  const stale = await member.begin(member.redeemedAt, member.redeemedAt + ENROLMENT_WINDOW_MS + 1);
   assert.notEqual(stale.ok, true);
-  const fresh = await member.begin(member.redeemedAt + 1, member.redeemedAt + ENROLMENT_WINDOW_MS - 10_000);
+  const fresh = await member.begin(member.redeemedAt, member.redeemedAt + ENROLMENT_WINDOW_MS - 10_000);
   assert.equal(fresh.ok, true, 'ARRANGEMENT: the same session inside five minutes can');
 });
 

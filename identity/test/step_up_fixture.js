@@ -216,7 +216,9 @@ async function freshAdmin(F) {
     assert.ok(secondId, 'ARRANGEMENT: redemption must yield the new person id');
 
     const theirDevice = createDevice();
-    const theirSession = session_store.issue({ subject_id: secondId, now: now + 10 });
+    // The session redemption starts carries the redemption's own time; only it
+    // may begin the first passkey.
+    const theirSession = session_store.issue({ subject_id: secondId, now: now + 6 });
     assert.ok(theirSession.ok, 'ARRANGEMENT: the second person must get a session');
     const begin = await authenticator_service.beginRegistration(env(theirSession, now + 11));
     assert.ok(begin.ok, 'ARRANGEMENT: their registration must begin: ' + JSON.stringify(begin));

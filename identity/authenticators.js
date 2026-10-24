@@ -53,8 +53,9 @@ const ATTESTATION_TYPE = 'none';
 const CEREMONY_TIMEOUT_MS = 60_000;
 // After setup, a person's first passkey is authorised by the invite they
 // redeemed, never by a password: only from the session redemption started
-// (authenticated within a minute of it), and within five minutes of it.
-const INVITE_SESSION_MS = 60 * 1000;
+// (the host issues it with the same `now` as the redemption, so its
+// authenticated_at equals the invite's consumed_at), and within five minutes
+// of it.
 const INVITE_ENROLMENT_MS = 5 * 60 * 1000;
 const MAX_JSON_DEPTH = 12;
 const MAX_JSON_NODES = 2048;
@@ -296,8 +297,7 @@ function createService(opts) {
       c.tenant === tenant && c.purpose === 'human_invite' && c.consuming_subject_id === personId &&
       typeof c.consumed_at === 'number' && env.now >= c.consumed_at &&
       env.now - c.consumed_at < INVITE_ENROLMENT_MS &&
-      opened.session.authenticated_at >= c.consumed_at &&
-      opened.session.authenticated_at - c.consumed_at < INVITE_SESSION_MS)) {
+      opened.session.authenticated_at === c.consumed_at)) {
       return FAIL_UNAVAIL;
     }
 

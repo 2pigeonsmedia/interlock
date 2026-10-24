@@ -40,7 +40,7 @@ async function coOwnedRoom() {
     assert.ok(red.ok, 'ARRANGEMENT: redeem ' + JSON.stringify(red));
     const id = red.person_id || red.subject_id;
     const device = Step.createDevice();
-    const session = session_store.issue({ subject_id: id, now: at + 1 });
+    const session = session_store.issue({ subject_id: id, now: at }); // the session redemption starts
     const begin = await authenticator_service.beginRegistration(env(session, at + 2));
     const fin = await authenticator_service.finishRegistration(Object.assign(env(session, at + 3),
       { ceremony_id: begin.ceremony_id, response: device.registration(begin.options.challenge) }));
