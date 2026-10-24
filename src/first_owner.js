@@ -144,7 +144,9 @@ function publicUser(who) {
   const roles = [];
   if (identityRoles.has('participant')) roles.push('participant');
   if (identityRoles.has('administrator')) roles.push('owner');
-  return Object.freeze({ name: who.name, kind: who.kind, roles });
+  // Every administrator carries the 'owner' role above; this says which one
+  // set up the Interlock, so the page can label the others "Admin".
+  return Object.freeze({ name: who.name, kind: who.kind, roles, first_owner: who.first_owner === true });
 }
 
 function publicMessage(message) {

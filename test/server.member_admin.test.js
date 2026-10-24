@@ -173,6 +173,12 @@ test('the owner makes a member with a passkey an administrator', async () => {
       'a role change ends the member\'s existing sessions');
     bea = await login(runtime, 'Bea', beaPassword);
     assert.deepEqual(await roles(runtime, bea), ['participant', 'owner']);
+    // Both carry the owner role; only the person who set up the Interlock is
+    // the first owner, so the page labels Bea "Admin" and Ana "Owner".
+    const firstOwner = async session => (await call(runtime,
+      { path: '/api/session', headers: { cookie: session.cookie } })).json.user.first_owner;
+    assert.equal(await firstOwner(bea), false, 'an administrator is not the first owner');
+    assert.equal(await firstOwner(owner), true, 'the person who set up the Interlock is');
     bea = await elevate(runtime, bea, beaDevice);
     const beaInvites = await post(runtime, '/api/invitations', {}, bea);
     assert.equal(beaInvites.status, 200, 'an administrator can do what the owner does: ' + beaInvites.text);

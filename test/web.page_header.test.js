@@ -96,7 +96,7 @@ test('secondary header loads owner actions, pending count, panel routes, and sig
     if (url === '/api/session') return response(200, {
       ok: true,
       authenticated: true,
-      user: { name: 'Dana', roles: ['owner'] },
+      user: { name: 'Dana', roles: ['owner'], first_owner: true },
     });
     if (url === '/api/ai/admissions') return response(200, {
       ok: true,
@@ -169,12 +169,45 @@ test('secondary header identifies a signed-in non-owner without opening owner ac
   assert.equal(calls.includes('/api/ai/admissions'), false);
 });
 
+test('secondary header labels an administrator who did not set up the Interlock as Admin', async () => {
+  const fetcher = async url => {
+    if (url === '/api/session') return response(200, {
+      ok: true,
+      authenticated: true,
+      user: { name: 'Bea', roles: ['participant', 'owner'], first_owner: false },
+    });
+    if (url === '/api/ai/admissions') return response(200, { ok: true, pending: [] });
+    if (url === '/health') return response(200, { ok: true });
+    throw new Error('unexpected fetch: ' + url);
+  };
+  const { elements } = world(fetcher);
+  await settle();
+
+  assert.equal(elements['#account-label'].textContent, 'Bea · Admin');
+  assert.equal(elements['#connect-ai-button'].disabled, false, 'an administrator keeps the owner actions');
+  assert.equal(elements['#settings-button'].disabled, false);
+});
+
+test('the room page labels the first owner Owner, another administrator Admin, and a member Person', () => {
+  const room = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.js'), 'utf8');
+  const show = room.slice(room.indexOf('function showRoom('));
+  const line = show.split('\n').find(l => l.trim().startsWith('const role = '));
+  assert.ok(room.includes('function showRoom(') && line, 'ARRANGEMENT: showRoom computes its header role');
+  const label = user => vm.runInNewContext(
+    'const owner = Array.isArray(user.roles) && user.roles.includes(\'owner\');\n' + line + '\nrole;', { user });
+  assert.equal(label({ roles: ['participant', 'owner'], first_owner: true }), 'Owner');
+  assert.equal(label({ roles: ['participant', 'owner'], first_owner: false }), 'Admin');
+  assert.equal(label({ roles: ['participant'], first_owner: false }), 'Person');
+  assert.ok(show.includes("const owner = Array.isArray(user.roles) && user.roles.includes('owner');"),
+    'ARRANGEMENT: the owner test the label line depends on is unchanged');
+});
+
 test('secondary header does not claim it can sign out without this tab csrf', async () => {
   const fetcher = async url => {
     if (url === '/api/session') return response(200, {
       ok: true,
       authenticated: true,
-      user: { name: 'Dana', roles: ['owner'] },
+      user: { name: 'Dana', roles: ['owner'], first_owner: true },
     });
     if (url === '/api/ai/admissions') return response(200, { ok: true, pending: [] });
     if (url === '/health') return response(200, { ok: true });

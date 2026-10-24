@@ -635,7 +635,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
     }, { cookie: '', csrf: '' });
     assert.equal(invited.status, 200, invited.text);
     assert.deepEqual(invited.json.user, {
-      name: 'Rowan', kind: 'person', roles: ['participant'],
+      name: 'Rowan', kind: 'person', roles: ['participant'], first_owner: false,
     });
     const rowan = {
       cookie: invited.headers['set-cookie'][0].split(';', 1)[0],

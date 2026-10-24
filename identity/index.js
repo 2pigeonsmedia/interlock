@@ -586,7 +586,12 @@ function create(config) {
       roleList.push({ slug: role.slug, display_name: role.display_name });
     }
 
-    return { subject_id: subj.id, name: subj.name, kind: subj.kind, roles: roleList };
+    // Whether this is the person who set up the Interlock: a display fact for
+    // the host. It authorises nothing; the role rows above do.
+    let firstOwner = false;
+    try { firstOwner = repo.firstOwnerIdIn(repo.read(), tenant) === subj.id; } catch (_) { firstOwner = false; }
+
+    return { subject_id: subj.id, name: subj.name, kind: subj.kind, roles: roleList, first_owner: firstOwner };
   }
 
   // ── INVITE + REDEEM: the human-invite lifecycle ──────────────────────────

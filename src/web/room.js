@@ -270,7 +270,7 @@ function showLogin(message = '') {
 
 function showRoom(user) {
   const owner = Array.isArray(user.roles) && user.roles.includes('owner');
-  const role = owner ? 'Owner' : 'Person';
+  const role = owner ? (user.first_owner === true ? 'Owner' : 'Admin') : 'Person';
   accountLabel.textContent = user.name + ' · ' + role;
   currentUser = user;
   renderRoster([{

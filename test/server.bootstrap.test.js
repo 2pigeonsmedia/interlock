@@ -448,7 +448,7 @@ test('the loopback browser transport completes first-owner setup through the pub
     assert.equal(loggedIn.json.authenticated, true);
     assert.equal(typeof loggedIn.json.csrf_token, 'string');
     assert.deepEqual(loggedIn.json.user, {
-      name: 'Ana', kind: 'person', roles: ['participant', 'owner'],
+      name: 'Ana', kind: 'person', roles: ['participant', 'owner'], first_owner: true,
     }, 'the room identity and Interlock role vocabulary must be server-derived');
     assert.equal(loggedIn.json.subject_id, undefined);
     assert.equal(loggedIn.json.user.subject_id, undefined,
@@ -467,7 +467,7 @@ test('the loopback browser transport completes first-owner setup through the pub
     assert.deepEqual(authenticatedSession.json, {
       ok: true,
       authenticated: true,
-      user: { name: 'Ana', kind: 'person', roles: ['participant', 'owner'] },
+      user: { name: 'Ana', kind: 'person', roles: ['participant', 'owner'], first_owner: true },
     });
     const retiredBootstrapMutation = await post(
       runtime, '/api/bootstrap/registration/options', {}, ownerSession,

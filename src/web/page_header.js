@@ -60,7 +60,7 @@ function showSignedOut() {
 function showUser(user) {
   const owner = ownerUser(user);
   currentUser = user;
-  accountLabel.textContent = `${user.name} · ${owner ? 'Owner' : 'Person'}`;
+  accountLabel.textContent = `${user.name} · ${owner ? (user.first_owner === true ? 'Owner' : 'Admin') : 'Person'}`;
   connectAiButton.disabled = !owner;
   connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
   settingsButton.disabled = !owner;
