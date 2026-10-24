@@ -263,6 +263,7 @@ function showLogin(message = '') {
   if (settingsDialog.open) settingsDialog.close();
   if (addPasskeyDialog.open) addPasskeyDialog.close();
   addPasskeyButton.hidden = true;
+  forgetPasskeyCode();
   renderPendingAis([]);
   roomAttention.reset();
   resetTranscript();
@@ -1049,6 +1050,14 @@ const PASSKEY_CODE_REFUSALS = Object.freeze({
   'not-found': name => `${name} is not a member here any more. Refresh Settings.`,
 });
 
+function forgetPasskeyCode() {
+  passkeyCodeValue.textContent = '';
+  passkeyCodeName.textContent = '';
+  passkeyCodeExpiry.textContent = '';
+  passkeyCodeExpiry.removeAttribute('datetime');
+  passkeyCodeResult.hidden = true;
+}
+
 async function sendPasskeyCode(participant, button) {
   button.disabled = true;
   setSettingsStatus(settingsPeopleStatus, 'Confirm with your passkey…');
@@ -1824,6 +1833,7 @@ settingsDialog.addEventListener('close', () => {
   inviteExpiry.textContent = '';
   inviteExpiry.removeAttribute('datetime');
   inviteResult.hidden = true;
+  forgetPasskeyCode();
   forgetArchiveResult();
   changePasswordForm.reset();
 });
