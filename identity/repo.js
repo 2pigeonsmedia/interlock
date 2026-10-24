@@ -122,7 +122,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 // ── Version 2 vocabulary — one definition, frozen, for later code to reuse ───
 const MEMBERSHIP_STATUSES = Object.freeze(['invited', 'active', 'suspended', 'revoked']);
 const ADMISSION_PURPOSES = Object.freeze(['human_invite', 'summon_seat', 'remote_seat_claim',
-  'member_reset', 'bootstrap', 'offline_recovery']);
+  'member_reset', 'bootstrap', 'offline_recovery', 'passkey_enrolment']);
 const SEAT_ADMISSION_PURPOSES = Object.freeze(['summon_seat', 'remote_seat_claim']);
 const ROLE_ASSIGNMENT_SCOPES = Object.freeze(['tenant', 'room']);
 const SUBJECT_KINDS = Object.freeze(['person', 'seat', 'tool']);
@@ -1238,6 +1238,16 @@ function assertV2RelationalInvariants(state, where) {
       }
       if (r.purpose === 'offline_recovery' && r.principal_subject_id === null) {
         throw bad(at + ' offline_recovery capability must fix principal_subject_id to the target administrator');
+      }
+    }
+    // A passkey code names the one member it is for, and carries no authority.
+    if (r.purpose === 'passkey_enrolment') {
+      if (r.principal_subject_id === null || r.intended_subject_kind !== 'person' ||
+          r.capability_ceiling.length !== 0 || r.resource_ceiling.length !== 0) {
+        throw bad(at + ' passkey_enrolment capability must name a person and carry empty ceilings');
+      }
+      if (r.consuming_subject_id !== null && r.consuming_subject_id !== r.principal_subject_id) {
+        throw bad(at + ' passkey_enrolment capability may be consumed only by the person it names');
       }
     }
   });

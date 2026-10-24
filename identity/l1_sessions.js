@@ -1009,7 +1009,7 @@ function createStore(opts) {
   // administration/bootstrap pass a fixed string; unknown keys still consume L2
   // but return no lineage (caller cannot invent lineage).
   const WORKFLOW_KEYS = Object.freeze([
-    'human-invite.issue', 'member-reset.issue',
+    'human-invite.issue', 'member-reset.issue', 'passkey-code.issue',
     'role.assign.participant', 'role.assign.administrator', 'role.revoke',
     'membership.suspend', 'membership.reinstate', 'membership.revoke',
     'person.revoke', 'participant.revoke', 'transcript.clear',

@@ -16,6 +16,7 @@ const grants = require('./grants.js');
 
 const HUMAN_INVITE_TTL_MS = admission.HUMAN_INVITE_TTL_MS;
 const MEMBER_RESET_TTL_MS = 900_000;
+const PASSKEY_CODE_TTL_MS = admission.PASSKEY_CODE_TTL_MS;
 // LAZY. Evaluating at module load throws — require() happens long
 // before initialize() has been told the tenant.
 const TENANT = () => repo.tenant();
@@ -24,6 +25,7 @@ const WORKFLOWS = Object.freeze([
   'human-invite.issue',
   'ai-admission.allow',
   'member-reset.issue',
+  'passkey-code.issue',
   'role.assign.participant',
   'role.assign.administrator',
   'role.revoke',
@@ -739,6 +741,59 @@ function createService(opts) {
     }
   }
 
+  // ── Passkey code ──────────────────────────────────────────────────────────
+  // A member who joined without a passkey can be given one later. The first
+  // owner issues a one-time code bound to that member, with a fresh passkey
+  // confirmation, and only while the member has no authenticator at all; the
+  // member redeems it from their own signed-in session (authenticators.js).
+  // Issuing again replaces the previous code for that member.
+  function issuePasskeyCode(optsIn) {
+    const target = ownData(optsIn || {}, 'target_person_subject_id').value;
+    if (typeof target !== 'string' || !target) return Object.freeze({ ok: false, reason: 'invalid-request' });
+    let refusal = null;
+    const refuse = reason => { refusal = reason; throw new Error(reason); };
+    const result = withFreshAdmin(optsIn, 'passkey-code.issue', 'credentials', ({ actorId }) => {
+      const state = repo.read();
+      try { requireFirstOwner(state, actorId); } catch (_) { refuse('not-authorized'); }
+      try { refuseFirstOwner(state, target); } catch (_) { refuse('not-found'); }
+      const person = state.subjects.find(s => s.id === target);
+      if (!person || person.kind !== 'person' || person.status !== 'active' || person.tenant !== TENANT()) {
+        refuse('not-found');
+      }
+      if (!state.memberships.some(m =>
+        m.tenant === TENANT() && m.person_subject_id === target && m.status === 'active')) {
+        refuse('not-found');
+      }
+      // Any authenticator row, revoked included: the first-passkey ceremony
+      // this code begins accepts only a person who never had one.
+      if (state.authenticators.some(a => a.tenant === TENANT() && a.person_subject_id === target)) {
+        refuse('passkey-exists');
+      }
+      const { record, secret } = admission.mint({
+        tenant: TENANT(),
+        purpose: 'passkey_enrolment',
+        issuer_subject_id: actorId,
+        intended_subject_kind: 'person',
+        principal_subject_id: target,
+        capability_ceiling: [],
+        resource_ceiling: [],
+        max_seat_ttl: null,
+        ttl_ms: PASSKEY_CODE_TTL_MS,
+        mint_audit_id: crypto.randomUUID(),
+      });
+      return Object.freeze({
+        ok: true,
+        capability_id: record.id,
+        secret,
+        expires_at: record.expires_at,
+      });
+    });
+    if (result && result.ok === true) return result;
+    // Every check in the body names its refusal; without one, the fresh
+    // confirmation (or the session) is what was missing.
+    return Object.freeze({ ok: false, reason: refusal || 'fresh-step-up-required' });
+  }
+
   // ── Role assignment ───────────────────────────────────────────────────────
   function assignProtectedRole(optsIn) {
     const target = ownData(optsIn || {}, 'target_person_subject_id').value;
@@ -1201,6 +1256,7 @@ function createService(opts) {
     changeOwnPassword,
     issueMemberReset,
     redeemMemberReset,
+    issuePasskeyCode,
     assignProtectedRole,
     revokeRoleAssignment,
     suspendMembership,
@@ -1244,4 +1300,5 @@ module.exports = {
   WORKFLOWS,
   HUMAN_INVITE_TTL_MS,
   MEMBER_RESET_TTL_MS,
+  PASSKEY_CODE_TTL_MS,
 };

@@ -22,8 +22,10 @@
 //
 // TTL POLICY: seat, bootstrap, recovery and reset claims keep the inherited
 // 15-minute ceiling (`TTL_MAX_MS`, the minimum pass lifetime). Interlock's
-// human invite is deliberately the single 24-hour exception so a person does
-// not have to coordinate enrollment inside a quarter-hour window.
+// human invite and passkey code are the two 24-hour exceptions so a person does
+// not have to coordinate enrollment inside a quarter-hour window. A passkey
+// code alone grants nothing: it is redeemed only from a session the member
+// already signed in to, so it needs both the code and their password.
 'use strict';
 const crypto = require('crypto');
 const repo = require('./repo.js');
@@ -33,6 +35,8 @@ const capabilityPolicy = require('./capability_policy.js');
 const TTL_MIN_MS = 60_000;                        // one minute
 const TTL_MAX_MS = repo.MIN_PASS_LIFETIME_MS;     // == the pass-lifetime floor (900_000)
 const HUMAN_INVITE_TTL_MS = 86_400_000;           // exactly 24 hours
+const PASSKEY_CODE_TTL_MS = 86_400_000;           // exactly 24 hours
+const DAY_PURPOSES = Object.freeze(['human_invite', 'passkey_enrolment']);
 
 // Keys a caller may supply to mint(). Anything else refuses ON PRESENCE — the
 // subjects.create `expires_at` precedent: refusing on the KEY closes the
@@ -106,12 +110,12 @@ function mint(opts) {
   if (!repo.SUBJECT_KINDS.includes(intended_subject_kind)) {
     throw new Error('admission.mint: unknown intended_subject_kind ' + JSON.stringify(intended_subject_kind));
   }
-  const ttlMax = purpose === 'human_invite' ? HUMAN_INVITE_TTL_MS : TTL_MAX_MS;
+  const ttlMax = DAY_PURPOSES.includes(purpose) ? HUMAN_INVITE_TTL_MS : TTL_MAX_MS;
   if (!(typeof ttl_ms === 'number' && Number.isSafeInteger(ttl_ms) &&
         ttl_ms >= TTL_MIN_MS && ttl_ms <= ttlMax)) {
     throw new Error('admission.mint: ttl_ms must be a safe integer inside ' + TTL_MIN_MS + '..' + ttlMax +
-      (purpose === 'human_invite'
-        ? ' — human_invite is the one 24-hour purpose-specific bound'
+      (DAY_PURPOSES.includes(purpose)
+        ? ' — human_invite and passkey_enrolment are the 24-hour purpose-specific bounds'
         : ' — this admission purpose remains short-lived and never outlives the shortest pass it could produce'));
   }
 
@@ -363,6 +367,43 @@ function consumeBoundPersonInDraft(draft, opts) {
   return row;
 }
 
+// ── passkey code ────────────────────────────────────────────────────────────
+// A passkey code is bound to one member (the stored principal) and is redeemed
+// from that member's own session, so the caller names the session's subject,
+// never a target. Only the newest code issued for a member is live: issuing
+// another replaces it without rewriting the older record. Reasons are returned
+// rather than thrown so the member can be told which one applies; a code
+// issued for someone else reads exactly like a wrong code, and is not spent.
+const CONSUME_PASSKEY_CODE_KEYS = Object.freeze(['tenant', 'secret', 'subject_id', 'now']);
+
+function consumePasskeyCodeInDraft(draft, opts) {
+  const input = opts || {};
+  refuseUnknownKeys(input, CONSUME_PASSKEY_CODE_KEYS, 'consumePasskeyCode');
+  const { tenant, secret, subject_id, now } = input;
+  requireIdentityString(tenant, 'tenant', 'consumePasskeyCode');
+  requireIdentityString(subject_id, 'subject_id', 'consumePasskeyCode');
+  if (typeof now !== 'number' || !Number.isFinite(now)) {
+    throw new Error('admission.consumePasskeyCode: now must be a finite number');
+  }
+  if (!draft || !Array.isArray(draft.admission_capabilities)) {
+    throw new Error('admission.consumePasskeyCodeInDraft: a repository draft is required');
+  }
+  if (typeof secret !== 'string' || secret === '') return { ok: false, reason: 'code-invalid' };
+
+  const digest = digestOf(secret);
+  const issued = draft.admission_capabilities.filter(r =>
+    r.tenant === tenant && r.purpose === 'passkey_enrolment' && r.principal_subject_id === subject_id);
+  const row = issued.find(r => digestMatches(r.digest, digest)) || null;
+  if (!row) return { ok: false, reason: 'code-invalid' };
+  if (row.consumed_at !== null) return { ok: false, reason: 'code-used' };
+  if (now >= row.expires_at || issued[issued.length - 1] !== row) {
+    return { ok: false, reason: 'code-expired' };
+  }
+  const consumer = draft.subjects.find(s => s.id === subject_id) || null;
+  stampConsumption(draft, row, consumer, now);
+  return { ok: true, record: row };
+}
+
 // ── consumption ─────────────────────────────────────────────────────────────
 // WHERE ATOMICITY LIVES. repo.transact() is non-reentrant, so a consumer
 // that must create a subject, a credential and an assignment IN THE SAME
@@ -506,6 +547,6 @@ function forTenant(tenant) {
 module.exports = {
   mint, consume, consumeInDraft, get, forTenant,
   mintOperatorInDraft, consumeBoundPersonInDraft, consumeSeatClaimInDraft,
-  seatLabelFromSecret,
-  OPERATOR_PURPOSES, TTL_MIN_MS, TTL_MAX_MS, HUMAN_INVITE_TTL_MS,
+  consumePasskeyCodeInDraft, seatLabelFromSecret,
+  OPERATOR_PURPOSES, TTL_MIN_MS, TTL_MAX_MS, HUMAN_INVITE_TTL_MS, PASSKEY_CODE_TTL_MS,
 };

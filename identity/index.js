@@ -588,10 +588,19 @@ function create(config) {
 
     // Whether this is the person who set up the Interlock: a display fact for
     // the host. It authorises nothing; the role rows above do.
+    // Whether they hold a usable passkey: also display only, so a member
+    // without one can be offered a way to add it.
     let firstOwner = false;
-    try { firstOwner = repo.firstOwnerIdIn(repo.read(), tenant) === subj.id; } catch (_) { firstOwner = false; }
+    let passkey = false;
+    try {
+      const state = repo.read();
+      firstOwner = repo.firstOwnerIdIn(state, tenant) === subj.id;
+      passkey = state.authenticators.some(a => a.tenant === tenant &&
+        a.person_subject_id === subj.id && a.revoked_at === null);
+    } catch (_) { firstOwner = false; passkey = false; }
 
-    return { subject_id: subj.id, name: subj.name, kind: subj.kind, roles: roleList, first_owner: firstOwner };
+    return { subject_id: subj.id, name: subj.name, kind: subj.kind, roles: roleList,
+      first_owner: firstOwner, passkey };
   }
 
   // ── INVITE + REDEEM: the human-invite lifecycle ──────────────────────────
@@ -977,6 +986,34 @@ function create(config) {
     if (!result || result.ok !== true) return Object.freeze({ ok: false, reason: 'fresh-step-up-required' });
     return Object.freeze({ ok: true, name: target.name });
   }
+  // The first owner issues a one-time passkey code for a member without a
+  // passkey. administration.js decides and names each refusal; this only
+  // finds the member by name.
+  function issuePasskeyCode(meta, body) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('issuePasskeyCode(meta, …) requires the trusted metadata object');
+    }
+    const b = closedBody(body, ['name']);
+    if (!b || typeof b.name !== 'string' || b.name.length === 0 || b.name.includes('\0') ||
+        Buffer.byteLength(b.name, 'utf8') > 256) {
+      return Object.freeze({ ok: false, reason: 'invalid-request' });
+    }
+    const target = peopleState(repo.read()).find(person => person.name === b.name);
+    if (!target) return Object.freeze({ ok: false, reason: 'not-found' });
+    const result = service.issuePasskeyCode({
+      cookie_header: meta.cookie_header,
+      csrf_token: meta.csrf_token,
+      request_origin: meta.request_origin,
+      sec_fetch_site: meta.sec_fetch_site,
+      now: meta.now,
+      target_person_subject_id: target.id,
+    });
+    if (!result || result.ok !== true) {
+      return Object.freeze({ ok: false, reason: (result && result.reason) || 'fresh-step-up-required' });
+    }
+    return Object.freeze({ ok: true, name: target.name, secret: result.secret, expires_at: result.expires_at });
+  }
+
   const grantAdministrator = (meta, body) => administratorChange(meta, body, true);
   const revokeAdministrator = (meta, body) => administratorChange(meta, body, false);
 
@@ -1093,6 +1130,7 @@ function create(config) {
     administrators,
     grantAdministrator,
     revokeAdministrator,
+    issuePasskeyCode,
     signOutOtherSessions,
     confirmTranscriptClear,
     allowAiAdmission,

@@ -24,6 +24,7 @@ const {
 } = require('@simplewebauthn/server/helpers');
 
 const repo = require('./repo.js');
+const admission = require('./admission.js');
 
 const RP_ID = 'localhost';
 function isCanonicalHttpsRpPair(rpId, origin) {
@@ -55,7 +56,8 @@ const CEREMONY_TIMEOUT_MS = 60_000;
 // redeemed, never by a password: only from the session redemption started
 // (the host issues it with the same `now` as the redemption, so its
 // authenticated_at equals the invite's consumed_at), and within five minutes
-// of it.
+// of it. The one other authority is a passkey code the first owner issued for
+// that person, spent from their own session when the ceremony begins.
 const INVITE_ENROLMENT_MS = 5 * 60 * 1000;
 const MAX_JSON_DEPTH = 12;
 const MAX_JSON_NODES = 2048;
@@ -63,6 +65,8 @@ const MAX_JSON_STRING_BYTES = 256 * 1024;
 
 const FAIL_UNAVAIL = Object.freeze({ ok: false, reason: 'webauthn-unavailable' });
 const FAIL_FAILED = Object.freeze({ ok: false, reason: 'webauthn-failed' });
+const PASSKEY_EXISTS = Object.freeze({ ok: false, reason: 'passkey-exists' });
+const CODE_INVALID = Object.freeze({ ok: false, reason: 'code-invalid' });
 
 const FORBIDDEN_TOP_KEYS = Object.freeze([
   'tenant', 'person_subject_id', 'subject_id', 'subject_kind', 'membership',
@@ -267,7 +271,20 @@ function createService(opts) {
     return false;
   }
 
+  // The first passkey. Without a code (`code === null`) only the invite gate
+  // below can authorise it; with one, only that code can.
   async function beginRegistration(optsIn) {
+    return beginFirstRegistration(optsIn, null);
+  }
+
+  async function beginRegistrationWithCode(optsIn) {
+    if (refuseInput(optsIn)) return FAIL_UNAVAIL;
+    const code = ownData(optsIn, 'passkey_code').value;
+    if (typeof code !== 'string' || code.length === 0 || code.length > 256) return CODE_INVALID;
+    return beginFirstRegistration(optsIn, code);
+  }
+
+  async function beginFirstRegistration(optsIn, code) {
     if (refuseInput(optsIn)) return FAIL_UNAVAIL;
     const env = envelopeArgs(optsIn);
     if (!safeTime(env.now)) return FAIL_UNAVAIL;
@@ -291,9 +308,27 @@ function createService(opts) {
     if (!subj || subj.kind !== 'person' || subj.status !== 'active') return FAIL_UNAVAIL;
     // Zero historical authenticator rows (not merely zero unrevoked).
     if (state.authenticators.some(a => a.tenant === tenant && a.person_subject_id === personId)) {
-      return FAIL_UNAVAIL;
+      return code === null ? FAIL_UNAVAIL : PASSKEY_EXISTS;
     }
-    if (state.bootstrap.completed_at !== null && !state.admission_capabilities.some(c =>
+    if (code !== null) {
+      // A code exists only after setup, and is spent here, in the same
+      // synchronous step as the checks above: a second tab presenting it finds
+      // it used. The ceremony that follows is bound to this session alone.
+      if (state.bootstrap.completed_at === null) return FAIL_UNAVAIL;
+      if (!state.memberships.some(m =>
+        m.tenant === tenant && m.person_subject_id === personId && m.status === 'active')) {
+        return FAIL_UNAVAIL;
+      }
+      let spent;
+      try {
+        spent = repo.transact(draft => admission.consumePasskeyCodeInDraft(draft, {
+          tenant, secret: code, subject_id: personId, now: env.now,
+        }));
+      } catch (_) { return FAIL_UNAVAIL; }
+      if (!spent || spent.ok !== true) {
+        return Object.freeze({ ok: false, reason: (spent && spent.reason) || 'code-invalid' });
+      }
+    } else if (state.bootstrap.completed_at !== null && !state.admission_capabilities.some(c =>
       c.tenant === tenant && c.purpose === 'human_invite' && c.consuming_subject_id === personId &&
       typeof c.consumed_at === 'number' && env.now >= c.consumed_at &&
       env.now - c.consumed_at < INVITE_ENROLMENT_MS &&
@@ -1002,6 +1037,7 @@ function createService(opts) {
 
   return Object.freeze({
     beginRegistration,
+    beginRegistrationWithCode,
     finishRegistration,
     beginElevation,
     finishElevation,
