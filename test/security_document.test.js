@@ -115,8 +115,12 @@ test('the hosted setup code and the password door are described as built', () =>
     'Many addresses together can: the throttle keeps bounded tables, and a few thousand distinct IPv4 addresses ' +
     'failing within fifteen minutes can fill them.');
   assertSentence(SECURITY,
-    'While a table is full, a block with 25 failures waits and is refused as a whole, so IPv6 addresses fill the ' +
-    'tables only from several hundred separate /48 blocks (about 660, measured).');
+    'While a table is full, a block with 25 failures waits and is refused as a whole, so failures arriving over ' +
+    'time fill the tables only from several hundred separate /48 blocks (about 660, measured).');
+  assertSentence(SECURITY,
+    'A very large burst from one /48 can still fill them: tens of thousands of attempts in flight at once, ' +
+    'before their failures are recorded, are not held back by that limit.');
+  assertSentence(SECURITY, 'A later release will count attempts in flight.');
   assertSentence(SECURITY,
     'The throttle then cannot tell a new address or account from the attackers\' and fails closed: nearly every ' +
     'sign-in, the owner\'s included, waits 30 seconds and is refused.');

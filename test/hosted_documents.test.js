@@ -127,7 +127,11 @@ test('HOSTING.md says what throttled sign-in looks like and what clears it', () 
     'One address cannot cause this, but the throttle\'s tables are bounded, and a few thousand distinct IPv4 addresses ' +
     'failing within fifteen minutes can fill them.');
   assertSentence(HOSTING,
-    'IPv6 is counted per /48 block as well, so it takes several hundred separate /48 blocks.');
+    'IPv6 is counted per /48 block as well, so failures arriving over time take several hundred separate /48 blocks.');
+  assertSentence(HOSTING,
+    'A very large burst from one /48 can still fill them: tens of thousands of attempts in flight at once, ' +
+    'before their failures are recorded.');
+  assertSentence(HOSTING, 'A later release will count attempts in flight.');
   assertSentence(HOSTING,
     'To keep a guessing crowd from reaching Interlock at all, add a rate limiting rule for the path `/api/login` ' +
     'in Cloudflare\'s WAF settings; Interlock\'s own throttle stays in place behind it.');
