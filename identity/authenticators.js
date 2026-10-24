@@ -57,7 +57,8 @@ const CEREMONY_TIMEOUT_MS = 60_000;
 // (the host issues it with the same `now` as the redemption, so its
 // authenticated_at equals the invite's consumed_at), and within five minutes
 // of it. The one other authority is a passkey code the first owner issued for
-// that person, spent from their own session when the ceremony begins.
+// that person, spent from their own recently signed-in session once the
+// ceremony has been created.
 const INVITE_ENROLMENT_MS = 5 * 60 * 1000;
 // A passkey code is spent only from a session the member signed in to with
 // their password within the last ten minutes: long enough to sign in and paste
@@ -312,31 +313,19 @@ function createService(opts) {
     const personId = opened.session.subject_id;
     const subj = state.subjects.find(s => s.id === personId && s.tenant === tenant);
     if (!subj || subj.kind !== 'person' || subj.status !== 'active') return FAIL_UNAVAIL;
-    // Zero historical authenticator rows (not merely zero unrevoked).
-    if (state.authenticators.some(a => a.tenant === tenant && a.person_subject_id === personId)) {
-      return code === null ? FAIL_UNAVAIL : PASSKEY_EXISTS;
-    }
     if (code !== null) {
-      // A code exists only after setup, and is spent here, in the same
-      // synchronous step as the checks above: a second tab presenting it finds
-      // it used. The ceremony that follows is bound to this session alone.
+      // A code exists only after setup, and only a recent password sign-in
+      // may spend it. It is spent below, once the ceremony exists.
       if (state.bootstrap.completed_at === null) return FAIL_UNAVAIL;
       if (!state.memberships.some(m =>
         m.tenant === tenant && m.person_subject_id === personId && m.status === 'active')) {
         return FAIL_UNAVAIL;
       }
-      // Only a recent password sign-in may spend a code; refused, it stays unspent.
       const signedInAt = opened.session.authenticated_at;
       if (!(env.now >= signedInAt && env.now - signedInAt < CODE_SIGN_IN_MS)) return SIGN_IN_REQUIRED;
-      let spent;
-      try {
-        spent = repo.transact(draft => admission.consumePasskeyCodeInDraft(draft, {
-          tenant, secret: code, subject_id: personId, now: env.now,
-        }));
-      } catch (_) { return FAIL_UNAVAIL; }
-      if (!spent || spent.ok !== true) {
-        return Object.freeze({ ok: false, reason: (spent && spent.reason) || 'code-invalid' });
-      }
+    } else if (state.authenticators.some(a => a.tenant === tenant && a.person_subject_id === personId)) {
+      // Zero historical authenticator rows (not merely zero unrevoked).
+      return FAIL_UNAVAIL;
     } else if (state.bootstrap.completed_at !== null && !state.admission_capabilities.some(c =>
       c.tenant === tenant && c.purpose === 'human_invite' && c.consuming_subject_id === personId &&
       typeof c.consumed_at === 'number' && env.now >= c.consumed_at &&
@@ -377,6 +366,29 @@ function createService(opts) {
       now: env.now,
     });
     if (!issued.ok) return FAIL_UNAVAIL;
+
+    if (code !== null) {
+      // The ceremony now exists, so the code is spent: in the same synchronous
+      // step as the challenge was issued, and together with the check that the
+      // person still has no authenticator. A second tab presenting the code
+      // finds it used. Any refusal withdraws this ceremony before answering.
+      let spent;
+      try {
+        spent = repo.transact(draft => {
+          // Zero historical authenticator rows (not merely zero unrevoked).
+          if (draft.authenticators.some(a => a.tenant === tenant && a.person_subject_id === personId)) {
+            return PASSKEY_EXISTS;
+          }
+          return admission.consumePasskeyCodeInDraft(draft, {
+            tenant, secret: code, subject_id: personId, now: env.now,
+          });
+        });
+      } catch (_) { spent = null; }
+      if (!spent || spent.ok !== true) {
+        challenge_store.take({ ceremony_id: issued.ceremony_id, purpose: 'webauthn.register', now: env.now });
+        return spent ? Object.freeze({ ok: false, reason: spent.reason || 'code-invalid' }) : FAIL_UNAVAIL;
+      }
+    }
 
     return Object.freeze({
       ok: true,

@@ -263,3 +263,29 @@ test('a code needs a recent password sign-in, and a stale session does not spend
   const begun = await r.redeem(fresh, code.secret, late + 1);
   assert.equal(begun.ok, true, 'after signing in again the same code works: ' + JSON.stringify(begun));
 });
+
+test('a code is spent only once its ceremony exists', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  const code = r.issue(await r.asOwner(), cal);
+  const at = r.tick();
+  // Fill the ceremony store so the passkey ceremony itself cannot be created.
+  const store = r.world.instance.challenges;
+  let filled = 0;
+  for (; filled < 2048; filled += 1) {
+    const issued = store.issue({ purpose: 'webauthn.elevate', person_subject_id: 'filler', session_binding: {},
+      challenge: require('node:crypto').randomBytes(32).toString('base64url'), now: at });
+    if (!issued.ok) break;
+  }
+  assert.ok(filled > 0 && filled < 2048, 'ARRANGEMENT: the ceremony store is full');
+  const session = await r.signIn(cal, at);
+  const failed = await r.redeem(session, code.secret, at + 1);
+  assert.equal(failed.ok, false, 'ARRANGEMENT: no ceremony could be created');
+  assert.equal(failed.options, undefined);
+  assert.equal(r.repo.read().admission_capabilities.find(c => c.id === code.capability_id).consumed_at, null,
+    'a ceremony that was never created does not spend the code');
+  // Five minutes later the filler ceremonies have expired; the same code works.
+  const later = at + 5 * 60 * 1000 + 1;
+  const begun = await r.redeem(await r.signIn(cal, later), code.secret, later + 1);
+  assert.equal(begun.ok, true, JSON.stringify(begun));
+});
