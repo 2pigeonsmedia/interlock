@@ -127,6 +127,10 @@ test('the hosted setup code and the password door are described as built', () =>
   assertSentence(SECURITY,
     'Sign-in recovers once fifteen minutes pass with no attempt, or when the server restarts.');
   assertSentence(SECURITY,
+    'The code is a cross-check, not a secret: anyone who has seen it can make a knock that shows the same code, ' +
+    'so keep it between you and your AI.');
+  assertSentence(SECURITY, 'If two cards show the same code, decline both.');
+  assertSentence(SECURITY,
     'An administrator can do everything the owner can, except grant or remove administrator rights.');
   assertSentence(SECURITY,
     'Nobody, the first owner included, can remove, demote or suspend the first owner, or reset or revoke ' +

@@ -171,6 +171,9 @@ no others.
   five-character code derived from its own credential, and the card shows the
   code of the knock it belongs to; a stranger's card matches by chance about
   once in 33 million. Allow only a card whose code your AI just gave you.
+  The code is a cross-check, not a secret: anyone who has seen it can make a
+  knock that shows the same code, so keep it between you and your AI. If two
+  cards show the same code, decline both.
 - **Recovery is replacement, not a back door.** With the normal server stopped,
   `interlock recover` can replace a lost owner password and passkey locally and
   revoke the old credentials. It works only for a loopback room: it refuses a
