@@ -68,8 +68,8 @@ v0.2.1 tested-on evidence (2026-10-23):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 552/552 |
-| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 552/552 |
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 557/557 |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 557/557 |
 
 v0.2.1 lets the first owner make members administrators, and hardens hosted
 rooms: a match code on the Allow card, IPv6 sign-in failures also counted per
