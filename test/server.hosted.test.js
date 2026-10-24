@@ -354,7 +354,7 @@ test('hosted mode: a wrong code whose client has already gone arms no wait', asy
   const house = Object.assign(stubs([
     'authorizeRead', 'authorizeWrite', 'authorizeSeatBearer', 'aiSessionDiscriminator', 'resolveSession',
     'whoami', 'listParticipants', 'releaseIdleSeats', 'listRecentEndedSeats', 'listAiSeatHistory', 'invite',
-    'redeem', 'revokeParticipant', 'administrators', 'grantAdministrator', 'revokeAdministrator', 'endOwnSeat', 'changePassword', 'signOutOtherSessions', 'confirmTranscriptClear',
+    'redeem', 'revokeParticipant', 'administrators', 'grantAdministrator', 'revokeAdministrator', 'issuePasskeyCode', 'endOwnSeat', 'changePassword', 'signOutOtherSessions', 'confirmTranscriptClear',
   ]), {
     firstOwner: { status: () => ({ completed: false, in_progress: false }) },
     authenticators: {},

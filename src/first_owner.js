@@ -146,7 +146,9 @@ function publicUser(who) {
   if (identityRoles.has('administrator')) roles.push('owner');
   // Every administrator carries the 'owner' role above; this says which one
   // set up the Interlock, so the page can label the others "Admin".
-  return Object.freeze({ name: who.name, kind: who.kind, roles, first_owner: who.first_owner === true });
+  return Object.freeze({
+    name: who.name, kind: who.kind, roles, first_owner: who.first_owner === true, passkey: who.passkey === true,
+  });
 }
 
 function publicMessage(message) {
@@ -330,6 +332,7 @@ function createFirstOwnerHandler(options) {
       typeof house.administrators !== 'function' ||
       typeof house.grantAdministrator !== 'function' ||
       typeof house.revokeAdministrator !== 'function' ||
+      typeof house.issuePasskeyCode !== 'function' ||
       typeof house.endOwnSeat !== 'function' ||
       typeof house.changePassword !== 'function' ||
       typeof house.signOutOtherSessions !== 'function' ||
@@ -805,7 +808,58 @@ function createFirstOwnerHandler(options) {
     return sendJson(request, response, 200, { ok: true, name: result.name });
   }
 
-  // Completes the first passkey that invite redemption began.
+  // The first owner sends a member without a passkey a one-time code for one.
+  const PASSKEY_CODE_REFUSALS = Object.freeze({
+    'invalid-request': [400, 'invalid-participant'],
+    'not-authorized': [403, 'not-authorized'],
+    'not-found': [404, 'not-found'],
+    'passkey-exists': [409, 'passkey-exists'],
+    'fresh-step-up-required': [403, 'fresh-step-up-required'],
+  });
+
+  function issuePasskeyCode(request, response, body) {
+    if (!completed()) {
+      return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    }
+    const input = closedObject(body, ['name']);
+    if (!input || typeof input.name !== 'string' || input.name.length === 0 ||
+        input.name.includes('\0') || Buffer.byteLength(input.name, 'utf8') > 256) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-participant' });
+    }
+    if (!ownerSession(request, response, true)) return;
+    const result = house.issuePasskeyCode(requestMeta(request, Date.now()), input);
+    if (!result || result.ok !== true || typeof result.secret !== 'string' ||
+        !Number.isSafeInteger(result.expires_at)) {
+      const [status, error] = PASSKEY_CODE_REFUSALS[result && result.reason] || [403, 'not-authorized'];
+      return sendJson(request, response, status, { ok: false, error });
+    }
+    return sendJson(request, response, 200, {
+      ok: true, name: result.name, passkey_code: result.secret, expires_at: result.expires_at,
+    });
+  }
+
+  // The member, signed in, redeems that code; it begins their first passkey.
+  // Without a valid code no ceremony begins.
+  const CODE_REFUSALS = Object.freeze(['code-invalid', 'code-used', 'code-expired', 'passkey-exists']);
+  async function accountPasskeyBegin(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const input = closedObject(body, ['code']);
+    if (!input || typeof input.code !== 'string' || input.code.length === 0 ||
+        input.code.length > 256 || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(input.code)) {
+      return sendJson(request, response, 409, { ok: false, error: 'code-invalid' });
+    }
+    const begun = await house.authenticators.beginRegistrationWithCode(Object.assign(
+      requestMeta(request, Date.now()), { passkey_code: input.code.trim() }));
+    if (!begun || begun.ok !== true) {
+      const error = begun && CODE_REFUSALS.includes(begun.reason) ? begun.reason : 'passkey-unavailable';
+      return sendJson(request, response, 409, { ok: false, error });
+    }
+    return sendJson(request, response, 200, {
+      ok: true, ceremony_id: begun.ceremony_id, options: begun.options,
+    });
+  }
+
+  // Completes a member's first passkey, begun by invite redemption or a code.
   async function accountPasskeyFinish(request, response, body) {
     if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
     const input = closedObject(body, ['ceremony_id', 'response']);
@@ -1869,6 +1923,8 @@ function createFirstOwnerHandler(options) {
     ['/api/participants/revoke', revokeParticipant],
     ['/api/participants/admin', (request, response, body) => changeAdministrator(request, response, body, true)],
     ['/api/participants/admin/revoke', (request, response, body) => changeAdministrator(request, response, body, false)],
+    ['/api/participants/passkey-code', issuePasskeyCode],
+    ['/api/account/passkey/begin', accountPasskeyBegin],
     ['/api/account/passkey/finish', accountPasskeyFinish],
     ['/api/settings/reuse', updateEndedReuse],
     ['/api/owner/password', changeOwnerPassword],
