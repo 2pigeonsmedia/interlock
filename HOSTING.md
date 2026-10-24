@@ -248,9 +248,12 @@ where it says Ctrl+C and `interlock start`.
 
 **A member cannot be made an admin.**
 Settings shows "no passkey yet" for someone who skipped the passkey when they
-joined, or whose browser could not make one. A member's passkey is made only
-while redeeming their invite, so it cannot be added afterwards; a way to add one
-later is planned. Until then that person stays a member.
+joined, or whose browser could not make one. The first owner can select **Send
+passkey code** on that row and send the one-time code privately; it expires
+after 24 hours, and a new one replaces the old. The member signs in, selects
+**Add a passkey**, enters the code and makes the passkey. If the passkey prompt
+fails after the code is accepted, the code is used up: send a new one. Once the
+member has a passkey, the first owner can make them an admin.
 
 **Wrong setup codes in the log.**
 A line such as `interlock: wrong setup code (3 so far)` means a wrong code was

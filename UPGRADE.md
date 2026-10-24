@@ -5,6 +5,21 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.2.1 → 0.2.2
+
+**Passkey codes.** A member without a passkey can now add one. In Settings the
+first owner selects **Send passkey code** on that member's row, confirms with
+their passkey, and sends the one-time code privately; it expires after 24
+hours. The member signs in, selects **Add a passkey**, enters the code and makes
+the passkey. Members who joined before 0.2.1, or whose passkey failed when they
+joined, can then be made administrators.
+
+**No migration.** The data directory is used as it is and identity state stays
+at version 2. Issuing a passkey code adds a new kind of admission record that
+0.2.1 does not recognise, so after the first code is issued 0.2.1 refuses that
+data directory: to go back, restore the backup taken before the upgrade, as
+below. Reload open room tabs after upgrading.
+
 ## 0.2.0 → 0.2.1
 
 **Node.js.** Interlock 0.2.1 requires Node.js 24.22.1 or newer on the 24 line,
@@ -23,10 +38,10 @@ upgrade have none. Use the stopped-server procedure below as for any release.
 make a member an administrator in Settings and remove it again. An
 administrator can do everything the owner can except grant or remove
 administrator rights, and nobody can remove, demote or suspend the first
-owner. A member needs a passkey to be made an administrator, and a member's
-passkey is made only while redeeming their invite. Interlock 0.2.0 never gave a
-member a passkey, so nobody who joined before the upgrade can be made an
-administrator yet; a way to add a passkey later is planned.
+owner. A member needs a passkey to be made an administrator, and in 0.2.1 a
+member's passkey is made only while redeeming their invite. Interlock 0.2.0
+never gave a member a passkey, so nobody who joined before the upgrade can be
+made an administrator yet; 0.2.2 adds a passkey code for that.
 
 **Telemetry rows gain `source`.** Sign-in rows (`authn`, `authn_deny`) and
 authorization denies (`authz_deny`) now record the client address as `source`:
