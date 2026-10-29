@@ -2,6 +2,8 @@
 
 **Status:** v0.1.1 visual contract ("Signal Box"), implemented by
 `src/web/room.html`, `src/web/room.js`, `src/web/room.css`,
+`src/web/work_panel.js` (which wires, fetches and assembles the Work tile),
+`src/web/work_panel_model.js` (which supplies its rows, labels and lines),
 `src/web/setup.css`, and `src/web/recovery.css`. This document governs colour,
 type, responsive behavior, and transcript markup. It supersedes the v0.1
 grey-frame contract.
@@ -193,11 +195,93 @@ Rules the CSS relies on:
   Interlock within five minutes. This is recent client presence, not an online
   or doorbell claim. Settings retains quiet admitted seats for owner removal.
 
+### The Work tile (what work_panel.js renders today)
+
+The third tile sits beside the conversation. Its skeleton in `room.html`,
+trimmed to the section headings and lists; `work_panel.js` fills the lists:
+
+```html
+<aside class="work" aria-labelledby="work-heading">
+  <header class="work-heading">
+    <h2 id="work-heading">Work</h2>
+    <p id="work-scope" class="work-scope">Tracked work in this room</p>
+  </header>
+  <section class="work-section" aria-labelledby="needs-you-heading">
+    <h3 id="needs-you-heading"><button id="needs-you-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="needs-you-list">Needs you <span id="needs-you-count" class="work-count">0</span></button></h3>
+    <div id="needs-you-list" class="work-list"></div>
+  </section>
+  <section class="work-section" aria-labelledby="reported-heading">
+    <h3 id="reported-heading">Reported to you</h3>
+    <div id="reported-list" class="work-list"></div>
+  </section>
+  <section class="work-section" aria-labelledby="actions-heading">
+    <h3 id="actions-heading"><button id="actions-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="actions-list">Actions <span id="actions-count" class="work-count">0</span></button></h3>
+    <div id="actions-list" class="work-list"></div>
+  </section>
+  <section class="work-section" aria-labelledby="projects-heading">
+    <h3 id="projects-heading">Projects</h3>
+    <div id="project-list" class="work-list"></div>
+  </section>
+  <p id="work-status" class="status" role="status" aria-live="polite"></p>
+</aside>
+
+<!-- one Needs you row, as work_panel.js builds it -->
+<div class="work-row">
+  <button class="work-open" type="button" aria-label="Answer D-7: Ship the fix">Ship the fix</button>
+  <p class="work-state">Operations · D-7 · waiting 2h</p>
+  <p>Ship on Friday — asked by Lead</p>
+</div>
+
+<!-- one project, in place, as work_panel.js builds it inside #project-list -->
+<section class="work-project" aria-labelledby="project-ops-heading">
+  <h4 id="project-ops-heading" class="work-project-heading">Operations <span class="work-state">open 1 · blocked 0 · ready 0 · awaiting 0</span></h4>
+  <p class="work-project-brief">Keep it running · Keys · Ana · 2026-09-27T20:00:00.000Z</p>
+  <button class="quiet-action" type="button" aria-label="Edit Operations's objective and today">Edit</button>
+  <div class="work-project-form"></div>
+  <p class="status work-project-status" role="status"></p>
+  <ul class="work-tree">
+    <li><button class="work-open" type="button" aria-label="Open W-1: Rotate the keys">Rotate the keys</button>
+      <span class="work-state"> W-1 · Open</span>
+      <p class="work-tree-facts">next: Lead — complete 717</p></li>
+  </ul>
+  <button class="work-toggle work-done-toggle" type="button" aria-expanded="false" aria-controls="project-ops-done">done (1)</button>
+  <ul id="project-ops-done" class="work-tree" hidden></ul>
+</section>
+```
+
+The header carries `#work-count-button` (`Needs you · N`), the composer
+carries `#work-share-bar`, and every message's actions row
+(`.message-actions`) carries a `Work…` button beside Reply.
+
+Rules the CSS relies on:
+
+- Work states are `.work-state` text — words in the mono face at the meta
+  ink — never a hue. The tile adds no colour of its own: amber, teal, ice
+  blue, violet and crimson keep their jobs above, and a blocked or awaiting
+  record is said, not lit.
+- Row actions are `.work-open` `<button>`s whose accessible name carries the
+  record id and title (`Answer D-7: …`, `Open work W-12: …`, `Open W-1: …`);
+  the drawer's act buttons follow the same `<act> <id>: <title>` form.
+- A project is a `.work-project` section in the tile, never a dialog: its
+  heading is text, its notes are edited in place, and its rows and
+  `done (N)` list sit under it. The tile has no recent-changes list; history
+  lives in each record's drawer.
+- The facts line under a row (`.work-tree-facts`) is muted and in sentence
+  case: it carries the record's own words.
+- The record drawer (`#work-drawer`) and the create dialog
+  (`#work-create-dialog`) are native `<dialog>`s opened with `showModal()`.
+  The drawer's order is fixed: current state, actions, source, then the
+  history inside a closed `<details>` (*More detail*).
+- Everything in the tile is written with `textContent`; record text is never
+  interpreted as HTML.
+
 ## Small screens (≤ 760px)
 
 One column, tiles stacked; the account label takes its own line in the header;
 message metadata wraps inline above the text without widening the viewport.
 The shared action group wraps beneath the brand and navigation.
+The Work tile follows the conversation, and the header's `Needs you · N`
+button jumps to it.
 
 ## Deliberately left out
 

@@ -13,6 +13,9 @@ const { createArchiveService } = require('./chat/archive.js');
 const { createChatService } = require('./chat/service.js');
 const { openStore } = require('./chat/store.js');
 const { createFirstOwnerHandler } = require('./first_owner.js');
+const { openWorkStore } = require('./work/store.js');
+const { createWorkService } = require('./work/service.js');
+const { createWorkRoutes } = require('./work/routes.js');
 const { releaseIdleSeats } = require('./idle.js');
 const { readRoomSettings } = require('./room_settings.js');
 const { renderGuidePage } = require('./guide.js');
@@ -195,6 +198,8 @@ function loadBrowserAssets(hosted) {
       '/transcript_scroll.js': ['transcript_scroll.js', 'text/javascript; charset=utf-8'],
       '/attention.js': ['attention.js', 'text/javascript; charset=utf-8'],
       '/page_header.js': ['page_header.js', 'text/javascript; charset=utf-8'],
+      '/work_panel_model.js': ['work_panel_model.js', 'text/javascript; charset=utf-8'],
+      '/work_panel.js': ['work_panel.js', 'text/javascript; charset=utf-8'],
       '/room.js': ['room.js', 'text/javascript; charset=utf-8'],
       '/docs/screenshots/connect-an-ai.png': ['../../docs/screenshots/connect-an-ai.png', 'image/png'],
       '/BACKUP.md': ['../../BACKUP.md', 'text/plain; charset=utf-8'],
@@ -430,6 +435,23 @@ async function startInterlockServer(options) {
       participants: meta => house.listParticipants(meta),
     });
     archive = createArchiveService({ dataDir, store: chatStore });
+    // The Work record shares the process, the identity house and the data
+    // directory; it has its own store file and survives a transcript clear.
+    const work = createWorkRoutes({
+      work: createWorkService({ store: openWorkStore({ dataDir }) }),
+      participants: meta => house.listParticipants(meta),
+      // A cited room message, looked up by id; null when it is not in the
+      // room (never posted, or archived by a transcript clear).
+      messageById: async id => {
+        try {
+          const page = await chat.read({ after: id - 1, limit: 1 });
+          const m = page.messages[0];
+          return m && m.id === id ? m : null;
+        } catch (_) {
+          return null;
+        }
+      },
+    });
     let idleBusy = null;
     const releaseIdle = now => {
       if (idleBusy) return idleBusy;
@@ -470,7 +492,7 @@ async function startInterlockServer(options) {
       },
     }) : null;
     const handler = createFirstOwnerHandler({
-      house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler,
+      house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler, work,
     });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));

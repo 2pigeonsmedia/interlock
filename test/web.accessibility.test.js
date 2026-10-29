@@ -9,6 +9,7 @@ const ROOT = path.join(__dirname, '..');
 const ROOM = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.html'), 'utf8');
 const ROOM_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.css'), 'utf8');
 const ROOM_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'room.js'), 'utf8');
+const WORK_PANEL_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'work_panel.js'), 'utf8');
 const PAGE_HEADER_JS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'page_header.js'), 'utf8');
 const SETUP_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'setup.css'), 'utf8');
 const RECOVERY_CSS = fs.readFileSync(path.join(ROOT, 'src', 'web', 'recovery.css'), 'utf8');
@@ -161,4 +162,196 @@ test('the header keeps navigation, actions, and the account separable on every p
   assert.match(PAGE_HEADER_JS, /fetch\('\/api\/logout'/);
   assert.match(ROOM_JS,
     /searchParams\.get\('open'\)[^]*requested === 'connect-ai'[^]*requested === 'settings'[^]*button\.click\(\)/);
+});
+
+test('the work panel is a third tile with words for state, no borrowed hue, and no inline code', () => {
+  assert.match(ROOM, /<aside class="work" aria-labelledby="work-heading">/);
+  for (const id of ['needs-you-count', 'work-status', 'work-drawer', 'work-create-dialog',
+    'work-share-bar', 'work-count-button', 'project-create-form']) {
+    assert.match(ROOM, new RegExp(`id="${id}"`), `${id} must be present`);
+  }
+  assert.match(ROOM, /<dialog id="work-drawer"/);
+  assert.doesNotMatch(ROOM, /\son[a-z]+=|<style|\sstyle=/i, 'the page runs under a strict CSP');
+  assert.match(ROOM_CSS, /\.room-layout\s*\{[^}]*grid-template-columns:\s*254px minmax\(0, 3fr\) minmax\(0, 2fr\)/s);
+  const marker = ROOM_CSS.indexOf('/* ---------- work ----------');
+  assert.ok(marker >= 0, 'the work section must exist');
+  const workCss = ROOM_CSS.slice(marker);
+  assert.doesNotMatch(workCss.split('/* ----------')[1] ?? workCss, /--wait|--ember|--signal|--ai\b|--owner/,
+    'work states are words; the panel adds no hue');
+  assert.match(ROOM_CSS, /@media \(max-width: 760px\)[\s\S]*\.work \{ order: 3; \}/);
+  assert.match(ROOM, /work_panel_model\.js"[\s\S]*work_panel\.js"[\s\S]*room\.js"/);
+});
+
+test('the work panel renders with text only, names the unknown record, and starts and stops with the room', () => {
+  assert.match(WORK_PANEL_JS, /textContent/);
+  assert.doesNotMatch(WORK_PANEL_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+  assert.match(WORK_PANEL_JS, /not in the room's work record/);
+  assert.match(WORK_PANEL_JS, /Evidence attached/);
+  assert.doesNotMatch(WORK_PANEL_JS, /\bVerified\b/);
+  assert.match(WORK_PANEL_JS, /showModal\(\)/);
+  assert.match(ROOM_JS, /InterlockWorkPanel\.start\(/);
+  assert.match(ROOM_JS, /InterlockWorkPanel\.stop\(\)/);
+});
+
+test('the work panel writes through deliberate forms', () => {
+  for (const words of [/Record answer/, /Report an answer given elsewhere/, /Confirm as my answer/,
+    /No evidence attached/, /not confirmed here/]) {
+    assert.match(WORK_PANEL_JS, words);
+  }
+  // Label in name: an action button's accessible name is "<action> <id>: <title>".
+  assert.match(WORK_PANEL_JS, /row\.action \+ ' ' \+ row\.id \+ ': ' \+ row\.title/);
+  assert.match(WORK_PANEL_JS, /text \+ ' ' \+ item\.id \+ ': ' \+ item\.title/);
+});
+
+test('exposure and notify travel through the ordinary composer, and a message can become work', () => {
+  assert.match(ROOM_JS, /interlock:message-saved/);
+  assert.match(ROOM_JS, /interlock:message-failed/);
+  assert.match(ROOM_JS, /interlock:message-work/);
+  assert.match(ROOM_JS, /Create work from message #\$\{message\.id\}/);
+  assert.match(WORK_PANEL_JS, /Update saved; message not sent\./);
+  assert.match(WORK_PANEL_JS, /Sending again creates a new message\./);
+  assert.match(WORK_PANEL_JS, /notify: 'Message not sent\. Sending again creates a new message\.'/,
+    'a failed Notify saved no update, so its notice does not say one was saved');
+  assert.match(WORK_PANEL_JS, /source_message/);
+  // A send the room could not confirm is recorded as unconfirmed, and says it may have been sent.
+  assert.match(ROOM_JS, /!validMessage\(result\.message\)\) \{[^}]*failed\(response\.status, 'unconfirmed'\)/);
+  assert.match(ROOM_JS, /if \(!saved\) failed\(0, 'unconfirmed'\)/);
+  assert.doesNotMatch(ROOM_JS, /failed\(0, 'unavailable'\)/);
+  assert.match(WORK_PANEL_JS, /SHARE_UNCONFIRMED = 'The message may not have been sent; check the transcript\.'/);
+  assert.match(WORK_PANEL_JS, /event\.detail\.code === 'unconfirmed' \? SHARE_UNCONFIRMED : SHARE_FAILED\[share\.purpose\]/);
+  // Recording the failure never overwrites the failure notice.
+  assert.match(WORK_PANEL_JS, /element\(outcome === 'failed' \? 'work-drawer-status' : 'work-status'\)/);
+  assert.match(WORK_PANEL_JS, /setStatus\(\[state\.notice, model\(\)\.errorWords\(error\.code\)\]\.filter\(Boolean\)\.join\(' '\)\)/);
+  assert.match(WORK_PANEL_JS, /SHARE_NEXT = ' — your next message will be recorded as this share\.'/);
+  assert.match(WORK_PANEL_JS, /quote_truncated \? '\. Quoted the first 4 KB of message #' \+ message\.id/,
+    'a cut quote says so in the dialog');
+});
+
+test('the owner may answer for the person asked, and the update form says what each state requires', () => {
+  assert.match(WORK_PANEL_JS, /'Answer for ' \+ model\(\)\.who\(item\.asked_of\)/);
+  assert.match(WORK_PANEL_JS, /Why you are answering for them/);
+  assert.match(WORK_PANEL_JS, /requireFor\(blockReason, 'What it is waiting on', chosen === 'blocked'\)/);
+  assert.match(WORK_PANEL_JS, /requireFor\(nextTo, 'Next action for', chosen === 'ready'\)/);
+  assert.match(WORK_PANEL_JS, /requireFor\(nextAction, 'Next action', chosen === 'ready'\)/);
+});
+
+test('a write with no error code reads as unavailable, and an open form keeps one operation id until it changes or succeeds', () => {
+  assert.match(WORK_PANEL_JS, /const code = error && typeof error\.code === 'string' \? error\.code : 'unavailable';/);
+  assert.doesNotMatch(WORK_PANEL_JS, /errorWords\(error\.code\)\s*;\s*\n\s*return null;/, 'write reports the mapped code');
+  assert.match(WORK_PANEL_JS, /function formOperation\(form\) \{[\s\S]{0,200}?form\.addEventListener\('input', renew\);\s*form\.addEventListener\('change', renew\);/);
+  assert.match(WORK_PANEL_JS, /const operationId = operation \? operation\.id : crypto\.randomUUID\(\);/);
+  assert.match(WORK_PANEL_JS, /if \(operation\) operation\.id = crypto\.randomUUID\(\);/);
+  const forms = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+'/g);
+  const wired = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+', [^\n]*async operation => \{/g);
+  assert.equal(forms.length, 9);
+  assert.equal(wired.length, forms.length, 'every form hands its operation to its write');
+  // Every drawer form reports in the drawer; the project notes form reports beside its project.
+  assert.equal((WORK_PANEL_JS.match(/, null, operation\)/g) || []).length, forms.length - 1);
+  assert.match(WORK_PANEL_JS, /write\('projects\/update', body, view\.status, operation\)/);
+  assert.match(WORK_PANEL_JS, /write\(op, body, element\('work-create-status'\), state\.createOperation\)/);
+  assert.match(WORK_PANEL_JS, /addEventListener\('input', renewCreateOperation/);
+});
+
+test('the tile says who is responsible, the drawer says whom an owner answered for, and the project id pattern is valid', () => {
+  assert.match(WORK_PANEL_JS, /row\.ask \+ ' — ' \+ row\.by/);
+  assert.doesNotMatch(WORK_PANEL_JS, /asked by ' \+ row\.askedBy/);
+  // The drawer's answer lines come from the model's drawerLines, which calls answerLines.
+  assert.match(WORK_PANEL_JS, /model\(\)\.drawerLines\(item, result\.history\)/);
+  assert.doesNotMatch(WORK_PANEL_JS, /Every number and\s*\/\/ every sentence comes from/);
+  const pattern = /<input id="project-id" pattern="([^"]+)"/.exec(ROOM)[1];
+  // Browsers compile the pattern attribute with the v flag.
+  const compiled = new RegExp('^(?:' + pattern + ')$', 'v');
+  assert.ok(compiled.test('ops-2'));
+  assert.ok(!compiled.test('Ops'));
+  assert.ok(!compiled.test('o'));
+});
+
+test('closing the drawer returns focus to the row that opened it, even after a poll rebuilt the list', () => {
+  assert.match(WORK_PANEL_JS, /button\.dataset\.id = id/);
+  assert.match(WORK_PANEL_JS, /querySelectorAll\('button\[data-id\]'\)/);
+  assert.match(WORK_PANEL_JS, /function restoreOpenerFocus[\s\S]*?element\('needs-you-toggle'\)\.focus\(\)/);
+  // The check waits for the browser's own focus return, which may leave focus
+  // on the drawer's Close button; focus inside the drawer is restored too.
+  assert.match(WORK_PANEL_JS, /function scheduleOpenerFocus[\s\S]*?state\.focusTimer = setTimeout\(\(\) => restoreOpenerFocus\(state\), 0\)/);
+  assert.match(WORK_PANEL_JS, /element\('work-drawer'\)\.addEventListener\('close', scheduleOpenerFocus/);
+  assert.match(WORK_PANEL_JS, /function restoreOpenerFocus[\s\S]*?drawer\.contains\(active\)/);
+  assert.match(WORK_PANEL_JS, /function stop\(\)[\s\S]*?clearTimeout\(state\.focusTimer\)/);
+});
+
+test('between 761 and 1000 px the header wraps and the tiles stay three columns, Conversation wider than Work', () => {
+  assert.match(ROOM_CSS, /@media \(max-width: 1000px\)[\s\S]*\.room-actions[^}]*flex-wrap: wrap/);
+  const narrow = /@media \(max-width: 1000px\) \{([^@]*)\}/.exec(ROOM_CSS);
+  assert.ok(narrow, 'the 1000 px block must exist');
+  assert.match(narrow[1], /\.room-header \{[^}]*flex-wrap: wrap/);
+  assert.match(narrow[1], /\.room-layout \{[^}]*grid-template-columns: 200px minmax\(0, 3fr\) minmax\(0, 2fr\)/);
+  assert.doesNotMatch(narrow[1], /--wait|--ember|--signal|--ai\b|--owner/);
+  // The one-column rule below 760 px must come later in the cascade.
+  assert.ok(ROOM_CSS.indexOf('@media (max-width: 1000px)') < ROOM_CSS.lastIndexOf('@media (max-width: 760px)'),
+    'the 760 px one-column rule must follow the 1000 px block');
+  assert.match(ROOM_CSS.slice(ROOM_CSS.lastIndexOf('@media (max-width: 760px)')), /\.room-layout \{ grid-template-columns: 1fr; \}/);
+});
+
+test('a project row carries a line of the record\'s own facts under its title', () => {
+  assert.match(WORK_PANEL_JS, /function renderTreeRow\(node\)[\s\S]*?if \(node\.facts\) entry\.append\(make\('p', 'work-tree-facts', node\.facts\)\)/);
+  assert.match(WORK_PANEL_JS, /facts: model\(\)\.projectRowLine\(node\.row\)/);
+  const rule = /\.work-tree-facts \{([^}]*)\}/.exec(ROOM_CSS);
+  assert.ok(rule, 'the facts line has its own rule');
+  assert.match(rule[1], /color: var\(--ink-3\)/);
+  assert.doesNotMatch(rule[1], /#[0-9a-f]{3,8}\b|rgb|hsl|--wait|--ember|--signal|--ai\b|--owner/i);
+});
+
+test('an Actions section every participant sees, between Reported to you and Projects, collapsing like Needs you', () => {
+  for (const id of ['actions-heading', 'actions-toggle', 'actions-count', 'actions-list']) {
+    assert.equal(ROOM.split(`id="${id}"`).length, 2, `${id} must be present exactly once`);
+  }
+  assert.match(ROOM, /<button id="actions-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="actions-list">Actions <span id="actions-count" class="work-count">0<\/span><\/button>/);
+  assert.ok(ROOM.indexOf('id="reported-list"') < ROOM.indexOf('id="actions-list"') &&
+    ROOM.indexOf('id="actions-list"') < ROOM.indexOf('id="project-list"'), 'Actions sits between Reported to you and Projects');
+  assert.match(WORK_PANEL_JS, /function renderActions\(brief\)[\s\S]*?model\(\)\.actionsByPerson\(brief\)/);
+  assert.match(WORK_PANEL_JS, /function loadBrief[\s\S]*?renderActions\(brief\)/);
+  assert.match(WORK_PANEL_JS, /'Open ' \+ row\.id \+ ': ' \+ row\.title/);
+  assert.match(WORK_PANEL_JS, /element\('actions-toggle'\)\.addEventListener\('click', toggleActions/);
+  assert.match(WORK_PANEL_JS, /function toggleActions[\s\S]*?setAttribute\('aria-expanded'[\s\S]*?element\('actions-list'\)\.hidden = expanded/);
+  // Actions is a status: rendering it writes nothing and sends nothing.
+  const body = /function renderActions\(brief\) \{([\s\S]*?)\n  \}\n/.exec(WORK_PANEL_JS);
+  assert.ok(body, 'renderActions must exist');
+  assert.doesNotMatch(body[1], /mutate|deps\.|fetch\(|notify|share/i);
+  assert.match(WORK_PANEL_JS, /const OPENER_LISTS = Object\.freeze\(\[[^\]]*'actions-list'/);
+});
+
+test('Actions group headings keep names as stored, and the drawer\'s actions are named apart from the section', () => {
+  assert.match(WORK_PANEL_JS, /make\('h4', 'work-tree-facts', group\.who \+ ' · ' \+ group\.rows\.length\)/);
+  assert.doesNotMatch(WORK_PANEL_JS, /make\('h4', 'work-state'/);
+  assert.match(ROOM, /<section id="work-drawer-actions" aria-label="Actions on this record"><\/section>/);
+  assert.doesNotMatch(ROOM, /aria-label="Actions"/);
+});
+
+test('each project lists its work in place: a heading, an inline edit, rows, and done collapsed; no project pop-up, no recent changes', () => {
+  assert.match(WORK_PANEL_JS, /function renderProjects\(brief\)[\s\S]*?model\(\)\.projectSections\(brief\)/);
+  assert.match(WORK_PANEL_JS, /make\('section', 'work-project'\)/);
+  assert.match(WORK_PANEL_JS, /setAttribute\('aria-labelledby', 'project-' \+ id \+ '-heading'\)/);
+  assert.match(WORK_PANEL_JS, /make\('h4', 'work-project-heading'\)/);
+  assert.match(WORK_PANEL_JS, /make\('p', 'work-project-brief'\)/);
+  assert.match(WORK_PANEL_JS, /'Edit ' \+ section\.display_name \+ "'s objective and today"/);
+  assert.match(WORK_PANEL_JS, /'done \(' \+ section\.doneCount \+ '\)'/);
+  assert.match(WORK_PANEL_JS, /doneToggle\.setAttribute\('aria-expanded', 'false'\)/);
+  assert.match(WORK_PANEL_JS, /'\/api\/work\/list\?project=' \+ encodeURIComponent\(view\.id\) \+ '&limit=' \+ PROJECT_LIMIT/);
+  assert.match(WORK_PANEL_JS, /write\('projects\/update', body, view\.status, operation\)/);
+  // The heading is text: nothing in the tile opens a dialog for a project.
+  assert.doesNotMatch(WORK_PANEL_JS, /openProject|renderProjectTree|work-open-project|Showing ' \+/);
+  // Recent changes left the tile; the changes stream stays an API and CLI surface.
+  for (const gone of ['changes-heading', 'changes-list', 'changes-total', 'changes-more', 'Recent changes']) {
+    assert.doesNotMatch(ROOM, new RegExp(gone), `${gone} must be gone from the page`);
+  }
+  assert.doesNotMatch(WORK_PANEL_JS, /loadChanges|renderChanges|showMoreChanges|\/api\/work\/changes/);
+  assert.doesNotMatch(ROOM_CSS, /\.work-change\b|\.work-open-project\b/);
+  const rule = /\.work-project \{([^}]*)\}/.exec(ROOM_CSS);
+  assert.ok(rule, 'a project section has its own rule');
+  assert.doesNotMatch(ROOM_CSS.slice(ROOM_CSS.indexOf('.work-project')), /--wait|--ember|--signal|--ai\b|--owner|#[0-9a-f]{3,8}\b/i);
+});
+
+test('the item dialog renders every line the model gives it, keeping line breaks', () => {
+  assert.match(WORK_PANEL_JS, /for \(const line of model\(\)\.drawerLines\(item, result\.history\)\) section\.append\(make\('p', 'work-drawer-line', line\)\)/);
+  assert.doesNotMatch(WORK_PANEL_JS, /'Responsible: '|'Blocked: '|'Asked of '/);
+  assert.match(ROOM_CSS, /\.work-drawer-line \{[^}]*white-space: pre-wrap/);
 });

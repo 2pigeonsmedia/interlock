@@ -76,6 +76,7 @@
         <a id="source-link" class="nav-link" href="/source">Source</a>
       </nav>
       <div class="room-actions">
+        <button id="work-count-button" class="quiet-action" type="button" aria-controls="work-heading">Needs you · 0</button>
         <button id="connect-ai-button" type="button" class="primary-action" disabled>Connect an AI</button>
         <button id="settings-button" type="button" class="quiet-action" disabled>Settings</button>
         <span class="header-rule" aria-hidden="true"></span>
@@ -115,12 +116,37 @@
             <div id="mention-suggestions" class="mention-suggestions"></div>
           </div>
           <p id="mention-preview" class="mention-preview" aria-live="polite">No AI will be rung.</p>
+          <div id="work-share-bar" class="work-share-bar" hidden><span id="work-share-text"></span><button id="work-share-decline" class="quiet-action" type="button">Decline</button></div>
           <div class="composer-footer">
             <span>Plain text</span>
             <button id="send-button" type="submit">Send</button>
           </div>
         </form>
       </section>
+
+      <aside class="work" aria-labelledby="work-heading">
+        <header class="work-heading">
+          <h2 id="work-heading">Work</h2>
+          <p id="work-scope" class="work-scope">Tracked work in this room</p>
+        </header>
+        <section class="work-section" aria-labelledby="needs-you-heading">
+          <h3 id="needs-you-heading"><button id="needs-you-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="needs-you-list">Needs you <span id="needs-you-count" class="work-count">0</span></button></h3>
+          <div id="needs-you-list" class="work-list"></div>
+        </section>
+        <section class="work-section" aria-labelledby="reported-heading">
+          <h3 id="reported-heading">Reported to you</h3>
+          <div id="reported-list" class="work-list"></div>
+        </section>
+        <section class="work-section" aria-labelledby="actions-heading">
+          <h3 id="actions-heading"><button id="actions-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="actions-list">Actions <span id="actions-count" class="work-count">0</span></button></h3>
+          <div id="actions-list" class="work-list"></div>
+        </section>
+        <section class="work-section" aria-labelledby="projects-heading">
+          <h3 id="projects-heading">Projects</h3>
+          <div id="project-list" class="work-list"></div>
+        </section>
+        <p id="work-status" class="status" role="status" aria-live="polite"></p>
+      </aside>
     </div>
   </main>
 
@@ -172,6 +198,19 @@
       </div>
       <div id="settings-participant-list" class="settings-participant-list"></div>
       <p id="settings-people-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section aria-labelledby="settings-projects-heading">
+      <h3 id="settings-projects-heading">Projects</h3>
+      <form id="project-create-form" class="settings-form">
+        <label for="project-id">Short id</label>
+        <input id="project-id" pattern="[a-z][a-z0-9\-]{1,31}" maxlength="32" required>
+        <label for="project-name">Name</label>
+        <input id="project-name" maxlength="256" required>
+        <button id="project-create-button" class="quiet-action" type="submit">Create project</button>
+      </form>
+      <div id="settings-project-list" class="settings-participant-list"></div>
+      <p id="settings-projects-status" class="status" role="status" aria-live="polite"></p>
     </section>
 
     <section aria-labelledby="settings-transcript-heading">
@@ -226,12 +265,68 @@
     </section>
   </dialog>
 
+  <dialog id="work-drawer" class="connect-ai-dialog work-drawer" aria-labelledby="work-drawer-heading">
+    <header>
+      <div>
+        <h2 id="work-drawer-heading"></h2>
+        <p id="work-drawer-project"></p>
+      </div>
+      <form method="dialog"><button class="quiet-action" type="submit" aria-label="Close">Close</button></form>
+    </header>
+    <section id="work-drawer-state" aria-label="Current state"></section>
+    <section id="work-drawer-actions" aria-label="Actions on this record"></section>
+    <section id="work-drawer-source" aria-label="Source"></section>
+    <details id="work-drawer-history">
+      <summary>More detail</summary>
+      <div id="work-drawer-history-list"></div>
+    </details>
+    <p id="work-drawer-status" class="status" role="status" aria-live="polite"></p>
+  </dialog>
+
+  <dialog id="work-create-dialog" class="connect-ai-dialog" aria-labelledby="work-create-heading">
+    <header>
+      <div>
+        <h2 id="work-create-heading">Record from a message</h2>
+      </div>
+    </header>
+    <form id="work-create-form" class="work-create-form">
+      <fieldset class="work-create-kind">
+        <legend>What to record</legend>
+        <label><input type="radio" name="kind" value="work" checked> Create work</label>
+        <label><input type="radio" name="kind" value="decision"> Ask a decision</label>
+        <label><input type="radio" name="kind" value="evidence"> Attach as evidence</label>
+      </fieldset>
+      <p id="work-create-from" class="work-create-from"></p>
+      <label for="work-create-project">Project</label>
+      <select id="work-create-project"></select>
+      <label for="work-create-title">Title</label>
+      <input id="work-create-title" maxlength="256">
+      <label for="work-create-body">Details</label>
+      <textarea id="work-create-body" rows="3"></textarea>
+      <label id="work-create-to-label" for="work-create-to">Next action for</label>
+      <select id="work-create-to"></select>
+      <label for="work-create-next-action">Next action</label>
+      <input id="work-create-next-action">
+      <label for="work-create-item">Attach to</label>
+      <select id="work-create-item"></select>
+      <label for="work-create-quote">Quoted from the message</label>
+      <textarea id="work-create-quote" rows="3" readonly></textarea>
+      <p id="work-create-status" class="status" role="status" aria-live="polite"></p>
+      <div class="work-create-actions">
+        <button id="work-create-save" class="primary-action" type="submit">Save</button>
+        <button class="quiet-action" type="submit" formmethod="dialog" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="/mentions.js" defer></script>
   <script src="/reply_reference.js" defer></script>
   <script src="/message_page.js" defer></script>
   <script src="/request_generation.js" defer></script>
   <script src="/transcript_scroll.js" defer></script>
   <script src="/attention.js" defer></script>
+  <script src="/work_panel_model.js" defer></script>
+  <script src="/work_panel.js" defer></script>
   <script src="/room.js" defer></script>
 </body>
 </html>

@@ -14,6 +14,9 @@ const CHAT_READ_LIMIT = 100;
 const CHAT_RESOURCE = 'room:main';
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(allow|decline)$/;
+const WORK_ROUTE = /^\/api\/(ai\/)?work\/([a-z]+(?:\/[a-z]+)?)$/;
+const WORK_ITEM_ROUTE = /^\/api\/(ai\/)?work\/items\/([WD]-[1-9][0-9]*)$/;
+const WORK_READS = Object.freeze(['brief', 'list', 'changes', 'export']);
 const TRANSCRIPT_EXPORT_ROUTE = /^\/api\/transcript\/exports\/(transcript-[0-9]{8}T[0-9]{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(json|md)$/;
 
 const SECURITY_HEADERS = Object.freeze({
@@ -316,7 +319,7 @@ function deliveryQuery(target) {
 }
 
 function createFirstOwnerHandler(options) {
-  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted } = options || {};
+  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work } = options || {};
   const hostedMode = hosted ? hosted : null;
   if (!house || !house.firstOwner || !house.authenticators || !house.sessions || !house.login ||
       typeof house.authorizeRead !== 'function' || typeof house.authorizeWrite !== 'function' ||
@@ -338,6 +341,12 @@ function createFirstOwnerHandler(options) {
       typeof house.signOutOtherSessions !== 'function' ||
       typeof house.confirmTranscriptClear !== 'function') {
     throw new TypeError('first owner transport: a complete public identity service is required');
+  }
+  // The Work record is optional: without a work service its routes answer not-found.
+  if (work !== undefined && (!work || typeof work.mutate !== 'function' || typeof work.read !== 'function' ||
+      typeof work.ownerStepUpRequired !== 'function' || !Array.isArray(work.MUTATION_OPS) ||
+      typeof house.confirmWorkProjectAct !== 'function')) {
+    throw new TypeError('first owner transport: a complete work service is required');
   }
   let parsedOrigin;
   try { parsedOrigin = new URL(origin); } catch (_) { parsedOrigin = null; }
@@ -1389,6 +1398,135 @@ function createFirstOwnerHandler(options) {
     });
   }
 
+  // ── the Work record ───────────────────────────────────────────────────────
+  // Two doors to one service. A browser session or an admitted seat bearer
+  // becomes a trusted actor here; the request body never contributes identity.
+
+  function workOwnerFlag(request, authorized, now) {
+    const who = house.whoami({ cookie_header: request.headers.cookie, activity: 'ordinary', now });
+    return !!(who && who.subject_id === authorized.subject_id && Array.isArray(who.roles) &&
+      who.roles.some(role => role && role.slug === 'administrator'));
+  }
+
+  function browserWorkActor(request, response, mutation) {
+    const now = Date.now();
+    const authorized = mutation
+      ? house.authorizeWrite(requestMeta(request, now), 'write', CHAT_RESOURCE)
+      : house.authorizeRead(requestMeta(request, now), 'read', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) {
+      const sessionState = mutation ? house.resolveSession({
+        cookie_header: request.headers.cookie, activity: 'passive-delivery', now,
+      }) : null;
+      refuseAuthorization(request, response, authorized, sessionState);
+      return null;
+    }
+    const actor = authorizedActor(request, authorized, now);
+    if (!actor) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return null;
+    }
+    return Object.freeze({
+      subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null,
+      owner: workOwnerFlag(request, authorized, now), now,
+    });
+  }
+
+  function seatWorkActor(request, response, capability) {
+    const authorized = seatAuthorization(request, capability);
+    const actor = seatActor(authorized, null);
+    if (!actor) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return null;
+    }
+    const discriminator = house.aiSessionDiscriminator(actor.subject_id);
+    return Object.freeze({
+      subject_id: actor.subject_id, name: actor.name, kind: 'seat',
+      session: discriminator && discriminator.session !== undefined ? discriminator.session : null,
+      owner: false, now: Date.now(),
+    });
+  }
+
+  function queryObject(target) {
+    const query = {};
+    for (const [key, value] of target.searchParams) {
+      if (Object.prototype.hasOwnProperty.call(query, key)) return null;
+      query[key] = value;
+    }
+    return query;
+  }
+
+  function sendWorkResult(request, response, result) {
+    if (result.raw !== undefined) {
+      send(response, result.status, Buffer.from(result.raw, 'utf8'), result.content_type, request.method);
+      return;
+    }
+    sendJson(request, response, result.status, result.body);
+  }
+
+  function readWork(request, response, target, ai) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const itemRoute = WORK_ITEM_ROUTE.exec(target.pathname);
+    const route = itemRoute ? null : WORK_ROUTE.exec(target.pathname);
+    const op = itemRoute ? 'get' : route && WORK_READS.includes(route[2]) ? route[2] : null;
+    if (op === null) {
+      const known = route && work.MUTATION_OPS.includes(route[2]);
+      if (known) sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' }, { allow: 'POST' });
+      else sendJson(request, response, 404, { ok: false, error: 'not-found' });
+      return;
+    }
+    const query = queryObject(target);
+    if (!query || (itemRoute && Object.keys(query).length > 0)) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-query' });
+      return;
+    }
+    const actor = ai ? seatWorkActor(request, response, 'read') : browserWorkActor(request, response, false);
+    if (!actor) return;
+    sendWorkResult(request, response, work.read(op, actor, itemRoute ? { id: itemRoute[2] } : query, actor.now));
+  }
+
+  async function mutateWork(request, response, target, op, ai) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    if (target.search !== '') {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    if (!ai && !requireMutationEnvelope(request)) {
+      sendJson(request, response, 403, { ok: false, error: 'request-refused' });
+      return;
+    }
+    let body;
+    try {
+      body = await readJson(request);
+    } catch (error) {
+      if (response.headersSent || response.destroyed) return;
+      const expected = Number.isSafeInteger(error && error.status);
+      sendJson(request, response, expected ? error.status : 500, {
+        ok: false, error: expected && typeof error.code === 'string' ? error.code : 'unavailable',
+      });
+      return;
+    }
+    const actor = ai ? seatWorkActor(request, response, 'write') : browserWorkActor(request, response, true);
+    if (!actor) return;
+    if (work.ownerStepUpRequired(op)) {
+      if (ai || !actor.owner) {
+        sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+        return;
+      }
+      const stepped = house.confirmWorkProjectAct(requestMeta(request, actor.now));
+      if (!stepped || stepped.ok !== true) {
+        sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
+        return;
+      }
+    }
+    sendWorkResult(request, response, await work.mutate(op, actor, body, actor.now));
+  }
+
   async function readAiPeek(request, response, target) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -1971,6 +2109,10 @@ function createFirstOwnerHandler(options) {
         });
         return;
       }
+      if (work && (pathname.startsWith('/api/work/') || pathname.startsWith('/api/ai/work/'))) {
+        readWork(request, response, target, pathname.startsWith('/api/ai/'));
+        return;
+      }
       if (pathname === '/api/bootstrap/status') {
         const setup = house.firstOwner.status();
         if (setup.completed === true) {
@@ -2251,6 +2393,26 @@ function createFirstOwnerHandler(options) {
           error: expected && typeof error.code === 'string' ? error.code : 'unavailable',
         });
       }
+      return;
+    }
+
+    if (work && (pathname.startsWith('/api/work/') || pathname.startsWith('/api/ai/work/'))) {
+      const workRoute = WORK_ROUTE.exec(pathname);
+      const op = workRoute && work.MUTATION_OPS.includes(workRoute[2]) ? workRoute[2] : null;
+      if (request.method !== 'POST') {
+        sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' }, { allow: 'POST' });
+        return;
+      }
+      if (op === null) {
+        const readOp = workRoute && WORK_READS.includes(workRoute[2]);
+        if (readOp || WORK_ITEM_ROUTE.test(pathname)) {
+          sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' }, { allow: 'GET, HEAD' });
+        } else {
+          sendJson(request, response, 404, { ok: false, error: 'not-found' });
+        }
+        return;
+      }
+      await mutateWork(request, response, target, op, pathname.startsWith('/api/ai/'));
       return;
     }
 

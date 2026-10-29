@@ -52,6 +52,13 @@ Usage:
   interlock codex-policy install --connection NAME --mode receive|participate
   interlock codex-policy check --connection NAME [--json]
   interlock codex-policy remove --connection NAME
+  interlock work brief --connection NAME [--project ID] [--json]
+  interlock work list --connection NAME [--project ID] [--needs-me] [--after N] [--limit N] [--json]
+  interlock work get ID --connection NAME [--json]
+  interlock work changes --connection NAME --after N [--limit N] [--json]
+  interlock work create --connection NAME --file PATH [--json]
+  interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+  interlock work export --connection NAME --format json|md
 
 Persistent model wake setup:
   interlock-doorbell --help
@@ -2083,6 +2090,313 @@ async function runCodexPolicy(args, io, dependencies = {}) {
   }
 }
 
+// ── the Work record ───────────────────────────────────────────────────────────
+// A deliberate read or write against the shared Work record over the admitted
+// connection. Bodies travel in a JSON file, never in argv. Every write carries
+// an operation id so a retry replays instead of duplicating.
+
+const WORK_ITEM_ID = /^[WD]-[1-9][0-9]*$/;
+const WORK_VERBS = Object.freeze({
+  brief: Object.freeze({ path: '/api/ai/work/brief', method: 'GET', id: false, flags: ['project'] }),
+  list: Object.freeze({ path: '/api/ai/work/list', method: 'GET', id: false, flags: ['project', 'needs-me', 'after', 'limit'] }),
+  get: Object.freeze({ path: '/api/ai/work/items/', method: 'GET', id: true, flags: [] }),
+  changes: Object.freeze({ path: '/api/ai/work/changes', method: 'GET', id: false, flags: ['after', 'limit'], required: ['after'] }),
+  export: Object.freeze({ path: '/api/ai/work/export', method: 'GET', id: false, flags: ['format'], required: ['format'], raw: true }),
+  create: Object.freeze({ path: '/api/ai/work/items/create', method: 'POST', id: false }),
+  update: Object.freeze({ path: '/api/ai/work/items/update', method: 'POST', id: true }),
+  evidence: Object.freeze({ path: '/api/ai/work/items/evidence', method: 'POST', id: true }),
+  note: Object.freeze({ path: '/api/ai/work/items/note', method: 'POST', id: true }),
+  share: Object.freeze({ path: '/api/ai/work/items/share', method: 'POST', id: true }),
+  answer: Object.freeze({ path: '/api/ai/work/decisions/answer', method: 'POST', id: true }),
+  'report-answer': Object.freeze({ path: '/api/ai/work/decisions/report', method: 'POST', id: true }),
+  confirm: Object.freeze({ path: '/api/ai/work/decisions/confirm', method: 'POST', id: true }),
+  reopen: Object.freeze({ path: '/api/ai/work/decisions/reopen', method: 'POST', id: true }),
+  withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', method: 'POST', id: true }),
+});
+const WORK_QUERY_ORDER = Object.freeze(['project', 'needs_me', 'after', 'limit', 'format']);
+
+function refuseWork(stderr, message) {
+  line(stderr, `interlock work: ${message}; run "interlock --help" for the work commands.`);
+  return EXIT_USAGE;
+}
+
+function workOptions(args) {
+  const verb = args[0];
+  const spec = WORK_VERBS[verb];
+  if (!spec) return { error: 'unknown verb' };
+  const options = { verb, spec, id: null, connection: null, file: null, json: false, query: {} };
+  let index = 1;
+  if (spec.id) {
+    if (typeof args[1] !== 'string' || !WORK_ITEM_ID.test(args[1])) return { error: 'a record id like W-12 or D-7 comes right after the verb' };
+    options.id = args[1];
+    index = 2;
+  }
+  const seen = new Set();
+  const flags = spec.flags || [];
+  for (; index < args.length; index += 1) {
+    const flag = args[index];
+    if (seen.has(flag)) return { error: `${flag} was given twice` };
+    if (flag === '--connection' || flag === '--file' || flag === '--project' || flag === '--after' ||
+        flag === '--limit' || flag === '--format') {
+      const value = args[index + 1];
+      if (typeof value !== 'string' || value.startsWith('-')) return { error: `${flag} needs a value` };
+      seen.add(flag);
+      index += 1;
+      if (flag === '--connection') { options.connection = value; continue; }
+      if (flag === '--file') {
+        if (spec.method !== 'POST') return { error: `${verb} takes no --file` };
+        options.file = value;
+        continue;
+      }
+      const name = flag.slice(2);
+      if (!flags.includes(name)) return { error: `${verb} takes no ${flag}` };
+      if ((name === 'after' || name === 'limit') && !/^(?:0|[1-9][0-9]{0,15})$/.test(value)) return { error: `${flag} needs a whole number` };
+      if (name === 'format' && value !== 'json' && value !== 'md') return { error: '--format is json or md' };
+      options.query[name] = value;
+      continue;
+    }
+    if (flag === '--needs-me') {
+      if (!flags.includes('needs-me')) return { error: `${verb} takes no --needs-me` };
+      seen.add(flag);
+      options.query.needs_me = '1';
+      continue;
+    }
+    if (flag === '--json') {
+      if (spec.raw) return { error: 'export writes the document itself; --json does not apply' };
+      seen.add(flag);
+      options.json = true;
+      continue;
+    }
+    return { error: 'refusing extra arguments; a request body travels in --file PATH' };
+  }
+  if (options.connection === null) return { error: '--connection NAME is required' };
+  if (spec.method === 'POST' && options.file === null) return { error: `${verb} needs --file PATH holding a JSON object` };
+  for (const required of spec.required || []) {
+    if (options.query[required] === undefined) return { error: `${verb} needs --${required}` };
+  }
+  return options;
+}
+
+async function workRequest(fetcher, profile, pathname, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), COMMAND_FETCH_TIMEOUT_MS);
+  const headers = { authorization: 'Bearer ' + profile.token };
+  let body;
+  if (options.body !== undefined) {
+    headers['content-type'] = 'application/json';
+    body = JSON.stringify(options.body);
+  }
+  try {
+    const response = await fetcher(profile.server_url + pathname, {
+      method: options.method || 'GET', headers, body, signal: controller.signal,
+    });
+    if (options.raw && response.ok) return { raw: await response.text() };
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result || result.ok !== true) {
+      const error = new Error('work request refused');
+      error.status = response.status;
+      error.code = result && typeof result.error === 'string' ? result.error : 'unavailable';
+      if (result && Number.isSafeInteger(result.revision)) error.revision = result.revision;
+      throw error;
+    }
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function reportWorkError(stderr, error, profile) {
+  if (error && Number.isSafeInteger(error.status) && error.status !== 401 && typeof error.code === 'string') {
+    const revision = Number.isSafeInteger(error.revision) ? ` (current revision ${error.revision})` : '';
+    line(stderr, `interlock: the local Interlock refused the command: ${terminalSafe(error.code)}${revision}.`);
+    return;
+  }
+  reportRequestError(stderr, error, profile);
+}
+
+function who(value) {
+  if (!value || typeof value.name !== 'string') return 'nobody';
+  const session = value.session === null || value.session === undefined ? '' : ` (session ${terminalSafe(String(value.session))})`;
+  return terminalSafe(value.name) + session;
+}
+
+function workDetail(event) {
+  for (const key of ['text', 'note', 'observed', 'title', 'reason', 'display_name']) {
+    if (typeof event[key] === 'string' && event[key] !== '') return terminalSafe(event[key]);
+  }
+  if (event.from !== undefined && event.to !== undefined) return `${terminalSafe(String(event.from))} → ${terminalSafe(String(event.to))}`;
+  return '';
+}
+
+function workRow(row) {
+  if (row.kind === 'decision') {
+    return `${row.id} · ${row.state} · asked of ${who(row.asked_of)} by ${who(row.asked_by)} · ${terminalSafe(row.title)}`;
+  }
+  const next = row.next_to ? `${who(row.next_to)} — ${terminalSafe(row.next_action || '')}` : 'nobody';
+  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}`;
+}
+
+function needsRow(row) {
+  if (row.kind === 'decision') {
+    return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.proposal || '')} (${row.state}, asked by ${who(row.asked_by)})`;
+  }
+  const awaiting = row.awaiting ? `, awaiting ${row.awaiting}` : '';
+  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting})`;
+}
+
+function renderBrief(stdout, brief, connection) {
+  line(stdout, `Needs you (${brief.needs_me.length})`);
+  for (const row of brief.needs_me) line(stdout, '  ' + needsRow(row));
+  if (brief.reported_to_me.length) {
+    line(stdout, `Reported to you (${brief.reported_to_me.length}) — answers relayed in your name, confirm or correct them`);
+    for (const row of brief.reported_to_me) line(stdout, `  ${row.project} · ${row.id} · ${terminalSafe(row.title)}`);
+  }
+  line(stdout, 'Projects');
+  for (const project of brief.projects) {
+    line(stdout, `  ${terminalSafe(project.display_name)} — ${terminalSafe(project.objective || 'no objective yet')} · Today: ${terminalSafe(project.today || 'nothing recorded')} (${who(project.updated_by)})`);
+  }
+  line(stdout, `Open work (${brief.open.length})`);
+  for (const row of brief.open) line(stdout, '  ' + workRow(row));
+  line(stdout, `Decisions (${brief.decisions.length})`);
+  for (const row of brief.decisions) line(stdout, '  ' + workRow(row));
+  line(stdout, `Cursor ${brief.cursor} · continue with: interlock work changes --connection ${terminalSafe(connection)} --after ${brief.cursor}`);
+}
+
+function renderEvents(stdout, events) {
+  for (const event of events) {
+    const conditions = typeof event.conditions === 'string' && event.conditions !== '' ? ` · conditions: ${terminalSafe(event.conditions)}` : '';
+    line(stdout, `${event.seq} · ${who(event.by)} · ${event.kind} · ${event.item || event.project || '-'} · ${workDetail(event)}${conditions}`);
+  }
+}
+
+function renderGet(stdout, result) {
+  const item = result.item;
+  line(stdout, `${item.id} · ${terminalSafe(item.title)} (${item.kind} · ${item.project} · ${item.state})`);
+  line(stdout, `  ${terminalSafe(item.body || '', true)}`);
+  if (item.kind === 'decision') {
+    line(stdout, `  asked of ${who(item.asked_of)} by ${who(item.asked_by)} · scope: ${terminalSafe(item.scope || 'not stated')}`);
+    if (item.proposal) line(stdout, `  proposal: ${terminalSafe(item.proposal)}`);
+    if (item.answer) {
+      const a = item.answer;
+      const relay = a.kind === 'reported' ? ` · attributed to ${who(a.attributed_to)}, reported by ${who(a.by)}, not confirmed here` : '';
+      const conditions = a.conditions ? ` · conditions: ${terminalSafe(a.conditions)}` : '';
+      line(stdout, `  answer (${a.kind}): ${terminalSafe(a.text)}${conditions} · by ${who(a.by)}${relay} · source: ${terminalSafe(a.source || '')}`);
+    }
+  } else {
+    const next = item.next_to ? `${who(item.next_to)} — ${terminalSafe(item.next_action || '')}` : 'nobody';
+    line(stdout, `  responsible: ${who(item.responsible)} · next: ${next} · target: ${terminalSafe(item.target || 'none')} · revision ${item.revision}`);
+  }
+  line(stdout, `Evidence (${result.evidence.length})`);
+  for (const e of result.evidence) {
+    line(stdout, `  ${e.seq} · ${who(e.by)} · target ${terminalSafe(e.target)} (${e.target_matches ? 'current' : 'not the current target'}) · ${terminalSafe(e.observed)} · ${terminalSafe(e.reference)} · limits: ${terminalSafe(e.limits)}`);
+  }
+  line(stdout, `History (${result.history.length})`);
+  renderEvents(stdout, result.history);
+}
+
+function renderWrite(stdout, verb, result, connection) {
+  const item = result.item;
+  const event = result.event;
+  const exposure = result.exposure;
+  if (verb === 'create') line(stdout, `Created ${item.id} · ${terminalSafe(item.title)} (${item.state}) in ${item.project}.`);
+  else if (verb === 'update') line(stdout, `Updated ${item.id} (${item.state}).`);
+  else if (verb === 'evidence') line(stdout, `Attached evidence to ${event.item} (event ${event.seq}).`);
+  else if (verb === 'note') line(stdout, `Added a note to ${event.item} (event ${event.seq}).`);
+  else if (verb === 'share') line(stdout, `Recorded: ${terminalSafe(String(event.purpose))} ${terminalSafe(String(event.outcome))}${event.message_id ? ' as #' + terminalSafe(String(event.message_id)) : ''}.`);
+  else if (verb === 'answer') line(stdout, `Recorded an answer on ${item.id} (${item.state}).`);
+  else if (verb === 'report-answer') {
+    if (result.conflict === true) line(stdout, `Recorded a conflicting report on ${item.id}; the answer recorded here stands.`);
+    else line(stdout, `Recorded a reported answer on ${item.id} (reported, not confirmed by ${who(item.answer && item.answer.attributed_to) === 'nobody' && exposure ? terminalSafe(exposure.to) : who(item.answer && item.answer.attributed_to)}).`);
+  } else if (verb === 'confirm') line(stdout, `Confirmed the reported answer on ${item.id} (${item.state}).`);
+  else if (verb === 'reopen') line(stdout, `Reopened ${item.id} (${item.state}, asked of ${who(item.asked_of)}).`);
+  else if (verb === 'withdraw') line(stdout, `Withdrew ${item.id} (${item.state}).`);
+  if (result.replayed === true) line(stdout, 'This operation id was already applied; the original result is shown.');
+  if (exposure && typeof exposure.text === 'string') {
+    line(stdout, '');
+    line(stdout, `Exposure draft for ${terminalSafe(exposure.to)}:`);
+    line(stdout, terminalSafe(exposure.text, true));
+    line(stdout, '');
+    line(stdout, `Send it with: interlock say --connection ${terminalSafe(connection)} --file <the file you save it to>`);
+  }
+}
+
+async function runWork(args, io, dependencies = {}) {
+  const parsed = workOptions(args);
+  if (parsed.error) return refuseWork(io.stderr, parsed.error);
+  let selected;
+  try { selected = selectedConnection(parsed.connection, dependencies); }
+  catch (error) {
+    reportConnectionError(io.stderr, error, parsed.connection);
+    return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+  }
+  const { profile } = selected;
+  const clock = dependencies.clock || Date.now;
+  if (profile.expires_at <= clock()) {
+    line(io.stderr, `interlock: connection ${terminalSafe(profile.name)} has expired; run "interlock join" for a new session.`);
+    return EXIT_RUNTIME;
+  }
+  const fetcher = dependencies.fetch || globalThis.fetch;
+  const { spec } = parsed;
+  let pathname = spec.path + (spec.method === 'GET' && spec.id ? parsed.id : '');
+  let requestOptions = { method: spec.method, raw: spec.raw === true };
+  if (spec.method === 'POST') {
+    let body;
+    try {
+      body = JSON.parse((dependencies.readFile || fs.readFileSync)(parsed.file, 'utf8'));
+    } catch (_) {
+      line(io.stderr, 'interlock work: could not read the request file as JSON.');
+      return EXIT_RUNTIME;
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      line(io.stderr, 'interlock work: the request file must hold one JSON object.');
+      return EXIT_RUNTIME;
+    }
+    body = Object.assign({}, body);
+    if (spec.id) body.id = parsed.id;
+    const fromFile = typeof body.operation_id === 'string';
+    if (!fromFile) body.operation_id = crypto.randomUUID();
+    // Printed before the request leaves, so a timed-out send still leaves the
+    // id a retry must reuse.
+    line(io.stdout, fromFile
+      ? `Operation ${terminalSafe(body.operation_id)} · from the file.`
+      : `Operation ${body.operation_id} · to retry this exact request, put "operation_id": "${body.operation_id}" in the file.`);
+    requestOptions.body = body;
+  } else {
+    const query = WORK_QUERY_ORDER.filter(key => parsed.query[key] !== undefined)
+      .map(key => `${key}=${encodeURIComponent(parsed.query[key])}`).join('&');
+    if (query) pathname += '?' + query;
+  }
+  let result;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      result = await workRequest(fetcher, profile, pathname, requestOptions);
+      break;
+    } catch (error) {
+      if (attempt === 0 && !Number.isSafeInteger(error && error.status)) continue;
+      reportWorkError(io.stderr, error, profile);
+      return EXIT_RUNTIME;
+    }
+  }
+  if (spec.raw) {
+    io.stdout.write(result.raw);
+    return EXIT_OK;
+  }
+  if (parsed.json) {
+    line(io.stdout, JSON.stringify(result));
+    return EXIT_OK;
+  }
+  if (parsed.verb === 'brief') renderBrief(io.stdout, result, profile.name);
+  else if (parsed.verb === 'list') {
+    for (const row of result.items) line(io.stdout, workRow(row));
+    line(io.stdout, `${result.items.length} of ${result.total} · ${result.next === null ? 'no more' : `continue with --after ${result.next}`}`);
+  } else if (parsed.verb === 'changes') {
+    renderEvents(io.stdout, result.events);
+    line(io.stdout, `Cursor ${result.cursor} · ${result.total} event${result.total === 1 ? '' : 's'} after ${parsed.query.after}`);
+  } else if (parsed.verb === 'get') renderGet(io.stdout, result);
+  else renderWrite(io.stdout, parsed.verb, result, profile.name);
+  return EXIT_OK;
+}
+
 function run(argv, io, dependencies = {}) {
   const { stdout, stderr } = io;
 
@@ -2113,6 +2427,8 @@ function run(argv, io, dependencies = {}) {
   if (argv[0] === 'leave') return runLeave(argv.slice(1), io, dependencies);
 
   if (argv[0] === 'codex-policy') return runCodexPolicy(argv.slice(1), io, dependencies);
+
+  if (argv[0] === 'work') return runWork(argv.slice(1), io, dependencies);
 
   line(stderr, 'interlock: unknown command; run "interlock --help".');
   return EXIT_USAGE;

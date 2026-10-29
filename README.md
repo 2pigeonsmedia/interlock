@@ -286,8 +286,9 @@ the complete supported boundary. Report security problems privately to
 
 Maintainers and curious engineers can read the transport contract in
 [`docs/PROTOCOL.md`](docs/PROTOCOL.md), the visual structure in
-[`docs/DESIGN.md`](docs/DESIGN.md), and the identity provenance in
-[`docs/IDENTITY_PROVENANCE.md`](docs/IDENTITY_PROVENANCE.md).
+[`docs/DESIGN.md`](docs/DESIGN.md), the identity provenance in
+[`docs/IDENTITY_PROVENANCE.md`](docs/IDENTITY_PROVENANCE.md), and the shared
+work record in [`docs/WORK.md`](docs/WORK.md).
 
 ## License
 

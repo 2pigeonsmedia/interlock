@@ -256,6 +256,7 @@ function stopRoomFacts() {
 }
 
 function showLogin(message = '') {
+  InterlockWorkPanel.stop();
   roomRequestGeneration.rotate();
   stopRoomFacts();
   connectAiButton.disabled = true;
@@ -310,6 +311,17 @@ function showRoom(user) {
     if (owner) loadPendingAis();
   }, ROOM_FACT_INTERVAL_MS);
   openRequestedPanel();
+  InterlockWorkPanel.start(user, {
+    mutate: ownerMutation,
+    aiNames: () => rosterSeats.map(row => row.name),
+    participants: () => rosterParticipants.filter(row => row.kind === 'person' || row.present),
+    composer: messageBody,
+    freshOwnerStepUp,
+    onSessionEnded: () => {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+    },
+  });
 }
 
 function openRequestedPanel() {
@@ -1377,6 +1389,13 @@ function renderMessage(message) {
   reply.textContent = 'Reply';
   reply.setAttribute('aria-label', `Reply to message #${message.id}`);
   reply.addEventListener('click', () => seedReply(message.id));
+  const work = document.createElement('button');
+  work.className = 'message-reply';
+  work.type = 'button';
+  work.textContent = 'Work…';
+  work.setAttribute('aria-label', `Create work from message #${message.id}`);
+  work.addEventListener('click', () => document.dispatchEvent(
+    new CustomEvent('interlock:message-work', { detail: { message } })));
   meta.append(byline, session, kind, timestamp, ident);
 
   const text = document.createElement('p');
@@ -1386,6 +1405,7 @@ function renderMessage(message) {
   actions.className = 'message-actions';
   actions.append(reply);
   article.append(meta, text, actions);
+  actions.append(work);
   if (message.delivery.length > 0) {
     const delivery = document.createElement('div');
     delivery.className = 'delivery';
@@ -1674,6 +1694,9 @@ messageForm.addEventListener('submit', async event => {
   forceFollowMessageId = null;
   setRoomNotice('Saving message…', 'progress');
   let saved = false;
+  const sentText = messageBody.value;
+  const failed = (status, code) => document.dispatchEvent(
+    new CustomEvent('interlock:message-failed', { detail: { text: sentText, status, code } }));
   try {
     const response = await fetch('/api/messages', {
       method: 'POST',
@@ -1682,7 +1705,7 @@ messageForm.addEventListener('submit', async event => {
         'content-type': 'application/json',
         'x-csrf-token': sendCsrf,
       },
-      body: JSON.stringify({ text: messageBody.value }),
+      body: JSON.stringify({ text: sentText }),
     });
     const result = await readJson(response);
     if (response.status === 401) {
@@ -1692,17 +1715,21 @@ messageForm.addEventListener('submit', async event => {
     }
     if (response.status === 400) {
       setRoomNotice('That message is empty, too large, or contains unsupported control characters.');
+      failed(response.status, result.error || 'unavailable');
       return;
     }
     if (response.status === 403) {
       setRoomNotice('Interlock refused this message. Reload the page or sign in again before retrying.');
+      failed(response.status, result.error || 'unavailable');
       return;
     }
     if (!response.ok || result.ok !== true || !validMessage(result.message)) {
       setRoomNotice('Interlock could not confirm the message. Check the transcript before sending it again.');
+      failed(response.status, 'unconfirmed');
       return;
     }
     saved = true;
+    document.dispatchEvent(new CustomEvent('interlock:message-saved', { detail: { id: result.message.id, text: sentText } }));
     forceFollowMessageId = result.message.id;
     messageBody.value = '';
     updateMentionPreview();
@@ -1716,6 +1743,7 @@ messageForm.addEventListener('submit', async event => {
   } catch (_) {
     setConnectionState('unavailable');
     setRoomNotice('Interlock could not confirm the message. Check the transcript before sending it again.');
+    if (!saved) failed(0, 'unconfirmed');
   } finally {
     if (!saved) {
       forceFollowAfterSend = false;

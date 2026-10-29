@@ -110,6 +110,7 @@ function loadPage() {
     InterlockMessagePage: standIn(),
     InterlockReplyReference: standIn(),
     InterlockTranscriptScroll: standIn(),
+    InterlockWorkPanel: standIn(),
   };
   page.window = page;
   page.window.addEventListener = () => {};
