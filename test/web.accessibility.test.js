@@ -77,12 +77,13 @@ test('dynamic decisions have specific names and narrow layouts wrap', () => {
 test('stale browser code receives reload guidance without disguising outages', () => {
   const guidance = 'Your browser may be running an older version of this page after an Interlock upgrade. Press Ctrl+F5 (Cmd+Shift+R on Mac) to force a reload.';
   assert.ok(ROOM_JS.includes(`const HARD_REFRESH_GUIDANCE = '${guidance}'`));
-  assert.equal((ROOM_JS.match(/\$\{HARD_REFRESH_GUIDANCE\}/g) || []).length, 4,
-    'waiting AIs, People, delivery, and messages must share the stale-page remedy');
+  assert.equal((ROOM_JS.match(/\$\{HARD_REFRESH_GUIDANCE\}/g) || []).length, 5,
+    'waiting AIs, People, delivery, asks, and messages must share the stale-page remedy');
   for (const temporaryFailure of [
     'Interlock could not refresh the waiting list. It will try again.',
     'The participant roster is temporarily unavailable. Messages will keep trying.',
     'Delivery confirmations are temporarily unavailable. Interlock will try again.',
+    'Asks are temporarily unavailable. Interlock will try again.',
     'Messages are temporarily unavailable. Interlock will try again.',
   ]) assert.ok(ROOM_JS.includes(temporaryFailure),
     'ordinary network and service failures must retain retry guidance');

@@ -102,6 +102,7 @@ function loadPage() {
     URL, URLSearchParams, Intl, Date, Math, JSON, Promise, Error, Object, Array, Set, Map,
     Number, String, Boolean, Symbol, RegExp, TypeError, Uint8Array, btoa, atob, console,
     AbortController, FormData: class { get() { return ''; } },
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
     requestAnimationFrame: () => 0,
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     InterlockRequestGeneration: { create: () => ({ rotate() {}, capture: () => 0, isCurrent: () => true }) },
@@ -109,6 +110,7 @@ function loadPage() {
     InterlockMentions: standIn(),
     InterlockMessagePage: standIn(),
     InterlockReplyReference: standIn(),
+    InterlockAsks: standIn(),
     InterlockTranscriptScroll: standIn(),
     InterlockWorkPanel: standIn(),
   };
