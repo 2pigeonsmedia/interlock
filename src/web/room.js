@@ -6,7 +6,8 @@ const CONNECTION_CHECK_TIMEOUT_MS = 3_000;
 const MESSAGE_PAGE_LIMIT = 100;
 const MESSAGE_RETRY_MS = 1_000;
 const ROOM_FACT_INTERVAL_MS = 2_000;
-const HARD_REFRESH_GUIDANCE = 'Your browser may be running an older version of this page after an Interlock upgrade. Press Ctrl+F5 (Cmd+Shift+R on Mac) to force a reload.';
+const HARD_REFRESH_GUIDANCE = 'Interlock may have been updated since this page loaded. Reload this page.';
+const UPDATED_GUIDANCE = 'Interlock was updated. Reload this page.';
 const loginView = document.querySelector('#login-view');
 const roomView = document.querySelector('#room-view');
 const loginForm = document.querySelector('#login-form');
@@ -180,7 +181,27 @@ function setLoginStatus(message, kind = '') {
   loginStatus.className = 'status' + (kind ? ' ' + kind : '');
 }
 
+// The first version the server reports is the one this page was loaded with.
+let loadedServerVersion = null;
+let serverUpdated = false;
+
+function noteServerVersion(response) {
+  const version = response && response.headers && typeof response.headers.get === 'function'
+    ? response.headers.get('x-interlock-version') : null;
+  if (typeof version !== 'string' || version === '') return;
+  if (loadedServerVersion === null) loadedServerVersion = version;
+  else if (version !== loadedServerVersion && !serverUpdated) {
+    serverUpdated = true;
+    setRoomNotice('');
+  }
+}
+
 function setRoomNotice(message, kind = '') {
+  // Once the server has been updated, a reload is the answer to every other notice.
+  if (serverUpdated) {
+    message = UPDATED_GUIDANCE;
+    kind = '';
+  }
   roomNotice.textContent = message;
   roomNotice.className = 'room-notice' + (kind ? ' ' + kind : '');
 }
@@ -1182,6 +1203,7 @@ async function loadRoster() {
     const response = await fetch('/api/participants', {
       cache: 'no-store', credentials: 'same-origin',
     });
+    noteServerVersion(response);
     const result = await readJson(response);
     if (!roomRequestGeneration.isCurrent(requestGeneration)) return;
     if (response.status === 401) {
@@ -1455,6 +1477,7 @@ async function messagePage(wait, signal) {
       (knownEra === null ? '' : `&era=${knownEra}`),
     { cache: 'no-store', credentials: 'same-origin', signal },
   );
+  noteServerVersion(response);
   const result = await readJson(response);
   if (response.status === 401) {
     const error = new Error('not-authenticated');

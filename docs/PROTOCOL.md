@@ -361,6 +361,16 @@ and therefore consumes fresh L2. The export and clear mutations remain
 owner-only; the durable History index and verified downloads are readable by
 every signed-in person in the room.
 
+## Running version
+
+A successful answer on `GET /api/messages`, `GET /api/participants` and
+`/api/ai/messages` (read and send) carries the response header
+`x-interlock-version` with the running release. Refused answers, including
+signed-out ones, do not. An open room page remembers the first version it sees
+and, when a later answer names a different one, shows *Interlock was updated.
+Reload this page.* The CLI prints one line on stderr when the room runs a newer
+release than the CLI. No response body changes.
+
 ## Time and failure bounds
 
 - Admission server wait: 20 seconds per retained request; overall candidate

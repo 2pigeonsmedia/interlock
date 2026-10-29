@@ -4,6 +4,7 @@ const path = require('node:path');
 const { clientSource } = require('./hosted.js');
 const { SETTINGS_ENDED_MS } = require('./idle.js');
 const { readRoomSettings, writeRoomSettings } = require('./room_settings.js');
+const { version: PACKAGE_VERSION } = require('../package.json');
 
 const MAX_JSON_BYTES = 384 * 1024;
 const JSON_TYPE = 'application/json; charset=utf-8';
@@ -34,8 +35,16 @@ function encodedJson(value) {
   return Buffer.from(JSON.stringify(value) + '\n', 'utf8');
 }
 
+// Open pages and AI clients poll these routes; a successful answer carries the
+// running version so a client loaded from an older release can say so. Error
+// answers (signed out included) never carry it.
+const VERSIONED_ROUTES = new Set(['/api/messages', '/api/participants', '/api/ai/messages']);
+const versionedResponses = new WeakSet();
+
 function send(response, status, body, contentType, method, extraHeaders = {}) {
-  const headers = Object.assign({}, SECURITY_HEADERS, extraHeaders, {
+  const version = versionedResponses.has(response) && status < 400
+    ? { 'x-interlock-version': PACKAGE_VERSION } : {};
+  const headers = Object.assign({}, SECURITY_HEADERS, extraHeaders, version, {
     'content-length': body.length,
     'content-type': contentType,
   });
@@ -2093,6 +2102,7 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const pathname = target.pathname;
+    if (VERSIONED_ROUTES.has(pathname)) versionedResponses.add(response);
 
     if (request.method === 'GET' || request.method === 'HEAD') {
       if (pathname === '/health') {

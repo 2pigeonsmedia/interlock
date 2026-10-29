@@ -2784,3 +2784,30 @@ test('unknown commands fail without reflecting untrusted terminal input', () => 
   assert.equal(result.stderr, 'interlock: unknown command; run "interlock --help".\n');
   assert.doesNotMatch(result.stderr, /\u001b/);
 });
+
+test('say prints one line when the room runs a newer Interlock, and never for the same or an older one', async () => {
+  const { version } = require('../package.json');
+  async function sayWith(serverVersion) {
+    const world = admittedConnection();
+    world.dependencies.readStdin = async () => 'hello';
+    world.dependencies.fetch = async () => Object.assign(
+      fakeResponse(201, { ok: true, message: publicMessage({
+        id: 7, byline: 'Marlow', kind: 'seat', text: 'hello', product: 'Codex CLI',
+        product_provenance: 'client-reported', delivery: [],
+      }) }),
+      { headers: { get: name => name === 'x-interlock-version' ? serverVersion : null } });
+    return captureCommand(['say', '--connection', 'Marlow', '--stdin'], world.dependencies);
+  }
+  const same = await sayWith(version);
+  assert.equal(same.code, EXIT_OK, same.stderr);
+  assert.match(same.stdout, /^Sent as Marlow \(message 7\)\.\n$/, 'ARRANGEMENT: the send itself succeeds');
+  assert.equal(same.stderr, '');
+  for (const quiet of ['0.0.1', 'not-a-version', null]) {
+    assert.equal((await sayWith(quiet)).stderr, '', String(quiet));
+  }
+  const newer = await sayWith('99.0.0');
+  assert.equal(newer.code, EXIT_OK);
+  assert.equal(newer.stderr,
+    `interlock: the room runs Interlock 99.0.0; this CLI is ${version}. Update the CLI to match.\n`);
+  assert.equal((await sayWith('99.0.0')).stderr, '', 'once per version per process');
+});

@@ -75,7 +75,7 @@ test('dynamic decisions have specific names and narrow layouts wrap', () => {
 });
 
 test('stale browser code receives reload guidance without disguising outages', () => {
-  const guidance = 'Your browser may be running an older version of this page after an Interlock upgrade. Press Ctrl+F5 (Cmd+Shift+R on Mac) to force a reload.';
+  const guidance = 'Interlock may have been updated since this page loaded. Reload this page.';
   assert.ok(ROOM_JS.includes(`const HARD_REFRESH_GUIDANCE = '${guidance}'`));
   assert.equal((ROOM_JS.match(/\$\{HARD_REFRESH_GUIDANCE\}/g) || []).length, 4,
     'waiting AIs, People, delivery, and messages must share the stale-page remedy');
