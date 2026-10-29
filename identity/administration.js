@@ -36,6 +36,8 @@ const WORKFLOWS = Object.freeze([
   'participant.revoke',
   'transcript.clear',
   'work.project',
+  'grant.create',
+  'grant.revoke',
   'authenticator.add',
   // 'authenticator.revoke' is REMOVED, not aliased. Two revoke doors with
   // two threat models must be two workflow names, or the audit log cannot tell a
@@ -952,6 +954,18 @@ function createService(opts) {
       Object.freeze({ ok: true }));
   }
 
+  // One fresh step-up authorises one grant to be made, or one revoked. The
+  // grant itself is stored outside identity; this only proves the act was
+  // confirmed, under its own workflow name so the audit trail tells them apart.
+  function confirmGrantAct(optsIn, workflow) {
+    if (workflow !== 'grant.create' && workflow !== 'grant.revoke') return FAIL;
+    if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn) ||
+        Reflect.ownKeys(optsIn).some(key =>
+          typeof key !== 'string' || !TRANSCRIPT_CLEAR_KEYS.includes(key))) return FAIL;
+    return withFreshAdmin(optsIn, workflow, 'membership', () =>
+      Object.freeze({ ok: true }));
+  }
+
   // ── Authenticator self-management ─────────────────────────────────────────
   async function beginAdditionalAuthenticator(optsIn) {
     // Requires L2 + at least one existing usable authenticator; uses the WebAuthn service.
@@ -1278,6 +1292,7 @@ function createService(opts) {
     revokeParticipant,
     confirmTranscriptClear,
     confirmWorkProjectAct,
+    confirmGrantAct,
     beginAdditionalAuthenticator,
     finishAdditionalAuthenticator,
     revokeOwnAuthenticator,

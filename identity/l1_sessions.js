@@ -1015,7 +1015,7 @@ function createStore(opts) {
     'person.revoke', 'participant.revoke', 'transcript.clear',
     'authenticator.add', 'authenticator.revoke',
     'bootstrap.complete', 'room.grant',
-    'work.project',
+    'work.project', 'grant.create', 'grant.revoke',
   ]);
 
   function consumeFreshAdminStepUp(opts) {
