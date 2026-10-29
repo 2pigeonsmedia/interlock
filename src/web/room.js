@@ -2106,6 +2106,11 @@ messageForm.addEventListener('submit', async event => {
 
 messageBody.addEventListener('input', updateMentionPreview);
 messageBody.addEventListener('input', updateBindVisibility);
+// The work panel's Reply on an ask is the same act as the message's Reply.
+document.addEventListener('interlock:reply-ask', event => {
+  const detail = event.detail || {};
+  if (Number.isSafeInteger(detail.ask_id)) seedReply(detail.ask_id);
+});
 // The work panel's inline Yes / No answers through the room, like the chip.
 document.addEventListener('interlock:answer-ask', event => {
   const detail = event.detail || {};

@@ -368,6 +368,7 @@ function createWorkService(options) {
       target: item.target, block_reason: item.block_reason, created_by: clone(item.created_by), updated_at: item.updated_at,
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),
       awaiting: awaitingDecision(draft, item),
+      source_message_id: item.source_message ? item.source_message.message_id : null,
     };
   }
 

@@ -163,3 +163,7 @@ test('a reply to an ask hides the answer chips and binds nothing; the panel answ
   assert.match(ROOM_JS, /addEventListener\('interlock:answer-ask'[\s\S]*answerAsk\(detail\.ask_id, detail\.choice\)/);
   assert.match(ROOM_JS, /question: askQuestion\(ask\.ask_id\)/);
 });
+
+test('the work panel\'s Reply on an ask is the same composer act as the message\'s Reply', () => {
+  assert.match(ROOM_JS, /addEventListener\('interlock:reply-ask'[\s\S]*seedReply\(detail\.ask_id\)/);
+});
