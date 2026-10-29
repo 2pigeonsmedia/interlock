@@ -45,6 +45,30 @@
     return Object.hasOwn(labels, item.state) ? labels[item.state] : String(item.state);
   }
 
+  // The kill slot's state in words (design §7): derived by the store, shown
+  // here. A record from before the kill slot has no state and shows none.
+  const KILL_WORDS = Object.freeze({
+    unattacked: 'unattacked', attacked: 'attacked', survived: 'attacked, survived', killed: 'killed',
+  });
+
+  function killWord(item) {
+    return item && Object.hasOwn(KILL_WORDS, item.kill_state) ? KILL_WORDS[item.kill_state] : null;
+  }
+
+  function killLines(item) {
+    const word = killWord(item);
+    if (word === null) return [];
+    const lines = ['Kill slot: ' + word];
+    if (item.kill) {
+      lines.push('Kill question from ' + who(item.kill.by) + ': ' + oneLine(item.kill.question));
+      if (item.kill.reply) {
+        lines.push('Reply from ' + who(item.kill.reply.by) + ' (' + item.kill.reply.outcome + '): ' +
+          oneLine(item.kill.reply.words));
+      }
+    }
+    return lines;
+  }
+
   function projectNames(brief) {
     return new Map(brief.projects.map(project => [project.id, project.display_name]));
   }
@@ -69,11 +93,28 @@
   // Everything that waits on the viewer, across every active project, and
   // every open ask addressed to the viewer, oldest first. The brief's
   // needs_me is already unfiltered; nothing here narrows it.
-  function needsYou(brief, now, asks = []) {
+  // A decision still awaiting whose own ask was answered in the room by the
+  // person asked: the room has the answer, the record does not (yet).
+  const ROOM_NOT_RECORDED = 'Answered in the room, not recorded here';
+
+  function answeredInRoom(decision, answered) {
+    const cited = decision.source_message_id !== undefined ? decision.source_message_id
+      : decision.source_message ? decision.source_message.message_id : null;
+    return decision.state === 'awaiting' && Number.isSafeInteger(cited) && answered.has(cited);
+  }
+
+  function needsYou(brief, now, asks = [], answered = new Set()) {
     const names = projectNames(brief);
+    // An ask that a decision cites as its message is that decision's row,
+    // never a second one.
+    const cited = new Set(brief.needs_me.concat(brief.decisions || [])
+      .filter(row => row.kind === 'decision' && Number.isSafeInteger(row.source_message_id))
+      .map(row => row.source_message_id));
     const workRows = brief.needs_me.map(row => {
       const decision = row.kind === 'decision';
-      return { at: row.updated_at, row: {
+      const kill = decision ? killWord(row) : null;
+      const room = decision && answeredInRoom(row, answered) ? { note: ROOM_NOT_RECORDED } : {};
+      return { at: row.updated_at, row: Object.assign({
         id: row.id,
         kind: row.kind,
         projectName: names.has(row.project) ? names.get(row.project) : row.project,
@@ -85,9 +126,10 @@
           : 'asked by ' + who(row.created_by) + (row.responsible ? ' · responsible: ' + who(row.responsible) : ''),
         waiting: waitingLabel(row.updated_at, now),
         action: decision ? 'Answer' : 'Open work',
-      } };
+      }, kill === null ? {} : { kill }, room) };
     });
-    const rows = workRows.concat(asks.map(ask => ({ at: ask.asked_at, row: askRow(ask, now) })))
+    const rows = workRows.concat(asks.filter(ask => !cited.has(ask.ask_id))
+      .map(ask => ({ at: ask.asked_at, row: askRow(ask, now) })))
       .sort((a, b) => a.at - b.at).map(entry => entry.row);
     return { count: rows.length, rows };
   }
@@ -334,10 +376,11 @@
   // next action with no recipient reads unassigned, as in the tile. A done
   // item's done line is added by the caller, which holds its closer and
   // follow-ups.
-  function drawerLines(item, history) {
+  function drawerLines(item, history, answered = new Set()) {
     if (item.kind === 'decision') {
       const answer = item.answer;
       return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by)]
+        .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.source_message.message_id + ').'] : [])
         .concat(answerLines(item, history))
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])
         .concat(item.rationale ? ['Rationale: ' + item.rationale] : [])
@@ -346,6 +389,7 @@
         .concat(answer ? ['Answer: ' + answer.text] : [])
         .concat(answer && answer.conditions ? ['Answer conditions: ' + answer.conditions] : [])
         .concat(answer && answer.kind === 'reported' && answer.source ? ['Answer source: ' + answer.source] : [])
+        .concat(killLines(item))
         .concat(placeLines(item));
     }
     const lines = ['Responsible: ' + (item.responsible ? who(item.responsible) : UNASSIGNED)];
@@ -511,6 +555,10 @@
     'store-damaged': 'The work record cannot be read right now; nothing was changed.',
     'fresh-step-up-required': 'Confirm it is you with your passkey, then try again.',
     'unavailable': 'The work record is not reachable right now. It will try again.',
+    'kill-slot-filled': 'Someone has already asked this decision\'s kill question.',
+    'kill-slot-replied': 'The kill question already has its reply.',
+    'means-required': 'Asking a person needs a line saying what a yes means.',
+    'ask-target-unknown': 'That name is not anyone in the room.',
   });
 
   function errorWords(code) {
@@ -534,7 +582,7 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
+    who, waitingLabel, stateLabel, killWord, killLines, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });

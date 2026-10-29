@@ -86,6 +86,29 @@ function readRecord(lockPath) {
   return { raw, record: parseRecord(raw) };
 }
 
+// Windows refuses to open a file that another process is deleting or renaming,
+// with EPERM, EBUSY or EACCES rather than ENOENT or EEXIST. On the lock path
+// that is a contender mid-release, not a fault: it surfaces as 'lock-busy' so a
+// caller that already waits for a held lock waits for this too.
+function sharingViolation(error) {
+  const code = error && error.code;
+  return code === 'EPERM' || code === 'EBUSY' || (code === 'EACCES' && process.platform === 'win32');
+}
+
+function lockBusy(cause) {
+  const error = new Error('interlock.lock: lock-busy', { cause });
+  error.code = 'lock-busy';
+  return error;
+}
+
+function readContended(lockPath) {
+  try { return readRecord(lockPath); }
+  catch (error) {
+    if (sharingViolation(error)) throw lockBusy(error);
+    throw error;
+  }
+}
+
 function sameFile(left, right) {
   return !!left && !!right && left.dev === right.dev && left.ino === right.ino;
 }
@@ -174,10 +197,11 @@ function acquireInstanceLock(options) {
         owned = createOwnedLock(lockPath, dataDir);
         break;
       } catch (error) {
+        if (sharingViolation(error)) throw lockBusy(error);
         if (!error || error.code !== 'EEXIST') throw error;
       }
 
-      const existing = readRecord(lockPath);
+      const existing = readContended(lockPath);
       if (existing === null) continue;
       const state = ownerState(existing.record);
       if (state === 'active') fail('already-running');
@@ -186,7 +210,7 @@ function acquireInstanceLock(options) {
       // A second contender may have reaped the stale file and acquired the
       // path since our first read. Re-read immediately before the atomic move;
       // never act on a stale observation when the ownership record changed.
-      const confirmed = readRecord(lockPath);
+      const confirmed = readContended(lockPath);
       if (confirmed === null || confirmed.raw !== existing.raw) continue;
       const confirmedState = ownerState(confirmed.record);
       if (confirmedState === 'active') fail('already-running');

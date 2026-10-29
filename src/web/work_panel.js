@@ -139,7 +139,7 @@
 
   function renderNeedsYou(brief) {
     const state = session;
-    const needs = model().needsYou(brief, Date.now(), state ? state.asks : []);
+    const needs = model().needsYou(brief, Date.now(), state ? state.asks : [], state ? state.answered : new Set());
     element('needs-you-count').textContent = String(needs.count);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
     element('needs-you-list').replaceChildren(...needs.rows.map(row => {
@@ -147,9 +147,10 @@
       const open = row.kind === 'ask' ? () => showAsk(row) : () => openItem(row.id);
       card.append(
         openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, open, row.id),
-        make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting),
+        make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting + (row.kill ? ' · ' + row.kill : '')),
         make('p', '', row.ask + ' — ' + row.by),
       );
+      if (row.note) card.append(make('p', 'work-state', row.note));
       return card;
     }));
   }
@@ -441,7 +442,7 @@
     const item = result.item;
     const section = element('work-drawer-state');
     section.append(make('p', 'work-state', model().stateLabel(item)));
-    for (const line of model().drawerLines(item, result.history)) section.append(make('p', 'work-drawer-line', line));
+    for (const line of model().drawerLines(item, result.history, state.answered)) section.append(make('p', 'work-drawer-line', line));
     if (item.kind !== 'decision' && item.state === 'done') {
       section.append(make('p', 'work-drawer-line',
         model().doneLine(item, result.evidence, childrenOf(state, item), closerOf(result.history))));
@@ -713,7 +714,41 @@
     })];
   }
 
+  // The kill slot: anyone but the asker asks the one question that would sink
+  // the decision; only the asker replies, and says whether it survived.
+  function killForm(item) {
+    const question = control('textarea', 'question', 'The one question that would sink it', { required: true });
+    return [actionForm('work-kill', [question], 'Ask the kill question', async operation => {
+      const result = await write('decisions/kill',
+        { id: item.id, expected_revision: item.revision, question: question.node.value }, null, operation);
+      if (result) await afterDecisionWrite(result, item);
+    })];
+  }
+
+  function killReplyForm(item) {
+    const words = control('textarea', 'words', 'Your reply', { required: true });
+    const outcome = choice('outcome', 'Outcome', [
+      { value: 'survived', text: 'It survives the question' },
+      { value: 'killed', text: 'The question kills it' },
+    ], 'survived');
+    return [
+      make('p', '', 'Kill question from ' + model().who(item.kill.by) + ': ' + item.kill.question),
+      actionForm('work-killreply', [words, outcome], 'Record reply', async operation => {
+        const result = await write('decisions/kill-reply', {
+          id: item.id, expected_revision: item.revision, words: words.node.value, outcome: outcome.node.value,
+        }, null, operation);
+        if (result) await afterDecisionWrite(result, item);
+      }),
+    ];
+  }
+
   function renderDecisionActions(buttons, slot, item) {
+    if (item.kill_state === 'unattacked' && !isMe(item.asked_by)) {
+      actionButton(buttons, slot, 'Ask the kill question', item, () => killForm(item));
+    }
+    if (item.kill_state === 'attacked' && item.kill && isMe(item.asked_by)) {
+      actionButton(buttons, slot, 'Reply to the kill question', item, () => killReplyForm(item));
+    }
     if (item.state === 'awaiting') {
       if (isMe(item.asked_of)) actionButton(buttons, slot, 'Answer', item, () => answerForm(item, null, 'Record answer'));
       else {
@@ -1015,6 +1050,9 @@
     showCreateField('work-create-project', !evidence);
     showCreateField('work-create-to', !evidence);
     showCreateField('work-create-next-action', kind === 'work');
+    showCreateField('work-create-scope', kind === 'decision');
+    element('work-create-scope').value = '';
+    element('work-create-save').textContent = kind === 'decision' ? 'Ask a decision' : 'Save';
     showCreateField('work-create-item', evidence);
     element('work-create-status').textContent = '';
   }
@@ -1070,6 +1108,18 @@
         id: element('work-create-item').value, target: element('work-create-title').value,
         observed: prefill.observed, limits: element('work-create-body').value, source_message: prefill.source_message,
       };
+    } else if (kind === 'decision') {
+      // "Ask a decision": the server posts a new message carrying the ask,
+      // then records the decision citing it, so a yes in the room answers
+      // it. The message it was made from is linked, not cited.
+      op = 'decisions/ask';
+      body = {
+        project: element('work-create-project').value,
+        title: element('work-create-title').value, body: element('work-create-body').value,
+        asked_of: element('work-create-to').value, about_message: message.id,
+      };
+      const scope = element('work-create-scope').value;
+      if (scope.trim() !== '') body.scope = scope;
     } else {
       op = 'items/create';
       body = {
@@ -1078,8 +1128,7 @@
         source_message: prefill.source_message,
       };
       const to = element('work-create-to').value;
-      if (kind === 'decision') body.asked_of = to;
-      else if (to !== '') {
+      if (to !== '') {
         body.next_to = to;
         body.next_action = element('work-create-next-action').value;
       }
@@ -1213,6 +1262,8 @@
     state.asks = addressed.filter(ask => ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
       typeof ask.by === 'string' && Number.isSafeInteger(ask.asked_at) &&
       (ask.means === null || typeof ask.means === 'string'));
+    const answered = event && event.detail && Array.isArray(event.detail.answered) ? event.detail.answered : [];
+    state.answered = new Set(answered.filter(id => Number.isSafeInteger(id) && id > 0));
     if (state.brief) renderNeedsYou(state.brief);
   }
 
@@ -1236,7 +1287,7 @@
   function start(user, deps) {
     stop();
     const state = {
-      user, deps, brief: null, projectViews: new Map(), asks: [],
+      user, deps, brief: null, projectViews: new Map(), asks: [], answered: new Set(),
       refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },

@@ -64,6 +64,21 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
+v0.2.2 tested-on evidence (2026-10-28):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 591/592, 1 skipped |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 591/592, 1 skipped |
+
+v0.2.2 lets the first owner send a member without a passkey a one-time
+passkey code, so members who joined before 0.2.1 can be made administrators.
+It also counts sign-in attempts still in flight, so a concurrent burst from
+one IPv6 /48 can no longer fill the sign-in throttle, and on Windows two
+processes on one AI connection now wait for each other instead of failing.
+
+**Earlier releases**, kept as history:
+
 v0.2.1 tested-on evidence (2026-10-23):
 
 | Runtime | Platform | Automated result |
@@ -76,8 +91,6 @@ rooms: a match code on the Allow card, IPv6 sign-in failures also counted per
 /48, and the client address on sign-in rows and denies. It requires a patched
 Node.js. It was not run live behind a Cloudflare Tunnel; the hosted results
 below are v0.2.0's.
-
-**Earlier releases**, kept as history:
 
 v0.2.0 tested-on evidence (2026-10-18):
 

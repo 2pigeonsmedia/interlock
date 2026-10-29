@@ -218,6 +218,148 @@ test('one reader lease per connection refuses a silent concurrent cursor consume
   )), false);
 });
 
+// Windows answers an open of a file another process is deleting or renaming
+// with EPERM, EBUSY or EACCES. These replace the call for the first few opens
+// or reads of one path, as a contender mid-release would make them fail.
+function refuseOnLockPath(lockPath, method, code, times, before = null) {
+  const real = fs[method];
+  const state = { refused: 0, restore: () => { fs[method] = real; } };
+  fs[method] = function (file, ...rest) {
+    if (file === lockPath && state.refused < times) {
+      state.refused += 1;
+      const error = new Error(`${code}: operation not permitted, ${method} '${file}'`);
+      error.code = code;
+      throw error;
+    }
+    return real.call(this, file, ...rest);
+  };
+  if (before) {
+    const realOpen = fs.openSync;
+    let fakedExists = false;
+    fs.openSync = function (file, ...rest) {
+      if (file === lockPath && !fakedExists) {
+        fakedExists = true;
+        const error = new Error(`EEXIST: file already exists, open '${file}'`);
+        error.code = 'EEXIST';
+        throw error;
+      }
+      return realOpen.call(this, file, ...rest);
+    };
+    const restore = state.restore;
+    state.restore = () => { fs.openSync = realOpen; restore(); };
+  }
+  return state;
+}
+
+// A refused read happens once, before the lock is taken: after that the owner
+// reads its own lock file, which no contender is deleting.
+for (const [label, method, code, times, viaExisting] of [
+  ['open refused with EPERM', 'openSync', 'EPERM', 3, false],
+  ['open refused with EBUSY', 'openSync', 'EBUSY', 3, false],
+  ['read of a held lock refused with EPERM', 'readFileSync', 'EPERM', 1, true],
+]) {
+  test(`a lock another process is releasing is waited for (${label})`, () => {
+    const world = fixture();
+    world.store.createUnadmitted(world.body);
+    admit(world);
+    const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'instance.lock');
+    const fault = refuseOnLockPath(lockPath, method, code, times, viaExisting);
+    let updated;
+    try {
+      updated = world.store.updateCursor('Marlow', world.body.request_id, 7);
+    } finally {
+      fault.restore();
+    }
+    assert.equal(fault.refused, times, `ARRANGEMENT: the lock path refused ${times} time(s) with ${code}`);
+    assert.equal(updated.cursor, 7, 'the cursor commit waited and then succeeded');
+    assert.equal(fs.existsSync(lockPath), false, 'and released its lock');
+  });
+}
+
+test('a reader lease waits for a reader lock another process is releasing', () => {
+  const world = fixture();
+  const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'reader', 'instance.lock');
+  const fault = refuseOnLockPath(lockPath, 'openSync', 'EPERM', 3);
+  let lease;
+  try {
+    lease = world.store.acquireReadLease('Marlow');
+  } finally {
+    fault.restore();
+  }
+  assert.equal(fault.refused, 3, 'ARRANGEMENT: the reader lock path refused three times');
+  assert.equal(lease.owner.pid, process.pid);
+  lease.release();
+});
+
+test('EACCES on the lock path is a wait only on Windows; elsewhere it is a permission error', () => {
+  const world = fixture();
+  world.store.createUnadmitted(world.body);
+  admit(world);
+  const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'instance.lock');
+  const fault = refuseOnLockPath(lockPath, 'openSync', 'EACCES', 3);
+  let outcome;
+  try {
+    outcome = world.store.updateCursor('Marlow', world.body.request_id, 7);
+  } catch (error) {
+    outcome = error;
+  } finally {
+    fault.restore();
+  }
+  if (process.platform === 'win32') {
+    assert.equal(fault.refused, 3, 'ARRANGEMENT: the lock path refused three times');
+    assert.equal(outcome.cursor, 7, 'on Windows the commit waited and succeeded');
+  } else {
+    assert.equal(fault.refused, 1, 'ARRANGEMENT: the first open was refused');
+    assert.equal(outcome.code, 'EACCES', 'elsewhere the permission error is reported at once');
+  }
+});
+
+test('a sharing violation that outlasts the wait is reported as busy with its cause', () => {
+  const world = fixture();
+  world.store.createUnadmitted(world.body);
+  admit(world);
+  const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'instance.lock');
+  const fault = refuseOnLockPath(lockPath, 'openSync', 'EPERM', Infinity);
+  try {
+    assert.throws(() => world.store.updateCursor('Marlow', world.body.request_id, 7), error =>
+      error && error.code === 'profile-busy' && error.cause && error.cause.code === 'EPERM');
+  } finally {
+    fault.restore();
+  }
+  assert.ok(fault.refused > 1, `ARRANGEMENT: the wait retried (${fault.refused} refusals)`);
+});
+
+test('on Windows, a lock file another process holds exclusively is waited for', {
+  skip: process.platform !== 'win32' && 'needs a Windows sharing violation',
+}, async () => {
+  const world = fixture();
+  world.store.createUnadmitted(world.body);
+  admit(world);
+  const lockDirectory = path.join(world.connectionDir, '.profile-locks', 'marlow');
+  const lockPath = path.join(lockDirectory, 'instance.lock');
+  fs.mkdirSync(lockDirectory, { recursive: true });
+  fs.writeFileSync(lockPath, 'held\n');
+  // Another process opens the lock file with no sharing, lets it go 300 ms
+  // later and deletes it, as a contender releasing its lock would.
+  const holder = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', [
+    '$f = [System.IO.File]::Open($env:LOCK_PATH, "Open", "ReadWrite", "None")',
+    '[Console]::Out.WriteLine("held"); [Console]::Out.Flush()',
+    'Start-Sleep -Milliseconds 300',
+    '$f.Close(); Remove-Item -LiteralPath $env:LOCK_PATH',
+  ].join('; ')], { env: Object.assign({}, process.env, { LOCK_PATH: lockPath }), stdio: ['ignore', 'pipe', 'pipe'] });
+  const exited = once(holder, 'exit');
+  let stderr = '';
+  holder.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
+  await once(holder.stdout, 'data');
+  assert.throws(() => fs.readFileSync(lockPath), error =>
+    error && ['EPERM', 'EBUSY', 'EACCES'].includes(error.code),
+    'ARRANGEMENT: the held lock file refuses a read the way a contender sees it');
+  const updated = world.store.updateCursor('Marlow', world.body.request_id, 9);
+  assert.equal(updated.cursor, 9, 'the cursor commit waited for the holder to let go');
+  const [code] = await exited;
+  assert.equal(code, 0, 'ARRANGEMENT: the holder released and deleted the file: ' + stderr);
+});
+
 test('a contender waits through an incomplete lock record without reaping it', async () => {
   const world = fixture();
   world.store.createUnadmitted(world.body);
