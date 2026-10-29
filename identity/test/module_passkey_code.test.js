@@ -416,3 +416,14 @@ test('a failure that is not the code\'s does not count toward the limit', async 
   const begun = await r.redeem(await r.signIn(cal, later), code.secret, later + 1);
   assert.equal(begun.ok, true, 'the right code works: ' + JSON.stringify(begun));
 });
+
+test('codes that begin a passkey do not count toward the limit', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  for (let i = 0; i < 6; i += 1) {
+    // Each code begins a passkey whose prompt is never finished; the owner sends another.
+    const code = r.issue(await r.asOwner(), cal);
+    const begun = await r.redeem(await r.signIn(cal), code.secret);
+    assert.equal(begun.ok, true, `code ${i + 1} begins a passkey: ` + JSON.stringify(begun));
+  }
+});
