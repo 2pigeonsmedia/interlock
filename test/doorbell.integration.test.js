@@ -127,17 +127,33 @@ function onlyStateFile(directory) {
   return fs.readdirSync(directory).find(name => /^doorbell-[0-9a-f]{24}\.json$/.test(name));
 }
 
-async function waitForAdapterLock(directory) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const lockRoot = path.join(directory, '.locks');
-    if (fs.existsSync(lockRoot)) {
-      const owners = fs.readdirSync(lockRoot).filter(name =>
-        fs.existsSync(path.join(lockRoot, name, 'instance.lock')));
-      if (owners.length === 1) return;
-    }
+// Polls until check() is true. The bound only stops a hang: how long a loaded
+// machine takes to start an adapter process is not what these tests measure.
+const WAIT_BOUND_MS = 15_000;
+async function waitUntil(check) {
+  const deadline = Date.now() + WAIT_BOUND_MS;
+  while (Date.now() < deadline) {
+    if (check()) return true;
     await new Promise(resolve => setTimeout(resolve, 10));
   }
-  assert.fail('the first adapter never established its observed ownership lock');
+  return check();
+}
+
+async function waitForAdapterLock(directory) {
+  const lockRoot = path.join(directory, '.locks');
+  const established = await waitUntil(() => fs.existsSync(lockRoot) && fs.readdirSync(lockRoot).filter(name =>
+    fs.existsSync(path.join(lockRoot, name, 'instance.lock'))).length === 1);
+  if (!established) assert.fail('the first adapter never established its observed ownership lock');
+}
+
+// Waits for the adapter with this pid to claim the runtime file, and returns it.
+async function waitForRuntimeOf(directory, pid) {
+  let current = null;
+  await waitUntil(() => {
+    current = JSON.parse(fs.readFileSync(runtimeFile(directory), 'utf8'));
+    return current.pid === pid;
+  });
+  return current;
 }
 
 test('Codex adapter queues a generic nudge before committing its observation cursor', () => {
@@ -254,9 +270,7 @@ test('status reports absent, starting, ready, then stale without private hooks',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   await waitForAdapterLock(world.stateDir);
-  for (let attempt = 0; attempt < 100 && runtimeFile(world.stateDir) === null; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
+  await waitUntil(() => runtimeFile(world.stateDir) !== null);
   const starting = runCommand(world, statusArgs(world));
   assert.equal(starting.status, 0, starting.stderr);
   assert.equal(JSON.parse(starting.stdout).state, 'starting');
@@ -301,7 +315,9 @@ test('status reports immediate and aged recovery as starting during the first po
   const statePath = path.join(world.stateDir, onlyStateFile(world.stateDir));
 
   async function proveStarting(label) {
-    world.delay = 500;
+    // The first poll is held long enough for status to land inside it even on
+    // a loaded machine; the adapter is killed as soon as status has answered.
+    world.delay = 3000;
     const child = childProcess.spawn(process.execPath, [
       RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
       '--session', 'host-session-1', '--state-dir', world.stateDir,
@@ -311,12 +327,7 @@ test('status reports immediate and aged recovery as starting during the first po
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     await waitForAdapterLock(world.stateDir);
-    let currentRuntime = null;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      currentRuntime = JSON.parse(fs.readFileSync(runtimeFile(world.stateDir), 'utf8'));
-      if (currentRuntime.pid === child.pid) break;
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
+    const currentRuntime = await waitForRuntimeOf(world.stateDir, child.pid);
     assert.equal(currentRuntime.pid, child.pid, `${label} runtime must belong to the new adapter`);
     const recovering = runCommand(world, statusArgs(world));
     assert.equal(recovering.status, 0, recovering.stderr);
@@ -351,12 +362,7 @@ test('status explains a live adapter with no recent successful poll', async () =
   });
   try {
     await waitForAdapterLock(world.stateDir);
-    let currentRuntime = null;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      currentRuntime = JSON.parse(fs.readFileSync(runtimeFile(world.stateDir), 'utf8'));
-      if (currentRuntime.pid === child.pid) break;
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
+    const currentRuntime = await waitForRuntimeOf(world.stateDir, child.pid);
     assert.equal(currentRuntime.pid, child.pid, 'the runtime must belong to the live adapter');
     const { FRESH_MS, inspectStatus } = require(RUNNER);
     const later = Date.now() + FRESH_MS + 10 * 60 * 1000;
