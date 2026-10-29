@@ -691,6 +691,28 @@ function writeReadOutput(stdout, parsed, page) {
   stdout.write(readOutput(parsed, page));
 }
 
+const noticedServerVersions = new Set();
+
+function compareVersions(left, right) {
+  const parts = value => value.split('-', 1)[0].split('.').map(Number);
+  const a = parts(left);
+  const b = parts(right);
+  for (let index = 0; index < 3; index += 1) {
+    if ((a[index] || 0) !== (b[index] || 0)) return (a[index] || 0) - (b[index] || 0);
+  }
+  return 0;
+}
+
+// One line per newer server version per process; the CLI keeps working either way.
+function noticeServerVersion(response, stderr) {
+  if (!stderr || !response || !response.headers || typeof response.headers.get !== 'function') return;
+  const version = response.headers.get('x-interlock-version');
+  if (typeof version !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(version)) return;
+  if (compareVersions(version, packageJson.version) <= 0 || noticedServerVersions.has(version)) return;
+  noticedServerVersions.add(version);
+  line(stderr, `interlock: the room runs Interlock ${version}; this CLI is ${packageJson.version}. Update the CLI to match.`);
+}
+
 async function localRequest(fetcher, profile, pathname, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs || COMMAND_FETCH_TIMEOUT_MS);
@@ -704,6 +726,7 @@ async function localRequest(fetcher, profile, pathname, options = {}) {
     const response = await fetcher(profile.server_url + pathname, {
       method: options.method || 'GET', headers, body, signal: controller.signal,
     });
+    noticeServerVersion(response, options.stderr);
     const result = await response.json().catch(() => null);
     if (!response.ok || !result || result.ok !== true) throw responseError(result, response.status);
     return result;
@@ -819,7 +842,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
   try {
     page = await localRequest(fetcher, profile,
       `/api/ai/messages?after=${profile.cursor}&limit=${HISTORY_LIMIT}&wait=${wait ? 1 : 0}`,
-      { timeoutMs: wait ? LISTEN_FETCH_TIMEOUT_MS : COMMAND_FETCH_TIMEOUT_MS });
+      { timeoutMs: wait ? LISTEN_FETCH_TIMEOUT_MS : COMMAND_FETCH_TIMEOUT_MS, stderr: io.stderr });
     if (!validPage(page, profile.cursor)) throw incompatibleResponse();
   } catch (error) {
     reportRequestError(io.stderr, error, profile);
@@ -892,7 +915,7 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
     try {
       page = await localRequest(fetcher, profile,
         `/api/ai/messages?after=${cursor}&limit=${HISTORY_LIMIT}&wait=0`,
-        { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
+        { timeoutMs: COMMAND_FETCH_TIMEOUT_MS, stderr: io.stderr });
       if (!validPage(page, cursor) ||
           (connectionSession !== undefined &&
             page.connection_session !== connectionSession)) throw incompatibleResponse();
@@ -1298,7 +1321,7 @@ async function runSay(args, io, dependencies = {}) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       result = await localRequest(fetcher, profile, route, {
-        method: 'POST', body, timeoutMs: COMMAND_FETCH_TIMEOUT_MS,
+        method: 'POST', body, timeoutMs: COMMAND_FETCH_TIMEOUT_MS, stderr: io.stderr,
       });
       break;
     } catch (error) {
@@ -2643,6 +2666,7 @@ function renderGet(stdout, result) {
   if (item.kind === 'decision') {
     line(stdout, `  asked of ${who(item.asked_of)} by ${who(item.asked_by)} · scope: ${terminalSafe(item.scope || 'not stated')}`);
     if (item.proposal) line(stdout, `  proposal: ${terminalSafe(item.proposal)}`);
+    if (item.conditions) line(stdout, `  asked with conditions: ${terminalSafe(item.conditions)}`);
     if (item.answer) {
       const a = item.answer;
       const relay = a.kind === 'reported' ? ` · attributed to ${who(a.attributed_to)}, reported by ${who(a.by)}, not confirmed here` : '';

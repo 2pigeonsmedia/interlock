@@ -147,7 +147,8 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 `GET /api/work/...` (session) or `GET /api/ai/work/...` (bearer):
 
 - `brief[?project=ID]` — projects (each with `done_count`, its work and
-  findings in state `done`), `needs_me`, `reported_to_me`, open work,
+  findings in state `done`, and `withdrawn_count`, its withdrawn
+  decisions), `needs_me`, `reported_to_me`, open work,
   decisions, and the `cursor` a later `changes` call continues from.
 - `list[?project=ID&needs_me=1&after=N&limit=N]` — rows with a `total` and a
   `next` continuation; never a silent cap. Retired projects are omitted unless
@@ -248,8 +249,11 @@ Four sections, in this order:
   `done · no evidence attached`, and `awaiting D-n` if a question is still
   open; for a decision, `asked of <name> by <name>` and, once answered,
   `answered by <name>` or `reported by <name> · attributed to <name>`. Last,
-  `done (N)`, collapsed: N is the brief's `done_count`, and opening it reads
-  the project's list, every page of it, and shows the done rows the same way.
+  `done (N)`, collapsed: N is the brief's `done_count` (followed by
+  `· withdrawn (M)` when the project has withdrawn decisions), and opening it
+  reads the project's list, every page of it, and shows the done rows and the
+  withdrawn decisions the same way, so a withdrawn question can be opened and
+  reopened.
 
 The tile does not show the record's changes. Each record's history is in its
 drawer; the changes stream stays an API and CLI surface (`changes`, `work
