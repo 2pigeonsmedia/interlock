@@ -7,6 +7,7 @@ const InterlockMentions = require('../web/mentions.js');
 const Annotations = require('./annotations.js');
 
 const MAX_WAIT_MS = 45_000;
+const DEFAULT_ASK_PROJECT = 'ops';
 const AI_PRESENCE_WINDOW_MS = 5 * 60 * 1000;
 const OPTION_KEYS = Object.freeze(['store', 'participants']);
 const WAIT_OPTION_KEYS = Object.freeze(['signal', 'timeoutMs']);
@@ -179,7 +180,10 @@ function createChatService(options) {
         const means = askIn.means === undefined ? null : askIn.means;
         if (means === null && askTarget.kind === 'person') throw fail('means-required');
         if (means !== null && !Annotations.validMeans(means)) throw fail('invalid-annotation');
-        const project = askIn.project === undefined ? null : askIn.project;
+        // Every ask belongs to a project: the asker's choice, or else the
+        // room's built-in Operations project. (The asker's own assignment, when
+        // there is one, is chosen by the host before this.)
+        const project = askIn.project === undefined || askIn.project === null ? DEFAULT_ASK_PROJECT : askIn.project;
         ask = {
           of_subject_id: askTarget.subject_id,
           of_name: askTarget.name,

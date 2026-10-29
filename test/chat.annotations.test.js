@@ -63,7 +63,8 @@ test('an ask of an AI rings it without an @, and the row carries the scope', asy
   assert.deepEqual(ringed(saved), ['Marlow']);
   const page = await chat.readAnnotations({ after: 0, limit: 10 });
   assert.equal(page.rows.length, 1);
-  assert.deepEqual(page.rows[0].ask, { of: 'Marlow', of_kind: 'seat', means: null, deliver: 'now', project: null });
+  assert.deepEqual(page.rows[0].ask, { of: 'Marlow', of_kind: 'seat', means: null, deliver: 'now', project: 'ops' },
+    'with no project chosen, an ask belongs to Operations');
   assert.equal(page.rows[0].message_id, saved.id);
   assert.equal(page.rows[0].by, 'Ana');
 });
