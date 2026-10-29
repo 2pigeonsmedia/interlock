@@ -936,40 +936,48 @@ test('an export names a block reason only while the item is blocked', () => {
   code(() => work.updateWork(lead, { operation_id: uuid(), id: item.id, expected_revision: 3, title: 'x' }), 'invalid-note');
 });
 
-test('a room answer to the ask a decision cites is the addressee\'s direct answer, once, and nobody else\'s', () => {
+test('a room answer reaches only the decision bound to its ask, from its addressee, and the latest one is the record', () => {
   const { work } = fresh();
+  const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
   const decision = work.createItem(lead, {
     operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Merge?', body: 'b',
     asked_of: ref(owner), source_message: { message_id: 41, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Merge?' },
   }).item;
   const asOwner = Object.assign({}, owner, { session: null });
-  // A decision that only cites the ask is not that ask's decision.
-  assert.equal(work.answerFromRoom(asOwner, { ask_id: 41, message_id: 49, text: 'yes' }).recorded, null,
-    'before the bind, a citation alone records nothing');
-  const attacker = work.createItem(reviewer, {
-    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Something else', body: 'b',
-    asked_of: ref(owner), source_message: { message_id: 41, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Merge?' },
-  }).item;
-  // bindAsk is never a route: only "Ask a decision" calls it, on the message it
-  // just posted for that actor. Here: once bound, no second decision can bind.
-  work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 41 });
-  assert.throws(() => work.bindAsk(Object.assign({}, reviewer, { session: null }), { id: attacker.id, ask_message_id: 41 }),
-    error => error.code === 'not-authorized' || error.code === 'invalid-state', 'one ask, one decision');
-  const asOwnerAdmin = Object.assign({}, reviewer, { session: null });
-  assert.equal(work.answerFromRoom(asOwnerAdmin, { ask_id: 41, message_id: 50, text: 'yes' }).recorded, null,
-    'a bystander records nothing');
-  assert.equal(work.answerFromRoom(Object.assign({}, owner, { session: null }),
-    { ask_id: 99, message_id: 51, text: 'yes' }).recorded, null, 'an ask no decision cites records nothing');
-  const first = work.answerFromRoom(Object.assign({}, owner, { session: null }), { ask_id: 41, message_id: 52, text: 'yes' });
-  assert.equal(first.recorded, decision.id);
-  const retry = work.answerFromRoom(Object.assign({}, owner, { session: null }), { ask_id: 41, message_id: 52, text: 'yes' });
-  assert.equal(retry.replayed, true);
-  const after = work.get(owner, { id: decision.id });
-  assert.equal(after.item.state, 'answered');
+  const say = (message_id, choice, extra = {}) => work.answerFromRoom(asOwner, Object.assign({
+    ask_id: 41, message_id, text: choice || 'ok', choice, by_addressee: true, of: ANA_OF,
+  }, extra));
+  assert.equal(say(49, 'yes').recorded, null, 'before the bind, nothing records');
+  assert.throws(() => work.bindAsk(Object.assign({}, lead, { session: null }), {
+    id: decision.id, ask_message_id: 41, of: { kind: 'seat', subject_id: 'x', name: 'Scout' },
+  }), error => error.code === 'invalid-asked-of', 'the room ask and the record must name the same person');
+  const bound = work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 41, of: ANA_OF });
+  assert.equal(bound.item.revision, decision.revision + 1, 'the bind bumps the revision');
+  assert.equal(work.get(owner, { id: decision.id }).history.filter(event => event.kind === 'ask-bound').length, 1);
+  assert.equal(say(50, 'yes', { by_addressee: false }).recorded, null, 'the room says a bystander: nothing records');
+  assert.equal(say(51, 'yes').recorded, decision.id);
+  assert.equal(say(51, 'yes').replayed, true);
+  assert.equal(say(52, 'no').recorded, decision.id, 'her later answer is the record');
+  let after = work.get(owner, { id: decision.id });
+  assert.equal(after.item.answer.choice, 'no');
   assert.equal(after.item.answer.source, 'answered in the room #52');
-  assert.equal(after.history.filter(event => event.kind === 'answered').length, 1, 'recorded once');
-  assert.equal(work.answerFromRoom(Object.assign({}, owner, { session: null }),
-    { ask_id: 41, message_id: 60, text: 'no' }).recorded, null, 'a later room answer does not replace a direct one');
-  assert.equal(work.get(owner, { id: attacker.id }).item.state, 'awaiting',
-    'the decision that only cited the ask got nothing');
+  assert.deepEqual(after.history.filter(event => event.kind === 'answered' || event.kind === 'answer-replaced')
+    .map(event => event.choice), ['yes', 'no'], 'earlier answers stay on the trail');
+  // Reopened to the same person: a replay of an old message records nothing.
+  work.reopen(owner, { operation_id: uuid(), id: decision.id, expected_revision: after.item.revision, reason: 'again' });
+  assert.equal(say(51, 'yes').replayed, true, 'a message is recorded once in the decision\'s life');
+  assert.equal(work.get(owner, { id: decision.id }).item.state, 'awaiting');
+  // Re-addressed: the decision lets go of the ask; nobody's room answer records.
+  after = work.get(owner, { id: decision.id });
+  work.withdraw(owner, { operation_id: uuid(), id: decision.id, expected_revision: after.item.revision, reason: 'r' });
+  after = work.get(owner, { id: decision.id });
+  work.reopen(owner, { operation_id: uuid(), id: decision.id, expected_revision: after.item.revision, reason: 'to Builder', asked_of: ref(builder) });
+  after = work.get(owner, { id: decision.id });
+  assert.equal(after.item.ask_message_id, null);
+  assert.equal(after.history.filter(event => event.kind === 'reopened').slice(-1)[0].unbound_ask, 41);
+  assert.equal(work.answerFromRoom(Object.assign({}, builder, { session: null }), {
+    ask_id: 41, message_id: 60, text: 'yes', choice: 'yes', by_addressee: false,
+    of: ANA_OF,
+  }).recorded, null);
+  assert.equal(say(61, 'yes').recorded, null, 'her answer to the ask put to her no longer reaches it either');
 });

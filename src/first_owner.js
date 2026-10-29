@@ -1926,6 +1926,16 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return;
     }
+    // A retry of a completed ask is answered from its record; nothing is posted.
+    const prior = work.priorResult(workActor, body.operation_id);
+    if (prior) {
+      const cited = prior.body.item && prior.body.item.source_message;
+      const page = cited ? await chat.read({ after: cited.message_id - 1, limit: 1 }) : null;
+      const message = page && page.messages[0] && page.messages[0].id === cited.message_id
+        ? publicMessage(page.messages[0]) : null;
+      sendJson(request, response, 200, Object.assign({}, prior.body, { message }));
+      return;
+    }
     const text = (body.about_message ? `re #${body.about_message} ` : '') + `Decision: ${body.title.trim()}`;
     const ask = { of: body.asked_of };
     if (typeof body.scope === 'string' && body.scope.trim() !== '') ask.means = body.scope.trim();
@@ -1947,25 +1957,50 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, result.status, Object.assign({}, result.body, { message: saved }));
       return;
     }
-    // Only now is the record the ask's decision: the room answer binds to it.
-    const bound = work.bindAsk(workActor, { id: result.body.item.id, ask_message_id: saved.id });
+    // Only now is the record the ask's decision: the room answer binds to it,
+    // provided the room ask and the record name the same person.
+    const facts = await chat.postFacts(saved.id);
+    const bound = work.bindAsk(workActor, {
+      id: result.body.item.id, ask_message_id: saved.id, of: facts && facts.ask,
+    });
+    if (bound.status === 200) await catchUpAnswer(saved.id);
     const reply = bound.status === 200 ? Object.assign({}, result.body, { item: bound.body.item }) : result.body;
     sendJson(request, response, result.status, Object.assign({}, reply, { message: saved }));
   }
 
-  /* After a room answer is saved: each ask it answers that a decision cites
-   * becomes that decision's direct answer, when the answerer is the person it
-   * was asked of. The post's own response never changes. */
-  function bridgeRoomAnswers(chatActor, saved, annotation) {
-    if (!work || !annotation || !Array.isArray(annotation.answers)) return;
+  /* After a room answer is saved: each answer the room stored as coming from
+   * its ask's addressee goes to the decision bound to that ask, if any. The
+   * room's facts decide, not the request. The post's response never changes. */
+  async function bridgeRoomAnswers(chatActor, saved) {
+    if (!work) return;
+    const facts = await chat.postFacts(saved.id);
+    if (!facts) return;
     const actor = {
       subject_id: chatActor.subject_id, name: chatActor.name, kind: chatActor.kind,
       session: saved.session === undefined ? null : saved.session, owner: false,
     };
-    for (const answer of annotation.answers) {
-      if (!answer || !Number.isSafeInteger(answer.ask_id)) continue;
-      work.answerFromRoom(actor, { ask_id: answer.ask_id, message_id: saved.id, text: saved.text });
+    for (const answer of facts.answers) {
+      if (!answer.by_addressee || !answer.of) continue;
+      work.answerFromRoom(actor, {
+        ask_id: answer.ask_id, message_id: saved.id, text: saved.text, choice: answer.choice,
+        by_addressee: answer.by_addressee, of: answer.of,
+      });
     }
+  }
+
+  /* An answer the addressee gave between the ask's post and its binding:
+   * the latest one is recorded now, as it would have been. */
+  async function catchUpAnswer(askId) {
+    const answers = await chat.addresseeAnswers(askId);
+    const latest = answers[answers.length - 1];
+    if (!latest) return;
+    work.answerFromRoom({
+      subject_id: latest.author.subject_id, name: latest.author.name, kind: latest.author.kind,
+      session: null, owner: false,
+    }, {
+      ask_id: askId, message_id: latest.message_id, text: latest.text, choice: latest.choice,
+      by_addressee: true, of: latest.of,
+    });
   }
 
   // ── asks, answers and status: the side-car ────────────────────────────────
@@ -2011,7 +2046,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (!saved) throw new Error('invalid chat result');
-      bridgeRoomAnswers(actor, saved, input.annotation);
+      await bridgeRoomAnswers(actor, saved);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2047,7 +2082,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (saved === null) throw new Error('invalid chat result');
-      bridgeRoomAnswers(actor, saved, input.annotation);
+      await bridgeRoomAnswers(actor, saved);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);

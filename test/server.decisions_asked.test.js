@@ -281,6 +281,38 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     assert.equal(noScope.status, 400, noScope.text);
     assert.equal(noScope.json.error, 'means-required', 'an ask of a person needs its scope line');
 
+    // Re-addressed after a withdraw, the decision lets go of the ask put to Scout.
+    const toScout = await askOf(runtime, lead.token, {
+      project: 'ops', title: 'Tag it', body: 'b', asked_of: 'Scout',
+    });
+    let d2 = await item(runtime, owner, toScout.json.item.id);
+    const withdrawn = await aiPost(runtime, '/api/ai/work/decisions/withdraw', {
+      operation_id: uuid(), id: d2.id, expected_revision: d2.revision, reason: 'wrong person',
+    }, lead.token);
+    assert.equal(withdrawn.status, 200, withdrawn.text);
+    const reopened = await aiPost(runtime, '/api/ai/work/decisions/reopen', {
+      operation_id: uuid(), id: d2.id, expected_revision: withdrawn.json.item.revision, reason: 'ask Ana', asked_of: 'Ana',
+    }, lead.token);
+    assert.equal(reopened.status, 200, reopened.text);
+    assert.equal(reopened.json.item.ask_message_id, null, 'the record let go of the ask put to Scout');
+    await post(runtime, '/api/annotated-messages', {
+      text: 'sure', annotation: { answers: [{ ask_id: toScout.json.message.id, choice: 'yes' }] },
+    }, owner);
+    assert.equal((await item(runtime, owner, d2.id)).state, 'awaiting',
+      'her word on an ask put to Scout is not her answer to the record');
+
+    // A browser retry of "Ask a decision" posts nothing twice.
+    const browserBody = { operation_id: uuid(), project: 'ops', title: 'Browser ask', body: 'b', asked_of: 'Scout' };
+    const first = await post(runtime, '/api/work/decisions/ask', browserBody, owner);
+    assert.equal(first.status, 201, first.text);
+    const roomBefore = (await get(runtime, '/api/messages?after=0&limit=100&wait=0', owner)).json.messages.length;
+    const retried = await post(runtime, '/api/work/decisions/ask', browserBody, owner);
+    assert.equal(retried.status, 200, retried.text);
+    assert.equal(retried.json.item.id, first.json.item.id);
+    assert.equal(retried.json.message.id, first.json.message.id);
+    assert.equal((await get(runtime, '/api/messages?after=0&limit=100&wait=0', owner)).json.messages.length, roomBefore,
+      'no twin ask in the room');
+
     // A record refused after its ask was posted: the ask stands and is answerable.
     const orphan = await askOf(runtime, lead.token, {
       project: 'nowhere', title: 'Ship it', body: 'b', asked_of: 'Ana', scope: 'I ship it',

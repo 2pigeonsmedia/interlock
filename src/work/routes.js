@@ -247,6 +247,16 @@ function createWorkRoutes(options) {
     }
   }
 
+  // "Ask a decision" only: a completed create for this operation id, or null.
+  function priorResult(actor, operationId) {
+    try {
+      const prior = work.priorResult(actor, operationId);
+      return prior ? Object.freeze({ status: 200, body: stripIds(prior) }) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // "Ask a decision" only: binds the record to the ask the host just posted.
   function bindAsk(actor, body) {
     try {
@@ -257,7 +267,7 @@ function createWorkRoutes(options) {
   }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

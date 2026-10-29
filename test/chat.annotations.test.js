@@ -437,3 +437,17 @@ test('an ask of a person stays hers: a namesake answering closes nothing', async
   await chat.appendAnnotated({ text: 'yes' }, seat(IMPOSTOR, 'ana'), { answers: [{ ask_id: ask.id }] });
   assert.deepEqual((await chat.openAsks(ANA, 'Ana')).addressed.map(row => row.ask_id), [ask.id]);
 });
+
+test('the host can read an ask\'s answers from its addressee, oldest first, with words and author', async () => {
+  const { chat } = room();
+  const ask = await chat.appendAnnotated({ text: 'merge?' }, seat(MARLOW, 'Marlow'),
+    { ask: { of: 'Ana', means: 'I merge' } });
+  await chat.appendAnnotated({ text: 'me too' }, seat(CODEX, 'Codex'), { answers: [{ ask_id: ask.id }] });
+  const yes = await chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  const answers = await chat.addresseeAnswers(ask.id);
+  assert.deepEqual(answers.map(row => [row.message_id, row.choice, row.text, row.author.name]),
+    [[yes.id, 'yes', 'yes', 'Ana']], 'only the addressee\'s answers');
+  assert.deepEqual(answers[0].of, { kind: 'person', subject_id: ANA, name: 'Ana' });
+  const facts = await chat.postFacts(yes.id);
+  assert.deepEqual(facts.answers.map(row => [row.ask_id, row.by_addressee]), [[ask.id, true]]);
+});

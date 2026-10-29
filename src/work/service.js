@@ -472,6 +472,7 @@ function createWorkService(options) {
           answer: null,
           kill: null,
           ask_message_id: null,
+          bridged_message_ids: [],
         });
       } else {
         Object.assign(item, {
@@ -789,11 +790,16 @@ function createWorkService(options) {
         item.answer = null;
         item.withdrawn = false;
         if (askedOf !== undefined) item.asked_of = askedOf;
+        // Re-addressed, the decision is no longer the room ask's: that ask was
+        // put to someone else. Asking again means "Ask a decision" again.
+        const unbound = askedOf !== undefined && item.ask_message_id &&
+          (askedOf.subject_id !== previousAskedOf.subject_id) ? item.ask_message_id : null;
+        if (unbound !== null) item.ask_message_id = null;
         touch(item, now);
-        appendEvent(draft, now, actor, {
+        appendEvent(draft, now, actor, Object.assign({
           item: item.id, project: item.project, kind: 'reopened', reason,
           asked_of: clone(item.asked_of), previous_asked_of: previousAskedOf, previous: clone(previous),
-        });
+        }, unbound !== null ? { unbound_ask: unbound } : {}));
         return { ok: true, item: publicItem(item) };
       });
   }
@@ -836,13 +842,25 @@ function createWorkService(options) {
       });
   }
 
+  /* Whether the room's addressee of an ask is this decision's asked_of. The
+   * room's rule, applied once: an AI by name, a person by identity. */
+  function sameAddressee(item, of) {
+    if (!plainObject(of) || (of.kind !== 'person' && of.kind !== 'seat')) return false;
+    if (item.asked_of.kind !== of.kind) return false;
+    if (of.kind === 'seat') {
+      return typeof of.name === 'string' && of.name.toLowerCase() === item.asked_of.name.toLowerCase();
+    }
+    return of.subject_id === item.asked_of.subject_id;
+  }
+
   /* Bind a decision to the ask the host just posted for it, in the room, as
    * this actor. Never a route: only "Ask a decision" calls it, with a message
-   * it wrote itself. A citation alone never binds, so nobody can attach a
-   * decision of their own to someone else's ask. One ask, one decision. */
+   * it wrote itself and that ask's room addressee. A citation alone never
+   * binds; the room ask and the record must name the same person; one ask,
+   * one decision. The bind is on the record's trail. */
   function bindAsk(actor, rawInput) {
     requireActor(actor);
-    const body = closedObject(rawInput, ['id', 'ask_message_id']);
+    const body = closedObject(rawInput, ['id', 'ask_message_id', 'of']);
     if (!body || !Number.isSafeInteger(body.ask_message_id) || body.ask_message_id < 1) fail('invalid-input');
     return store.commit(draft => {
       const item = findDecision(draft, body.id);
@@ -850,51 +868,69 @@ function createWorkService(options) {
       if (item.ask_message_id !== null && item.ask_message_id !== undefined) fail('invalid-state');
       if (item.created_by.subject_id !== actor.subject_id || !item.source_message ||
           item.source_message.message_id !== body.ask_message_id) fail('not-authorized');
+      if (!sameAddressee(item, body.of)) fail('invalid-asked-of');
       if (draft.items.some(row => row.kind === 'decision' && row.ask_message_id === body.ask_message_id)) {
         fail('invalid-state');
       }
+      const now = clock();
       item.ask_message_id = body.ask_message_id;
+      touch(item, now);
+      appendEvent(draft, now, actor, {
+        item: item.id, project: item.project, kind: 'ask-bound', ask_message_id: body.ask_message_id, before: null,
+      });
       return { ok: true, item: publicItem(item) };
     });
   }
 
-  /* The room answer is the decision's answer. When the person a decision is
-   * asked of answers, in the room, the ask that decision was asked with, the
-   * answer is recorded here as theirs, directly. Keyed by the room message,
-   * so a retry records nothing twice. Anyone else's room answer, the owner's
-   * included, records nothing here, and an ask a decision merely cites
-   * records nothing at all. */
+  /* The room answer is the decision's answer. When the room says an answer
+   * to the ask this decision was asked with came from that ask's addressee,
+   * and that addressee is still the one this decision is asked of, the answer
+   * is recorded here as theirs, directly, with its Yes or No. The addressee's
+   * latest room answer is the record; earlier ones stay on the trail. A room
+   * message is recorded at most once in a decision's life. */
   function answerFromRoom(actor, rawInput) {
     requireActor(actor);
-    const body = closedObject(rawInput, ['ask_id', 'message_id', 'text']);
+    const body = closedObject(rawInput, ['ask_id', 'message_id', 'text', 'choice', 'by_addressee', 'of']);
     if (!body || !Number.isSafeInteger(body.ask_id) || body.ask_id < 1 ||
-        !Number.isSafeInteger(body.message_id) || body.message_id < 1) fail('invalid-input');
+        !Number.isSafeInteger(body.message_id) || body.message_id < 1 ||
+        !(body.choice === null || body.choice === 'yes' || body.choice === 'no') ||
+        typeof body.by_addressee !== 'boolean') fail('invalid-input');
     const text = requiredText(body.text, BODY_BYTES, 'text');
     const source = 'answered in the room #' + body.message_id;
     return store.commit(draft => {
       const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
-      if (!item) return { ok: true, recorded: null };
-      if (actor.subject_id !== item.asked_of.subject_id || item.withdrawn) {
+      if (!item || item.withdrawn || body.by_addressee !== true || !sameAddressee(item, body.of)) {
         return { ok: true, recorded: null };
       }
-      if (item.answer && item.answer.source === source) {
-        return { ok: true, recorded: item.id, replayed: true };
-      }
-      if (item.answer && item.answer.kind === 'direct') return { ok: true, recorded: null };
+      const bridged = Array.isArray(item.bridged_message_ids) ? item.bridged_message_ids : [];
+      if (bridged.includes(body.message_id)) return { ok: true, recorded: item.id, replayed: true };
       const now = clock();
       const previous = item.answer;
       item.answer = {
-        kind: 'direct', text, conditions: '', source,
+        kind: 'direct', text, choice: body.choice, conditions: '', source,
         by: refOf(actor), attributed_to: refOf(actor), at: now, reason: '',
       };
+      item.bridged_message_ids = bridged.concat([body.message_id]);
       touch(item, now);
       appendEvent(draft, now, actor, previous
-        ? { item: item.id, project: item.project, kind: 'answer-replaced', text, conditions: '',
-          reason: source, previous: clone(previous) }
-        : { item: item.id, project: item.project, kind: 'answered', text, conditions: '', reason: '',
-          on_behalf: false, asked_of: clone(item.asked_of), source });
+        ? { item: item.id, project: item.project, kind: 'answer-replaced', text, choice: body.choice,
+          conditions: '', reason: source, previous: clone(previous) }
+        : { item: item.id, project: item.project, kind: 'answered', text, choice: body.choice, conditions: '',
+          reason: '', on_behalf: false, asked_of: clone(item.asked_of), source });
       return { ok: true, recorded: item.id };
     });
+  }
+
+  /* An operation this actor already completed, by its id alone, so a host
+   * can answer a retry before doing anything with side effects. */
+  function priorResult(actor, operationId) {
+    requireActor(actor);
+    if (typeof operationId !== 'string' || !UUID.test(operationId)) return null;
+    const prior = snapshot().operations[operationId.toLowerCase()];
+    const result = prior && prior.result;
+    if (!result || !result.item || !result.item.created_by ||
+        result.item.created_by.subject_id !== actor.subject_id) return null;
+    return Object.assign({}, clone(result), { replayed: true });
   }
 
   function withdraw(actor, rawInput) {
@@ -1138,7 +1174,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk,
+    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, priorResult,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });

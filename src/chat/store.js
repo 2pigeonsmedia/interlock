@@ -951,6 +951,49 @@ function openStore(opts) {
     });
   }
 
+  /* For the host only, never a route: what the room stored about one post.
+   * The ask's addressee and, per answer, its choice, whether its author was
+   * the one asked, and that ask's addressee. Identities stay server-side. */
+  function addresseeOf(ask) {
+    return Object.freeze({ kind: ask.of_kind, subject_id: ask.of_subject_id, name: ask.of_name });
+  }
+
+  function postFacts(messageId) {
+    return exclusive(() => {
+      requireOpen();
+      const row = asks.posts.get(messageId);
+      if (!row) return null;
+      return Object.freeze({
+        ask: row.ask ? addresseeOf(row.ask) : null,
+        answers: Object.freeze(row.answers.map(answer => {
+          const ask = asks.asks.get(answer.ask_id);
+          return Object.freeze({
+            ask_id: answer.ask_id, choice: answer.choice, by_addressee: answer.by_addressee,
+            of: ask ? addresseeOf(ask) : null,
+          });
+        })),
+      });
+    });
+  }
+
+  /* The answers an ask's addressee has given it so far, oldest first, with
+   * the words and author of each, for the host to catch up a late binding. */
+  function addresseeAnswers(askId) {
+    return exclusive(() => {
+      requireOpen();
+      const ask = asks.asks.get(askId);
+      if (!ask) return Object.freeze([]);
+      return Object.freeze(ask.answers.filter(answer => answer.by_addressee).map(answer => {
+        const message = messages.find(candidate => candidate.id === answer.message_id);
+        return message ? Object.freeze({
+          message_id: answer.message_id, choice: answer.choice, text: message.text,
+          author: Object.freeze({ subject_id: message.subject_id, name: message.byline, kind: message.kind }),
+          of: addresseeOf(ask),
+        }) : null;
+      }).filter(Boolean));
+    });
+  }
+
   /* The ask a seat's earlier post with this client id carried, so a retry
    * can be answered by the idempotency rule even if the addressee has since
    * left the roster. */
@@ -1274,7 +1317,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, readAnnotationRows, openAsks, priorAsk,
+    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers,
   });
 }
 
