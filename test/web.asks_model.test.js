@@ -128,3 +128,14 @@ test('the page reads what the server stored, never re-derives it from names', ()
   assert.equal(state.ask(10).state, 'open');
   assert.equal(Asks.chosen(state.ask(10)), null);
 });
+
+test('answered lists every ask its addressee has answered, by the stored fact, open or not', () => {
+  const state = Asks.createAsksState();
+  state.apply([
+    post(1, 10, 'Lead', { ask: ask('Ana', 'a') }),
+    post(2, 11, 'Lead', { ask: ask('Ana', 'b') }),
+    post(3, 12, 'Ana', { answers: [answer(10, 'yes', null, true, true)] }),
+    post(4, 13, 'Ana', { answers: [answer(11, 'yes', null, false, false)] }),
+  ]);
+  assert.deepEqual(state.answeredIds(), [10]);
+});

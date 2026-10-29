@@ -1455,7 +1455,7 @@ function refreshAsks() {
   }
   renderBindChips(open.addressed);
   document.dispatchEvent(new CustomEvent('interlock:asks', {
-    detail: { addressed: open.addressed, asked: open.asked },
+    detail: { addressed: open.addressed, asked: open.asked, answered: asksState.answeredIds() },
   }));
 }
 
