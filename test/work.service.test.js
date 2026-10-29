@@ -1014,4 +1014,6 @@ test('the latest room answer is the one latest in the room, not the one that arr
   assert.equal(say(95, 'no').recorded, decision.id);
   assert.equal(say(93, 'yes').recorded, null, 'an older message arriving later does not replace her newer answer');
   assert.equal(work.get(owner, { id: decision.id }).item.answer.choice, 'no');
+  const row = work.list(owner, {}).items.find(entry => entry.id === decision.id);
+  assert.equal(row.answer_summary.source, 'answered in the room #95', 'list rows can say where it was answered');
 });
