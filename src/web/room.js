@@ -1455,9 +1455,34 @@ function refreshAsks() {
     if (!open.addressed.some(ask => ask.ask_id === id)) pickedAsks.delete(id);
   }
   renderBindChips(open.addressed);
+  const withQuestion = ask => Object.freeze(Object.assign({}, ask, { question: askQuestion(ask.ask_id) }));
   document.dispatchEvent(new CustomEvent('interlock:asks', {
-    detail: { addressed: open.addressed, asked: open.asked, answered: asksState.answeredIds() },
+    detail: {
+      addressed: open.addressed.map(withQuestion), asked: open.asked.map(withQuestion),
+      answered: asksState.answeredIds(),
+    },
   }));
+}
+
+/* The first line an ask's message says, or null when that message is not in
+ * this era (a carried ask). */
+function askQuestion(askId) {
+  const text = transcript.querySelector(`[data-message-id="${askId}"] .message-text`);
+  if (!text) return null;
+  const body = text.querySelector('.message-body') || text;
+  const line = body.textContent.trim().split('\n')[0];
+  return line ? line.slice(0, 120) : null;
+}
+
+/* A message that replies to an ask is a discussion: it answers nothing. */
+function composingDiscussion() {
+  const reference = InterlockReplyReference.parse(messageBody.value);
+  return !!(reference && asksState.ask(reference.id));
+}
+
+function updateBindVisibility() {
+  const addressed = asksState.openFor(viewerName()).addressed;
+  askBind.hidden = addressed.length === 0 || composingDiscussion();
 }
 
 function askButton(label, onClick) {
@@ -1547,7 +1572,7 @@ function decorateMessage(article, messageId) {
 
 function renderBindChips(addressed) {
   askBindChips.replaceChildren();
-  askBind.hidden = addressed.length === 0;
+  askBind.hidden = addressed.length === 0 || composingDiscussion();
   askBindLabel.textContent = addressed.length > 1
     ? 'Answering which? Tap each one you answer.'
     : 'A bare yes, no or go answers this ask; anything else, tap it first.';
@@ -1601,7 +1626,8 @@ function setAskMode(on) {
 /* The annotation the composer will send, or null for a plain message. */
 function composerAnnotation() {
   const annotation = {};
-  const answers = InterlockAsks.bindAnswers(asksState.openFor(viewerName()).addressed, pickedAsks, messageBody.value);
+  const answers = composingDiscussion() ? null
+    : InterlockAsks.bindAnswers(asksState.openFor(viewerName()).addressed, pickedAsks, messageBody.value);
   if (answers) annotation.answers = answers;
   if (!askFields.hidden && askOf.value) {
     annotation.ask = { of: askOf.value, deliver: askLater.checked ? 'later' : 'now' };
@@ -1651,6 +1677,7 @@ function seedReply(messageId) {
   if (ask && ask.by !== viewerName() && !messageBody.value.includes(`@${ask.by}`)) {
     messageBody.value = messageBody.value.replace(/^(re #\d+ ?)/u, `$1@${ask.by} `);
   }
+  updateBindVisibility();
   updateMentionPreview();
   messageBody.focus();
   messageBody.setSelectionRange(messageBody.value.length, messageBody.value.length);
@@ -2048,6 +2075,7 @@ messageForm.addEventListener('submit', async event => {
     document.dispatchEvent(new CustomEvent('interlock:message-saved', { detail: { id: result.message.id, text: sentText } }));
     forceFollowMessageId = result.message.id;
     messageBody.value = '';
+    updateBindVisibility();
     if (annotation !== null) {
       pickedAsks.clear();
       askMeans.value = '';
@@ -2077,6 +2105,14 @@ messageForm.addEventListener('submit', async event => {
 });
 
 messageBody.addEventListener('input', updateMentionPreview);
+messageBody.addEventListener('input', updateBindVisibility);
+// The work panel's inline Yes / No answers through the room, like the chip.
+document.addEventListener('interlock:answer-ask', event => {
+  const detail = event.detail || {};
+  if (Number.isSafeInteger(detail.ask_id) && (detail.choice === 'yes' || detail.choice === 'no')) {
+    answerAsk(detail.ask_id, detail.choice);
+  }
+});
 askToggle.addEventListener('click', () => setAskMode(askFields.hidden));
 askOf.addEventListener('change', updateAskMeansRequired);
 

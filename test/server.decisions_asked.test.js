@@ -337,6 +337,25 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     assert.equal(folded.json.item.asked_of.name, 'Scout');
     assert.equal(folded.json.item.ask_message_id, folded.json.message.id, 'bound, not left loose');
 
+    // Answered on the record by the person asked: the room's ask closes too.
+    const onRecord = await askOf(runtime, lead.token, {
+      project: 'ops', title: 'Order the lanes', body: 'b', asked_of: 'Ana', scope: 'I order the lanes',
+    });
+    const fresh = await item(runtime, owner, onRecord.json.item.id);
+    const recorded = await post(runtime, '/api/work/decisions/answer', {
+      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'yes, by priority',
+    }, owner);
+    assert.equal(recorded.status, 200, recorded.text);
+    const echoed = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
+      .filter(row => row.answers.some(entry => entry.ask_id === onRecord.json.message.id));
+    assert.equal(echoed.length, 1, 'the room carries her answer');
+    assert.deepEqual(echoed[0].answers.map(entry => [entry.by_addressee, entry.closes]), [[true, true]]);
+    const roomText = (await get(runtime, '/api/messages?after=0&limit=100&wait=0', owner)).json.messages
+      .find(message => message.id === echoed[0].message_id).text;
+    assert.equal(roomText, `re #${onRecord.json.message.id} Answered on ${fresh.id}: yes, by priority`);
+    const after = await item(runtime, owner, fresh.id);
+    assert.equal(after.answer.source, 'recorded here', 'the record keeps the answer as recorded, not replaced by its echo');
+
     // A record refused after its ask was posted: the ask stands and is answerable.
     const orphan = await askOf(runtime, lead.token, {
       project: 'nowhere', title: 'Ship it', body: 'b', asked_of: 'Ana', scope: 'I ship it',

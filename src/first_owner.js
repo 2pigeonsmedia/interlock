@@ -1576,7 +1576,9 @@ function createFirstOwnerHandler(options) {
       await askDecision(request, response, body, actor, ai);
       return;
     }
-    sendWorkResult(request, response, await work.mutate(op, actor, body, actor.now));
+    const result = await work.mutate(op, actor, body, actor.now);
+    if (op === 'decisions/answer' && result.status < 400) await echoAnswerToRoom(request, actor, result.body.item, ai);
+    sendWorkResult(request, response, result);
   }
 
   async function readAiPeek(request, response, target) {
@@ -2013,6 +2015,31 @@ function createFirstOwnerHandler(options) {
         ask_id: answer.ask_id, message_id: saved.id, text: saved.text, choice: answer.choice,
         by_addressee: answer.by_addressee, of: answer.of,
       });
+    }
+  }
+
+  /* The person a decision is asked of answered it on the record, not in the
+   * room: their answer is also posted in the room, as a reply to the ask, so
+   * the room and the record agree. The post goes straight to the room, so the
+   * bridge does not record it a second time. Anyone else's answer on the
+   * record leaves the room's ask as it is: its addressee has not answered. */
+  async function echoAnswerToRoom(request, workActor, item, ai) {
+    if (!item || !Number.isSafeInteger(item.ask_message_id) || !item.answer ||
+        !item.asked_of || item.asked_of.name !== workActor.name || item.asked_of.kind !== workActor.kind) return;
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), require('node:crypto').randomUUID());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor || chatActor.subject_id !== workActor.subject_id) return;
+    const firstLine = String(item.answer.text).split('\n')[0].slice(0, 200);
+    try {
+      await chat.appendAnnotated({ text: `re #${item.ask_message_id} Answered on ${item.id}: ${firstLine}` }, chatActor,
+        { answers: [{ ask_id: item.ask_message_id }] });
+    } catch (_) {
+      // The ask was already answered or withdrawn in the room: nothing to close.
     }
   }
 
