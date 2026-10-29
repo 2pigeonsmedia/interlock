@@ -157,12 +157,14 @@ Owner-only actions stay disabled for signed-out people and non-owners.
   </div>
 </article>
 
-<!-- an ask on its message, under .message-text (slice 1; the room.js contract) -->
-<div class="ask-chip" data-ask-id="42" data-state="open">
-  <p class="ask-means">Asks Ana · a yes means: I merge the candidate to main and nothing else</p>
-  <button type="button" aria-pressed="false">Yes</button>
-  <button type="button" aria-pressed="true">No</button>
-  <button type="button">Reply</button>
+<!-- an ask on its message, before .message-actions, as room.js builds it;
+     here as Ana sees an open ask addressed to her -->
+<div class="ask-chip" data-ask-state="open">
+  <span class="ask-line">Ask of Ana · open 5m</span>
+  <span class="ask-means">A yes means: I merge the candidate to main and nothing else</span>
+  <button type="button" class="quiet-action" aria-pressed="false" aria-label="Yes to ask #42">Yes</button>
+  <button type="button" class="quiet-action" aria-pressed="false" aria-label="No to ask #42">No</button>
+  <button type="button" class="quiet-action">Reply</button>
 </div>
 
 <!-- one roster card, as room.js builds it -->
@@ -189,10 +191,14 @@ Rules the CSS relies on:
   rang nobody rendered plain, which read as broken rather than as
   information.)
 - `.ask-chip` is the ask a message carries, read from the annotations
-  side-car, never from message text. `data-state` is `open`, `answered` or
-  `withdrawn`. The chosen answer is the button with `aria-pressed="true"`;
-  pressed is the only way a choice shows, so it reads the same without
-  colour. The scope line is written with `textContent`.
+  side-car, never from message text. `data-ask-state` is `open`, `answered`
+  or `withdrawn`. The chosen answer is the Yes or No button with
+  `aria-pressed="true"`, so a choice reads the same without colour. Yes and
+  No are disabled for anyone but the addressee of an open ask; Reply shows
+  only to that addressee. The asker sees Withdraw on an open ask and Keep
+  open on an answered one. `.ask-line` says hold or ask, the state and age;
+  `.ask-means` appears only when the ask has a scope line. All text is
+  written with `textContent`.
 - `data-addressed="true"` on a message tints the row and lights its teal left
   rail; `.delivery` states are words, not colours alone.
 - `.message-id` renders as a bordered plate — the id the CLI shows as `[n]`;
