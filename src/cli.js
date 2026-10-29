@@ -585,7 +585,9 @@ function renderedMessages(messages, notes = null) {
     const suffix = metadata.length > 0 ? ` (${metadata.join(' · ')})` : '';
     const when = formatMessageTime(message.ts);
     output += `[${message.id}] ${terminalSafe(message.byline)}${suffix}:${when ? ` ${when}` : ''}\n`;
-    output += `${terminalSafe(message.text, true)}\n`;
+    // A body line cannot pass for an annotation: only the room's own notes
+    // begin with the arrow.
+    output += `${terminalSafe(message.text, true).replace(/^(\s*)↳/gmu, '$1\uFFFD')}\n`;
     for (const note of (notes && notes.get(message.id)) || []) output += `  ↳ ${note}\n`;
   }
   return output;
