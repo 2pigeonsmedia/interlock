@@ -1072,3 +1072,15 @@ test('an answer written before protection was recorded counts as protected when 
   assert.throws(() => work.reopen(admin, { operation_id: uuid(), id: decision.id, expected_revision: answered.revision, reason: 'r' }),
     error => error.code === 'first-owner-answer');
 });
+
+test('a work row names the room message it was made from', () => {
+  const { work } = fresh();
+  const made = work.createItem(lead, {
+    operation_id: uuid(), kind: 'work', project: 'ops', title: 'Track it', body: 'b',
+    source_message: { message_id: 12, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: x' },
+  }).item;
+  const plain = newWork(work, lead);
+  const rows = work.list(owner, {}).items;
+  assert.equal(rows.find(row => row.id === made.id).source_message_id, 12);
+  assert.equal(rows.find(row => row.id === plain.id).source_message_id, null);
+});

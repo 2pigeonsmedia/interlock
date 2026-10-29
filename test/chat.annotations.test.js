@@ -486,3 +486,16 @@ test('a room whose asks were stored before asks carried a project still opens; t
   const again = reopen();
   assert.equal((await again.openAsks(MARLOW, 'Marlow')).addressed[0].project, 'ops');
 });
+
+test('a room written by an earlier asks build opens, and its ask reads as Operations', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-earlier-'));
+  fs.cpSync(path.join(__dirname, 'fixtures', 'room_e4b20e9'), dir, { recursive: true });
+  const earlier = JSON.parse(fs.readFileSync(path.join(dir, 'chat', 'annotations.jsonl'), 'utf8').split('\n')[0]);
+  assert.equal(Object.prototype.hasOwnProperty.call(earlier.ask, 'project'), false, 'the arrangement: the earlier shape');
+  const chat = createChatService({ store: openStore({ dataDir: dir }), participants: () => roster() });
+  const rows = (await chat.readAnnotations({ after: 0, limit: 10 })).rows;
+  assert.deepEqual(rows.map(row => row.kind), ['post', 'post']);
+  assert.equal(rows[0].ask.project, 'ops');
+  assert.equal(rows[1].answers[0].closes, true, 'its answer still closed it');
+  assert.deepEqual((await chat.openAsks(ANA, 'Ana')).addressed, []);
+});

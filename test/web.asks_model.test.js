@@ -155,3 +155,15 @@ test('one Reply on an ask, and it is a discussion that names the asker and binds
   assert.doesNotMatch(seed, /pickedAsks/, 'a discussion reply never binds an ask');
   assert.match(decorate, /Re: \$\{asked\.by\}'s ask #\$\{target\}/, 'the reference says whose ask');
 });
+
+test('a reply to an ask hides the answer chips and binds nothing; the panel answers through the room', () => {
+  const compose = ROOM_JS.slice(ROOM_JS.indexOf('function composerAnnotation'), ROOM_JS.indexOf('const ASK_REFUSALS'));
+  assert.match(compose, /composingDiscussion\(\) \? null/, 'a discussion reply carries no answers');
+  assert.match(ROOM_JS, /askBind\.hidden = addressed\.length === 0 \|\| composingDiscussion\(\)/);
+  assert.match(ROOM_JS, /addEventListener\('interlock:answer-ask'[\s\S]*answerAsk\(detail\.ask_id, detail\.choice\)/);
+  assert.match(ROOM_JS, /question: askQuestion\(ask\.ask_id\)/);
+});
+
+test('the work panel\'s Reply on an ask is the same composer act as the message\'s Reply', () => {
+  assert.match(ROOM_JS, /addEventListener\('interlock:reply-ask'[\s\S]*seedReply\(detail\.ask_id\)/);
+});
