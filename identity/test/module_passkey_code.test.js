@@ -381,3 +381,38 @@ test('the limit is per member: another member\'s refused codes do not count', as
   const begun = await r.redeem(await r.signIn(dee, at + 11), deeCode.secret, at + 12);
   assert.equal(begun.ok, true, "Dee's code still works: " + JSON.stringify(begun));
 });
+
+test('parallel wrong codes get no more tries than sequential ones', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  r.issue(await r.asOwner(), cal);
+  const at = r.tick();
+  const session = await r.signIn(cal, at);
+  const results = await Promise.all(Array.from({ length: 12 }, (_, i) => r.redeem(session, 'wrong ' + i, at + 1)));
+  const reasons = results.map(x => x.reason);
+  assert.equal(reasons.length, 12, 'ARRANGEMENT: twelve codes were sent at once');
+  assert.equal(reasons.filter(x => x === 'code-invalid').length, 5, 'only five were checked: ' + reasons.join(','));
+  assert.equal(reasons.filter(x => x === 'code-limited').length, 7, 'the rest were refused for the limit');
+});
+
+test('a failure that is not the code\'s does not count toward the limit', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  const code = r.issue(await r.asOwner(), cal);
+  const at = r.tick();
+  const store = r.world.instance.challenges;
+  for (let filled = 0; filled < 2048; filled += 1) {
+    const issued = store.issue({ purpose: 'webauthn.elevate', person_subject_id: 'filler', session_binding: {},
+      challenge: require('node:crypto').randomBytes(32).toString('base64url'), now: at });
+    if (!issued.ok) break;
+  }
+  const session = await r.signIn(cal, at);
+  for (let i = 0; i < 6; i += 1) {
+    const failed = await r.redeem(session, code.secret, at + 1 + i);
+    assert.equal(failed.reason, 'webauthn-unavailable', `ARRANGEMENT: try ${i + 1} fails for the full ceremony store`);
+  }
+  // Five minutes later the fillers have expired, still inside the fifteen-minute window.
+  const later = at + 5 * 60 * 1000 + 100;
+  const begun = await r.redeem(await r.signIn(cal, later), code.secret, later + 1);
+  assert.equal(begun.ok, true, 'the right code works: ' + JSON.stringify(begun));
+});

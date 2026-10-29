@@ -279,6 +279,13 @@ function createService(opts) {
     if (!r || now - r.first >= CODE_REFUSAL_WINDOW_MS) codeRefusals.set(personId, { n: 1, first: now });
     else r.n += 1;
   }
+  function refundCodeRefusal(personId) {
+    const r = codeRefusals.get(personId);
+    if (!r) return;
+    r.n -= 1;
+    if (r.n <= 0) codeRefusals.delete(personId);
+  }
+  const CODE_REFUSAL_REASONS = Object.freeze(['code-invalid', 'code-used', 'code-expired']);
   let fault = null;
 
   function envelopeArgs(optsIn) {
@@ -332,6 +339,17 @@ function createService(opts) {
     const personId = opened.session.subject_id;
     const subj = state.subjects.find(s => s.id === personId && s.tenant === tenant);
     if (!subj || subj.kind !== 'person' || subj.status !== 'active') return FAIL_UNAVAIL;
+    // A code attempt is counted against the member's limit before the first
+    // await, so parallel attempts get no more tries than sequential ones. It
+    // stays counted only if the code itself is refused.
+    let charged = false;
+    function settle(result) {
+      if (charged) {
+        if (result.ok === true) codeRefusals.delete(personId);
+        else if (!CODE_REFUSAL_REASONS.includes(result.reason)) refundCodeRefusal(personId);
+      }
+      return result;
+    }
     if (code !== null) {
       // A code exists only after setup, and only a recent password sign-in
       // may spend it. It is spent below, once the ceremony exists.
@@ -343,6 +361,8 @@ function createService(opts) {
       const signedInAt = opened.session.authenticated_at;
       if (!(env.now >= signedInAt && env.now - signedInAt < CODE_SIGN_IN_MS)) return SIGN_IN_REQUIRED;
       if (codeLimited(personId, env.now)) return CODE_LIMITED;
+      recordCodeRefusal(personId, env.now);
+      charged = true;
     } else if (state.authenticators.some(a => a.tenant === tenant && a.person_subject_id === personId)) {
       // Zero historical authenticator rows (not merely zero unrevoked).
       return FAIL_UNAVAIL;
@@ -373,11 +393,11 @@ function createService(opts) {
       });
     } catch (_) {
       fault = 'options-generation-failed';
-      return FAIL_UNAVAIL;
+      return settle(FAIL_UNAVAIL);
     }
 
     const challenge = options.challenge;
-    if (typeof challenge !== 'string') return FAIL_UNAVAIL;
+    if (typeof challenge !== 'string') return settle(FAIL_UNAVAIL);
     const issued = challenge_store.issue({
       purpose: 'webauthn.register',
       person_subject_id: personId,
@@ -385,7 +405,7 @@ function createService(opts) {
       challenge,
       now: env.now,
     });
-    if (!issued.ok) return FAIL_UNAVAIL;
+    if (!issued.ok) return settle(FAIL_UNAVAIL);
 
     if (code !== null) {
       // The ceremony now exists, so the code is spent: in the same synchronous
@@ -415,19 +435,17 @@ function createService(opts) {
       } catch (e) { spent = e === refusal ? refusal.result : null; }
       if (!spent || spent.ok !== true) {
         challenge_store.take({ ceremony_id: issued.ceremony_id, purpose: 'webauthn.register', now: env.now });
-        if (!spent) return FAIL_UNAVAIL;
-        if (spent.reason !== 'passkey-exists') recordCodeRefusal(personId, env.now);
-        return Object.freeze({ ok: false, reason: spent.reason || 'code-invalid' });
+        if (!spent) return settle(FAIL_UNAVAIL);
+        return settle(Object.freeze({ ok: false, reason: spent.reason || 'code-invalid' }));
       }
-      codeRefusals.delete(personId);
     }
 
-    return Object.freeze({
+    return settle(Object.freeze({
       ok: true,
       options,
       ceremony_id: issued.ceremony_id,
       expires_at: issued.expires_at,
-    });
+    }));
   }
 
   async function finishRegistration(optsIn) {
