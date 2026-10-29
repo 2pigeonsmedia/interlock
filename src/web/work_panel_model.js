@@ -403,6 +403,9 @@
       return ['Answered by ' + who(answer.by) + ' · asked of ' + who(last.asked_of)]
         .concat(answer.reason ? ['Reason: ' + answer.reason] : []);
     }
+    if (typeof answer.source === 'string' && ROOM_SOURCE.test(answer.source)) {
+      return ['Answered in the room by ' + who(answer.by) + ' (message #' + answer.source.slice(answer.source.indexOf('#') + 1) + ')'];
+    }
     return ['Answered here by ' + who(answer.by)];
   }
 

@@ -927,3 +927,10 @@ test('the open dialog knows when its record changed in a newer brief', () => {
   assert.equal(changedSince(brief, 'W-9', 1), false, 'a record the brief does not list is left alone');
   assert.equal(changedSince({ needs_me: [], open: [] }, 'D-2', 100), false);
 });
+
+test('the dialog says a room answer was given in the room, naming the message', () => {
+  const by = { name: 'Scout', kind: 'seat', session: null };
+  assert.deepEqual(answerLines({ answer: { kind: 'direct', by, source: 'answered in the room #7' } }, []),
+    ['Answered in the room by Scout (message #7)']);
+  assert.deepEqual(answerLines({ answer: { kind: 'direct', by, source: '' } }, []), ['Answered here by Scout']);
+});
