@@ -857,11 +857,14 @@ function createWorkService(options) {
     return {
       ok: true,
       cursor: draft.next_event - 1,
-      // Each project's done work and findings are counted, not listed: the
-      // tile collapses them as done (N) and lists them on request.
+      // Each project's done work and findings, and its withdrawn decisions,
+      // are counted, not listed: the tile collapses them and lists them on
+      // request, so a withdrawn question stays reachable for a reopen.
       projects: projects.map(project => Object.assign(publicProject(project), {
         done_count: draft.items.filter(item => item.project === project.id && item.kind !== 'decision' &&
           item.state === 'done').length,
+        withdrawn_count: draft.items.filter(item => item.project === project.id && item.kind === 'decision' &&
+          item.withdrawn).length,
       })),
       needs_me: mine.filter(item => needsMe(item, me)).map(item => row(draft, item)),
       reported_to_me: mine.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&

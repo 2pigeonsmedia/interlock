@@ -334,6 +334,11 @@ test('each project lists its work in place: a heading, an inline edit, rows, and
   assert.match(WORK_PANEL_JS, /make\('p', 'work-project-brief'\)/);
   assert.match(WORK_PANEL_JS, /'Edit ' \+ section\.display_name \+ "'s objective and today"/);
   assert.match(WORK_PANEL_JS, /'done \(' \+ section\.doneCount \+ '\)'/);
+  // Withdrawn decisions stay reachable (and so can be reopened) under the same toggle.
+  assert.match(WORK_PANEL_JS, /' · withdrawn \(' \+ section\.withdrawnCount \+ '\)'/);
+  assert.match(WORK_PANEL_JS, /row\.state === 'done' \|\| row\.state === 'withdrawn'/);
+  // Only the newest load of a project's closed list may render.
+  assert.match(WORK_PANEL_JS, /if \(!current\(state\) \|\| view\.doneLoad !== load\) return;/);
   assert.match(WORK_PANEL_JS, /doneToggle\.setAttribute\('aria-expanded', 'false'\)/);
   assert.match(WORK_PANEL_JS, /'\/api\/work\/list\?project=' \+ encodeURIComponent\(view\.id\) \+ '&limit=' \+ PROJECT_LIMIT/);
   assert.match(WORK_PANEL_JS, /write\('projects\/update', body, view\.status, operation\)/);

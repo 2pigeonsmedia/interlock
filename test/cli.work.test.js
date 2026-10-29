@@ -251,3 +251,12 @@ test('a write prints its operation id before sending so a retry can reuse it', a
   assert.match(lines[0], /^Operation [0-9a-f-]{36} · to retry this exact request, put "operation_id": "[0-9a-f-]{36}" in the file\.$/);
   assert.match(lines[1], /^Created W-9/);
 });
+
+test('work get shows the conditions a decision was asked with', async () => {
+  const decision = Object.assign({}, BRIEF.decisions[0], { scope: 'March only', conditions: 'Only under 500', answer: null });
+  const { dependencies } = world(() => ({ json: { ok: true, item: decision, evidence: [], history: [] } }));
+  const got = await captureCommand(['work', 'get', 'D-4', '--connection', 'Marlow'], dependencies);
+  assert.equal(got.code, EXIT_OK, got.stderr);
+  assert.match(got.stdout, /proposal: Do not guess\./, 'ARRANGEMENT: the decision block rendered');
+  assert.match(got.stdout, /^ {2}asked with conditions: Only under 500$/m);
+});

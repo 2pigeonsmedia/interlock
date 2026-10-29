@@ -2299,6 +2299,7 @@ function renderGet(stdout, result) {
   if (item.kind === 'decision') {
     line(stdout, `  asked of ${who(item.asked_of)} by ${who(item.asked_by)} · scope: ${terminalSafe(item.scope || 'not stated')}`);
     if (item.proposal) line(stdout, `  proposal: ${terminalSafe(item.proposal)}`);
+    if (item.conditions) line(stdout, `  asked with conditions: ${terminalSafe(item.conditions)}`);
     if (item.answer) {
       const a = item.answer;
       const relay = a.kind === 'reported' ? ` · attributed to ${who(a.attributed_to)}, reported by ${who(a.by)}, not confirmed here` : '';

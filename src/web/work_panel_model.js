@@ -254,6 +254,7 @@
       updatedBy: who(project.updated_by),
       updated_at: project.updated_at,
       doneCount: Number.isSafeInteger(project.done_count) ? project.done_count : 0,
+      withdrawnCount: Number.isSafeInteger(project.withdrawn_count) ? project.withdrawn_count : 0,
       rows: rowNodes(rows.filter(row => row.project === project.id)),
     }));
   }
@@ -321,8 +322,9 @@
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])
         .concat(item.rationale ? ['Rationale: ' + item.rationale] : [])
         .concat(item.scope ? ['Scope: ' + item.scope] : [])
+        .concat(item.conditions ? ['Asked with conditions: ' + item.conditions] : [])
         .concat(answer ? ['Answer: ' + answer.text] : [])
-        .concat(answer && answer.conditions ? ['Conditions: ' + answer.conditions] : [])
+        .concat(answer && answer.conditions ? ['Answer conditions: ' + answer.conditions] : [])
         .concat(answer && answer.kind === 'reported' && answer.source ? ['Answer source: ' + answer.source] : [])
         .concat(placeLines(item));
     }
