@@ -64,11 +64,18 @@ test('open asks for the viewer: addressed and asked, carried asks included, in i
   'the event carries the same ask shape GET /api/ai/asks returns');
 });
 
-test('binding is always a tap: no pick, no answer, even with exactly one open ask', () => {
-  assert.equal(Asks.BIND_SINGLE_WITHOUT_TAP, false);
+test('a bare yes, no or go answers the one open ask with no tap; anything else takes a tap', () => {
   const one = [{ ask_id: 7 }];
-  assert.equal(Asks.bindAnswers(one, new Set()), null, 'ordinary talk never closes an ask');
-  assert.deepEqual(Asks.bindAnswers(one, new Set([7])), [{ ask_id: 7, choice: null }]);
+  assert.equal(Asks.bindAnswers(one, new Set(), 'sounds good, will do'), null, 'ordinary talk never closes an ask');
+  assert.equal(Asks.bindAnswers(one, new Set(), 'yes, but'), null, 'only the exact word');
+  assert.deepEqual(Asks.bindAnswers(one, new Set(), ' YES '), [{ ask_id: 7, choice: 'yes' }]);
+  assert.deepEqual(Asks.bindAnswers(one, new Set(), 'Go'), [{ ask_id: 7, choice: 'yes' }]);
+  assert.deepEqual(Asks.bindAnswers(one, new Set(), 'no'), [{ ask_id: 7, choice: 'no' }]);
+  assert.equal(Asks.bindAnswers([{ ask_id: 7 }, { ask_id: 9 }], new Set(), 'yes'), null,
+    'two open asks: a bare yes takes a tap');
+  assert.deepEqual(Asks.bindAnswers(one, new Set([7]), 'merge it'), [{ ask_id: 7, choice: null }]);
+  assert.deepEqual(Asks.bindAnswers(one, new Set([7]), 'no'), [{ ask_id: 7, choice: 'no' }],
+    'a tapped bare word keeps its choice');
   const two = [{ ask_id: 7 }, { ask_id: 9 }];
   assert.deepEqual(Asks.bindAnswers(two, new Set([9, 7, 99])),
     [{ ask_id: 7, choice: null }, { ask_id: 9, choice: null }], 'a stale pick is ignored');

@@ -1534,7 +1534,9 @@ function decorateMessage(article, messageId) {
 function renderBindChips(addressed) {
   askBindChips.replaceChildren();
   askBind.hidden = addressed.length === 0;
-  askBindLabel.textContent = addressed.length > 1 ? 'Answering which?' : 'Answer this ask?';
+  askBindLabel.textContent = addressed.length > 1
+    ? 'Answering which? Tap each one you answer.'
+    : 'A bare yes, no or go answers this ask; anything else, tap it first.';
   for (const ask of addressed) {
     const chip = document.createElement('button');
     chip.type = 'button';
@@ -1591,7 +1593,7 @@ function setAskMode(on) {
 /* The annotation the composer will send, or null for a plain message. */
 function composerAnnotation() {
   const annotation = {};
-  const answers = InterlockAsks.bindAnswers(asksState.openFor(viewerName()).addressed, pickedAsks);
+  const answers = InterlockAsks.bindAnswers(asksState.openFor(viewerName()).addressed, pickedAsks, messageBody.value);
   if (answers) annotation.answers = answers;
   if (!askFields.hidden && askOf.value) {
     annotation.ask = { of: askOf.value, deliver: askLater.checked ? 'later' : 'now' };

@@ -685,6 +685,15 @@ function createWorkService(options) {
     item.updated_at = now;
   }
 
+  /* The first owner's recorded answer stands against an administrator: an
+   * admin who is not her may not replace it or reopen it away. */
+  function guardFirstOwnersAnswer(item, actor) {
+    const recorded = item.answer;
+    if (!recorded || recorded.kind !== 'direct' || !actor.owner || actor.first_owner === true) return;
+    if (typeof actor.first_owner_name === 'string' && recorded.by && recorded.by.kind === 'person' &&
+        recorded.by.name === actor.first_owner_name) fail('first-owner-answer');
+  }
+
   function answer(actor, rawInput) {
     return operation(actor, 'decisions.answer', rawInput, ['id', 'expected_revision', 'text', 'conditions', 'reason'],
       (draft, body, now) => {
@@ -696,6 +705,7 @@ function createWorkService(options) {
         const reason = optionalText(body.reason, SHORT_BYTES, 'reason') ?? '';
         const isAnswerer = actor.subject_id === item.asked_of.subject_id;
         if (!isAnswerer && !actor.owner) fail('not-answerer');
+        guardFirstOwnersAnswer(item, actor);
         const onBehalf = !isAnswerer;
         const previous = item.answer;
         if ((onBehalf || previous !== null) && reason.trim() === '') fail('invalid-reason');
@@ -783,6 +793,7 @@ function createWorkService(options) {
         checkRevision(item, body.expected_revision);
         const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
         if (decisionState(item) === 'awaiting') fail('invalid-state');
+        guardFirstOwnersAnswer(item, actor);
         const askedOf = optionalRef(body.asked_of, 'asked-of');
         if (askedOf === null) fail('invalid-asked-of');
         const previous = item.answer;

@@ -1464,9 +1464,16 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return null;
     }
+    // Who the first owner is, so an administrator cannot overwrite her
+    // recorded answer on a decision (her ruling, 2026-10-29).
+    const who = house.whoami({ cookie_header: request.headers.cookie, activity, now });
+    const roster = house.administrators(requestMeta(request, now));
+    const first = roster && roster.ok === true ? roster.people.find(row => row.first_owner === true) : null;
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null,
       owner: workOwnerFlag(request, authorized, now, activity), now,
+      first_owner: !!(who && who.subject_id === actor.subject_id && who.first_owner === true),
+      first_owner_name: first ? first.name : null,
     });
   }
 
@@ -1481,7 +1488,7 @@ function createFirstOwnerHandler(options) {
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: 'seat',
       session: discriminator && discriminator.session !== undefined ? discriminator.session : null,
-      owner: false, now: Date.now(),
+      owner: false, now: Date.now(), first_owner: false, first_owner_name: null,
     });
   }
 

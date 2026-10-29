@@ -1017,3 +1017,23 @@ test('the latest room answer is the one latest in the room, not the one that arr
   const row = work.list(owner, {}).items.find(entry => entry.id === decision.id);
   assert.equal(row.answer_summary.source, 'answered in the room #95', 'list rows can say where it was answered');
 });
+
+test('an administrator who is not the first owner cannot replace or reopen her recorded answer', () => {
+  const { work } = fresh();
+  const first = Object.assign({}, owner, { first_owner: true, first_owner_name: 'Ana' });
+  const admin = Object.freeze({ subject_id: 'p-2', name: 'Bea', kind: 'person', owner: true, first_owner: false, first_owner_name: 'Ana' });
+  const decision = newDecision(work, lead, owner);
+  const answered = work.answer(first, { operation_id: uuid(), id: decision.id, expected_revision: decision.revision, text: 'yes' }).item;
+  assert.throws(() => work.answer(admin, { operation_id: uuid(), id: decision.id, expected_revision: answered.revision, text: 'no', reason: 'overruled' }),
+    error => error.code === 'first-owner-answer');
+  assert.throws(() => work.reopen(admin, { operation_id: uuid(), id: decision.id, expected_revision: answered.revision, reason: 'again' }),
+    error => error.code === 'first-owner-answer');
+  assert.equal(work.get(owner, { id: decision.id }).item.answer.text, 'yes', 'her answer stands');
+  const reopened = work.reopen(first, { operation_id: uuid(), id: decision.id, expected_revision: answered.revision, reason: 'mine to reopen' }).item;
+  assert.equal(reopened.state, 'awaiting', 'she may reopen her own');
+  // An admin's own recorded answer is not protected from another admin.
+  const other = newDecision(work, lead, builder);
+  const byAdmin = work.answer(admin, { operation_id: uuid(), id: other.id, expected_revision: other.revision, text: 'go', reason: 'on behalf' }).item;
+  assert.equal(work.reopen(Object.assign({}, admin, { subject_id: 'p-3', name: 'Cy' }),
+    { operation_id: uuid(), id: other.id, expected_revision: byAdmin.revision, reason: 'r' }).item.state, 'awaiting');
+});

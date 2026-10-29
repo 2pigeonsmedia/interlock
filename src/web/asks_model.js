@@ -16,9 +16,10 @@
   ]);
   const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver']);
   const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
-  // With exactly one open ask, does a sent message bind to it without a tap?
-  // Off: binding is always a tap, so ordinary talk never closes an ask.
-  const BIND_SINGLE_WITHOUT_TAP = false;
+  // A message that is exactly one of these words, in any case, answers the
+  // sender's one open ask with no tap (Patti, 2026-10-29). Anything else, or
+  // two open asks, takes a tap: ordinary talk never closes an ask.
+  const BARE_ANSWERS = Object.freeze({ yes: 'yes', go: 'yes', no: 'no' });
 
   function exact(value, keys) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -205,18 +206,28 @@
     return last ? last.choice : null;
   }
 
+  /* The choice a bare answer carries, or null when the text is not one. */
+  function bareAnswer(text) {
+    if (typeof text !== 'string') return null;
+    const word = text.trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(BARE_ANSWERS, word) ? BARE_ANSWERS[word] : null;
+  }
+
   /* Which asks a message from the viewer answers. `picked` is the set of
-   * ask ids the viewer tapped. Returns null when nothing binds. */
-  function bindAnswers(openAddressed, picked, choice = null) {
+   * ask ids the viewer tapped. With nothing tapped, a bare yes, no or go
+   * answers the one open ask. Returns null when nothing binds. */
+  function bindAnswers(openAddressed, picked, text = '', choice = null) {
     const ids = openAddressed.map(ask => ask.ask_id);
-    let chosenIds = ids.filter(id => picked.has(id));
-    if (chosenIds.length === 0 && BIND_SINGLE_WITHOUT_TAP && ids.length === 1) chosenIds = ids;
-    if (chosenIds.length === 0) return null;
-    return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice }));
+    const chosenIds = ids.filter(id => picked.has(id));
+    if (chosenIds.length === 0) {
+      const bare = bareAnswer(text);
+      return bare !== null && ids.length === 1 ? [{ ask_id: ids[0], choice: bare }] : null;
+    }
+    return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice: choice ?? bareAnswer(text) }));
   }
 
   const contract = Object.freeze({
-    BIND_SINGLE_WITHOUT_TAP, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers,
+    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {
