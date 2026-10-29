@@ -76,7 +76,7 @@ const OWN_CODES = Object.freeze([
   'invalid-clear', 'archive-invalid', 'archive-stale',
   'invalid-session-discriminator',
   'corrupt-annotations', 'invalid-annotation', 'ask-of-self', 'ask-not-found', 'ask-not-open',
-  'ask-not-answered', 'not-asker', 'unread-addressed',
+  'ask-not-answered', 'not-asker', 'unread-addressed', 'already-posted',
 ]);
 
 function fail(code) {
@@ -639,7 +639,10 @@ function openStore(opts) {
     return meta.next_id - 1;
   }
 
-  function append(untrusted, trusted, annotationInput = null) {
+  /* `requireNew`: a retry under a client id already used is refused, not
+   * replayed, inside this same lock, for a caller that must know its post is
+   * the first under that id. */
+  function append(untrusted, trusted, annotationInput = null, requireNew = false) {
     return exclusive(() => {
       requireOpen();
       const body = closedObject(untrusted, UNTRUSTED_KEYS);
@@ -684,6 +687,7 @@ function openStore(opts) {
           message.subject_id === actor.subject_id &&
           message.client_message_id === actor.client_message_id);
         if (prior) {
+          if (requireNew === true) fail('already-posted');
           const exact = prior.text === body.text && prior.byline === actor.name &&
             prior.kind === actor.kind && prior.product === actor.product &&
             prior.product_provenance === actor.product_provenance;
@@ -991,15 +995,6 @@ function openStore(opts) {
           of: addresseeOf(ask),
         }) : null;
       }).filter(Boolean));
-    });
-  }
-
-  /* Whether this seat already posted a message under this client id. */
-  function hasClientMessage(subjectId, clientMessageId) {
-    return exclusive(() => {
-      requireOpen();
-      return messages.some(message => message.subject_id === subjectId &&
-        message.client_message_id === clientMessageId);
     });
   }
 
@@ -1326,7 +1321,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, hasClientMessage,
+    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers,
   });
 }
 

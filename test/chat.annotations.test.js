@@ -451,3 +451,14 @@ test('the host can read an ask\'s answers from its addressee, oldest first, with
   const facts = await chat.postFacts(yes.id);
   assert.deepEqual(facts.answers.map(row => [row.ask_id, row.by_addressee]), [[ask.id, true]]);
 });
+
+test('a post that must be new is refused, not replayed, when its client id was used, in the same step', async () => {
+  const { chat } = room();
+  const id = 'bbbbbbbb-bbbb-4bbb-8bbb-000000000077';
+  const first = await chat.appendAnnotated({ text: 'Decision: x' }, seat(MARLOW, 'Marlow', id), { ask: { of: 'Codex' } });
+  const replay = await chat.appendAnnotated({ text: 'Decision: x' }, seat(MARLOW, 'Marlow', id), { ask: { of: 'Codex' } });
+  assert.equal(replay.id, first.id, 'the arrangement: an ordinary retry replays');
+  await assert.rejects(chat.appendAnnotated({ text: 'Decision: x' }, seat(MARLOW, 'Marlow', id),
+    { ask: { of: 'Codex' } }, true), error => code(error) === 'already-posted');
+  assert.equal((await chat.read({ after: 0, limit: 10 })).messages.length, 1);
+});

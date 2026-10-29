@@ -1945,21 +1945,22 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 200, Object.assign({}, prior.body, { message }));
       return;
     }
-    // An earlier post under this operation id that no completed ask owns is
-    // never bound to a new decision: answers already given to it were given
-    // to something else.
-    if (ai && await chat.hasClientMessage(chatActor.subject_id, chatActor.client_message_id)) {
-      sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
-      return;
-    }
     const text = (body.about_message ? `re #${body.about_message} ` : '') + `Decision: ${body.title.trim()}`;
     const ask = { of: body.asked_of };
     if (typeof body.scope === 'string' && body.scope.trim() !== '') ask.means = body.scope.trim();
+    // The post must be new. An earlier post under this operation id that no
+    // completed ask owns is never bound to a new decision: answers already
+    // given to it were given to something else. The store refuses it in the
+    // same step as the append, so nothing can land in between.
     let saved;
     try {
-      saved = publicMessage(await chat.appendAnnotated({ text }, chatActor, { ask }));
+      saved = publicMessage(await chat.appendAnnotated({ text }, chatActor, { ask }, true));
       if (!saved) throw new Error('invalid chat result');
     } catch (error) {
+      if (error && error.code === 'already-posted') {
+        sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
+        return;
+      }
       annotationRefusal(request, response, error);
       return;
     }

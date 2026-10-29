@@ -126,12 +126,12 @@ function createChatService(options) {
   }
 
   async function append(body, actor) {
-    return await appendWith(body, actor, null);
+    return await appendWith(body, actor, false, null);
   }
 
   /* A message and its annotation in one call: the ask has to be known before
    * recipients are frozen on the row, or it could neither ring nor hold. */
-  async function appendAnnotated(body, actor, annotationIn) {
+  async function appendAnnotated(body, actor, annotationIn, requireNew = false) {
     // Every key is optional on the wire; absent means none.
     const input = closedObject(annotationIn, ['ask', 'answers', 'status', 'read_through']);
     if (!input) throw fail('invalid-annotation');
@@ -144,7 +144,7 @@ function createChatService(options) {
       if (!entry) throw fail('invalid-annotation');
       return { ask_id: entry.ask_id, choice: entry.choice === undefined ? null : entry.choice };
     });
-    return await appendWith(body, actor, {
+    return await appendWith(body, actor, requireNew === true, {
       ask: input.ask === undefined ? null : input.ask,
       answers: normalized,
       status: input.status === undefined ? null : input.status,
@@ -152,7 +152,7 @@ function createChatService(options) {
     });
   }
 
-  async function appendWith(body, actor, annotationIn) {
+  async function appendWith(body, actor, requireNew, annotationIn) {
     requireOpen();
     const now = Date.now();
     await store.touch(actor.subject_id, now);
@@ -198,7 +198,7 @@ function createChatService(options) {
     const recipients = ringRecipients(
       body && body.text, roster, actor && actor.subject_id, askTarget, deliver,
     );
-    const saved = await store.append(body, Object.assign({}, actor, { recipients }), annotation);
+    const saved = await store.append(body, Object.assign({}, actor, { recipients }), annotation, requireNew);
     // Store append resolves only after its durable commit. A waiter can never
     // observe a wake for a message the append caller has not durably earned.
     for (const waiter of [...waiters]) waiter.notify();
@@ -588,11 +588,6 @@ function createChatService(options) {
     return await store.readAnnotationRows(query);
   }
 
-  async function hasClientMessage(subjectId, clientMessageId) {
-    requireOpen();
-    return await store.hasClientMessage(subjectId, clientMessageId);
-  }
-
   async function postFacts(messageId) {
     requireOpen();
     return await store.postFacts(messageId);
@@ -609,7 +604,7 @@ function createChatService(options) {
   }
 
   return Object.freeze({
-    append, appendAnnotated, annotate, readAnnotations, openAsks, postFacts, addresseeAnswers, hasClientMessage,
+    append, appendAnnotated, annotate, readAnnotations, openAsks, postFacts, addresseeAnswers,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
