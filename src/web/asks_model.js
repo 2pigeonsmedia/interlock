@@ -167,7 +167,15 @@
       return Object.freeze({ addressed: Object.freeze(addressed), asked: Object.freeze(asked) });
     }
 
-    return Object.freeze({ reset, apply, ask, post, openFor });
+    /* Every ask in this era its addressee has answered at least once, open or
+     * not, by the server's stored fact. */
+    function answeredIds() {
+      return Object.freeze([...asks.values()]
+        .filter(found => found.answers.some(answer => answer.by_addressee))
+        .map(found => found.ask_id).sort((a, b) => a - b));
+    }
+
+    return Object.freeze({ reset, apply, ask, post, openFor, answeredIds });
   }
 
   /* What the ask's own line says, for every viewer. */
