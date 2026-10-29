@@ -50,7 +50,7 @@ test('open asks for the viewer: addressed and asked, carried asks included, in i
   const state = Asks.createAsksState();
   state.apply([
     { seq: 1, ts: 9, kind: 'carry', by: 'Lead', ask_id: 4, archive_id: 'transcript-x',
-      asked_at: 5, ask: ask('Ana', 'old scope') },
+      asked_at: 5, ask: ask('Ana', 'old scope'), kept_open: false },
     post(2, 20, 'Ana', { ask: ask('Scout') }),
     post(3, 21, 'Scout', { ask: ask('Ana', 'new scope') }),
   ]);

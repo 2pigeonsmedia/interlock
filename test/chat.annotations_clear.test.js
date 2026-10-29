@@ -71,6 +71,12 @@ async function seeded() {
   return { dir, room, ids: { open: open1.id, answered: answered.id, withdrawn: withdrawn.id, kept: kept.id } };
 }
 
+const ORIGINAL_KINDS = ['post', 'post', 'post', 'post', 'post', 'withdraw', 'post', 'keep_open'];
+
+async function rowKinds(chat) {
+  return (await chat.readAnnotations({ after: 0, limit: 20 })).rows.map(row => row.kind);
+}
+
 async function openIds(chat) {
   return (await chat.openAsks(ANA)).addressed.map(ask => ask.ask_id);
 }
@@ -196,7 +202,7 @@ test('crash after the staged side-car is written, before its marker: the clear n
   assert.equal(fs.existsSync(chatFile(dir, 'annotations.next.jsonl')), false);
   assert.equal((await again.chat.read({ after: 0, limit: 20 })).messages.length, 6);
   assert.deepEqual(await openIds(again.chat), [ids.open, ids.kept]);
-  assert.equal((await again.chat.readAnnotations({ after: 0, limit: 20 })).rows.length, 8);
+  assert.deepEqual(await rowKinds(again.chat), ORIGINAL_KINDS, 'the live rows stand, not carries');
 });
 
 test('crash before the transcript marker: staged and marker are discarded, the room stands', async () => {
@@ -212,6 +218,7 @@ test('crash before the transcript marker: staged and marker are discarded, the r
   }
   assert.equal((await again.chat.read({ after: 0, limit: 20 })).messages.length, 6);
   assert.deepEqual(await openIds(again.chat), [ids.open, ids.kept]);
+  assert.deepEqual(await rowKinds(again.chat), ORIGINAL_KINDS, 'the live rows stand, not carries');
 });
 
 async function assertCleared(dir, ids) {
@@ -277,4 +284,66 @@ test('the side-car archive is invisible to the archive listing\'s file rule', as
   // The listing counts .json and .md only; the side-car ends in neither.
   assert.equal(names.filter(name => name.endsWith('.json') || name.endsWith('.md')).length, 2);
   assert.deepEqual(room.archive.listArchives().map(row => row.archive_id), [receipt.archive_id]);
+});
+
+/* What an older server's clear does to the files: it empties the transcript
+ * and moves the era, and never touches the side-car it does not know. */
+function olderServerClear(dir) {
+  const meta = JSON.parse(fs.readFileSync(chatFile(dir, 'meta.json'), 'utf8'));
+  fs.writeFileSync(chatFile(dir, 'messages.jsonl'), '');
+  fs.writeFileSync(chatFile(dir, 'receipts.jsonl'), '');
+  fs.writeFileSync(chatFile(dir, 'meta.json'),
+    JSON.stringify({ schema: 2, first_id: meta.next_id, next_id: meta.next_id }) + '\n');
+}
+
+test('after an older server clears during a rollback, a carried ask that was answered stays answered', async () => {
+  const { dir, room, ids } = await seeded();
+  await room.archive.clearTranscript();
+  await room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ids.open }] });
+  assert.deepEqual(await openIds(room.chat), [ids.kept], 'the arrangement: one carried ask answered');
+  await room.chat.close();
+  olderServerClear(dir);
+  const again = open(dir);
+  assert.deepEqual(await openIds(again.chat), [],
+    'the carry rows belong to the cleared era and no longer bind');
+  assert.deepEqual((await again.chat.readAnnotations({ after: 0, limit: 20 })).rows, []);
+});
+
+test('a kept-open ask is still kept open after it is carried', async () => {
+  const { room, ids } = await seeded();
+  await room.archive.clearTranscript();
+  const kept = (await room.chat.openAsks(ANA)).addressed.find(ask => ask.ask_id === ids.kept);
+  assert.equal(kept.kept_open, true);
+  await room.chat.appendAnnotated({ text: 'still yes' }, PERSON, { answers: [{ ask_id: ids.kept }] });
+  assert.deepEqual(await openIds(room.chat), [ids.open, ids.kept],
+    'an answer to a kept-open ask leaves it open, before and after a clear');
+});
+
+test('a dropped side-car with its marker still pending opens empty, as missing means empty', async () => {
+  const { dir, room } = await seeded();
+  await failing('renameSync', from => base(from) === 'annotations.next.jsonl',
+    () => assert.rejects(room.archive.clearTranscript()));
+  fs.unlinkSync(chatFile(dir, 'annotations.jsonl'));
+  fs.unlinkSync(chatFile(dir, 'annotations.next.jsonl'));
+  assert.equal(fs.existsSync(chatFile(dir, 'annotations.clear.pending.json')), true,
+    'the arrangement: only the marker is left');
+  const again = open(dir);
+  assert.deepEqual(await openIds(again.chat), []);
+  assert.equal(fs.existsSync(chatFile(dir, 'annotations.clear.pending.json')), false);
+});
+
+test('recovery will not install the carried asks when the side-car archive is gone or altered', async () => {
+  const { dir, room, ids } = await seeded();
+  await failing('renameSync', from => base(from) === 'annotations.next.jsonl',
+    () => assert.rejects(room.archive.clearTranscript()));
+  const marker = JSON.parse(fs.readFileSync(chatFile(dir, 'annotations.clear.pending.json'), 'utf8'));
+  const file = path.join(dir, 'archives', marker.archive_id + '.annotations.jsonl');
+  const bytes = fs.readFileSync(file);
+  fs.appendFileSync(file, '\n');
+  assert.throws(() => openStore({ dataDir: dir }), error => code(error) === 'inconsistent-state');
+  fs.unlinkSync(file);
+  assert.throws(() => openStore({ dataDir: dir }), error => code(error) === 'inconsistent-state');
+  fs.writeFileSync(file, bytes);
+  assert.deepEqual(await openIds(open(dir).chat), [ids.open, ids.kept],
+    'with the archive restored, recovery installs the carried asks');
 });

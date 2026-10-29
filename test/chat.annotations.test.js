@@ -308,3 +308,59 @@ test('a missing side-car is an empty one: the room opens with no asks and its me
   assert.equal((await again.read({ after: 0, limit: 10 })).messages.length, 1);
   assert.equal((await again.readAnnotations({ after: 0, limit: 10 })).rows.length, 0);
 });
+
+test('a person\'s status post waits for an unread ask of her, though no ask rings a person', async () => {
+  const { chat } = room();
+  const ask = await chat.appendAnnotated({ text: 'merge?' }, seat(MARLOW, 'Marlow'),
+    { ask: { of: 'Ana', means: 'I merge' } });
+  assert.deepEqual(ringed(ask), [], 'the arrangement: nothing rang Ana');
+  await assert.rejects(chat.appendAnnotated({ text: 'done for today' }, PERSON,
+    { status: 'done', read_through: 0 }), error => {
+    assert.equal(code(error), 'unread-addressed');
+    assert.deepEqual(error.unread_ids, [ask.id]);
+    return true;
+  });
+});
+
+test('a side-car replaced under an open store stops the store', async () => {
+  const { chat, dir } = room();
+  await chat.appendAnnotated({ text: 'A?' }, PERSON, { ask: { of: 'Marlow' } });
+  const file = path.join(dir, 'chat', 'annotations.jsonl');
+  const copy = file + '.copy';
+  fs.copyFileSync(file, copy);
+  fs.renameSync(copy, file);
+  await assert.rejects(chat.openAsks(MARLOW), error => code(error) === 'log-changed');
+});
+
+test('an AI retry is answered by its first post even after the addressee has left', async () => {
+  let people = [
+    { subject_id: ANA, name: 'Ana', kind: 'person', created_at: Date.now() },
+    { subject_id: MARLOW, name: 'Marlow', kind: 'seat', created_at: Date.now() },
+    { subject_id: CODEX, name: 'Codex', kind: 'seat', created_at: Date.now() },
+  ];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-'));
+  const chat = createChatService({ store: openStore({ dataDir: dir }), participants: () => people });
+  const id = 'bbbbbbbb-bbbb-4bbb-8bbb-000000000099';
+  const first = await chat.appendAnnotated({ text: 'run it?' }, seat(MARLOW, 'Marlow', id),
+    { ask: { of: 'Codex' } });
+  people = people.filter(row => row.name !== 'Codex');
+  const again = await chat.appendAnnotated({ text: 'run it?' }, seat(MARLOW, 'Marlow', id),
+    { ask: { of: 'Codex' } });
+  assert.equal(again.id, first.id);
+  await assert.rejects(chat.appendAnnotated({ text: 'new' }, seat(MARLOW, 'Marlow'),
+    { ask: { of: 'Codex' } }), error => code(error) === 'ask-target-unknown',
+  'a new post still needs a current participant');
+});
+
+// Outcome only: truncate-in-place versus rewrite differs in a crash window a
+// test in one process cannot reach. The code is the evidence for that part.
+test('a torn side-car tail is cut back to its last whole row', async () => {
+  const { chat, dir, reopen } = room();
+  await chat.appendAnnotated({ text: 'A?' }, PERSON, { ask: { of: 'Marlow' } });
+  await chat.close();
+  const file = path.join(dir, 'chat', 'annotations.jsonl');
+  const before = fs.statSync(file);
+  fs.appendFileSync(file, '{"v":1,"seq":2,"ts":');
+  reopen();
+  assert.equal(fs.statSync(file).size, before.size);
+});

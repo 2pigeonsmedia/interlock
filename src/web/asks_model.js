@@ -11,7 +11,9 @@
     'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through',
   ]);
   const LIFECYCLE_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id']);
-  const CARRY_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id', 'archive_id', 'asked_at', 'ask']);
+  const CARRY_KEYS = Object.freeze([
+    'seq', 'ts', 'kind', 'by', 'ask_id', 'archive_id', 'asked_at', 'ask', 'kept_open',
+  ]);
   const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver']);
   const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by']);
   // With exactly one open ask, does a sent message bind to it without a tap?
@@ -54,7 +56,7 @@
     if (row.kind === 'carry') {
       return exact(row, CARRY_KEYS) && positive(row.seq) && name(row.by) &&
         positive(row.ask_id) && typeof row.archive_id === 'string' &&
-        Number.isSafeInteger(row.asked_at) && validAsk(row.ask);
+        Number.isSafeInteger(row.asked_at) && validAsk(row.ask) && typeof row.kept_open === 'boolean';
     }
     return exact(row, LIFECYCLE_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id);
   }
@@ -117,6 +119,7 @@
           if (row.ask) addAsk(row.message_id, row.by, row.ask, row.ts, null);
         } else if (row.kind === 'carry') {
           addAsk(row.ask_id, row.by, row.ask, row.asked_at, row.archive_id);
+          asks.get(row.ask_id).kept_open = row.kept_open;
         } else {
           const ask = asks.get(row.ask_id);
           if (!ask) continue;

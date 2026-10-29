@@ -1455,7 +1455,8 @@ function decorateMessage(article, messageId) {
   if (ask) {
     const chip = document.createElement('div');
     chip.className = 'ask-chip';
-    chip.dataset.askState = ask.state;
+    chip.dataset.askId = String(ask.ask_id);
+    chip.dataset.state = ask.state;
     const line = document.createElement('span');
     line.className = 'ask-line';
     line.textContent = InterlockAsks.askLine(ask, Date.now());
