@@ -326,3 +326,58 @@ test('a member whose membership is suspended cannot begin a passkey with a code'
   assert.equal(r.repo.read().admission_capabilities.find(c => c.id === code.capability_id).consumed_at, null,
     'and the code is not spent');
 });
+
+test('a refused code writes nothing to the identity state', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  const code = r.issue(await r.asOwner(), cal);
+  const session = await r.signIn(cal);
+  const file = require('node:path').join(r.world.dir, 'identity-state.v2.json');
+  const fs = require('node:fs');
+  const before = fs.readFileSync(file);
+  const beforeStat = fs.statSync(file);
+  for (const wrong of [code.secret + 'x', 'not a code at all']) {
+    const refused = await r.redeem(session, wrong);
+    assert.equal(refused.reason, 'code-invalid', 'ARRANGEMENT: the code is refused inside the spend');
+  }
+  assert.ok(before.equals(fs.readFileSync(file)), 'the state file is byte-for-byte unchanged');
+  assert.equal(fs.statSync(file).mtimeMs, beforeStat.mtimeMs, 'and was not rewritten');
+  const begun = await r.redeem(session, code.secret);
+  assert.equal(begun.ok, true, 'the right code still works after two wrong ones');
+});
+
+test('after five refused codes a member waits fifteen minutes, the right code included', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  const code = r.issue(await r.asOwner(), cal);
+  const at = r.tick();
+  const session = await r.signIn(cal, at);
+  for (let i = 0; i < 5; i += 1) {
+    const refused = await r.redeem(session, code.secret + i, at + 1 + i);
+    assert.equal(refused.reason, 'code-invalid', `ARRANGEMENT: wrong code ${i + 1} is refused as wrong`);
+  }
+  const store = r.world.instance.challenges;
+  const ceremonies = store.health().challenges;
+  const limited = await r.redeem(session, code.secret, at + 10);
+  assert.equal(limited.reason, 'code-limited', 'the sixth try is refused for the limit, even with the right code');
+  assert.equal(store.health().challenges, ceremonies, 'and no ceremony was made for it');
+  assert.equal(r.repo.read().admission_capabilities.find(c => c.id === code.capability_id).consumed_at, null,
+    'the code is not spent');
+  const later = at + 15 * 60 * 1000 + 1;
+  const begun = await r.redeem(await r.signIn(cal, later), code.secret, later + 1);
+  assert.equal(begun.ok, true, 'fifteen minutes later the right code works: ' + JSON.stringify(begun));
+});
+
+test('the limit is per member: another member\'s refused codes do not count', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  const dee = await r.join('Dee', false);
+  const deeCode = r.issue(await r.asOwner(), dee);
+  const at = r.tick();
+  const calSession = await r.signIn(cal, at);
+  for (let i = 0; i < 6; i += 1) await r.redeem(calSession, 'wrong ' + i, at + 1 + i);
+  assert.equal((await r.redeem(calSession, 'wrong again', at + 10)).reason, 'code-limited',
+    'ARRANGEMENT: Cal is at the limit');
+  const begun = await r.redeem(await r.signIn(dee, at + 11), deeCode.secret, at + 12);
+  assert.equal(begun.ok, true, "Dee's code still works: " + JSON.stringify(begun));
+});

@@ -1108,6 +1108,7 @@ const ADD_PASSKEY_REFUSALS = Object.freeze({
   'code-expired': 'That code has expired or was replaced. Ask the owner for a new one.',
   'passkey-exists': 'You already have a passkey.',
   'sign-in-required': 'Sign in again, then enter the code.',
+  'code-limited': 'Too many codes were not accepted. Wait 15 minutes, then try again.',
 });
 
 addPasskeyButton.addEventListener('click', () => {

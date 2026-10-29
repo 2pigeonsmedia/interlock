@@ -841,7 +841,7 @@ function createFirstOwnerHandler(options) {
   // The member, signed in, redeems that code; it begins their first passkey.
   // Without a valid code no ceremony begins.
   const CODE_REFUSALS = Object.freeze(['code-invalid', 'code-used', 'code-expired', 'passkey-exists',
-    'sign-in-required']);
+    'sign-in-required', 'code-limited']);
   async function accountPasskeyBegin(request, response, body) {
     if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
     const input = closedObject(body, ['code']);

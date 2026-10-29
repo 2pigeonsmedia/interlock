@@ -248,6 +248,12 @@ async function codeRefusals({ runtime, ownerDevice }) {
   refusedWith(await begin(dee, forFay), 'code-invalid');
   refusedWith(await begin(dee, 'not-a-real-code-but-long-enough-to-look-like-one'), 'code-invalid');
 
+  // Five refused codes, then the member waits: the sixth is refused for the limit.
+  for (let i = 0; i < 3; i += 1) {
+    refusedWith(await begin(dee, `another-wrong-code-${i}-long-enough-to-look-real`), 'code-invalid');
+  }
+  refusedWith(await begin(dee, forFay), 'code-limited');
+
   // Used twice: the first use begins the passkey (here the prompt fails).
   let fay = await login(runtime, 'Fay', fayPassword);
   assert.equal((await begin(fay, forFay)).status, 200, 'ARRANGEMENT: the first use begins');

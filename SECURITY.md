@@ -154,7 +154,9 @@ no others.
   member who has none; it is stored as a digest, works once within 24 hours,
   and is redeemed only from that member's own session, signed in with their
   password in the last ten minutes, so it needs both the code and the
-  member's password. An administrator can do everything the owner can,
+  member's password. A refused code changes nothing on disk, and after five
+  refused codes a member waits fifteen minutes before any code is checked
+  again, the right one included. An administrator can do everything the owner can,
   except grant or remove administrator rights. Nobody, the first owner
   included, can remove, demote or suspend the first owner, or reset or revoke
   their password or passkeys. Interlock identifies the first owner from the
