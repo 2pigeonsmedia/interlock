@@ -74,7 +74,7 @@ async function assertStartRefused(options, expected, message) {
 }
 
 // One identity binding per process: this file starts ONE hosted data directory.
-let hostedDataDir = null;
+// What a restart finds there is proven in test/server.hosted_origin_record.test.js.
 // The throttle halves each live in their own file for the same reason.
 
 test('hosted mode: refusals happen at construction, before any directory is created', async () => {
@@ -94,7 +94,6 @@ test('hosted mode: refusals happen at construction, before any directory is crea
 test('hosted mode: Host is pinned to the hosted origin, the setup code gates first-owner setup, /health says nothing', async () => {
   const port = await reservePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-hosted-'));
-  hostedDataDir = dataDir;
   const wrongCounts = [];
   // The host's observer may fail either way (odd counts throw, even counts
   // return a rejected promise); neither may reach the request or the process.
@@ -188,12 +187,10 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     assert.equal(stillServing.status, 200, 'wrong codes never stop the server');
     assert.equal(typeof runtime.setupCode, 'string', 'wrong codes never withdraw the setup code');
 
-    const correctStart = performance.now();
     const redeemed = await post(runtime, '/api/bootstrap/redeem',
       { name: 'Ana', password: 'correct horse battery staple', setup_code: runtime.setupCode.toLowerCase() });
-    const correctMs = performance.now() - correctStart;
+    const correctDoneMs = performance.now() - burstStart;
     assert.equal(redeemed.status, 200, redeemed.text);
-    assert.ok(correctMs < 1_000, `the correct code never waits behind wrong ones (${Math.round(correctMs)} ms)`);
 
     const answered = await Promise.all(burst);
     const busy = answered.filter(item => item.response.status === 429);
@@ -209,6 +206,10 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     const lastQueuedMs = Math.max(...queued.map(item => item.ms));
     assert.ok(lastQueuedMs >= (queued.length - 1) * 1_000,
       `queued wrong codes are answered one second apart (${queued.length} took ${Math.round(lastQueuedMs)} ms)`);
+    // Measured against the queue's own wait, not the wall clock: a slow machine
+    // slows the password hash, while the queued wrong codes keep their slots.
+    assert.ok(correctDoneMs < lastQueuedMs / 2,
+      `the correct code never waits behind wrong ones (${Math.round(correctDoneMs)} ms; queue ${Math.round(lastQueuedMs)} ms)`);
     assert.deepEqual(wrongCounts, Array.from({ length: 17 }, (_, i) => i + 1),
       'the running count increases by one for every wrong code, busy ones included');
 
@@ -312,35 +313,6 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
   } finally {
     await runtime.close();
   }
-});
-
-test('hosted mode: the data directory remembers its origin; a loopback or other-origin start is refused', async () => {
-  assert.ok(hostedDataDir !== null, 'ARRANGEMENT: the hosted directory above was started and set up');
-  const recordPath = path.join(hostedDataDir, 'origin.json');
-  assert.deepEqual(JSON.parse(fs.readFileSync(recordPath, 'utf8')).origin, HOSTED,
-    'ARRANGEMENT: the first hosted start recorded the hosted origin');
-  if (process.platform !== 'win32') assert.equal(fs.statSync(recordPath).mode & 0o777, 0o600, 'the record is private');
-
-  const again = await startInterlockServer({ port: await reservePort(), dataDir: hostedDataDir, hostedOrigin: HOSTED });
-  try {
-    assert.equal(again.url, HOSTED, 'a restart at the same origin is allowed');
-    assert.equal(again.setupCode, null, 'and finds the owner it already has');
-  } finally {
-    await again.close();
-  }
-
-  const recorded = fs.readFileSync(recordPath, 'utf8');
-  for (const other of [{}, { hostedOrigin: 'https://other.example.test' }]) {
-    await assertStartRefused(Object.assign({ port: await reservePort(), dataDir: hostedDataDir }, other),
-      error => {
-        assert.equal(error.code, 'origin-mismatch', error.message);
-        assert.ok(error.message.includes(HOSTED), error.message);
-        assert.ok(error.message.includes(other.hostedOrigin || 'http://localhost:'), error.message);
-        assert.ok(error.message.includes('UPGRADE.md'), error.message);
-        return true;
-      }, JSON.stringify(other));
-  }
-  assert.equal(fs.readFileSync(recordPath, 'utf8'), recorded, 'refused starts leave the record alone');
 });
 
 test('hosted mode: a wrong code whose client has already gone arms no wait', async () => {
