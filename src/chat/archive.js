@@ -420,7 +420,23 @@ function publicReceipt(receipt) {
   });
 }
 
-function publicListing(id, verified) {
+// The side-car download is listed only when its file exists and would be
+// served: an archive from before the side-car, or one whose file fails the
+// download's own check, lists null rather than a link that refuses.
+function annotationsDownload(dataDir, id) {
+  let body;
+  try {
+    const file = archivePaths(dataDir, id).annotations;
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    body = fs.readFileSync(file);
+  } catch (_) {
+    return null;
+  }
+  return validAnnotationsArchive(body) ? `/api/transcript/exports/${id}.annotations.jsonl` : null;
+}
+
+function publicListing(id, verified, annotations) {
   const document = verified.document;
   return Object.freeze({
     archive_id: id,
@@ -431,6 +447,7 @@ function publicListing(id, verified) {
     downloads: Object.freeze({
       markdown: `/api/transcript/exports/${id}.md`,
       json: `/api/transcript/exports/${id}.json`,
+      annotations,
     }),
   });
 }
@@ -492,7 +509,8 @@ function createArchiveService(options) {
       if (formats.size !== 2 || !formats.has('json') || !formats.has('md')) {
         throw error('archive-verification-failed');
       }
-      listed.push(publicListing(id, verifyArchiveSet(input.dataDir, id)));
+      listed.push(publicListing(id, verifyArchiveSet(input.dataDir, id),
+        annotationsDownload(input.dataDir, id)));
     }
     listed.sort((left, right) => {
       if (left.exported_at !== right.exported_at) {

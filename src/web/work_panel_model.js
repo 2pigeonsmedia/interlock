@@ -49,13 +49,31 @@
     return new Map(brief.projects.map(project => [project.id, project.display_name]));
   }
 
-  // Everything that waits on the viewer, across every active project. The
-  // brief's needs_me is already unfiltered; nothing here narrows it.
-  function needsYou(brief, now) {
+  // An open ask addressed to the viewer, as one Needs you row: who asked,
+  // what a yes means, how long it has waited. The ask is a message in the
+  // room, so its row shows the message rather than opening a work record.
+  function askRow(ask, now) {
+    return {
+      id: 'ask-' + ask.ask_id,
+      kind: 'ask',
+      askId: ask.ask_id,
+      projectName: 'Ask',
+      title: ask.means === null ? 'Ask in message #' + ask.ask_id : 'A yes means: ' + oneLine(ask.means),
+      ask: ask.carried_from ? 'Asked before the transcript was cleared' : 'Message #' + ask.ask_id,
+      by: 'asked by ' + ask.by,
+      waiting: waitingLabel(ask.asked_at, now),
+      action: 'Show ask',
+    };
+  }
+
+  // Everything that waits on the viewer, across every active project, and
+  // every open ask addressed to the viewer, oldest first. The brief's
+  // needs_me is already unfiltered; nothing here narrows it.
+  function needsYou(brief, now, asks = []) {
     const names = projectNames(brief);
-    const rows = [...brief.needs_me].sort((a, b) => a.updated_at - b.updated_at).map(row => {
+    const workRows = brief.needs_me.map(row => {
       const decision = row.kind === 'decision';
-      return {
+      return { at: row.updated_at, row: {
         id: row.id,
         kind: row.kind,
         projectName: names.has(row.project) ? names.get(row.project) : row.project,
@@ -67,8 +85,10 @@
           : 'asked by ' + who(row.created_by) + (row.responsible ? ' · responsible: ' + who(row.responsible) : ''),
         waiting: waitingLabel(row.updated_at, now),
         action: decision ? 'Answer' : 'Open work',
-      };
+      } };
     });
+    const rows = workRows.concat(asks.map(ask => ({ at: ask.asked_at, row: askRow(ask, now) })))
+      .sort((a, b) => a.at - b.at).map(entry => entry.row);
     return { count: rows.length, rows };
   }
 

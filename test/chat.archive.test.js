@@ -173,7 +173,8 @@ test('archive listing is verified, closed, newest-first, and loud about missing 
     assert.deepEqual(row.downloads, {
       markdown: `/api/transcript/exports/${row.archive_id}.md`,
       json: `/api/transcript/exports/${row.archive_id}.json`,
-    });
+      annotations: `/api/transcript/exports/${row.archive_id}.annotations.jsonl`,
+    }, 'an export writes the side-car beside the transcript, and the listing links it');
   }
 
   const secondJsonPath = path.join(root, second.archive_id + '.json');

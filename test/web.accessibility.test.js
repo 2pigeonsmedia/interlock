@@ -204,6 +204,19 @@ test('the work panel writes through deliberate forms', () => {
   assert.match(WORK_PANEL_JS, /text \+ ' ' \+ item\.id \+ ': ' \+ item\.title/);
 });
 
+test('Needs you takes the open asks addressed to the viewer from the room\'s asks event', () => {
+  assert.match(WORK_PANEL_JS, /document\.addEventListener\('interlock:asks', asksChanged, \{ signal \}\)/,
+    'the listener is removed with the panel session');
+  assert.match(WORK_PANEL_JS, /event\.detail\.addressed/);
+  assert.doesNotMatch(WORK_PANEL_JS, /detail\.asked\b/, 'asks the viewer made never wait on the viewer');
+  assert.match(WORK_PANEL_JS, /model\(\)\.needsYou\(brief, Date\.now\(\), state \? state\.asks : \[\]\)/);
+  assert.match(WORK_PANEL_JS, /querySelector\('\[data-message-id="' \+ row\.askId \+ '"\]'\)/,
+    'an ask row shows its message in the transcript');
+  assert.match(WORK_PANEL_JS, /an ask from before a clear is in History/);
+  assert.match(WORK_PANEL_JS, /user, deps, brief: null, projectViews: new Map\(\), asks: \[\]/,
+    'a new viewer starts with no asks from the last one');
+});
+
 test('exposure and notify travel through the ordinary composer, and a message can become work', () => {
   assert.match(ROOM_JS, /interlock:message-saved/);
   assert.match(ROOM_JS, /interlock:message-failed/);

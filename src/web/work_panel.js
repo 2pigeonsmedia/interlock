@@ -124,14 +124,29 @@
     if (!match || document.activeElement !== match) element('needs-you-toggle').focus();
   }
 
+  // The ask's message in the transcript, brought into view. An ask carried
+  // across a clear has its message in an archive, not on the page.
+  function showAsk(row) {
+    const target = document.querySelector('[data-message-id="' + row.askId + '"]');
+    if (!target) {
+      setStatus('Message #' + row.askId + ' is not on this page; an ask from before a clear is in History.');
+      return;
+    }
+    target.scrollIntoView({ block: 'center' });
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus();
+  }
+
   function renderNeedsYou(brief) {
-    const needs = model().needsYou(brief, Date.now());
+    const state = session;
+    const needs = model().needsYou(brief, Date.now(), state ? state.asks : []);
     element('needs-you-count').textContent = String(needs.count);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
     element('needs-you-list').replaceChildren(...needs.rows.map(row => {
       const card = make('div', 'work-row');
+      const open = row.kind === 'ask' ? () => showAsk(row) : () => openItem(row.id);
       card.append(
-        openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, () => openItem(row.id), row.id),
+        openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, open, row.id),
         make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting),
         make('p', '', row.ask + ' — ' + row.by),
       );
@@ -1180,6 +1195,19 @@
     showDrawer();
   }
 
+  // The room reports the viewer's open asks on every change, and once with
+  // none when the era resets. Only the asks addressed to the viewer wait on
+  // them; the ones they made are someone else's Needs you.
+  function asksChanged(event) {
+    const state = session;
+    if (!state) return;
+    const addressed = event && event.detail && Array.isArray(event.detail.addressed) ? event.detail.addressed : [];
+    state.asks = addressed.filter(ask => ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
+      typeof ask.by === 'string' && Number.isSafeInteger(ask.asked_at) &&
+      (ask.means === null || typeof ask.means === 'string'));
+    if (state.brief) renderNeedsYou(state.brief);
+  }
+
   // ── start and stop ─────────────────────────────────────────────────────
 
   // A signed-out page keeps nothing of the last viewer's record on screen.
@@ -1200,7 +1228,7 @@
   function start(user, deps) {
     stop();
     const state = {
-      user, deps, brief: null, projectViews: new Map(),
+      user, deps, brief: null, projectViews: new Map(), asks: [],
       refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },
@@ -1221,6 +1249,7 @@
     document.addEventListener('interlock:message-work', openCreateDialog, { signal });
     document.addEventListener('interlock:message-saved', shareSaved, { signal });
     document.addEventListener('interlock:message-failed', shareFailed, { signal });
+    document.addEventListener('interlock:asks', asksChanged, { signal });
     setStatus('');
     refresh();
     state.timer = setInterval(refresh, WORK_POLL_MS);
