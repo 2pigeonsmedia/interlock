@@ -171,6 +171,8 @@ test('the line is bounded in length and in time, and a waiting sign-in still cou
     const waited = await Promise.all(guesses);
     assert.ok(waited.every(r => r.ok === false), 'a sign-in that waits past the bound is refused');
     assert.equal(room.throttle.health().waiting, 0, 'and leaves the line');
+    assert.equal(room.service.busyRefusals(), 20,
+      'all twenty count as refused for capacity: seventeen at once, three after waiting');
 
     const room2 = await heldRoom({ maxWaiting: 100, queueWaitMs: 200 });
     try {
