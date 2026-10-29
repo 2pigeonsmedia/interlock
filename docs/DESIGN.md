@@ -157,6 +157,14 @@ Owner-only actions stay disabled for signed-out people and non-owners.
   </div>
 </article>
 
+<!-- an ask on its message, under .message-text (slice 1; the room.js contract) -->
+<div class="ask-chip" data-ask-id="42" data-state="open">
+  <p class="ask-means">Asks Ana · a yes means: I merge the candidate to main and nothing else</p>
+  <button type="button" aria-pressed="false">Yes</button>
+  <button type="button" aria-pressed="true">No</button>
+  <button type="button">Reply</button>
+</div>
+
 <!-- one roster card, as room.js builds it -->
 <div class="person-card" data-kind="seat">
   <i class="presence-lamp" data-state="heard" aria-hidden="true"></i>
@@ -180,6 +188,11 @@ Rules the CSS relies on:
   colour. (A delivery-gated variant was tried and rejected: an `@all` that
   rang nobody rendered plain, which read as broken rather than as
   information.)
+- `.ask-chip` is the ask a message carries, read from the annotations
+  side-car, never from message text. `data-state` is `open`, `answered` or
+  `withdrawn`. The chosen answer is the button with `aria-pressed="true"`;
+  pressed is the only way a choice shows, so it reads the same without
+  colour. The scope line is written with `textContent`.
 - `data-addressed="true"` on a message tints the row and lights its teal left
   rail; `.delivery` states are words, not colours alone.
 - `.message-id` renders as a bordered plate — the id the CLI shows as `[n]`;
@@ -230,6 +243,14 @@ trimmed to the section headings and lists; `work_panel.js` fills the lists:
   <button class="work-open" type="button" aria-label="Answer D-7: Ship the fix">Ship the fix</button>
   <p class="work-state">Operations · D-7 · waiting 2h</p>
   <p>Ship on Friday — asked by Lead</p>
+</div>
+
+<!-- one open ask addressed to the viewer, as a Needs you row; its button
+     brings message #42 into view -->
+<div class="work-row">
+  <button class="work-open" type="button" aria-label="Show ask ask-42: A yes means: I merge the candidate" data-id="ask-42">A yes means: I merge the candidate</button>
+  <p class="work-state">Ask · ask-42 · waiting 5h</p>
+  <p>Message #42 — asked by Lead</p>
 </div>
 
 <!-- one project, in place, as work_panel.js builds it inside #project-list -->
