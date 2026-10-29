@@ -2262,6 +2262,16 @@ function createFirstOwnerHandler(options) {
     return { actor: Object.freeze({ subject_id: self.subject_id, name: self.name, kind: 'person', owner: true, now }), live, now };
   }
 
+  // The first owner's subject id, found by the name identity marks as first
+  // owner among the live people; null when it cannot be resolved.
+  function firstOwnerSubject(request, who) {
+    const roster = house.administrators(requestMeta(request, who.now));
+    const firstName = roster && roster.ok === true
+      ? (roster.people.find(row => row.first_owner === true) || {}).name : null;
+    const first = who.live.find(row => row.kind === 'person' && row.name === firstName);
+    return first ? first.subject_id : null;
+  }
+
   async function createGrant(request, response, body) {
     if (!people) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
     if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -2270,16 +2280,20 @@ function createFirstOwnerHandler(options) {
     }
     const who = await grantActor(request, response);
     if (!who) return undefined;
-    const input = { holder_name: body.holder_name, holder_kind: body.holder_kind, project: body.project,
-      scope: body.scope, until: body.until };
+    const holder = who.live.find(row => row.name === body.holder_name && row.kind === body.holder_kind);
+    const firstOwnerSubjectId = firstOwnerSubject(request, who);
+    if (!firstOwnerSubjectId) return sendJson(request, response, 503, { ok: false, error: 'unavailable' });
+    const input = { holder_subject_id: holder ? holder.subject_id : '', holder_name: body.holder_name,
+      holder_kind: body.holder_kind, project: body.project, scope: body.scope, until: body.until };
+    const context = { now: who.now, firstOwnerSubjectId };
     try {
-      if (!who.live.some(row => row.name === body.holder_name && row.kind === body.holder_kind)) {
+      if (!holder || typeof holder.subject_id !== 'string') {
         throw Object.assign(new Error('invalid-holder'), { code: 'invalid-holder' });
       }
       if (body.project !== null && !people.liveProjects().includes(body.project)) {
         throw Object.assign(new Error('unknown-project'), { code: 'unknown-project' });
       }
-      people.service.grant(who.actor, input, { now: who.now, check: true });
+      people.service.grant(who.actor, input, Object.assign({ check: true }, context));
     } catch (error) {
       return sendGrantError(request, response, error);
     }
@@ -2288,7 +2302,7 @@ function createFirstOwnerHandler(options) {
       return sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
     }
     try {
-      const row = people.service.grant(who.actor, input, { now: who.now });
+      const row = people.service.grant(who.actor, input, context);
       const made = people.service.grants(who.now).find(item => item.grant_id === row.grant_id);
       return sendJson(request, response, 201, { ok: true, grant: made });
     } catch (error) {
@@ -2304,13 +2318,10 @@ function createFirstOwnerHandler(options) {
     }
     const who = await grantActor(request, response);
     if (!who) return undefined;
-    const roster = house.administrators(requestMeta(request, who.now));
-    const firstName = roster && roster.ok === true
-      ? (roster.people.find(row => row.first_owner === true) || {}).name : null;
-    const first = who.live.find(row => row.kind === 'person' && row.name === firstName);
-    if (!first) return sendJson(request, response, 503, { ok: false, error: 'unavailable' });
+    const firstOwnerSubjectId = firstOwnerSubject(request, who);
+    if (!firstOwnerSubjectId) return sendJson(request, response, 503, { ok: false, error: 'unavailable' });
     const input = { grant_id: body.grant_id, reason: body.reason };
-    const context = { firstOwnerSubjectId: first.subject_id };
+    const context = { firstOwnerSubjectId };
     try {
       people.service.revoke(who.actor, input, Object.assign({ check: true }, context));
     } catch (error) {
@@ -2329,8 +2340,14 @@ function createFirstOwnerHandler(options) {
     }
   }
 
-  function sendGrants(request, response) {
-    const grants = people.service.grants(Date.now());
+  async function sendGrants(request, response) {
+    let live;
+    try {
+      live = new Set((await chat.listParticipants()).map(row => row.subject_id).filter(id => typeof id === 'string'));
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+    }
+    const grants = people.service.grants(Date.now(), live);
     if (grants === null) return sendJson(request, response, 503, { ok: false, error: 'store-damaged' });
     return sendJson(request, response, 200, { ok: true, grants });
   }
@@ -2435,7 +2452,11 @@ function createFirstOwnerHandler(options) {
     });
   }
 
-  async function listSettingsParticipants(request, response) {
+  // Live participants are always listed; seats ended in the last week are
+  // listed newest first, a page at a time unless the owner asks for all.
+  const SETTINGS_ENDED_PAGE = 50;
+
+  async function listSettingsParticipants(request, response, allEnded = false) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
@@ -2445,7 +2466,9 @@ function createFirstOwnerHandler(options) {
     try {
       await releaseIdle(now);
       const live = (await chat.listParticipants()).filter(row => row.kind === 'seat' || row.kind === 'person');
-      const ended = house.listRecentEndedSeats({ now, since: now - SETTINGS_ENDED_MS });
+      const allRecent = house.listRecentEndedSeats({ now, since: now - SETTINGS_ENDED_MS })
+        .slice().sort((left, right) => right.ended_at - left.ended_at);
+      const ended = allEnded ? allRecent : allRecent.slice(0, SETTINGS_ENDED_PAGE);
       const ids = [...live, ...ended].map(row => row.subject_id).filter(id => typeof id === 'string');
       // The chat store reads at most 64 participants per call; a busy room has
       // more than that within its ended-seat window, so read them in batches.
@@ -2487,6 +2510,7 @@ function createFirstOwnerHandler(options) {
         ok: true,
         allow_ended_reuse: readRoomSettings(dataDir).allow_ended_reuse,
         manage_admins: Boolean(roster && roster.ok === true && roster.manage === true),
+        ended_more: allRecent.length - ended.length,
         participants: Object.freeze([...people, ...seats, ...endedSeats].map(withFlags)),
       });
     } catch (_) {
@@ -2742,14 +2766,14 @@ function createFirstOwnerHandler(options) {
         return;
       }
       if (pathname === '/api/settings/participants') {
-        if (request.method !== 'GET' || target.search !== '') {
+        if (request.method !== 'GET' || (target.search !== '' && target.search !== '?ended=all')) {
           sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
             ok: false,
             error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-settings-query',
           }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
           return;
         }
-        await listSettingsParticipants(request, response);
+        await listSettingsParticipants(request, response, target.search === '?ended=all');
         return;
       }
       if (people && (pathname === '/api/grants' || pathname === '/api/ai/grants')) {
@@ -2759,8 +2783,8 @@ function createFirstOwnerHandler(options) {
           }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
           return;
         }
-        if (pathname === '/api/grants') listGrants(request, response);
-        else listAiGrants(request, response);
+        if (pathname === '/api/grants') await listGrants(request, response);
+        else await listAiGrants(request, response);
         return;
       }
       if (pathname === '/api/participants') {

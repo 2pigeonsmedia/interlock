@@ -19,9 +19,13 @@ function assignRow(extra) {
     BY, extra || {});
 }
 
+function profileRow(line) {
+  return Object.assign({ v: 1, ts: 1000, kind: 'profile', person_name: 'Ana', line }, BY);
+}
+
 function grantRow(id, extra) {
   return Object.assign({
-    v: 1, ts: 1000, kind: 'grant', grant_id: id, holder_name: 'Scout', holder_kind: 'seat',
+    v: 1, ts: 1000, kind: 'grant', grant_id: id, holder_subject_id: 'subject-scout', holder_name: 'Scout', holder_kind: 'seat',
     project: 'finance', scope: 'run the finance cutover', until: null,
   }, BY, extra || {});
 }
@@ -140,4 +144,21 @@ test('grant ids only go up: a reused or lower id is refused at append and at loa
   const dup = Object.assign(grantRow('G-2'), { seq: 3 });
   fs.appendFileSync(file, JSON.stringify(dup) + '\n');
   assert.equal(openPeopleStore({ dataDir: dir }).damaged, true);
+});
+
+test('a write that fails before any byte lands leaves the record open; the next write succeeds', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-people-'));
+  const store = openPeopleStore({ dataDir: dir });
+  store.append(profileRow('first'));
+  const file = path.join(dir, 'room', 'people.jsonl');
+  const before = fs.readFileSync(file);
+  fs.chmodSync(file, 0o400);
+  try {
+    assert.throws(() => store.append(profileRow('refused')), 'ARRANGEMENT: a read-only file refuses the write');
+  } finally {
+    fs.chmodSync(file, 0o600);
+  }
+  assert.equal(store.damaged, false, 'nothing was written, so the record stays open');
+  assert.deepEqual(fs.readFileSync(file), before);
+  assert.equal(store.append(profileRow('after')).seq, 2, 'the next write lands without a restart');
 });

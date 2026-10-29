@@ -70,7 +70,7 @@ function roomWith(liveSeats, endedSeats) {
   return { handler, calls };
 }
 
-async function settings(handler) {
+async function settings(handler, query = '') {
   const response = Object.assign(new EventEmitter(), {
     destroyed: false, writableEnded: false, headersSent: false, statusCode: 200, body: '',
     setHeader() {},
@@ -79,7 +79,7 @@ async function settings(handler) {
     end(chunk) { if (chunk) this.body += chunk; this.writableEnded = true; },
   });
   const request = Object.assign(Readable.from([]), {
-    method: 'GET', url: '/api/settings/participants',
+    method: 'GET', url: '/api/settings/participants' + query,
     headers: { host: 'localhost:4100', cookie: 'session=x' },
     socket: { remoteAddress: '127.0.0.1' },
   });
@@ -89,15 +89,29 @@ async function settings(handler) {
 
 test('Settings lists a room with more than 64 participants in its window', async () => {
   const small = roomWith(3, 60);
-  const fits = await settings(small.handler);
+  const fits = await settings(small.handler, '?ended=all');
   assert.equal(fits.status, 200, 'ARRANGEMENT: 64 participants fit one call');
   assert.equal(fits.json.participants.length, 64);
 
   const busy = roomWith(19, 57);
-  const answered = await settings(busy.handler);
+  const answered = await settings(busy.handler, '?ended=all');
   assert.equal(answered.status, 200, JSON.stringify(answered.json));
   assert.equal(answered.json.participants.length, 77, 'one person, 19 live seats and 57 ended seats');
+  assert.equal(answered.json.ended_more, 0);
   assert.ok(busy.calls.every(count => count <= 64), `every store call stays within its bound: ${busy.calls}`);
   const seatRows = answered.json.participants.filter(row => row.kind === 'seat');
   assert.ok(seatRows.every(row => row.last_heard === 5), 'every seat, in every batch, carries its state');
+});
+
+test('Settings lists the 50 newest ended seats and counts the rest', async () => {
+  const busy = roomWith(19, 57);
+  const page = await settings(busy.handler);
+  assert.equal(page.status, 200, JSON.stringify(page.json));
+  const ended = page.json.participants.filter(row => row.live === false);
+  assert.equal(ended.length, 50);
+  assert.equal(page.json.ended_more, 7);
+  assert.equal(page.json.participants.filter(row => row.live === true).length, 20, 'live participants are never paged');
+  assert.ok(ended.every(row => row.ended_at >= 1_000 + 7), 'the newest ended seats are the ones listed');
+  const refused = await settings(busy.handler, '?ended=some');
+  assert.equal(refused.status, 400);
 });

@@ -1195,8 +1195,8 @@ function validSettingsParticipant(value) {
     (value.ended_at === null || Number.isSafeInteger(value.ended_at));
 }
 
-async function loadSettingsParticipants() {
-  const response = await fetch('/api/settings/participants', {
+async function loadSettingsParticipants(allEnded = false) {
+  const response = await fetch('/api/settings/participants' + (allEnded ? '?ended=all' : ''), {
     cache: 'no-store', credentials: 'same-origin',
   });
   const result = await readJson(response);
@@ -1208,12 +1208,26 @@ async function loadSettingsParticipants() {
   if (!response.ok || !result || result.ok !== true ||
       typeof result.allow_ended_reuse !== 'boolean' ||
       typeof result.manage_admins !== 'boolean' ||
+      !Number.isSafeInteger(result.ended_more) || result.ended_more < 0 ||
       !Array.isArray(result.participants) ||
       result.participants.some(row => !validSettingsParticipant(row))) {
     throw new Error('invalid-settings');
   }
   allowEndedReuse.checked = result.allow_ended_reuse;
   renderSettingsParticipants(result);
+  if (result.ended_more > 0) {
+    // Seats ended this week beyond the newest page are one click away.
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'quiet-action';
+    more.textContent = `Show ${result.ended_more} more ended ${result.ended_more === 1 ? 'seat' : 'seats'}`;
+    more.addEventListener('click', () => {
+      loadSettingsParticipants(true).catch(() => {
+        setSettingsStatus(settingsPeopleStatus, 'The ended seats could not be loaded. Try again.', 'error');
+      });
+    });
+    settingsParticipantList.append(more);
+  }
   return result;
 }
 
@@ -1444,7 +1458,7 @@ function validGrant(value) {
     textOrNull(value.project) && typeof value.scope === 'string' &&
     (value.until === null || Number.isSafeInteger(value.until)) &&
     typeof value.by_name === 'string' && Number.isSafeInteger(value.at) &&
-    ['active', 'revoked', 'expired'].includes(value.state) &&
+    ['active', 'revoked', 'expired', 'ended'].includes(value.state) &&
     (value.revoked_at === null || Number.isSafeInteger(value.revoked_at)) &&
     textOrNull(value.revoked_by) && textOrNull(value.reason) &&
     (value.state === 'revoked') === (value.revoked_at !== null);

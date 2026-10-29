@@ -449,7 +449,11 @@ passkey step-up. Every rule is checked before the step-up is used: the holder
 is in the room, the project is live, the grant is active, and an administrator
 does not revoke a grant the first owner made (`403 first-owner-grant`).
 `GET /api/grants` (signed-in people) and `GET /api/ai/grants` (AI bearer) list
-every grant with its `state`: `active`, `revoked` or `expired`. The holder of a
+every grant with its `state`: `active`, `revoked`, `expired`, or `ended` (its
+holder has left the room). A grant belongs to the participant it was made for,
+not to a name: a later person or AI session with the same name holds nothing.
+While the first owner's grant on a project is active, only the first owner can
+make another grant on that project (`403 first-owner-grant`). The holder of a
 project's newest active grant is that project's lead, and may assign AIs to
 that project; a grant does nothing else.
 

@@ -43,8 +43,10 @@ const LIMITS = Object.freeze({
 const BASE_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'by_subject_id', 'by_name']);
 const KEYS = Object.freeze({
   assign: Object.freeze(BASE_KEYS.concat(['seat_name', 'project', 'how'])),
+  // A grant is made to one participant: its subject id, never its name, so a
+  // later holder of the name (a new person, a new seat generation) holds nothing.
   grant: Object.freeze(BASE_KEYS.concat([
-    'grant_id', 'holder_name', 'holder_kind', 'project', 'scope', 'until',
+    'grant_id', 'holder_subject_id', 'holder_name', 'holder_kind', 'project', 'scope', 'until',
   ])),
   revoke: Object.freeze(BASE_KEYS.concat(['grant_id', 'reason'])),
   presence: Object.freeze(BASE_KEYS.concat(['subject_id', 'middle', 'waiting_on', 'need'])),
@@ -124,6 +126,7 @@ function parseRow(value, expectedSeq) {
     case 'grant':
       ok = typeof row.grant_id === 'string' && GRANT_ID.test(row.grant_id) &&
         Number.isSafeInteger(grantNumber(row.grant_id)) &&
+        boundedString(row.holder_subject_id, MAX_SUBJECT_BYTES) &&
         boundedString(row.holder_name, MAX_NAME_BYTES) && HOLDER_KINDS.includes(row.holder_kind) &&
         (row.project === null || (typeof row.project === 'string' && PROJECT_ID.test(row.project))) &&
         oneLine(row.scope, LIMITS.scope) &&
@@ -211,6 +214,18 @@ function openPeopleStore(options) {
   }
 
   /* `row` is every key of its kind except `seq`, which the store assigns. */
+  function restoredTo(size) {
+    try {
+      const now = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+      if (now === size) return true;
+      if (now < size) return false;
+      fs.truncateSync(filePath, size);
+      return fs.statSync(filePath).size === size;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function append(input) {
     if (state !== 'ready') fail('store-damaged');
     if (!plainObject(input) || Object.prototype.hasOwnProperty.call(input, 'seq')) fail('invalid-row');
@@ -219,6 +234,8 @@ function openPeopleStore(options) {
     if (row.kind === 'grant' && grantNumber(row.grant_id) <= highestGrant) fail('grant-id-reused');
     const buffer = Buffer.from(JSON.stringify(row) + '\n', 'utf8');
     const created = !fs.existsSync(filePath);
+    let sizeBefore = 0;
+    try { sizeBefore = created ? 0 : fs.statSync(filePath).size; } catch (_) { fail('store-unavailable'); }
     try {
       if (created) {
         fs.mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -233,9 +250,9 @@ function openPeopleStore(options) {
       }
       if (created) fsyncDirectory(root);
     } catch (error) {
-      // A partial line may now sit at the end of the file; stop writing
-      // rather than append after it.
-      state = 'damaged'; reason = 'uncertain-append';
+      // Nothing written, or a partial line cut back off: the file is as it was
+      // and the record stays open. Only a tail that cannot be removed shuts it.
+      if (!restoredTo(sizeBefore)) { state = 'damaged'; reason = 'uncertain-append'; }
       throw error;
     }
     rows.push(row);

@@ -206,6 +206,12 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     assert.equal(of(await rows(), 'Scout').presence, null, 'a message clears its author\'s presence line');
     const profile = await post(runtime, '/api/profile', { line: 'BLUF, bullets' }, owner);
     assert.equal(profile.status, 200, profile.text);
+    const grantState = async () => (await call(runtime, { path: '/api/grants', headers: { cookie: owner.cookie } }))
+      .json.grants.find(item => item.holder_name === 'Scout').state;
+    assert.equal(await grantState(), 'active', 'ARRANGEMENT: Scout holds an active grant');
+    const left = await aiPost('/api/ai/leave', {}, scoutAuth);
+    assert.equal(left.status, 200, left.text);
+    assert.equal(await grantState(), 'ended', 'a grant ends when its holder leaves the room');
 
     const bad = await call(runtime, { path: '/api/ai/admissions', method: 'POST',
       body: Object.assign({}, knock, { request_id: crypto.randomUUID(), name: 'Bad', model: 'a\nb' }) });

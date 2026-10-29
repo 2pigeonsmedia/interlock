@@ -146,13 +146,16 @@ function createPeopleService(options) {
     return written;
   }
 
-  function stateOf(entry, now) {
+  // `live`, when given, is the set of subject ids still in the room: a grant
+  // whose holder has left (removed, or a seat whose session ended) is ended.
+  function stateOf(entry, now, live) {
     if (entry.revoked_at !== null) return 'revoked';
     if (entry.row.until !== null && entry.row.until <= now) return 'expired';
+    if (live instanceof Set && !live.has(entry.row.holder_subject_id)) return 'ended';
     return 'active';
   }
 
-  function publicGrant(entry, now) {
+  function publicGrant(entry, now, live) {
     const row = entry.row;
     return Object.freeze({
       grant_id: row.grant_id,
@@ -163,7 +166,7 @@ function createPeopleService(options) {
       until: row.until,
       by_name: row.by_name,
       at: row.ts,
-      state: stateOf(entry, now),
+      state: stateOf(entry, now, live),
       revoked_at: entry.revoked_at,
       revoked_by: entry.revoked_by,
       reason: entry.reason,
@@ -173,10 +176,21 @@ function createPeopleService(options) {
   function holdsActiveGrantFor(actor, project, now) {
     if (project === null) return false;
     for (const entry of grantsById.values()) {
-      if (entry.row.project === project && entry.row.holder_name === actor.name &&
-          entry.row.holder_kind === actor.kind && stateOf(entry, now) === 'active') return true;
+      if (entry.row.project === project && entry.row.holder_subject_id === actor.subject_id &&
+          stateOf(entry, now) === 'active') return true;
     }
     return false;
+  }
+
+  /* The first owner's active grant on a project, if any: while it stands only
+   * the first owner changes that project's lead. */
+  function firstOwnerGrantOn(project, firstOwnerSubjectId, now) {
+    if (project === null || typeof firstOwnerSubjectId !== 'string') return null;
+    for (const entry of grantsById.values()) {
+      if (entry.row.project === project && entry.row.by_subject_id === firstOwnerSubjectId &&
+          stateOf(entry, now) === 'active') return entry;
+    }
+    return null;
   }
 
   // ---- writes ------------------------------------------------------------
@@ -211,18 +225,22 @@ function createPeopleService(options) {
    * refuse before it spends a step-up on the act. */
   function grant(actor, input, context) {
     requireActor(actor);
-    const body = request(input, ['holder_name', 'holder_kind', 'project', 'scope'], ['until']);
-    if (!plainObject(context) || !Number.isSafeInteger(context.now)) fail('invalid-request');
-    if (!validName(body.holder_name) || !HOLDER_KINDS.includes(body.holder_kind) ||
+    const body = request(input, ['holder_subject_id', 'holder_name', 'holder_kind', 'project', 'scope'], ['until']);
+    if (!plainObject(context) || !Number.isSafeInteger(context.now) ||
+        !validName(context.firstOwnerSubjectId)) fail('invalid-request');
+    if (!validName(body.holder_subject_id) || !validName(body.holder_name) || !HOLDER_KINDS.includes(body.holder_kind) ||
         !validProject(body.project) || !oneLine(body.scope, LIMITS.scope) ||
         !(body.until === null || (Number.isSafeInteger(body.until) && body.until > context.now))) {
       fail('invalid-request');
     }
     if (actor.kind !== 'person' || actor.owner !== true) fail('not-authorized');
+    if (actor.subject_id !== context.firstOwnerSubjectId &&
+        firstOwnerGrantOn(body.project, context.firstOwnerSubjectId, context.now)) fail('first-owner-grant');
     if (damaged()) fail('store-damaged');
     if (context.check === true) return null;
     return write(Object.assign(base(actor, 'grant'), {
       grant_id: store.nextGrantId(),
+      holder_subject_id: body.holder_subject_id,
       holder_name: body.holder_name,
       holder_kind: body.holder_kind,
       project: body.project,
@@ -311,22 +329,22 @@ function createPeopleService(options) {
     return assignments.get(seatName) || null;
   }
 
-  function grants(now) {
+  function grants(now, live) {
     if (damaged()) return null;
-    return Object.freeze([...grantsById.values()].map(entry => publicGrant(entry, now)));
+    return Object.freeze([...grantsById.values()].map(entry => publicGrant(entry, now, live)));
   }
 
-  function activeGrants(now) {
+  function activeGrants(now, live) {
     if (damaged()) return null;
-    return Object.freeze(grants(now).filter(item => item.state === 'active'));
+    return Object.freeze(grants(now, live).filter(item => item.state === 'active'));
   }
 
   /* The holder of the newest active grant with this project. */
-  function leadOf(project, now) {
+  function leadOf(project, now, live) {
     if (damaged()) return null;
     let newest = null;
     for (const entry of grantsById.values()) {
-      if (entry.row.project === project && stateOf(entry, now) === 'active' &&
+      if (entry.row.project === project && stateOf(entry, now, live) === 'active' &&
           (newest === null || entry.row.seq > newest.row.seq)) newest = entry;
     }
     if (!newest) return null;

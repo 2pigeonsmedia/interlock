@@ -32,8 +32,9 @@ function at(actor, now) {
 
 function grantTo(people, actor, holder, project, extra) {
   return people.grant(actor, Object.assign({
-    holder_name: holder.name, holder_kind: holder.kind, project, scope: 'lead the ' + project + ' work',
-  }, extra || {}), { now: actor.now });
+    holder_subject_id: holder.subject_id, holder_name: holder.name, holder_kind: holder.kind, project,
+    scope: 'lead the ' + project + ' work',
+  }, extra || {}), { now: actor.now, firstOwnerSubjectId: OWNER.subject_id });
 }
 
 test('assign: join is the server only, self is the seat named, assigned is an owner', () => {
@@ -104,24 +105,24 @@ test('grant: owner only, closed validation, ids increase and are never reused af
   const reopened = open(dir).people;
   assert.equal(grantTo(reopened, OWNER, WREN, 'finance').grant_id, 'G-4');
 
-  const ok = { holder_name: 'Scout', holder_kind: 'seat', project: 'finance', scope: 'ok' };
+  const ok = { holder_subject_id: SCOUT.subject_id, holder_name: 'Scout', holder_kind: 'seat', project: 'finance', scope: 'ok' };
   for (const bad of [
     { scope: '' }, { scope: 'x'.repeat(301) }, { scope: 'a\nb' }, { scope: 'tab\there' },
     { holder_kind: 'bot' }, { project: 'Finance' }, { until: NOW }, { until: NOW - 1 }, { until: 1.5 },
     { extra: 1 },
   ]) {
-    assert.throws(() => people.grant(OWNER, Object.assign({}, ok, bad), { now: NOW }),
+    assert.throws(() => people.grant(OWNER, Object.assign({}, ok, bad), { now: NOW, firstOwnerSubjectId: OWNER.subject_id }),
       { code: 'invalid-request' }, JSON.stringify(bad));
   }
   assert.equal(people.grant(OWNER, Object.assign({}, ok, { scope: 'x'.repeat(300), until: NOW + 1 }),
-    { now: NOW }).until, NOW + 1);
+    { now: NOW, firstOwnerSubjectId: OWNER.subject_id }).until, NOW + 1);
 });
 
 test('revoke: the first owner can revoke an admin grant and an own grant; an admin cannot revoke the first owner grant', () => {
   const { people } = open();
   const fromOwner = grantTo(people, OWNER, SCOUT, 'finance');
   const fromAdmin = grantTo(people, ADMIN, WREN, 'stateroom');
-  const fromAdmin2 = grantTo(people, ADMIN2, WREN, 'finance');
+  const fromAdmin2 = grantTo(people, ADMIN2, WREN, 'ops');
 
   assert.throws(() => people.revoke(ADMIN, { grant_id: fromOwner.grant_id }, FIRST), { code: 'first-owner-grant' });
   assert.throws(() => people.revoke(ADMIN2, { grant_id: fromOwner.grant_id }, FIRST), { code: 'first-owner-grant' });
@@ -226,13 +227,13 @@ test('a damaged store: reads null, writes refused', () => {
 test('a checked grant or revoke runs every rule and writes nothing', () => {
   const { dir, people } = open();
   const file = path.join(dir, 'room', 'people.jsonl');
-  const made = people.grant(OWNER, { holder_name: 'Scout', holder_kind: 'seat', project: 'finance', scope: 'leads the map' },
-    { now: NOW });
+  const made = people.grant(OWNER, { holder_subject_id: SCOUT.subject_id, holder_name: 'Scout', holder_kind: 'seat',
+    project: 'finance', scope: 'leads the map' }, { now: NOW, firstOwnerSubjectId: OWNER.subject_id });
   const before = fs.readFileSync(file);
-  assert.equal(people.grant(OWNER, { holder_name: 'Wren', holder_kind: 'seat', project: 'finance', scope: 'x' },
-    { now: NOW, check: true }), null);
-  assert.throws(() => people.grant(OWNER, { holder_name: 'Wren', holder_kind: 'seat', project: 'finance', scope: '' },
-    { now: NOW, check: true }), { code: 'invalid-request' });
+  assert.equal(people.grant(OWNER, { holder_subject_id: WREN.subject_id, holder_name: 'Wren', holder_kind: 'seat',
+    project: 'finance', scope: 'x' }, { now: NOW, check: true, firstOwnerSubjectId: OWNER.subject_id }), null);
+  assert.throws(() => people.grant(OWNER, { holder_subject_id: WREN.subject_id, holder_name: 'Wren', holder_kind: 'seat',
+    project: 'finance', scope: '' }, { now: NOW, check: true, firstOwnerSubjectId: OWNER.subject_id }), { code: 'invalid-request' });
   assert.equal(people.revoke(OWNER, { grant_id: made.grant_id }, { firstOwnerSubjectId: OWNER.subject_id, check: true }), null);
   assert.deepEqual(fs.readFileSync(file), before, 'a check writes nothing');
   assert.equal(people.activeGrants(NOW).length, 1);
@@ -246,4 +247,26 @@ test('a seat\'s reported model is written by the server only, keyed by seat name
   assert.throws(() => people.setModel(SERVER, { seat_name: 'Scout', model: 'x'.repeat(41) }), { code: 'invalid-request' });
   assert.equal(open(dir).people.modelOf('Scout'), 'Opus 5.5');
   assert.equal(people.modelOf('Wren'), null);
+});
+
+test('a grant binds to its holder\'s subject, never the name, and ends when the holder leaves', () => {
+  const { people } = open();
+  grantTo(people, OWNER, SCOUT, 'finance');
+  const nextScout = Object.freeze(Object.assign({}, SCOUT, { subject_id: 'subject-scout-generation-2' }));
+  assert.equal(people.assign(SCOUT, { seat_name: 'Wren', project: 'finance', how: 'assigned' }, { projects: ['finance'] }).how,
+    'assigned', 'ARRANGEMENT: the granted subject may assign into its project');
+  assert.throws(() => people.assign(nextScout, { seat_name: 'Wren', project: 'finance', how: 'assigned' }, { projects: ['finance'] }),
+    { code: 'not-authorized' }, 'a later holder of the same name holds nothing');
+  assert.equal(people.grants(NOW, new Set([SCOUT.subject_id]))[0].state, 'active');
+  assert.equal(people.grants(NOW, new Set([nextScout.subject_id]))[0].state, 'ended', 'the holder has left the room');
+  assert.equal(people.leadOf('finance', NOW, new Set([nextScout.subject_id])), null);
+});
+
+test('while the first owner\'s grant on a project stands, only she changes its lead', () => {
+  const { people } = open();
+  grantTo(people, ADMIN, WREN, 'ops');
+  assert.equal(grantTo(people, ADMIN, SCOUT, 'ops').grant_id, 'G-2', 'ARRANGEMENT: an admin replaces an admin\'s lead');
+  grantTo(people, OWNER, SCOUT, 'finance');
+  assert.throws(() => grantTo(people, ADMIN, WREN, 'finance'), { code: 'first-owner-grant' });
+  assert.equal(grantTo(people, OWNER, WREN, 'finance').grant_id, 'G-4', 'the first owner herself may');
 });
