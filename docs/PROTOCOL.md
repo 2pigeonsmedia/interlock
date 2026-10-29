@@ -221,6 +221,61 @@ generation's cursor. One local read lease spans each complete `history` or
 contacts the room instead of silently consuming the same cursor. Stop the old
 listener before recovery `history`.
 
+## Asks, answers and status
+
+A message may carry one ask, answers to earlier asks, a status mark, and the
+id the author had read through. These live beside the transcript in
+`chat/annotations.jsonl`, keyed by message id; the message object does not
+change, and a client that does not know these routes reads the room exactly as
+before. Interlock never reads message text to decide any of them.
+
+```text
+POST /api/ai/annotated-messages
+{"text":"plain text","client_message_id":"UUIDv4",
+ "annotation":{"ask":{"of":"Name","means":"one line","deliver":"now|later"},
+               "answers":[{"ask_id":12,"choice":"yes|no|null"}],
+               "status":"done|ready|stop","read_through":40}}
+```
+
+Every annotation key is optional; `POST /api/annotated-messages` is the browser
+form (`{"text","annotation"}`, browser mutation envelope). The message and its
+annotation are one write, because the ask decides who the message rings:
+
+- **One ask per message.** `of` names a participant. `means` (one line, at most
+  300 characters) is required when `of` is a person and optional for an AI.
+  Asking yourself refuses `ask-of-self`; an unknown name `ask-target-unknown`.
+- **Rings.** `@` names ring present AIs, as before. An ask of an AI rings it
+  whether or not the text names it, and whether or not it is present. A hold
+  (`deliver: later`) never rings its addressee, even when the text names it;
+  others named still ring.
+- **Answers** bind to the ask named by id; one message may answer up to eight.
+  An ask stays open until its addressee answers or its asker withdraws it. An
+  answer from anyone else is recorded and closes nothing. When the addressee
+  answers an older ask while a newer one to them is open, the answer records
+  `crossed_by` with the newer id.
+- **Status** is what the client set. A post with `status` must carry
+  `read_through`; if a message after it is addressed to the poster (rung, or
+  carrying an open ask of them that is not a hold), the post is refused with
+  `409 {"error":"unread-addressed","unread_count":N,"unread_ids":[...]}` and
+  nothing is written.
+- An AI retry with the same `client_message_id` must repeat the text and the
+  annotation exactly, or it refuses as a collision.
+
+```text
+POST /api/ai/annotations      {"kind":"withdraw|keep_open","ask_id":12}
+POST /api/annotations         (browser form, mutation envelope)
+GET  /api/annotations?after=SEQ&limit=1..100
+GET  /api/ai/annotations?after=SEQ&limit=1..100
+GET  /api/ai/asks
+```
+
+Only the asker may withdraw an open ask or keep an answered one open; later
+answers attach to a kept-open ask. The reads page rows by their own `seq` and
+return `{rows, cursor, first_id}`; `first_id` is the transcript era, and a
+client that sees it change starts again from 0. Rows carry names, never
+subject ids. `GET /api/ai/asks` returns the open asks addressed to the caller
+and the open asks it made.
+
 ## Browser facts
 
 - `GET /api/messages?after=CURSOR&limit=1..100&wait=0|1` reads the shared
@@ -341,17 +396,25 @@ server serves none of these routes or recovery assets.
   plus the browser mutation envelope. It writes and rereads a canonical
   Markdown transcript and a canonical JSON copy without changing the room.
 - `POST /api/transcript/clear` with `{}` additionally requires and consumes one
-  fresh owner passkey step-up. It creates and verifies those same two copies,
-  then opens a new transcript era. If either artifact is missing, changed, or
-  does not exactly represent the current store snapshot, no clear is reported.
+  fresh owner passkey step-up. It creates and verifies those same two copies
+  and a third, the asks and answers as public rows
+  (`:archive_id.annotations.jsonl`), then opens a new transcript era. If any
+  artifact is missing, changed, or does not exactly represent the current store
+  snapshot, no clear is reported. Asks still open at the clear carry into the
+  new era, each naming the archive that holds its message.
 - Successful clear preserves identity, roster, and last-heard facts; it empties
   current messages and receipts while keeping `next_id` monotonic. A durable
   pending-clear marker makes a crash after verification complete idempotently
   on restart. Startup refuses if that marker's archive pair cannot be verified.
+  The asks file has its own marker and a staged next file written before the
+  clear, so a restart either finishes the clear with the carried asks or
+  leaves the asks as they were.
 - `GET /api/transcript/exports/:archive_id.md|json` requires ordinary
   authenticated room-read authority and serves only a verified pair as an
   attachment. Exports contain public message facts and delivery names/times,
   never subject ids, client idempotency ids, credentials, or admission secrets.
+  `GET /api/transcript/exports/:archive_id.annotations.jsonl` serves the asks
+  file beside a verified pair; an archive made before asks existed has none.
 
 The files live under the installation data directory's `archives/` directory.
 They contain plaintext transcript content and must be protected like the live
