@@ -992,3 +992,28 @@ test('a folded project line names only the counts that are not zero', () => {
   assert.equal(projectLine({ needsYou: 1, open: 2, blocked: 0, ready: 0, awaiting: 1 }), '1 waiting on you · 2 open · 1 awaiting an answer');
   assert.equal(projectLine({ needsYou: 0, open: 0, blocked: 0, ready: 0, awaiting: 0 }), 'nothing open');
 });
+
+test('Needs you follows the turn: a reply moves an ask off the replier, and the asker gets it back', () => {
+  const brief = { projects: [{ id: 'ops', display_name: 'Operations' }], open: [], decisions: [], needs_me: [] };
+  const ask = (turnOn, word, latest) => ({ ask_id: 6, asked_at: NOW - HOUR, by: 'Scout', of: 'Patti', means: 'I order one roller', project: 'ops',
+    question: 'The printer jams. Order a roller?', turn: { state: turnOn === 'Patti' ? 'your-turn' : 'waiting', on: turnOn, word },
+    latest: { by: latest[0], kind: latest[1], line: latest[2], at: NOW - MINUTE } });
+  // (1) Scout asks Patti: it is her turn.
+  const asked = ask('Patti', 'your turn', ['Scout', 'ask', 'The printer jams. Order a roller?']);
+  const first = needsCards(brief, NOW, [asked], new Set(), { viewer: 'Patti' });
+  assert.equal(first.count, 1);
+  assert.equal(first.cards[0].turn, 'your turn');
+  assert.equal(first.cards[0].latest, 'Scout: The printer jams. Order a roller?');
+  // (2) Patti replies to discuss: it waits on Scout, off her Needs you, onto his.
+  const replied = ask('Scout', 'waiting on Scout', ['Patti', 'reply', 'Can we buy refurbished rollers?\nThey are cheaper.']);
+  assert.equal(needsCards(brief, NOW, [replied], new Set(), { viewer: 'Patti' }).count, 0, 'not her turn: not in her Needs you');
+  const forScout = needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [replied] });
+  assert.equal(forScout.count, 1, 'the asker gets his ask back when it is his turn');
+  assert.equal(forScout.cards[0].latest, 'Patti: Can we buy refurbished rollers?');
+  // An older room has no turn: an ask addressed to the viewer still waits on them.
+  const older = Object.assign({}, asked);
+  delete older.turn;
+  assert.equal(needsCards(brief, NOW, [older], new Set(), { viewer: 'Patti' }).count, 1);
+  assert.equal(needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [older] }).count, 0,
+    'without a turn, an ask the viewer made never waits on them');
+});

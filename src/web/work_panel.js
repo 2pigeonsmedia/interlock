@@ -171,16 +171,21 @@
   // a yes means, then its answers, its project and its age.
   function renderNeedsYou(brief) {
     const state = session;
-    const needs = model().needsCards(brief, Date.now(), state ? state.asks : [], state ? state.answers.settled() : new Set());
+    const needs = model().needsCards(brief, Date.now(), state ? state.asks : [], state ? state.answers.settled() : new Set(),
+      { asked: state ? state.asked : [], viewer: state && state.user ? state.user.name : null });
     element('needs-you-count').textContent = String(needs.count);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
     element('needs-you-list').replaceChildren(...(needs.count ? needs.cards.map(card => {
       const node = make('div', 'work-row work-card');
       const head = make('p', 'work-card-head');
-      head.append(make('span', 'work-card-who', card.who), ageNode(card.at));
+      head.append(make('span', 'work-card-who', card.who));
+      if (card.turn) head.append(make('span', 'work-turn', card.turn));
+      head.append(ageNode(card.at));
       const open = card.kind === 'ask' ? () => showAsk({ askId: card.askId }) : () => openItem(card.id);
       node.append(head, openButton('work-open', card.question, 'Open ' + card.id + ': ' + card.question, open, card.id));
       if (card.means) node.append(make('p', 'work-means', 'A yes means: ' + card.means));
+      // The latest exchange, so every place the ask shows tells the same story.
+      if (card.latest) node.append(make('p', 'work-card-detail', 'Latest · ' + card.latest));
       if (card.detail) node.append(make('p', 'work-card-detail', card.detail));
       const facts = [card.project, card.kind === 'ask' ? 'message #' + card.askId : card.id];
       if (card.kill) facts.push(card.kill);
@@ -1397,9 +1402,13 @@
     const state = session;
     if (!state) return;
     const addressed = event && event.detail && Array.isArray(event.detail.addressed) ? event.detail.addressed : [];
-    state.asks = addressed.filter(ask => ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
+    const valid = ask => ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
       typeof ask.by === 'string' && Number.isSafeInteger(ask.asked_at) &&
-      (ask.means === null || typeof ask.means === 'string'));
+      (ask.means === null || typeof ask.means === 'string');
+    state.asks = addressed.filter(valid);
+    // Asks the viewer made wait on them only when the room says it is their
+    // turn again (the other side replied); the model checks that.
+    state.asked = (event && event.detail && Array.isArray(event.detail.asked) ? event.detail.asked : []).filter(valid);
     const answered = event && event.detail && Array.isArray(event.detail.answered) ? event.detail.answered : [];
     // A new room answer waits for a brief read that began after it.
     if (state.answers.observe(answered)) refresh();
@@ -1426,7 +1435,7 @@
   function start(user, deps) {
     stop();
     const state = {
-      user, deps, brief: null, projectViews: new Map(), holderOpen: new Set(), asks: [], answers: model().createAnswerTracker(), refreshAgain: false,
+      user, deps, brief: null, projectViews: new Map(), holderOpen: new Set(), asks: [], asked: [], answers: model().createAnswerTracker(), refreshAgain: false,
       refreshing: false, drawerRequest: 0, drawerItem: null, drawerUpdatedAt: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },

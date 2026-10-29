@@ -210,8 +210,9 @@ test('Needs you takes the open asks addressed to the viewer from the room\'s ask
   assert.match(WORK_PANEL_JS, /document\.addEventListener\('interlock:asks', asksChanged, \{ signal \}\)/,
     'the listener is removed with the panel session');
   assert.match(WORK_PANEL_JS, /event\.detail\.addressed/);
-  assert.doesNotMatch(WORK_PANEL_JS, /detail\.asked\b/, 'asks the viewer made never wait on the viewer');
-  assert.match(WORK_PANEL_JS, /model\(\)\.needsCards\(brief, Date\.now\(\), state \? state\.asks : \[\], state \? state\.answers\.settled\(\) : new Set\(\)\)/);
+  // Asks the viewer made reach Needs you only when the room puts the turn back on them.
+  assert.match(WORK_PANEL_JS, /state\.asked = \(event && event\.detail && Array\.isArray\(event\.detail\.asked\)/);
+  assert.match(WORK_PANEL_JS, /model\(\)\.needsCards\(brief, Date\.now\(\), state \? state\.asks : \[\], state \? state\.answers\.settled\(\) : new Set\(\),/);
   assert.match(WORK_PANEL_JS, /querySelector\('\[data-message-id="' \+ row\.askId \+ '"\]'\)/,
     'an ask row shows its message in the transcript');
   assert.match(WORK_PANEL_JS, /an ask from before a clear is in History/);
@@ -270,7 +271,8 @@ test('a write with no error code reads as unavailable, and an open form keeps on
 
 test('the tile says who is responsible, the drawer says whom an owner answered for, and the project id pattern is valid', () => {
   // A Needs-you card names who asked at its head, then the question and what a yes means.
-  assert.match(WORK_PANEL_JS, /head\.append\(make\('span', 'work-card-who', card\.who\), ageNode\(card\.at\)\)/);
+  assert.match(WORK_PANEL_JS, /head\.append\(make\('span', 'work-card-who', card\.who\)\);\s*if \(card\.turn\) head\.append\(make\('span', 'work-turn', card\.turn\)\);\s*head\.append\(ageNode\(card\.at\)\);/,
+    'whose turn it is shows in words beside who asked');
   assert.match(WORK_PANEL_JS, /make\('p', 'work-means', 'A yes means: ' \+ card\.means\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /asked by ' \+ row\.askedBy/);
   // The drawer's answer lines come from the model's drawerLines, which calls answerLines.

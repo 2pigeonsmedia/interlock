@@ -266,9 +266,31 @@
   // Needs you as cards: one per thing waiting on the viewer, oldest first.
   // A decision asked in the room and its ask are one card, answered through
   // the ask (askId), so the room and the record hear the same answer.
-  function needsCards(brief, now, asks = [], answered = new Set()) {
+  // Whose turn an ask is on comes from the room (turn.on); the panel never
+  // works it out. With no turn (an older room) an ask addressed to the
+  // viewer waits on them.
+  function onViewer(ask, viewer) {
+    return !ask.turn || !viewer ? true : ask.turn.on === viewer;
+  }
+
+  function storyFields(ask) {
+    const fields = {};
+    if (ask && ask.turn && typeof ask.turn.word === 'string') fields.turn = ask.turn.word;
+    if (ask && ask.latest && typeof ask.latest.line === 'string') {
+      fields.latest = ask.latest.by + ': ' + firstLine(ask.latest.line);
+      fields.latestAt = ask.latest.at;
+    }
+    return fields;
+  }
+
+  function needsCards(brief, now, asks = [], answered = new Set(), story = {}) {
     const names = projectNames(brief);
-    const askById = new Map(asks.map(ask => [ask.ask_id, ask]));
+    const viewer = story.viewer || null;
+    // Asks addressed to the viewer that are their turn, and asks the viewer
+    // made that have come back to them (the other side replied).
+    const mine = asks.filter(ask => onViewer(ask, viewer))
+      .concat((story.asked || []).filter(ask => ask.turn && viewer && ask.turn.on === viewer));
+    const askById = new Map(mine.map(ask => [ask.ask_id, ask]));
     const project = id => id ? (names.get(id) || id) : 'Operations';
     const cards = [];
     for (const row of brief.needs_me) {
@@ -284,6 +306,7 @@
         project: project(row.project),
         askId: bound ? bound.ask_id : null,
       };
+      if (bound) Object.assign(card, storyFields(bound));
       if (decision && killWord(row)) card.kill = killWord(row);
       if (decision && answeredInRoom(row, answered)) card.note = ROOM_NOT_RECORDED;
       cards.push(card);
@@ -296,6 +319,7 @@
         means: ask.means, detail: ask.carried_from ? 'Asked before the transcript was cleared' : null,
         project: project(ask.project),
         askId: ask.ask_id,
+        ...storyFields(ask),
       });
     }
     cards.sort((a, b) => a.at - b.at);

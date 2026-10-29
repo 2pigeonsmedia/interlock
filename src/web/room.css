@@ -1194,3 +1194,4 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
 .work-more summary::-webkit-details-marker { display: none; }
 .work-more[open] > .quiet-action { position: absolute; right: 0; z-index: 2; white-space: nowrap; }
 [hidden] { display: none !important; }
+.work-turn { font-family: var(--font-ai); font-size: 0.72rem; color: var(--ink-2); margin-left: auto; margin-right: 8px; }
