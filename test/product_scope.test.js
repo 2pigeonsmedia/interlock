@@ -57,7 +57,8 @@ test('the portable CLI exposes no room selector or room identifier handoff', () 
 // line ('#' starts a comment). The list stays outside this repository, since
 // publishing it would publish the words. Name one or more list files in
 // INTERLOCK_VOCAB_LIST, separated by the platform path delimiter. Without it
-// this test skips and says so; with it, a missing or empty list fails.
+// this test skips and says so; with it, a missing or empty list fails. It
+// scans the shipped code: src/, bin/, identity/ (not its tests) and integrations/.
 function shippedTextFiles() {
   const files = [];
   function walk(relativeDir) {
@@ -73,6 +74,7 @@ function shippedTextFiles() {
   walk('src');
   walk('bin');
   walk('identity');
+  walk('integrations');
   return files.sort();
 }
 
