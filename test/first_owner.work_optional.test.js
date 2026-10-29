@@ -58,11 +58,40 @@ async function call(handler, method, url) {
   return response;
 }
 
+// Real Work routes, each of which reaches the identity checks when a work
+// service is present.
+const WORK_ROUTES = [
+  ['GET', '/api/work/brief'], ['GET', '/api/ai/work/brief'], ['GET', '/api/work/items/W-1'],
+  ['GET', '/api/ai/work/list'], ['POST', '/api/work/projects/create'],
+  ['POST', '/api/ai/work/items/create'], ['POST', '/api/work/items/update'],
+];
+
+function completeWork() {
+  return {
+    read() { throw new Error('unexpected call: work.read'); },
+    mutate() { throw new Error('unexpected call: work.mutate'); },
+    ownerStepUpRequired: op => op === 'projects/create',
+    MUTATION_OPS: ['projects/create', 'items/create', 'items/update'],
+  };
+}
+
+async function reached(handler, method, url) {
+  try {
+    return (await call(handler, method, url)).statusCode;
+  } catch (error) {
+    return `threw: ${error.message}`;
+  }
+}
+
 test('without a work service the handler builds and the Work routes answer not-found', async () => {
-  const handler = createFirstOwnerHandler(options({}));
-  for (const [method, url] of [['GET', '/api/work/projects'], ['GET', '/api/ai/work/items'], ['POST', '/api/work/items']]) {
-    const response = await call(handler, method, url);
-    assert.equal(response.statusCode, 404, `${method} ${url}: ${response.body}`);
+  const absent = createFirstOwnerHandler(options({}));
+  const withStepUp = options({ work: completeWork() });
+  withStepUp.house.confirmWorkProjectAct = () => { throw new Error('unexpected call: confirmWorkProjectAct'); };
+  const present = createFirstOwnerHandler(withStepUp);
+  for (const [method, url] of WORK_ROUTES) {
+    assert.notEqual(await reached(present, method, url), 404,
+      `ARRANGEMENT: ${method} ${url} is a real Work route when the service is present`);
+    assert.equal(await reached(absent, method, url), 404, `${method} ${url}`);
   }
 });
 
