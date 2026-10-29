@@ -278,9 +278,12 @@ guessing together. One address cannot cause this, but the throttle's tables are
 bounded, and a few thousand distinct IPv4 addresses failing within fifteen
 minutes can fill them. IPv6 is counted per /48 block as well, so failures
 arriving over time take several hundred separate /48 blocks. At most 16
-password checks run at once from one /48, and 32 in total; a sign-in past either
-cap is refused at once and works on retry. When the tables do fill, the throttle
-fails closed: nearly every sign-in waits 30 seconds and is refused. Sessions already
+password checks run or wait at once for one /48, and a sign-in past that is
+refused at once. At most 32 run at once in total; past that, a sign-in waits its
+turn for up to ten seconds. A flood from many blocks can still fill that line,
+and then most sign-ins are refused while it lasts; the console then shows
+`interlock: sign-in refused, every password check busy (N so far)`. When the
+tables do fill, the throttle fails closed: nearly every sign-in waits 30 seconds and is refused. Sessions already
 signed in keep working. It clears once fifteen minutes pass with no attempt, or
 when you restart the service. To keep a guessing crowd from reaching Interlock
 at all, add a rate limiting rule for the path `/api/login` in Cloudflare's WAF

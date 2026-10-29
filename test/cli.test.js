@@ -1412,9 +1412,10 @@ test('start accepts --hosted-origin with --port in either order and refuses a ma
   const settled = captureIo();
   assert.equal(await runStart(['--hosted-origin', HOSTED_ORIGIN, '--port', '9000'], settled, deps), EXIT_RUNTIME);
   assert.equal(calls.length, 1, 'ARRANGEMENT: the valid origin reached the server');
-  const { onWrongSetupCode, ...rest } = calls[0];
+  const { onWrongSetupCode, onSignInBusy, ...rest } = calls[0];
   assert.deepEqual(rest, { dataDir: '/tmp/x', port: 9000, hostedOrigin: HOSTED_ORIGIN });
   assert.equal(typeof onWrongSetupCode, 'function', 'hosted mode hands the server the CLI wrong-code reporter');
+  assert.equal(typeof onSignInBusy, 'function', 'and the busy sign-in reporter');
   await runStart(['--port', '9001', '--hosted-origin', HOSTED_ORIGIN], captureIo(), deps);
   assert.equal(calls.length, 2, 'ARRANGEMENT: the reverse order reached the server');
   assert.equal(calls[1].port, 9001);
@@ -1507,6 +1508,28 @@ test('hosted start coalesces wrong setup codes: one line per window carrying the
   timers.armed[1].callback();
   assert.equal(timers.armed.length, 2, 'a stopped reporter arms nothing');
   assert.equal(io.stderrText().split('\n').length - 1, 2, 'a stopped reporter prints nothing');
+});
+
+test('hosted start folds busy sign-ins into one line per window, separate from wrong setup codes', async () => {
+  const timers = fakeTimers();
+  const io = captureIo();
+  let busy = null;
+  let release;
+  const shutdown = new Promise(resolve => { release = resolve; });
+  const finished = runStart(['--hosted-origin', HOSTED_ORIGIN], io, hostedDependencies(async options => {
+    busy = options.onSignInBusy;
+    return hostedRuntime();
+  }, { timers, waitForShutdown: () => shutdown }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof busy, 'function', 'ARRANGEMENT: the server received the busy reporter');
+  busy(7);
+  busy(12);
+  assert.equal(timers.armed.length, 1, 'two reports inside one window share one timer');
+  assert.equal(io.stderrText(), '', 'nothing is printed until the window closes');
+  timers.armed[0].callback();
+  assert.equal(io.stderrText(), 'interlock: sign-in refused, every password check busy (12 so far)\n');
+  release('SIGINT');
+  assert.equal(await finished, EXIT_OK);
 });
 
 test('join accepts a canonical https origin and still refuses a plain-http remote', async () => {

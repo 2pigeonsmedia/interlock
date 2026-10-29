@@ -186,12 +186,13 @@ function startOptions(args) {
   return args.length % 2 === 0 ? Object.freeze(options) : null;
 }
 
-// Hosted mode only: the server reports every wrong setup code to the host. The
-// host may be watched by one person on one terminal, so a flood of wrong codes
-// is folded into at most one stderr line per window, carrying the latest count.
-// The timer never keeps the process alive; flush() prints what is pending and
-// retires the reporter.
-function wrongSetupCodeReporter(stderr, timers) {
+// Hosted mode only: the server reports every wrong setup code, and every
+// sign-in refused because all password checks were busy, to the host. The host
+// may be watched by one person on one terminal, so a flood is folded into at
+// most one stderr line per window, carrying the latest count. The timer never
+// keeps the process alive; flush() prints what is pending and retires the
+// reporter.
+function wrongSetupCodeReporter(stderr, timers, describe = count => `wrong setup code (${count} so far)`) {
   let latest = 0;
   let printed = 0;
   let timer = null;
@@ -200,7 +201,7 @@ function wrongSetupCodeReporter(stderr, timers) {
     timer = null;
     if (latest > printed) {
       printed = latest;
-      line(stderr, `interlock: wrong setup code (${latest} so far)`);
+      line(stderr, `interlock: ${describe(latest)}`);
     }
   }
   return Object.freeze({
@@ -1663,10 +1664,15 @@ async function runStart(args, io, dependencies = {}) {
 
   const serverOptions = { dataDir, port };
   let wrongCodes = null;
+  let busySignIns = null;
   if (parsed.hostedOrigin !== undefined) {
-    wrongCodes = wrongSetupCodeReporter(stderr, dependencies.timers || { setTimeout, clearTimeout });
+    const timers = dependencies.timers || { setTimeout, clearTimeout };
+    wrongCodes = wrongSetupCodeReporter(stderr, timers);
+    busySignIns = wrongSetupCodeReporter(stderr, timers,
+      count => `sign-in refused, every password check busy (${count} so far)`);
     serverOptions.hostedOrigin = parsed.hostedOrigin;
     serverOptions.onWrongSetupCode = wrongCodes.report;
+    serverOptions.onSignInBusy = busySignIns.report;
   }
 
   let runtime;
@@ -1728,6 +1734,7 @@ async function runStart(args, io, dependencies = {}) {
   let closedCleanly = true;
   try { await runtime.close(); } catch (_) { closedCleanly = false; }
   if (wrongCodes !== null) wrongCodes.flush();
+  if (busySignIns !== null) busySignIns.flush();
   if (!closedCleanly) {
     line(stderr, 'interlock: shutdown did not complete cleanly.');
   }

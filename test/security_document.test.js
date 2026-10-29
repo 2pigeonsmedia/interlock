@@ -118,12 +118,16 @@ test('the hosted setup code and the password door are described as built', () =>
     'While a table is full, a block with 25 failures waits and is refused as a whole, so failures arriving over ' +
     'time fill the tables only from several hundred separate /48 blocks (about 660, measured).');
   assertSentence(SECURITY,
-    'Attempts still being checked count toward a full table, and at most 16 password checks run at once ' +
-    'from one /48, and 32 in total.');
+    'At most 16 password checks run or wait at once for one /48; past that, a sign-in from the block is ' +
+    'refused at once and counted against nothing.');
   assertSentence(SECURITY,
-    'An attempt past either cap is refused at once and counted against nothing, so a burst cannot queue ' +
-    'password checks that every other sign-in waits behind; while a burst lasts, a sign-in can be refused ' +
-    'this way and works on retry.');
+    'At most 32 run at once in total; past that, a sign-in waits its turn in a line of at most 256, for at ' +
+    'most ten seconds, and is refused if its turn does not come.');
+  assertSentence(SECURITY,
+    'A flood from many blocks at once can still fill the line: then most sign-ins, the owner\'s included, ' +
+    'are refused and look like a wrong password until the flood stops, and the server prints a line saying ' +
+    'so at most once a second.');
+  assert.doesNotMatch(SECURITY, /works on retry/);
   assert.doesNotMatch(SECURITY, /later release will count attempts in flight/);
   assertSentence(SECURITY,
     'When the tables do fill, the throttle cannot tell a new address or account from the attackers\' and fails closed: nearly every ' +

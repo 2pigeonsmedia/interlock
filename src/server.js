@@ -25,7 +25,7 @@ const DEFAULT_PORT = 8788;
 const WRONG_SETUP_CODE_DELAY_MS = 1_000;
 const WRONG_SETUP_CODE_MAX_WAIT_MS = 10_000;
 const OPTION_KEYS = Object.freeze(['port']);
-const INTERLOCK_OPTION_KEYS = Object.freeze(['dataDir', 'port', 'hostedOrigin', 'onWrongSetupCode']);
+const INTERLOCK_OPTION_KEYS = Object.freeze(['dataDir', 'port', 'hostedOrigin', 'onWrongSetupCode', 'onSignInBusy']);
 
 function isLoopbackAddress(address) {
   if (net.isIPv4(address)) return address.split('.', 1)[0] === '127';
@@ -114,7 +114,7 @@ function requireInterlockOptions(input) {
   }
   for (const key of Reflect.ownKeys(opts)) {
     if (typeof key !== 'string' || !INTERLOCK_OPTION_KEYS.includes(key)) {
-      throw new TypeError('interlock server: full host accepts only dataDir, port, hostedOrigin and onWrongSetupCode');
+      throw new TypeError('interlock server: full host accepts only dataDir, port, hostedOrigin, onWrongSetupCode and onSignInBusy');
     }
     const descriptor = Object.getOwnPropertyDescriptor(opts, key);
     if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
@@ -138,7 +138,16 @@ function requireInterlockOptions(input) {
     }
   }
   const onWrongSetupCode = opts.onWrongSetupCode === undefined ? null : opts.onWrongSetupCode;
-  return { dataDir: opts.dataDir, port, hosted, onWrongSetupCode };
+  if (opts.onSignInBusy !== undefined) {
+    if (hosted === null) {
+      throw new TypeError('interlock server: onSignInBusy is accepted only with hostedOrigin');
+    }
+    if (typeof opts.onSignInBusy !== 'function') {
+      throw new TypeError('interlock server: onSignInBusy must be a function');
+    }
+  }
+  const onSignInBusy = opts.onSignInBusy === undefined ? null : opts.onSignInBusy;
+  return { dataDir: opts.dataDir, port, hosted, onWrongSetupCode, onSignInBusy };
 }
 
 // The host's observer never breaks a request or the process: it is called
@@ -356,7 +365,7 @@ function checkDataDirOrigin(dataDir, origin) {
 }
 
 async function startInterlockServer(options) {
-  const { dataDir, port, hosted, onWrongSetupCode } = requireInterlockOptions(options);
+  const { dataDir, port, hosted, onWrongSetupCode, onSignInBusy } = requireInterlockOptions(options);
   const assets = loadBrowserAssets(hosted);
   const origin = hosted ? hosted.origin : new URL(`http://localhost:${port}`).origin;
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -450,12 +459,20 @@ async function startInterlockServer(options) {
     let setupCode = hosted && !house.firstOwner.status().completed ? makeSetupCode() : null;
     let wrongCodes = 0;
     let nextSlot = 0;
+    let busySignIns = 0;
     const hostedForHandler = hosted ? Object.freeze({
       origin: hosted.origin,
       host: hosted.host,
       hostname: hosted.hostname,
       setupCodeMatches: supplied => setupCodeMatches(setupCode, supplied),
       setupCompleted: () => { setupCode = null; },
+      // The login service's running count of sign-ins refused because every
+      // password check was busy; the host hears of each increase.
+      signInBusy: count => {
+        if (!Number.isSafeInteger(count) || count <= busySignIns) return;
+        busySignIns = count;
+        if (onSignInBusy !== null) observeWrongSetupCode(onSignInBusy, count);
+      },
       wrongSetupCode: () => {
         wrongCodes += 1;
         if (onWrongSetupCode !== null) observeWrongSetupCode(onWrongSetupCode, wrongCodes);

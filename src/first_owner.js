@@ -641,6 +641,10 @@ function createFirstOwnerHandler(options) {
     });
     if (!signedIn || signedIn.ok !== true || typeof signedIn.set_cookie !== 'string' ||
         typeof signedIn.csrf_token !== 'string') {
+      if (hostedMode && typeof hostedMode.signInBusy === 'function' &&
+          typeof house.login.busyRefusals === 'function') {
+        hostedMode.signInBusy(house.login.busyRefusals());
+      }
       return sendJson(request, response, 401, { ok: false, error: 'sign-in-failed' });
     }
     const user = publicUser(house.whoami({

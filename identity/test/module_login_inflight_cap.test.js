@@ -20,9 +20,9 @@ function ownBlock(i) { return `2001:${(0x100 + (i >> 16)).toString(16)}:${(i & 0
 
 // A login service whose password check is held open until release(), so a
 // burst stays in flight exactly as long as the test wants.
-async function heldRoom() {
+async function heldRoom(throttleOptions = {}) {
   const fx = await F.fixture('identity-login-inflight-cap-');
-  const throttle = fx.login.createLoginThrottle({});
+  const throttle = fx.login.createLoginThrottle(throttleOptions);
   const service = fx.login.createLoginService({
     tenant: F.TENANT, origin: F.ORIGIN, session_store: fx.store,
     harness: true, throttle, sleep: async () => {},
@@ -72,7 +72,7 @@ test('a burst from one /48 has at most its cap of password checks in flight', as
 });
 
 test('a burst spread over many /48s has at most the total cap in flight', async () => {
-  const room = await heldRoom();
+  const room = await heldRoom({ queueWaitMs: 50 });
   try {
     const now = Date.now();
     const burst = [];
@@ -128,4 +128,68 @@ test('a normal sign-in is unaffected', async () => {
   const parallel = await Promise.all([1, 2, 3].map(k =>
     service.login(F.loginRequest({ source: `198.51.100.${k}`, now: now + 2 }))));
   assert.ok(parallel.every(r => r.ok === true), 'three people signing in at once all get in');
+});
+
+test('while two /48s hold every password check, the owner waits in line and signs in', async () => {
+  const room = await heldRoom();
+  try {
+    const now = Date.now();
+    const burst = [];
+    for (let i = 0; i < 200; i += 1) {
+      burst.push(room.service.login(request(inBlock(i), `burst-a-${i}`, now)));
+      burst.push(room.service.login(request(`2001:db8:3:${i.toString(16)}::/64`, `burst-b-${i}`, now)));
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(room.held(), MAX_INFLIGHT, 'ARRANGEMENT: two blocks hold every password check');
+    const owner = room.service.login(F.loginRequest({ source: '192.0.2.10', now }));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(room.throttle.health().waiting, 1, 'the owner waits for a check instead of being refused');
+    for (let i = 200; i < 300; i += 1) burst.push(room.service.login(request(inBlock(i), `late-${i}`, now)));
+    assert.equal(room.throttle.health().waiting, 1, 'the bursting blocks cannot add to the line: they are at their cap');
+    room.release();
+    const signedIn = await owner;
+    assert.equal(signedIn.ok, true, 'the owner signs in once a check is free: ' + JSON.stringify(signedIn));
+    await Promise.all(burst);
+    assert.equal(room.throttle.health().inflight_total, 0, 'every check was released');
+  } finally {
+    room.restore();
+  }
+});
+
+test('the line is bounded in length and in time, and a waiting sign-in still counts against its name', async () => {
+  const room = await heldRoom({ maxWaiting: 3, queueWaitMs: 200 });
+  try {
+    const now = Date.now();
+    const burst = [];
+    for (let i = 0; i < 32; i += 1) burst.push(room.service.login(request(ownBlock(i), `fill-${i}`, now)));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(room.held(), MAX_INFLIGHT, 'ARRANGEMENT: every password check is held');
+    const guesses = [];
+    for (let i = 0; i < 20; i += 1) guesses.push(room.service.login(request(ownBlock(1000 + i), 'Owner', now)));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(room.throttle.health().waiting, 3, 'at most three wait; the rest are refused at once');
+    const waited = await Promise.all(guesses);
+    assert.ok(waited.every(r => r.ok === false), 'a sign-in that waits past the bound is refused');
+    assert.equal(room.throttle.health().waiting, 0, 'and leaves the line');
+
+    const room2 = await heldRoom({ maxWaiting: 100, queueWaitMs: 200 });
+    try {
+      const fill = [];
+      for (let i = 0; i < 32; i += 1) fill.push(room2.service.login(request(ownBlock(i), `fill-${i}`, now)));
+      await new Promise(resolve => setImmediate(resolve));
+      const named = [];
+      for (let i = 0; i < 20; i += 1) named.push(room2.service.login(request(ownBlock(1000 + i), 'Owner', now)));
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(room2.throttle.health().waiting, 5,
+        'parallel guesses at one name wait no more than five at a time, as if already checked');
+      room2.release();
+      await Promise.all(fill.concat(named));
+    } finally {
+      room2.restore();
+    }
+    room.release();
+    await Promise.all(burst);
+  } finally {
+    room.restore();
+  }
 });
