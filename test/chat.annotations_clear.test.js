@@ -78,7 +78,7 @@ async function rowKinds(chat) {
 }
 
 async function openIds(chat) {
-  return (await chat.openAsks(ANA)).addressed.map(ask => ask.ask_id);
+  return (await chat.openAsks(ANA, 'Ana')).addressed.map(ask => ask.ask_id);
 }
 
 /* Fail one fs call inside `work`, matched by `when(name, args)`; `after`
@@ -312,7 +312,7 @@ test('after an older server clears during a rollback, a carried ask that was ans
 test('a kept-open ask is still kept open after it is carried', async () => {
   const { room, ids } = await seeded();
   await room.archive.clearTranscript();
-  const kept = (await room.chat.openAsks(ANA)).addressed.find(ask => ask.ask_id === ids.kept);
+  const kept = (await room.chat.openAsks(ANA, 'Ana')).addressed.find(ask => ask.ask_id === ids.kept);
   assert.equal(kept.kept_open, true);
   await room.chat.appendAnnotated({ text: 'still yes' }, PERSON, { answers: [{ ask_id: ids.kept }] });
   assert.deepEqual(await openIds(room.chat), [ids.open, ids.kept],

@@ -76,7 +76,7 @@ const OWN_CODES = Object.freeze([
   'invalid-clear', 'archive-invalid', 'archive-stale',
   'invalid-session-discriminator',
   'corrupt-annotations', 'invalid-annotation', 'ask-of-self', 'ask-not-found', 'ask-not-open',
-  'ask-not-answered', 'not-asker', 'unread-addressed',
+  'ask-not-answered', 'not-asker', 'unread-addressed', 'already-posted',
 ]);
 
 function fail(code) {
@@ -609,14 +609,15 @@ function openStore(opts) {
       fail('invalid-annotation');
     }
     const answeredIds = new Set(annotation.answers.map(answer => answer.ask_id));
+    const who = { subject_id: actor.subject_id, name: actor.name };
     const answers = annotation.answers.map(answer => {
       const refusal = asks.checkAnswer(answer.ask_id);
       if (refusal) fail(refusal);
-      return Object.freeze({
+      return Object.freeze(Object.assign({
         ask_id: answer.ask_id,
         choice: answer.choice,
-        crossed_by: asks.crossingFor(answer.ask_id, actor.subject_id, answeredIds),
-      });
+        crossed_by: asks.crossingFor(answer.ask_id, who, answeredIds),
+      }, asks.answerFacts(answer.ask_id, who)));
     });
     if (annotation.status !== null) {
       const unread = [];
@@ -624,7 +625,7 @@ function openStore(opts) {
       for (const message of messages) {
         if (message.id <= annotation.read_through || message.subject_id === actor.subject_id) continue;
         if (message.recipients.some(recipient => recipient.subject_id === actor.subject_id) ||
-            asks.isOpenAskOf(message.id, actor.subject_id)) {
+            asks.isOpenAskOf(message.id, who)) {
           count += 1;
           if (unread.length < Annotations.MAX_UNREAD_IDS) unread.push(message.id);
         }
@@ -638,7 +639,10 @@ function openStore(opts) {
     return meta.next_id - 1;
   }
 
-  function append(untrusted, trusted, annotationInput = null) {
+  /* `requireNew`: a retry under a client id already used is refused, not
+   * replayed, inside this same lock, for a caller that must know its post is
+   * the first under that id. */
+  function append(untrusted, trusted, annotationInput = null, requireNew = false) {
     return exclusive(() => {
       requireOpen();
       const body = closedObject(untrusted, UNTRUSTED_KEYS);
@@ -683,6 +687,7 @@ function openStore(opts) {
           message.subject_id === actor.subject_id &&
           message.client_message_id === actor.client_message_id);
         if (prior) {
+          if (requireNew === true) fail('already-posted');
           const exact = prior.text === body.text && prior.byline === actor.name &&
             prior.kind === actor.kind && prior.product === actor.product &&
             prior.product_provenance === actor.product_provenance;
@@ -950,6 +955,49 @@ function openStore(opts) {
     });
   }
 
+  /* For the host only, never a route: what the room stored about one post.
+   * The ask's addressee and, per answer, its choice, whether its author was
+   * the one asked, and that ask's addressee. Identities stay server-side. */
+  function addresseeOf(ask) {
+    return Object.freeze({ kind: ask.of_kind, subject_id: ask.of_subject_id, name: ask.of_name });
+  }
+
+  function postFacts(messageId) {
+    return exclusive(() => {
+      requireOpen();
+      const row = asks.posts.get(messageId);
+      if (!row) return null;
+      return Object.freeze({
+        ask: row.ask ? addresseeOf(row.ask) : null,
+        answers: Object.freeze(row.answers.map(answer => {
+          const ask = asks.asks.get(answer.ask_id);
+          return Object.freeze({
+            ask_id: answer.ask_id, choice: answer.choice, by_addressee: answer.by_addressee,
+            of: ask ? addresseeOf(ask) : null,
+          });
+        })),
+      });
+    });
+  }
+
+  /* The answers an ask's addressee has given it so far, oldest first, with
+   * the words and author of each, for the host to catch up a late binding. */
+  function addresseeAnswers(askId) {
+    return exclusive(() => {
+      requireOpen();
+      const ask = asks.asks.get(askId);
+      if (!ask) return Object.freeze([]);
+      return Object.freeze(ask.answers.filter(answer => answer.by_addressee).map(answer => {
+        const message = messages.find(candidate => candidate.id === answer.message_id);
+        return message ? Object.freeze({
+          message_id: answer.message_id, choice: answer.choice, text: message.text,
+          author: Object.freeze({ subject_id: message.subject_id, name: message.byline, kind: message.kind }),
+          of: addresseeOf(ask),
+        }) : null;
+      }).filter(Boolean));
+    });
+  }
+
   /* The ask a seat's earlier post with this client id carried, so a retry
    * can be answered by the idempotency rule even if the addressee has since
    * left the roster. */
@@ -965,14 +1013,14 @@ function openStore(opts) {
     });
   }
 
-  function openAsks(subjectId) {
+  function openAsks(subjectId, name) {
     return exclusive(() => {
       requireOpen();
-      if (!boundedString(subjectId, 64)) fail('invalid-read');
+      if (!boundedString(subjectId, 64) || !boundedString(name, MAX_BYLINE_BYTES)) fail('invalid-read');
       assertLiveLog();
       assertLiveReceipts();
       assertLiveActivity();
-      return asks.openAsksFor(subjectId);
+      return asks.openAsksFor({ subject_id: subjectId, name });
     });
   }
 
@@ -1037,6 +1085,7 @@ function openStore(opts) {
           of_kind: ask.of_kind,
           means: ask.means,
           deliver: ask.deliver,
+          project: ask.project,
         },
       }, i + 1));
       if (carryRows.some(row => row === null)) fail('archive-invalid');
@@ -1273,7 +1322,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, readAnnotationRows, openAsks, priorAsk,
+    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers,
   });
 }
 

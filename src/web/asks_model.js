@@ -14,11 +14,12 @@
   const CARRY_KEYS = Object.freeze([
     'seq', 'ts', 'kind', 'by', 'ask_id', 'archive_id', 'asked_at', 'ask', 'kept_open',
   ]);
-  const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver']);
-  const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by']);
-  // With exactly one open ask, does a sent message bind to it without a tap?
-  // Off: binding is always a tap, so ordinary talk never closes an ask.
-  const BIND_SINGLE_WITHOUT_TAP = false;
+  const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver', 'project']);
+  const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
+  // A message that is exactly one of these words, in any case, answers the
+  // sender's one open ask with no tap (Patti, 2026-10-29). Anything else, or
+  // two open asks, takes a tap: ordinary talk never closes an ask.
+  const BARE_ANSWERS = Object.freeze({ yes: 'yes', go: 'yes', no: 'no' });
 
   function exact(value, keys) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -38,7 +39,8 @@
     return exact(ask, ASK_KEYS) && name(ask.of) &&
       (ask.of_kind === 'person' || ask.of_kind === 'seat') &&
       (ask.means === null || name(ask.means)) &&
-      (ask.deliver === 'now' || ask.deliver === 'later');
+      (ask.deliver === 'now' || ask.deliver === 'later') &&
+      (ask.project === null || name(ask.project));
   }
 
   /* A kind a later release adds is passed over, never a reason to refuse
@@ -57,7 +59,8 @@
         Array.isArray(row.answers) && row.answers.every(answer => exact(answer, ANSWER_KEYS) &&
           positive(answer.ask_id) &&
           (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
-          (answer.crossed_by === null || positive(answer.crossed_by))) &&
+          (answer.crossed_by === null || positive(answer.crossed_by)) &&
+          typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean') &&
         (row.status === null || ['done', 'ready', 'stop'].includes(row.status)) &&
         (row.read_through === null || Number.isSafeInteger(row.read_through));
     }
@@ -87,6 +90,7 @@
       of_kind: ask.of_kind,
       means: ask.means,
       deliver: ask.deliver,
+      project: ask.project,
       state: ask.state,
       kept_open: ask.kept_open,
       carried_from: ask.carried_from,
@@ -106,7 +110,7 @@
     function addAsk(askId, by, ask, askedAt, carriedFrom) {
       asks.set(askId, {
         ask_id: askId, asked_at: askedAt, by, of: ask.of, of_kind: ask.of_kind,
-        means: ask.means, deliver: ask.deliver, state: 'open', kept_open: false,
+        means: ask.means, deliver: ask.deliver, project: ask.project, state: 'open', kept_open: false,
         carried_from: carriedFrom, answers: [],
       });
     }
@@ -122,8 +126,11 @@
           for (const answer of row.answers) {
             const ask = asks.get(answer.ask_id);
             if (!ask) continue;
-            ask.answers.push({ message_id: row.message_id, by: row.by, choice: answer.choice });
-            if (row.by === ask.of && !ask.kept_open) ask.state = 'answered';
+            // The server decided what this answer did, once; it is read, never re-derived.
+            ask.answers.push({
+              message_id: row.message_id, by: row.by, choice: answer.choice, by_addressee: answer.by_addressee,
+            });
+            if (answer.closes) ask.state = 'answered';
           }
           if (row.ask) addAsk(row.message_id, row.by, row.ask, row.ts, null);
         } else if (row.kind === 'carry') {
@@ -163,14 +170,22 @@
       return Object.freeze({ addressed: Object.freeze(addressed), asked: Object.freeze(asked) });
     }
 
-    return Object.freeze({ reset, apply, ask, post, openFor });
+    /* Every ask in this era its addressee has answered at least once, open or
+     * not, by the server's stored fact. */
+    function answeredIds() {
+      return Object.freeze([...asks.values()]
+        .filter(found => found.answers.some(answer => answer.by_addressee))
+        .map(found => found.ask_id).sort((a, b) => a - b));
+    }
+
+    return Object.freeze({ reset, apply, ask, post, openFor, answeredIds });
   }
 
   /* What the ask's own line says, for every viewer. */
   function askLine(ask, now) {
     const to = ask.deliver === 'later' ? `Hold for ${ask.of}` : `Ask of ${ask.of}`;
     if (ask.state === 'withdrawn') return `${to} · withdrawn`;
-    const last = ask.answers.filter(answer => answer.by === ask.of).slice(-1)[0];
+    const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
     if (ask.state === 'answered' && last) {
       return `${to} · answered ${last.choice === null ? '' : `"${last.choice}" `}· ${last.by} · #${last.message_id}`;
     }
@@ -189,22 +204,32 @@
 
   /* The choice the addressee last gave, held pressed for every viewer. */
   function chosen(ask) {
-    const last = ask.answers.filter(answer => answer.by === ask.of).slice(-1)[0];
+    const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
     return last ? last.choice : null;
   }
 
+  /* The choice a bare answer carries, or null when the text is not one. */
+  function bareAnswer(text) {
+    if (typeof text !== 'string') return null;
+    const word = text.trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(BARE_ANSWERS, word) ? BARE_ANSWERS[word] : null;
+  }
+
   /* Which asks a message from the viewer answers. `picked` is the set of
-   * ask ids the viewer tapped. Returns null when nothing binds. */
-  function bindAnswers(openAddressed, picked, choice = null) {
+   * ask ids the viewer tapped. With nothing tapped, a bare yes, no or go
+   * answers the one open ask. Returns null when nothing binds. */
+  function bindAnswers(openAddressed, picked, text = '', choice = null) {
     const ids = openAddressed.map(ask => ask.ask_id);
-    let chosenIds = ids.filter(id => picked.has(id));
-    if (chosenIds.length === 0 && BIND_SINGLE_WITHOUT_TAP && ids.length === 1) chosenIds = ids;
-    if (chosenIds.length === 0) return null;
-    return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice }));
+    const chosenIds = ids.filter(id => picked.has(id));
+    if (chosenIds.length === 0) {
+      const bare = bareAnswer(text);
+      return bare !== null && ids.length === 1 ? [{ ask_id: ids[0], choice: bare }] : null;
+    }
+    return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice: choice ?? bareAnswer(text) }));
   }
 
   const contract = Object.freeze({
-    BIND_SINGLE_WITHOUT_TAP, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers,
+    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {

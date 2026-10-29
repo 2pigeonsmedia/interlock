@@ -20,6 +20,8 @@ const MUTATIONS = Object.freeze({
   'decisions/confirm': Object.freeze(['confirmReported', 200]),
   'decisions/reopen': Object.freeze(['reopen', 200]),
   'decisions/withdraw': Object.freeze(['withdraw', 200]),
+  'decisions/kill': Object.freeze(['killAsk', 201]),
+  'decisions/kill-reply': Object.freeze(['killReply', 200]),
   'projects/create': Object.freeze(['createProject', 201]),
   'projects/retire': Object.freeze(['retireProject', 200]),
   'projects/update': Object.freeze(['updateProject', 200]),
@@ -34,7 +36,9 @@ const STATUS = Object.freeze({
   'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-a-relay': 403,
   'ambiguous-participant': 400,
   'unknown-item': 404, 'unknown-project': 404,
+  'kill-own-pick': 403, 'first-owner-answer': 403,
   'stale-revision': 409, 'operation-conflict': 409, 'answer-recorded': 409, 'project-retired': 409, 'default-project': 409,
+  'kill-slot-filled': 409, 'kill-slot-replied': 409, 'kill-slot-empty': 409,
   'project-exists': 409, 'invalid-state': 409,
   'store-damaged': 503,
 });
@@ -233,7 +237,39 @@ function createWorkRoutes(options) {
     return OWNER_STEP_UP.includes(op);
   }
 
-  return Object.freeze({ mutate, read, ownerStepUpRequired, MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)) });
+  // The room's answer to an ask a decision cites; the host calls this after
+  // the answer's message is saved. Never a refusal the room would see.
+  function answerFromRoom(actor, answer) {
+    try {
+      return work.answerFromRoom(actor, answer);
+    } catch (_) {
+      return Object.freeze({ ok: false, recorded: null });
+    }
+  }
+
+  // "Ask a decision" only: a completed create for this operation id, or null.
+  function priorResult(actor, operationId) {
+    try {
+      const prior = work.priorResult(actor, operationId);
+      return prior ? Object.freeze({ status: 200, body: stripIds(prior) }) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // "Ask a decision" only: binds the record to the ask the host just posted.
+  function bindAsk(actor, body) {
+    try {
+      return Object.freeze({ status: 200, body: stripIds(work.bindAsk(actor, body)) });
+    } catch (error) {
+      return errorResponse(error);
+    }
+  }
+
+  return Object.freeze({
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult,
+    MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
+  });
 }
 
 module.exports = Object.freeze({ MUTATIONS, OWNER_STEP_UP, createWorkRoutes });

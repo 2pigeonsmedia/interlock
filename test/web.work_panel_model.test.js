@@ -6,7 +6,7 @@ const test = require('node:test');
 const model = require('../src/web/work_panel_model.js');
 
 const {
-  who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
+  who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
   errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson, projectSections, drawerLines,
 } = model;
@@ -819,7 +819,118 @@ test('an answer reads who gave it, and an owner answering for someone names both
 
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'changedSince', 'createAnswerTracker', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
     'needsYou', 'notifyText', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
+});
+
+test('the kill slot reads in words on the decision and its Needs you row; an older record shows none', () => {
+  assert.deepEqual(['unattacked', 'attacked', 'survived', 'killed'].map(state => killWord({ kill_state: state })),
+    ['unattacked', 'attacked', 'attacked, survived', 'killed']);
+  assert.equal(killWord({}), null);
+  assert.equal(killWord({ kill_state: 'sunk' }), null);
+  const lead = { name: 'Lead', kind: 'seat', session: null };
+  const marlow = { name: 'Marlow', kind: 'seat', session: 1 };
+  assert.deepEqual(killLines({ kill_state: 'killed', kill: { question: 'Would the bank\nrefuse?', by: marlow, at: 1,
+    reply: { words: 'It would.', outcome: 'killed', by: lead, at: 2 } } }), [
+    'Kill slot: killed',
+    'Kill question from Marlow (session 1): Would the bank ⏎ refuse?',
+    'Reply from Lead (killed): It would.',
+  ]);
+  assert.deepEqual(killLines({ kill_state: 'unattacked', kill: null }), ['Kill slot: unattacked']);
+  assert.deepEqual(killLines({}), []);
+  const brief = Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row.kind === 'decision'
+    ? Object.assign({}, row, { kill_state: 'attacked' }) : row) });
+  const rows = needsYou(brief, NOW).rows;
+  assert.equal(rows.find(row => row.kind === 'decision').kill, 'attacked');
+  assert.equal(Object.hasOwn(rows.find(row => row.kind === 'work'), 'kill'), false);
+});
+
+test('an ask that a decision cites as its message is drawn once, as the decision', () => {
+  const decision = BRIEF.needs_me.find(row => row.kind === 'decision');
+  const brief = Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row === decision
+    ? Object.assign({}, row, { ask_message_id: 41 }) : row) });
+  const ask = id => ({ ask_id: id, asked_at: NOW - HOUR, by: 'Lead', of: 'Ana', of_kind: 'person', means: 'I pick it',
+    deliver: 'now', state: 'open', kept_open: false, carried_from: null, answers: [] });
+  const result = needsYou(brief, NOW, [ask(41), ask(42)]);
+  assert.deepEqual(result.rows.map(row => row.id).sort(), ['W-1', 'W-3', 'ask-42'],
+    'the cited ask is the decision row; the uncited ask keeps its own');
+  assert.equal(result.count, 3);
+  const viaDecisions = needsYou(Object.assign({}, BRIEF, { decisions: [{ kind: 'decision', id: 'D-9',
+    ask_message_id: 42 }] }), NOW, [ask(42)]);
+  assert.equal(viaDecisions.rows.some(row => row.id === 'ask-42'), false,
+    'a decision in the brief\'s decision list also claims its ask');
+  assert.equal(needsYou(BRIEF, NOW, [ask(41)]).rows.some(row => row.id === 'ask-41'), true,
+    'ARRANGEMENT: without the citation the ask has its own row');
+});
+
+test('an awaiting decision whose ask the person asked answered in the room says so, until the record has it', () => {
+  const decision = BRIEF.needs_me.find(row => row.kind === 'decision');
+  assert.equal(decision.state, 'awaiting', 'ARRANGEMENT: the fixture decision is awaiting');
+  const cites = Object.assign({}, decision, { ask_message_id: 41 });
+  const brief = Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row === decision ? cites : row) });
+  const row = id => needsYou(brief, NOW, [], new Set(id)).rows.find(r => r.id === decision.id);
+  assert.equal(row([41]).note, 'Answered in the room, not recorded here');
+  assert.equal(Object.hasOwn(row([40]), 'note'), false, 'another ask answered says nothing');
+  assert.equal(Object.hasOwn(row([]), 'note'), false);
+  assert.equal(Object.hasOwn(needsYou(BRIEF, NOW, [], new Set([41])).rows.find(r => r.id === decision.id), 'note'), false,
+    'a decision that cites no message says nothing');
+  const citesOnly = Object.assign({}, decision, { source_message_id: 41, ask_message_id: null });
+  assert.equal(Object.hasOwn(needsYou(Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row === decision ? citesOnly : row) }),
+    NOW, [], new Set([41])).rows.find(r => r.id === decision.id), 'note'), false,
+  'a decision that only cites a message, with no ask bound to it, says nothing');
+  const item = { kind: 'decision', state: 'awaiting', asked_of: { name: 'Ana' }, asked_by: { name: 'Lead' },
+    answer: null, ask_message_id: 41, source_message: { message_id: 41, byline: 'Lead', session: null, quote: 'Decision: Pick' } };
+  assert.ok(drawerLines(item, [], new Set([41])).includes('Answered in the room, not recorded here (message #41).'));
+  assert.ok(!drawerLines(Object.assign({}, item, { state: 'answered' }), [], new Set([41]))
+    .some(line => line.startsWith('Answered in the room')), 'once recorded, the line goes');
+  assert.ok(!drawerLines(item, []).some(line => line.startsWith('Answered in the room')));
+  assert.ok(!drawerLines(Object.assign({}, item, { ask_message_id: null }), [], new Set([41]))
+    .some(line => line.startsWith('Answered in the room')), 'citing alone binds nothing');
+});
+
+test('a room answer is settled only by a brief read that began after it arrived', () => {
+  const answers = createAnswerTracker();
+  assert.equal(answers.observe([5]), true, 'a first answer is new');
+  assert.deepEqual([...answers.settled()], [], 'unsettled until a brief is read');
+  // The answer that arrives while a read is in flight is not settled by it.
+  const inFlight = answers.beginRead();
+  assert.equal(answers.observe([5, 7]), true);
+  answers.settle(inFlight);
+  assert.deepEqual([...answers.settled()], [5], 'the read settles 5, which it began after; 7 arrived mid-read');
+  const next = answers.beginRead();
+  answers.settle(next);
+  assert.deepEqual([...answers.settled()].sort(), [5, 7]);
+  assert.equal(answers.observe([5, 7]), false, 'the same ids again are nothing new');
+  assert.equal(answers.observe([7]), false, 'an id leaving (era reset) is not new');
+  assert.deepEqual([...answers.settled()], [7]);
+  assert.equal(answers.observe([7, 0, -1, 1.5, '9']), false, 'malformed ids are ignored');
+});
+
+test('a decision the room answered reads as answered in the room, from the record or its row', () => {
+  const room = { kind: 'direct', source: 'answered in the room #5' };
+  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer: room }), 'Answered in the room');
+  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer_summary: room }), 'Answered in the room');
+  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer: { kind: 'direct', source: '' } }), 'Answered here');
+  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer: { kind: 'direct', source: 'answered in the room #5 and more' } }),
+    'Answered here', 'only the room\'s exact words count');
+  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer_summary: { kind: 'direct' } }), 'Answered here',
+    'a row without the answer\'s source keeps the old label');
+  assert.equal(stateLabel({ kind: 'decision', state: 'reported', answer: room }), 'Answer reported');
+});
+
+test('the open dialog knows when its record changed in a newer brief', () => {
+  const brief = { needs_me: [{ id: 'D-2', updated_at: 200 }], open: [{ id: 'W-1', updated_at: 50 }], decisions: [{ id: 'D-2', updated_at: 200 }] };
+  assert.equal(changedSince(brief, 'D-2', 100), true);
+  assert.equal(changedSince(brief, 'D-2', 200), false);
+  assert.equal(changedSince(brief, 'W-1', 50), false);
+  assert.equal(changedSince(brief, 'W-9', 1), false, 'a record the brief does not list is left alone');
+  assert.equal(changedSince({ needs_me: [], open: [] }, 'D-2', 100), false);
+});
+
+test('the dialog says a room answer was given in the room, naming the message', () => {
+  const by = { name: 'Scout', kind: 'seat', session: null };
+  assert.deepEqual(answerLines({ answer: { kind: 'direct', by, source: 'answered in the room #7' } }, []),
+    ['Answered in the room by Scout (message #7)']);
+  assert.deepEqual(answerLines({ answer: { kind: 'direct', by, source: '' } }, []), ['Answered here by Scout']);
 });

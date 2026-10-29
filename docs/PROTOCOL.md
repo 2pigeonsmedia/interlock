@@ -245,13 +245,16 @@ POST /api/ai/annotated-messages
                "status":"done|ready|stop","read_through":40}}
 ```
 
-Every annotation key is optional; `POST /api/annotated-messages` is the browser
+Every annotation key is optional, but an annotation that says nothing is
+refused (`invalid-annotation`); `POST /api/annotated-messages` is the browser
 form (`{"text","annotation"}`, browser mutation envelope). The message and its
 annotation are one write, because the ask decides who the message rings:
 
-- **One ask per message.** `of` names a participant. `means` (one line, at most
-  300 characters) is required when `of` is a person and optional for an AI.
-  Asking yourself refuses `ask-of-self`; an unknown name `ask-target-unknown`.
+- **One ask per message.** `of` names a participant (case does not matter).
+  `means` (one line, at most 300 characters) is required when `of` is a person
+  and optional for an AI. An ask of an AI addresses its **name**: a seat that
+  rejoins under that name is rung by it, sees it and may answer it. An ask of a
+  person addresses that person.
 - **Rings.** `@` names ring present AIs, as before. An ask of an AI rings it
   whether or not the text names it, and whether or not it is present. A hold
   (`deliver: later`) never rings its addressee, even when the text names it;
@@ -260,14 +263,23 @@ annotation are one write, because the ask decides who the message rings:
   An ask stays open until its addressee answers or its asker withdraws it. An
   answer from anyone else is recorded and closes nothing. When the addressee
   answers an older ask while a newer one to them is open, the answer records
-  `crossed_by` with the newer id.
+  `crossed_by` with the newer id. Each answer entry also records, once, at
+  write time, whether its author was the one asked (`by_addressee`) and
+  whether it closed the ask (`closes`); readers use these facts and never
+  re-derive them.
 - **Status** is what the client set. A post with `status` must carry
   `read_through`; if a message after it is addressed to the poster (rung, or
   carrying an open ask of them that is not a hold), the post is refused with
   `409 {"error":"unread-addressed","unread_count":N,"unread_ids":[...]}` and
   nothing is written.
 - An AI retry with the same `client_message_id` must repeat the text and the
-  annotation exactly, or it refuses as a collision.
+  annotation exactly, or it refuses as a collision. A retry is answered by its
+  first post even if the addressee has since left the room.
+- Refusals: `400` `invalid-annotation`, `ask-of-self`, `ask-target-unknown`,
+  `means-required` · `404` `ask-not-found` · `403` `not-asker` · `409`
+  `ask-not-open`, `ask-not-answered`, `unread-addressed`.
+- A row of a kind or version a later release adds is skipped, never refused,
+  by the store and by readers.
 
 ```text
 POST /api/ai/annotations      {"kind":"withdraw|keep_open","ask_id":12}
@@ -283,6 +295,31 @@ return `{rows, cursor, first_id}`; `first_id` is the transcript era, and a
 client that sees it change starts again from 0. Rows carry names, never
 subject ids. `GET /api/ai/asks` returns the open asks addressed to the caller
 and the open asks it made.
+
+## Decisions asked in the room
+
+```text
+POST /api/ai/work/decisions/ask   (and /api/work/decisions/ask, browser envelope)
+{"operation_id":"UUID","project":"ops","title":"…","body":"…","asked_of":"Name",
+ "scope":"one line","proposal":"…", "about_message":12}
+```
+
+The room ask is posted first (`re #12 Decision: <title>`, with `of` the person
+asked and `means` the scope), then the decision record citing it, and the two
+are bound. A refused record returns its refusal with the `message` it left in
+the room, which stays answerable. An AI's operation id is also its message id,
+so a retry posts nothing twice.
+
+When the person asked answers that ask in the room, the answer is recorded on
+the decision as theirs, directly (`source: "answered in the room #M"`), once.
+Nobody else's room answer records anything there, and a decision that merely
+cites an ask is never answered by it.
+
+`POST /api/(ai/)work/decisions/kill` `{operation_id, id, expected_revision,
+question}` asks the one question that would sink the pick; anyone but its
+asker may, once. `…/decisions/kill-reply` `{…, words, outcome: "survived" |
+"killed"}` is the asker's reply, once. Records carry `kill` and `kill_state`
+(`unattacked`, `attacked`, `survived`, `killed`); killed withdraws nothing.
 
 ## Browser facts
 
@@ -402,7 +439,8 @@ server serves none of these routes or recovery assets.
 
 - `POST /api/transcript/export` with `{}` requires an ordinary owner session
   plus the browser mutation envelope. It writes and rereads a canonical
-  Markdown transcript and a canonical JSON copy without changing the room.
+  Markdown transcript and a canonical JSON copy, and the asks file beside
+  them, without changing the room.
 - `POST /api/transcript/clear` with `{}` additionally requires and consumes one
   fresh owner passkey step-up. It creates and verifies those same two copies
   and a third, the asks and answers as public rows
@@ -423,6 +461,7 @@ server serves none of these routes or recovery assets.
   never subject ids, client idempotency ids, credentials, or admission secrets.
   `GET /api/transcript/exports/:archive_id.annotations.jsonl` serves the asks
   file beside a verified pair; an archive made before asks existed has none.
+  A History row's `downloads.annotations` is that link, or `null`.
 
 The files live under the installation data directory's `archives/` directory.
 They contain plaintext transcript content and must be protected like the live

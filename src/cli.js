@@ -65,6 +65,9 @@ Usage:
   interlock work changes --connection NAME --after N [--limit N] [--json]
   interlock work create --connection NAME --file PATH [--json]
   interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+  interlock work ask --connection NAME --file PATH [--json]
+  interlock work kill ID --connection NAME --file PATH|--stdin [--json]
+  interlock work kill-reply ID --outcome survived|killed --connection NAME --file PATH|--stdin [--json]
   interlock work export --connection NAME --format json|md
 
 Persistent model wake setup:
@@ -589,8 +592,9 @@ function renderedMessages(messages, notes = null) {
     const when = formatMessageTime(message.ts);
     output += `[${message.id}] ${terminalSafe(message.byline)}${suffix}:${when ? ` ${when}` : ''}\n`;
     // A body line cannot pass for an annotation: only the room's own notes
-    // begin with the arrow.
-    output += `${terminalSafe(message.text, true).replace(/^(\s*)↳/gmu, '$1\uFFFD')}\n`;
+    // carry the arrow. Every arrow in a body is replaced, wherever it sits,
+    // so no blank-looking letter in front of it can hide one.
+    output += `${terminalSafe(message.text, true).replace(/↳/gu, '\uFFFD')}\n`;
     for (const note of (notes && notes.get(message.id)) || []) output += `  ↳ ${note}\n`;
   }
   return output;
@@ -598,9 +602,10 @@ function renderedMessages(messages, notes = null) {
 
 const ANNOTATION_PAGE_LIMIT = 100;
 const ANNOTATION_PAGES = 50;
+const ANNOTATION_SEEK_STEPS = 48;
 
 function validAskFields(value) {
-  const ask = exactObject(value, ['of', 'of_kind', 'means', 'deliver']);
+  const ask = exactObject(value, ['of', 'of_kind', 'means', 'deliver', 'project']);
   return !!ask && typeof ask.of === 'string' && ask.of.length > 0 &&
     (ask.of_kind === 'person' || ask.of_kind === 'seat') &&
     (ask.means === null || typeof ask.means === 'string') &&
@@ -608,10 +613,11 @@ function validAskFields(value) {
 }
 
 function validAnswerEntry(value) {
-  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by']);
+  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
   return !!answer && Number.isSafeInteger(answer.ask_id) && answer.ask_id > 0 &&
     (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
-    (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0));
+    (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0)) &&
+    typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean';
 }
 
 function validPostRow(value) {
@@ -646,27 +652,58 @@ function postNotes(row) {
 
 /* The annotations of the messages about to be printed, read from the side-car.
  * A room without asks (an older release) or a malformed page prints the
- * messages without them: an annotation never stops a read. */
+ * messages without them: an annotation never stops a read.
+ *
+ * Post rows are written in message order, so the first row that can matter is
+ * found by halving the side-car (`after` is a row position; a read past the end
+ * reports the end), then read forward until the rows pass the last message
+ * printed. A long era costs a few requests, never a walk from the start. */
+async function annotationPage(fetcher, profile, after, limit) {
+  const page = await localRequest(fetcher, profile,
+    `/api/ai/annotations?after=${after}&limit=${limit}`, { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
+  if (!exactObject(page, ['ok', 'rows', 'cursor', 'first_id']) || !Array.isArray(page.rows) ||
+      !Number.isSafeInteger(page.cursor) || page.cursor < 0) throw incompatibleResponse();
+  for (const row of page.rows) {
+    if (row && row.kind === 'post' && !validPostRow(row)) throw incompatibleResponse();
+  }
+  return page;
+}
+
+function firstPostId(page) {
+  const post = page.rows.find(row => row && row.kind === 'post');
+  return post ? post.message_id : null;
+}
+
 async function annotationNotes(fetcher, profile, messages) {
   const notes = new Map();
   if (messages.length === 0) return notes;
   const wanted = new Set(messages.map(message => message.id));
-  let after = 0;
+  const lowest = Math.min(...wanted);
+  const highest = Math.max(...wanted);
   try {
+    const end = (await annotationPage(fetcher, profile, Number.MAX_SAFE_INTEGER, 1)).cursor;
+    // The last position whose first post row is still below the lowest
+    // message printed; reading starts just after it.
+    let low = 0;
+    let high = end;
+    for (let step = 0; step < ANNOTATION_SEEK_STEPS && high - low > ANNOTATION_PAGE_LIMIT; step += 1) {
+      const middle = Math.floor((low + high) / 2);
+      const first = firstPostId(await annotationPage(fetcher, profile, middle, ANNOTATION_PAGE_LIMIT));
+      if (first !== null && first < lowest) low = middle;
+      else high = middle;
+    }
+    let after = low;
     for (let index = 0; index < ANNOTATION_PAGES; index += 1) {
-      const page = await localRequest(fetcher, profile,
-        `/api/ai/annotations?after=${after}&limit=${ANNOTATION_PAGE_LIMIT}`,
-        { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
-      if (!exactObject(page, ['ok', 'rows', 'cursor', 'first_id']) || !Array.isArray(page.rows) ||
-          !Number.isSafeInteger(page.cursor) || page.cursor < after) return new Map();
+      const page = await annotationPage(fetcher, profile, after, ANNOTATION_PAGE_LIMIT);
+      let past = false;
       for (const row of page.rows) {
         if (!row || row.kind !== 'post') continue;
-        if (!validPostRow(row)) return new Map();
+        if (row.message_id > highest) { past = true; break; }
         if (!wanted.has(row.message_id)) continue;
         const rowNotes = postNotes(row);
         if (rowNotes.length > 0) notes.set(row.message_id, rowNotes);
       }
-      if (page.cursor === after) break;
+      if (past || page.cursor <= after) break;
       after = page.cursor;
     }
   } catch (_) {
@@ -1366,12 +1403,12 @@ function askOptions(args) {
 
 function validPublicAsk(value) {
   const ask = exactObject(value, [
-    'ask_id', 'asked_at', 'by', 'of', 'of_kind', 'means', 'deliver', 'state', 'kept_open',
+    'ask_id', 'asked_at', 'by', 'of', 'of_kind', 'means', 'deliver', 'project', 'state', 'kept_open',
     'carried_from', 'answers',
   ]);
   return !!ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
     typeof ask.by === 'string' && validAskFields({
-      of: ask.of, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver,
+      of: ask.of, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver, project: ask.project,
     }) && typeof ask.state === 'string' && Array.isArray(ask.answers);
 }
 
@@ -2638,6 +2675,11 @@ const WORK_VERBS = Object.freeze({
   confirm: Object.freeze({ path: '/api/ai/work/decisions/confirm', method: 'POST', id: true }),
   reopen: Object.freeze({ path: '/api/ai/work/decisions/reopen', method: 'POST', id: true }),
   withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', method: 'POST', id: true }),
+  ask: Object.freeze({ path: '/api/ai/work/decisions/ask', method: 'POST', id: false }),
+  // The kill slot's words are text, not a JSON body: from a file or stdin,
+  // never argv. The CLI reads the decision's current revision itself.
+  kill: Object.freeze({ path: '/api/ai/work/decisions/kill', method: 'POST', id: true, words: 'question' }),
+  'kill-reply': Object.freeze({ path: '/api/ai/work/decisions/kill-reply', method: 'POST', id: true, words: 'words', outcome: true }),
 });
 const WORK_QUERY_ORDER = Object.freeze(['project', 'needs_me', 'after', 'limit', 'format']);
 
@@ -2650,7 +2692,7 @@ function workOptions(args) {
   const verb = args[0];
   const spec = WORK_VERBS[verb];
   if (!spec) return { error: 'unknown verb' };
-  const options = { verb, spec, id: null, connection: null, file: null, json: false, query: {} };
+  const options = { verb, spec, id: null, connection: null, file: null, stdin: false, outcome: null, json: false, query: {} };
   let index = 1;
   if (spec.id) {
     if (typeof args[1] !== 'string' || !WORK_ITEM_ID.test(args[1])) return { error: 'a record id like W-12 or D-7 comes right after the verb' };
@@ -2681,6 +2723,21 @@ function workOptions(args) {
       options.query[name] = value;
       continue;
     }
+    if (flag === '--stdin') {
+      if (!spec.words) return { error: `${verb} takes no --stdin` };
+      seen.add(flag);
+      options.stdin = true;
+      continue;
+    }
+    if (flag === '--outcome') {
+      const value = args[index + 1];
+      if (!spec.outcome) return { error: `${verb} takes no --outcome` };
+      if (value !== 'survived' && value !== 'killed') return { error: '--outcome is survived or killed' };
+      seen.add(flag);
+      options.outcome = value;
+      index += 1;
+      continue;
+    }
     if (flag === '--needs-me') {
       if (!flags.includes('needs-me')) return { error: `${verb} takes no --needs-me` };
       seen.add(flag);
@@ -2696,7 +2753,12 @@ function workOptions(args) {
     return { error: 'refusing extra arguments; a request body travels in --file PATH' };
   }
   if (options.connection === null) return { error: '--connection NAME is required' };
-  if (spec.method === 'POST' && options.file === null) return { error: `${verb} needs --file PATH holding a JSON object` };
+  if (spec.words) {
+    if ((options.file === null) === !options.stdin) return { error: `${verb} reads its words from --file PATH or --stdin, one of them` };
+    if (spec.outcome && options.outcome === null) return { error: `${verb} needs --outcome survived|killed` };
+  } else if (spec.method === 'POST' && options.file === null) {
+    return { error: `${verb} needs --file PATH holding a JSON object` };
+  }
   for (const required of spec.required || []) {
     if (options.query[required] === undefined) return { error: `${verb} needs --${required}` };
   }
@@ -2754,9 +2816,23 @@ function workDetail(event) {
   return '';
 }
 
+const KILL_WORDS = Object.freeze({
+  unattacked: 'unattacked', attacked: 'attacked', survived: 'attacked, survived', killed: 'killed',
+});
+
+// The kill slot's state in words; a record from before the kill slot has none.
+function killWord(row) {
+  return Object.prototype.hasOwnProperty.call(KILL_WORDS, row && row.kill_state) ? KILL_WORDS[row.kill_state] : null;
+}
+
+function killSuffix(row) {
+  const word = killWord(row);
+  return word === null ? '' : ` · ${word}`;
+}
+
 function workRow(row) {
   if (row.kind === 'decision') {
-    return `${row.id} · ${row.state} · asked of ${who(row.asked_of)} by ${who(row.asked_by)} · ${terminalSafe(row.title)}`;
+    return `${row.id} · ${row.state}${killSuffix(row)} · asked of ${who(row.asked_of)} by ${who(row.asked_by)} · ${terminalSafe(row.title)}`;
   }
   const next = row.next_to ? `${who(row.next_to)} — ${terminalSafe(row.next_action || '')}` : 'nobody';
   return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}`;
@@ -2764,7 +2840,7 @@ function workRow(row) {
 
 function needsRow(row) {
   if (row.kind === 'decision') {
-    return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.proposal || '')} (${row.state}, asked by ${who(row.asked_by)})`;
+    return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.proposal || '')} (${row.state}${killSuffix(row)}, asked by ${who(row.asked_by)})`;
   }
   const awaiting = row.awaiting ? `, awaiting ${row.awaiting}` : '';
   return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting})`;
@@ -2809,6 +2885,13 @@ function renderGet(stdout, result) {
       const conditions = a.conditions ? ` · conditions: ${terminalSafe(a.conditions)}` : '';
       line(stdout, `  answer (${a.kind}): ${terminalSafe(a.text)}${conditions} · by ${who(a.by)}${relay} · source: ${terminalSafe(a.source || '')}`);
     }
+    if (killWord(item) !== null) {
+      const kill = item.kill;
+      line(stdout, `  kill slot: ${killWord(item)}${kill ? ` · asked by ${who(kill.by)}: ${terminalSafe(kill.question)}` : ''}`);
+      if (kill && kill.reply) {
+        line(stdout, `  kill reply (${terminalSafe(kill.reply.outcome)}) by ${who(kill.reply.by)}: ${terminalSafe(kill.reply.words)}`);
+      }
+    }
   } else {
     const next = item.next_to ? `${who(item.next_to)} — ${terminalSafe(item.next_action || '')}` : 'nobody';
     line(stdout, `  responsible: ${who(item.responsible)} · next: ${next} · target: ${terminalSafe(item.target || 'none')} · revision ${item.revision}`);
@@ -2837,6 +2920,11 @@ function renderWrite(stdout, verb, result, connection) {
   } else if (verb === 'confirm') line(stdout, `Confirmed the reported answer on ${item.id} (${item.state}).`);
   else if (verb === 'reopen') line(stdout, `Reopened ${item.id} (${item.state}, asked of ${who(item.asked_of)}).`);
   else if (verb === 'withdraw') line(stdout, `Withdrew ${item.id} (${item.state}).`);
+  else if (verb === 'ask') {
+    const message = result.message && Number.isSafeInteger(result.message.id) ? ` as message #${result.message.id}` : '';
+    line(stdout, `Asked ${item.id} · ${terminalSafe(item.title)} of ${who(item.asked_of)}${message}; a yes in the room answers it.`);
+  } else if (verb === 'kill') line(stdout, `Asked the kill question on ${item.id} (${killWord(item)}).`);
+  else if (verb === 'kill-reply') line(stdout, `Replied to the kill question on ${item.id} (${killWord(item)}).`);
   if (result.replayed === true) line(stdout, 'This operation id was already applied; the original result is shown.');
   if (exposure && typeof exposure.text === 'string') {
     line(stdout, '');
@@ -2866,7 +2954,30 @@ async function runWork(args, io, dependencies = {}) {
   const { spec } = parsed;
   let pathname = spec.path + (spec.method === 'GET' && spec.id ? parsed.id : '');
   let requestOptions = { method: spec.method, raw: spec.raw === true };
-  if (spec.method === 'POST') {
+  if (spec.method === 'POST' && spec.words) {
+    let words;
+    try {
+      words = (parsed.stdin
+        ? await (dependencies.readStdin || readStdin)(io.stdin || process.stdin)
+        : (dependencies.readFile || fs.readFileSync)(parsed.file, 'utf8')).replace(/\r?\n$/, '');
+    } catch (_) {
+      line(io.stderr, `interlock work: could not read the ${parsed.stdin ? 'piped words' : 'words file'} safely.`);
+      return EXIT_RUNTIME;
+    }
+    let current;
+    try {
+      current = await workRequest(fetcher, profile, WORK_VERBS.get.path + parsed.id);
+      if (!current || !current.item || !Number.isSafeInteger(current.item.revision)) throw incompatibleResponse();
+    } catch (error) {
+      reportWorkError(io.stderr, error, profile);
+      return EXIT_RUNTIME;
+    }
+    const body = { operation_id: crypto.randomUUID(), id: parsed.id, expected_revision: current.item.revision };
+    body[spec.words] = words;
+    if (spec.outcome) body.outcome = parsed.outcome;
+    line(io.stdout, `Operation ${body.operation_id} · against ${parsed.id} revision ${current.item.revision}.`);
+    requestOptions.body = body;
+  } else if (spec.method === 'POST') {
     let body;
     try {
       body = JSON.parse((dependencies.readFile || fs.readFileSync)(parsed.file, 'utf8'));

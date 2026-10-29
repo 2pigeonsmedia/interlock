@@ -63,7 +63,7 @@ test('an ask of an AI rings it without an @, and the row carries the scope', asy
   assert.deepEqual(ringed(saved), ['Marlow']);
   const page = await chat.readAnnotations({ after: 0, limit: 10 });
   assert.equal(page.rows.length, 1);
-  assert.deepEqual(page.rows[0].ask, { of: 'Marlow', of_kind: 'seat', means: null, deliver: 'now' });
+  assert.deepEqual(page.rows[0].ask, { of: 'Marlow', of_kind: 'seat', means: null, deliver: 'now', project: null });
   assert.equal(page.rows[0].message_id, saved.id);
   assert.equal(page.rows[0].by, 'Ana');
 });
@@ -73,7 +73,7 @@ test('a hold never rings its addressee, even named with @; others named still ri
   const saved = await chat.appendAnnotated({ text: '@Marlow @Codex later: the cutover plan' },
     PERSON, { ask: { of: 'Marlow', deliver: 'later' } });
   assert.deepEqual(ringed(saved), ['Codex']);
-  const asks = await chat.openAsks(MARLOW);
+  const asks = await chat.openAsks(MARLOW, 'Marlow');
   assert.equal(asks.addressed.length, 1);
   assert.equal(asks.addressed[0].deliver, 'later');
 });
@@ -99,7 +99,7 @@ test('the scope line is required when a person is asked, and is one line', async
     { ask: { of: 'Ana', means: 'I merge 5025792 to main and nothing else' } });
   // A person is never a ring recipient; the ask reaches her through Needs you.
   assert.deepEqual(ringed(saved), []);
-  assert.equal((await chat.openAsks(ANA)).addressed[0].means, 'I merge 5025792 to main and nothing else');
+  assert.equal((await chat.openAsks(ANA, 'Ana')).addressed[0].means, 'I merge 5025792 to main and nothing else');
   assert.equal((await chat.readAnnotations({ after: 0, limit: 10 })).rows.length, 1,
     'refused posts wrote nothing');
 });
@@ -121,9 +121,9 @@ test('only the addressee closes an ask; anyone may bind to it; a closed ask take
     { ask: { of: 'Ana', means: 'I push the release' } });
   await chat.appendAnnotated({ text: 'I think yes' }, seat(CODEX, 'Codex'),
     { answers: [{ ask_id: ask.id, choice: 'yes' }] });
-  assert.equal((await chat.openAsks(ANA)).addressed.length, 1, 'a bystander answer closes nothing');
+  assert.equal((await chat.openAsks(ANA, 'Ana')).addressed.length, 1, 'a bystander answer closes nothing');
   await chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
-  assert.equal((await chat.openAsks(ANA)).addressed.length, 0);
+  assert.equal((await chat.openAsks(ANA, 'Ana')).addressed.length, 0);
   await assert.rejects(chat.appendAnnotated({ text: 'yes again' }, PERSON,
     { answers: [{ ask_id: ask.id }] }), error => code(error) === 'ask-not-open');
   await assert.rejects(chat.appendAnnotated({ text: 'yes' }, PERSON,
@@ -143,13 +143,13 @@ test('withdraw and keep-open belong to the asker; a kept-open ask stays open thr
   await chat.annotate(marlow, 'keep_open', ask.id);
   await chat.appendAnnotated({ text: 'actually the release line' }, PERSON,
     { answers: [{ ask_id: ask.id }] });
-  const open = (await chat.openAsks(ANA)).addressed;
+  const open = (await chat.openAsks(ANA, 'Ana')).addressed;
   assert.equal(open.length, 1);
   assert.equal(open[0].kept_open, true);
   assert.equal(open[0].answers.length, 2);
   const withdrawn = await chat.annotate(marlow, 'withdraw', ask.id);
   assert.equal(withdrawn.kind, 'withdraw');
-  assert.equal((await chat.openAsks(ANA)).addressed.length, 0);
+  assert.equal((await chat.openAsks(ANA, 'Ana')).addressed.length, 0);
   await assert.rejects(chat.annotate(marlow, 'withdraw', ask.id),
     error => code(error) === 'ask-not-open');
 });
@@ -166,7 +166,8 @@ test('an answer to an older ask records the newer one it crossed; answering both
   await chat.appendAnnotated({ text: 'yes to both' }, PERSON,
     { answers: [{ ask_id: b.id, choice: 'yes' }, { ask_id: c.id, choice: 'yes' }] });
   const rows = (await chat.readAnnotations({ after: 0, limit: 10 })).rows;
-  assert.deepEqual(rows[3].answers, [{ ask_id: a.id, choice: 'yes', crossed_by: b.id }]);
+  assert.deepEqual(rows[3].answers,
+    [{ ask_id: a.id, choice: 'yes', crossed_by: b.id, by_addressee: true, closes: true }]);
   assert.deepEqual(rows[4].answers.map(answer => answer.crossed_by), [null, null]);
 });
 
@@ -200,7 +201,7 @@ test('a hold neither rings nor holds up the addressee\'s status post', async () 
   const done = await chat.appendAnnotated({ text: 'done' }, seat(MARLOW, 'Marlow'),
     { status: 'done', read_through: 0 });
   assert.equal(done.id, hold.id + 1);
-  assert.equal((await chat.openAsks(MARLOW)).addressed.length, 1, 'the hold is still carried');
+  assert.equal((await chat.openAsks(MARLOW, 'Marlow')).addressed.length, 1, 'the hold is still carried');
 });
 
 test('an AI retry replays with the same annotation and collides with a different one', async () => {
@@ -232,10 +233,10 @@ test('the open-ask index replays identically after a restart', async () => {
     { ask: { of: 'Ana', means: 'a' } });
   await chat.appendAnnotated({ text: 'B?' }, PERSON, { ask: { of: 'Codex' } });
   await chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: a.id }] });
-  const before = [await chat.openAsks(ANA), await chat.openAsks(CODEX), await chat.openAsks(MARLOW)];
+  const before = [await chat.openAsks(ANA, 'Ana'), await chat.openAsks(CODEX, 'Codex'), await chat.openAsks(MARLOW, 'Marlow')];
   await chat.close();
   const again = reopen();
-  const after = [await again.openAsks(ANA), await again.openAsks(CODEX), await again.openAsks(MARLOW)];
+  const after = [await again.openAsks(ANA, 'Ana'), await again.openAsks(CODEX, 'Codex'), await again.openAsks(MARLOW, 'Marlow')];
   assert.deepEqual(after, before);
 });
 
@@ -247,7 +248,7 @@ test('a post row left by a crash before its message never binds to the next mess
   // no real message will have.
   const orphan = {
     v: 1, seq: 1, ts: 5, kind: 'post', message_id: 2, subject_id: ANA, name: 'Ana',
-    ask: { of_subject_id: MARLOW, of_name: 'Marlow', of_kind: 'seat', means: null, deliver: 'now' },
+    ask: { of_subject_id: MARLOW, of_name: 'Marlow', of_kind: 'seat', means: null, deliver: 'now', project: null },
     answers: [], status: null, read_through: null,
   };
   fs.appendFileSync(path.join(dir, 'chat', 'annotations.jsonl'), JSON.stringify(orphan) + '\n');
@@ -257,7 +258,7 @@ test('a post row left by a crash before its message never binds to the next mess
   const page = await again.readAnnotations({ after: 0, limit: 10 });
   assert.deepEqual(page.rows, []);
   assert.equal(page.cursor, 1, 'the cursor passes the orphan');
-  assert.equal((await again.openAsks(MARLOW)).addressed.length, 0);
+  assert.equal((await again.openAsks(MARLOW, 'Marlow')).addressed.length, 0);
   const next = await again.appendAnnotated({ text: 'now?' }, PERSON, { ask: { of: 'Marlow' } });
   const rows = (await again.readAnnotations({ after: 0, limit: 10 })).rows;
   assert.deepEqual(rows.map(row => [row.seq, row.message_id]), [[2, next.id]]);
@@ -266,7 +267,7 @@ test('a post row left by a crash before its message never binds to the next mess
   const third = reopen();
   assert.deepEqual((await third.readAnnotations({ after: 0, limit: 10 })).rows
     .map(row => [row.seq, row.message_id]), [[2, next.id]]);
-  assert.equal((await third.openAsks(MARLOW)).addressed.length, 1);
+  assert.equal((await third.openAsks(MARLOW, 'Marlow')).addressed.length, 1);
 });
 
 test('what leaves the store carries names, never subject ids', async () => {
@@ -277,7 +278,7 @@ test('what leaves the store carries names, never subject ids', async () => {
   await chat.annotate({ subject_id: MARLOW, name: 'Marlow' }, 'keep_open', ask.id);
   const out = JSON.stringify([
     await chat.readAnnotations({ after: 0, limit: 10 }),
-    await chat.openAsks(ANA), await chat.openAsks(MARLOW),
+    await chat.openAsks(ANA, 'Ana'), await chat.openAsks(MARLOW, 'Marlow'),
   ]);
   assert.ok(out.includes('Marlow') && out.includes('Ana'), 'the arrangement: names are present');
   for (const id of [ANA, MARLOW, CODEX]) assert.ok(!out.includes(id), id);
@@ -292,7 +293,7 @@ test('a torn side-car tail is truncated; a corrupt row refuses to open', async (
   fs.appendFileSync(file, '{"v":1,"seq":2,');
   const again = reopen();
   assert.equal(fs.readFileSync(file, 'utf8'), whole);
-  assert.equal((await again.openAsks(MARLOW)).addressed.length, 1);
+  assert.equal((await again.openAsks(MARLOW, 'Marlow')).addressed.length, 1);
   await again.close();
   fs.appendFileSync(file, '{"v":1,"seq":9}\n');
   assert.throws(() => openStore({ dataDir: dir }), error => code(error) === 'corrupt-annotations');
@@ -304,7 +305,7 @@ test('a missing side-car is an empty one: the room opens with no asks and its me
   await chat.close();
   fs.unlinkSync(path.join(dir, 'chat', 'annotations.jsonl'));
   const again = reopen();
-  assert.equal((await again.openAsks(MARLOW)).addressed.length, 0);
+  assert.equal((await again.openAsks(MARLOW, 'Marlow')).addressed.length, 0);
   assert.equal((await again.read({ after: 0, limit: 10 })).messages.length, 1);
   assert.equal((await again.readAnnotations({ after: 0, limit: 10 })).rows.length, 0);
 });
@@ -329,7 +330,7 @@ test('a side-car replaced under an open store stops the store', async () => {
   const copy = file + '.copy';
   fs.copyFileSync(file, copy);
   fs.renameSync(copy, file);
-  await assert.rejects(chat.openAsks(MARLOW), error => code(error) === 'log-changed');
+  await assert.rejects(chat.openAsks(MARLOW, 'Marlow'), error => code(error) === 'log-changed');
 });
 
 test('an AI retry is answered by its first post even after the addressee has left', async () => {
@@ -347,6 +348,13 @@ test('an AI retry is answered by its first post even after the addressee has lef
   const again = await chat.appendAnnotated({ text: 'run it?' }, seat(MARLOW, 'Marlow', id),
     { ask: { of: 'Codex' } });
   assert.equal(again.id, first.id);
+  const id2 = 'bbbbbbbb-bbbb-4bbb-8bbb-000000000098';
+  people = people.concat([{ subject_id: CODEX, name: 'Codex', kind: 'seat', created_at: Date.now() }]);
+  const lower = await chat.appendAnnotated({ text: 'and this?' }, seat(MARLOW, 'Marlow', id2), { ask: { of: 'codex' } });
+  people = people.filter(row => row.name !== 'Codex');
+  const lowerAgain = await chat.appendAnnotated({ text: 'and this?' }, seat(MARLOW, 'Marlow', id2),
+    { ask: { of: 'codex' } });
+  assert.equal(lowerAgain.id, lower.id, 'a retry spelled as it first was, in any case, replays');
   await assert.rejects(chat.appendAnnotated({ text: 'new' }, seat(MARLOW, 'Marlow'),
     { ask: { of: 'Codex' } }), error => code(error) === 'ask-target-unknown',
   'a new post still needs a current participant');
@@ -373,13 +381,13 @@ test('a row a later release wrote is counted and skipped; the room still opens a
   fs.appendFileSync(file, JSON.stringify({ v: 1, seq: 2, kind: 'stamp', message_id: 1, project: 'finance' }) + '\n');
   fs.appendFileSync(file, JSON.stringify({ v: 2, seq: 3, kind: 'post', message_id: 1, anything: true }) + '\n');
   const again = reopen();
-  assert.equal((await again.openAsks(MARLOW)).addressed.length, 1);
+  assert.equal((await again.openAsks(MARLOW, 'Marlow')).addressed.length, 1);
   const next = await again.appendAnnotated({ text: 'B?' }, PERSON, { ask: { of: 'Codex' } });
   const rows = (await again.readAnnotations({ after: 0, limit: 10 })).rows;
   assert.deepEqual(rows.map(row => [row.seq, row.message_id]), [[1, 1], [4, next.id]],
     'later rows keep their places and are never served');
   await again.close();
-  assert.equal((await reopen().openAsks(CODEX)).addressed.length, 1);
+  assert.equal((await reopen().openAsks(CODEX, 'Codex')).addressed.length, 1);
 });
 
 test('a malformed row of a kind this release knows still refuses to open', async () => {
@@ -388,4 +396,78 @@ test('a malformed row of a kind this release knows still refuses to open', async
   fs.appendFileSync(path.join(dir, 'chat', 'annotations.jsonl'),
     JSON.stringify({ v: 1, seq: 1, kind: 'withdraw', ask_id: 1 }) + '\n');
   assert.throws(() => openStore({ dataDir: dir }), error => code(error) === 'corrupt-annotations');
+});
+
+test('an ask of an AI addresses its name: the seat that rejoins under it is rung, sees it and closes it', async () => {
+  let people = [
+    { subject_id: ANA, name: 'Ana', kind: 'person', created_at: Date.now() },
+    { subject_id: MARLOW, name: 'Marlow', kind: 'seat', created_at: Date.now() },
+  ];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-'));
+  const chat = createChatService({ store: openStore({ dataDir: dir }), participants: () => people });
+  const ask = await chat.appendAnnotated({ text: 'rerun it?' }, PERSON, { ask: { of: 'Marlow' } });
+  // Marlow's session ends; a new seat joins under the same name, with a new identity.
+  const REJOINED = '55555555-5555-4555-8555-555555555555';
+  people = [people[0], { subject_id: REJOINED, name: 'Marlow', kind: 'seat', created_at: Date.now() }];
+  assert.deepEqual((await chat.openAsks(REJOINED, 'Marlow')).addressed.map(row => row.ask_id), [ask.id],
+    'the rejoined seat sees the ask of its name');
+  const done = await chat.appendAnnotated({ text: 'yes' }, seat(REJOINED, 'Marlow'),
+    { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  assert.deepEqual((await chat.openAsks(ANA, 'Ana')).asked, [], 'the server closed it');
+  const rows = (await chat.readAnnotations({ after: 0, limit: 10 })).rows;
+  assert.deepEqual(rows[1].answers, [{ ask_id: ask.id, choice: 'yes', crossed_by: null, by_addressee: true, closes: true }],
+    'the answer carries the fact the page reads');
+  const Asks = require('../src/web/asks_model.js');
+  const page = Asks.createAsksState();
+  page.apply(rows);
+  assert.equal(page.ask(ask.id).state, 'answered', 'the page agrees with the server');
+  assert.equal(done.id, ask.id + 1);
+});
+
+test('an ask of a person stays hers: a namesake answering closes nothing', async () => {
+  let people = [
+    { subject_id: ANA, name: 'Ana', kind: 'person', created_at: Date.now() },
+    { subject_id: MARLOW, name: 'Marlow', kind: 'seat', created_at: Date.now() },
+  ];
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-'));
+  const chat = createChatService({ store: openStore({ dataDir: dir }), participants: () => people });
+  const ask = await chat.appendAnnotated({ text: 'merge?' }, seat(MARLOW, 'Marlow'),
+    { ask: { of: 'Ana', means: 'I merge' } });
+  const IMPOSTOR = '66666666-6666-4666-8666-666666666666';
+  await chat.appendAnnotated({ text: 'yes' }, seat(IMPOSTOR, 'ana'), { answers: [{ ask_id: ask.id }] });
+  assert.deepEqual((await chat.openAsks(ANA, 'Ana')).addressed.map(row => row.ask_id), [ask.id]);
+});
+
+test('the host can read an ask\'s answers from its addressee, oldest first, with words and author', async () => {
+  const { chat } = room();
+  const ask = await chat.appendAnnotated({ text: 'merge?' }, seat(MARLOW, 'Marlow'),
+    { ask: { of: 'Ana', means: 'I merge' } });
+  await chat.appendAnnotated({ text: 'me too' }, seat(CODEX, 'Codex'), { answers: [{ ask_id: ask.id }] });
+  const yes = await chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  const answers = await chat.addresseeAnswers(ask.id);
+  assert.deepEqual(answers.map(row => [row.message_id, row.choice, row.text, row.author.name]),
+    [[yes.id, 'yes', 'yes', 'Ana']], 'only the addressee\'s answers');
+  assert.deepEqual(answers[0].of, { kind: 'person', subject_id: ANA, name: 'Ana' });
+  const facts = await chat.postFacts(yes.id);
+  assert.deepEqual(facts.answers.map(row => [row.ask_id, row.by_addressee]), [[ask.id, true]]);
+});
+
+test('a post that must be new is refused, not replayed, when its client id was used, in the same step', async () => {
+  const { chat } = room();
+  const id = 'bbbbbbbb-bbbb-4bbb-8bbb-000000000077';
+  const first = await chat.appendAnnotated({ text: 'Decision: x' }, seat(MARLOW, 'Marlow', id), { ask: { of: 'Codex' } });
+  const replay = await chat.appendAnnotated({ text: 'Decision: x' }, seat(MARLOW, 'Marlow', id), { ask: { of: 'Codex' } });
+  assert.equal(replay.id, first.id, 'the arrangement: an ordinary retry replays');
+  await assert.rejects(chat.appendAnnotated({ text: 'Decision: x' }, seat(MARLOW, 'Marlow', id),
+    { ask: { of: 'Codex' } }, true), error => code(error) === 'already-posted');
+  assert.equal((await chat.read({ after: 0, limit: 10 })).messages.length, 1);
+});
+
+test('an ask may carry its project; a malformed project is refused', async () => {
+  const { chat } = room();
+  await chat.appendAnnotated({ text: 'ok?' }, PERSON, { ask: { of: 'Marlow', project: 'finance-app' } });
+  assert.equal((await chat.readAnnotations({ after: 0, limit: 10 })).rows[0].ask.project, 'finance-app');
+  assert.equal((await chat.openAsks(MARLOW, 'Marlow')).addressed[0].project, 'finance-app');
+  await assert.rejects(chat.appendAnnotated({ text: 'ok?' }, PERSON, { ask: { of: 'Marlow', project: 'Finance App' } }),
+    error => code(error) === 'invalid-annotation');
 });

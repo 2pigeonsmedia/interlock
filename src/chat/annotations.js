@@ -44,8 +44,11 @@ const CARRY_KEYS = Object.freeze([
   'v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id', 'archive_id', 'asked_at', 'ask',
   'era_first_id', 'kept_open',
 ]);
-const ASK_KEYS = Object.freeze(['of_subject_id', 'of_name', 'of_kind', 'means', 'deliver']);
-const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by']);
+const ASK_KEYS = Object.freeze(['of_subject_id', 'of_name', 'of_kind', 'means', 'deliver', 'project']);
+// A project id, as the Work record names it; whether the project exists and
+// whether one is required is the Work side's rule, not the room's.
+const PROJECT_ID = /^[a-z][a-z0-9-]{1,31}$/;
+const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
 const REQUEST_KEYS = Object.freeze(['ask', 'answers', 'status', 'read_through']);
 const REQUEST_ANSWER_KEYS = Object.freeze(['ask_id', 'choice']);
 
@@ -89,6 +92,7 @@ function parseAsk(value) {
   if (!ask || !boundedString(ask.of_subject_id, 64) || !boundedString(ask.of_name, MAX_NAME_BYTES) ||
       !KINDS.includes(ask.of_kind) || !DELIVER.includes(ask.deliver) ||
       !(ask.means === null || validMeans(ask.means)) ||
+      !(ask.project === null || (typeof ask.project === 'string' && PROJECT_ID.test(ask.project))) ||
       (ask.of_kind === 'person' && ask.means === null)) return null;
   return Object.freeze({
     of_subject_id: ask.of_subject_id,
@@ -96,6 +100,7 @@ function parseAsk(value) {
     of_kind: ask.of_kind,
     means: ask.means,
     deliver: ask.deliver,
+    project: ask.project,
   });
 }
 
@@ -107,12 +112,17 @@ function parseAnswers(value, withCrossing) {
     const answer = closedObject(candidate, withCrossing ? ANSWER_KEYS : REQUEST_ANSWER_KEYS);
     if (!answer || !positiveId(answer.ask_id) || seen.has(answer.ask_id) ||
         !(answer.choice === null || CHOICES.includes(answer.choice)) ||
-        (withCrossing && !(answer.crossed_by === null || positiveId(answer.crossed_by)))) {
+        (withCrossing && (!(answer.crossed_by === null || positiveId(answer.crossed_by)) ||
+          typeof answer.by_addressee !== 'boolean' || typeof answer.closes !== 'boolean' ||
+          (answer.closes && !answer.by_addressee)))) {
       return null;
     }
     seen.add(answer.ask_id);
     answers.push(Object.freeze(withCrossing
-      ? { ask_id: answer.ask_id, choice: answer.choice, crossed_by: answer.crossed_by }
+      ? {
+        ask_id: answer.ask_id, choice: answer.choice, crossed_by: answer.crossed_by,
+        by_addressee: answer.by_addressee, closes: answer.closes,
+      }
       : { ask_id: answer.ask_id, choice: answer.choice }));
   }
   return Object.freeze(answers);
@@ -193,6 +203,17 @@ function encodeRow(row) {
  * row (or one answer) whose reference no longer resolves is skipped, not
  * fatal: after a rollback an older server may have cleared messages this file
  * still points at. */
+/* Who an ask is waiting on. An ask of an AI addresses its name, as the room
+ * does: a seat that rejoins under the same name is the same addressee. An
+ * ask of a person addresses that person. */
+function addressedTo(ask, who) {
+  if (!who) return false;
+  if (ask.of_kind === 'seat') {
+    return typeof who.name === 'string' && who.name.toLowerCase() === ask.of_name.toLowerCase();
+  }
+  return who.subject_id === ask.of_subject_id;
+}
+
 function createAskIndex(eraFirstId) {
   const asks = new Map();
   const posts = new Map();
@@ -209,6 +230,7 @@ function createAskIndex(eraFirstId) {
       of_kind: ask.of_kind,
       means: ask.means,
       deliver: ask.deliver,
+      project: ask.project,
       carried_from: carriedFrom,
       state: 'open',
       kept_open: false,
@@ -223,10 +245,21 @@ function createAskIndex(eraFirstId) {
     return null;
   }
 
-  function applyAnswer(askId, messageId, row, choice) {
+  /* What an answer does to its ask, decided once when it is written and then
+   * stored: whether its author was the one asked, and whether it closed it. */
+  function answerFacts(askId, who) {
     const ask = asks.get(askId);
-    ask.answers.push({ message_id: messageId, subject_id: row.subject_id, name: row.name, choice });
-    if (row.subject_id === ask.of_subject_id && !ask.kept_open) ask.state = 'answered';
+    const byAddressee = addressedTo(ask, who);
+    return { by_addressee: byAddressee, closes: byAddressee && !ask.kept_open };
+  }
+
+  function applyAnswer(askId, messageId, row, answer) {
+    const ask = asks.get(askId);
+    ask.answers.push({
+      message_id: messageId, subject_id: row.subject_id, name: row.name, choice: answer.choice,
+      by_addressee: answer.by_addressee,
+    });
+    if (answer.closes) ask.state = 'answered';
   }
 
   function checkLifecycle(kind, askId, subjectId) {
@@ -250,13 +283,13 @@ function createAskIndex(eraFirstId) {
 
   /* The newest open ask of the same addressee that came after the one being
    * answered, unless this same message answers it too: a crossing. */
-  function crossingFor(askId, answererId, answeredIds) {
+  function crossingFor(askId, who, answeredIds) {
     const ask = asks.get(askId);
-    if (!ask || ask.of_subject_id !== answererId) return null;
+    if (!ask || !addressedTo(ask, who)) return null;
     let crossing = null;
     for (const other of asks.values()) {
       if (other.ask_id > askId && other.state === 'open' &&
-          other.of_subject_id === answererId && !answeredIds.has(other.ask_id) &&
+          addressedTo(other, who) && !answeredIds.has(other.ask_id) &&
           (crossing === null || other.ask_id < crossing)) crossing = other.ask_id;
     }
     return crossing;
@@ -274,7 +307,7 @@ function createAskIndex(eraFirstId) {
       posts.set(row.message_id, row);
       for (const answer of row.answers) {
         if (checkAnswer(answer.ask_id) === null) {
-          applyAnswer(answer.ask_id, row.message_id, row, answer.choice);
+          applyAnswer(answer.ask_id, row.message_id, row, answer);
         }
       }
       if (row.ask) addAsk(row.message_id, row, row.ask, row.ts, null);
@@ -292,18 +325,18 @@ function createAskIndex(eraFirstId) {
 
   /* An open ask that is waiting on this participant now. A hold is carried
    * for later, so it neither rings nor holds up a status post. */
-  function isOpenAskOf(messageId, subjectId) {
+  function isOpenAskOf(messageId, who) {
     const ask = asks.get(messageId);
-    return !!ask && ask.state === 'open' && ask.of_subject_id === subjectId && ask.deliver === 'now';
+    return !!ask && ask.state === 'open' && addressedTo(ask, who) && ask.deliver === 'now';
   }
 
-  function openAsksFor(subjectId) {
+  function openAsksFor(who) {
     const addressed = [];
     const asked = [];
     for (const ask of [...asks.values()].sort((a, b) => a.ask_id - b.ask_id)) {
       if (ask.state !== 'open') continue;
-      if (ask.of_subject_id === subjectId) addressed.push(publicAsk(ask));
-      if (ask.asker_subject_id === subjectId) asked.push(publicAsk(ask));
+      if (addressedTo(ask, who)) addressed.push(publicAsk(ask));
+      if (ask.asker_subject_id === who.subject_id) asked.push(publicAsk(ask));
     }
     return Object.freeze({ addressed: Object.freeze(addressed), asked: Object.freeze(asked) });
   }
@@ -314,14 +347,14 @@ function createAskIndex(eraFirstId) {
   }
 
   return {
-    rows, posts, asks, checkAnswer, checkLifecycle, crossingFor, replay,
+    rows, posts, asks, checkAnswer, answerFacts, checkLifecycle, crossingFor, replay,
     isOpenAskOf, openAsksFor, openAsks,
   };
 }
 
 function publicAskFields(ask) {
   return Object.freeze({
-    of: ask.of_name, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver,
+    of: ask.of_name, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver, project: ask.project,
   });
 }
 
@@ -334,11 +367,13 @@ function publicAsk(ask) {
     of_kind: ask.of_kind,
     means: ask.means,
     deliver: ask.deliver,
+    project: ask.project,
     state: ask.state,
     kept_open: ask.kept_open,
     carried_from: ask.carried_from,
     answers: Object.freeze(ask.answers.map(answer => Object.freeze({
       message_id: answer.message_id, by: answer.name, choice: answer.choice,
+      by_addressee: answer.by_addressee,
     }))),
   });
 }
@@ -353,6 +388,7 @@ function publicRow(row) {
       ask: row.ask ? publicAskFields(row.ask) : null,
       answers: Object.freeze(row.answers.map(answer => Object.freeze({
         ask_id: answer.ask_id, choice: answer.choice, crossed_by: answer.crossed_by,
+        by_addressee: answer.by_addressee, closes: answer.closes,
       }))),
       status: row.status,
       read_through: row.read_through,

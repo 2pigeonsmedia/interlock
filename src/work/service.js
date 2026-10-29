@@ -171,6 +171,14 @@ function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
+/* The kill slot: the one question that would sink a pick, asked by anyone
+ * but its asker, and the asker's reply. A word, never a verdict. */
+function killState(item) {
+  if (!item.kill) return 'unattacked';
+  if (!item.kill.reply) return 'attacked';
+  return item.kill.reply.outcome === 'killed' ? 'killed' : 'survived';
+}
+
 function decisionState(item) {
   if (item.withdrawn) return 'withdrawn';
   if (!item.answer) return 'awaiting';
@@ -320,7 +328,11 @@ function createWorkService(options) {
 
   function publicItem(item) {
     const copy = clone(item);
-    if (copy.kind === 'decision') copy.state = decisionState(item);
+    if (copy.kind === 'decision') {
+      copy.state = decisionState(item);
+      copy.kill = item.kill ? clone(item.kill) : null;
+      copy.kill_state = killState(item);
+    }
     return copy;
   }
 
@@ -341,8 +353,12 @@ function createWorkService(options) {
       return {
         id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: decisionState(item),
         asked_of: clone(item.asked_of), asked_by: clone(item.asked_by), proposal: item.proposal,
+        kill_state: killState(item),
+        source_message: item.source_message ? clone(item.source_message) : null,
+        source_message_id: item.source_message ? item.source_message.message_id : null,
+        ask_message_id: item.ask_message_id ?? null,
         answer_summary: item.answer ? {
-          kind: item.answer.kind, by: clone(item.answer.by),
+          kind: item.answer.kind, source: item.answer.source ?? '', by: clone(item.answer.by),
           attributed_to: clone(item.answer.attributed_to), at: item.answer.at,
         } : null,
         created_by: clone(item.created_by), updated_at: item.updated_at,
@@ -458,6 +474,9 @@ function createWorkService(options) {
           conditions: optionalText(body.conditions, SHORT_BYTES, 'conditions') ?? '',
           withdrawn: false,
           answer: null,
+          kill: null,
+          ask_message_id: null,
+          bridged_message_ids: [],
         });
       } else {
         Object.assign(item, {
@@ -670,6 +689,22 @@ function createWorkService(options) {
     item.updated_at = now;
   }
 
+  /* The first owner's recorded answer stands (her ruling, 2026-10-29). Each
+   * direct answer stores, when written, whether it is protected: recorded by
+   * the first owner, known by identity, or by a person not known not to be
+   * her. An administrator who is not her may not replace or reopen it. */
+  function protectedAnswer(item) {
+    const recorded = item.answer;
+    if (!recorded || recorded.kind !== 'direct') return false;
+    if (typeof recorded.first_owner_protected === 'boolean') return recorded.first_owner_protected;
+    // Written before the fact existed: a person's answer is protected.
+    return !!(recorded.by && recorded.by.kind === 'person');
+  }
+
+  function guardFirstOwnersAnswer(item, actor) {
+    if (protectedAnswer(item) && actor.owner && actor.first_owner !== true) fail('first-owner-answer');
+  }
+
   function answer(actor, rawInput) {
     return operation(actor, 'decisions.answer', rawInput, ['id', 'expected_revision', 'text', 'conditions', 'reason'],
       (draft, body, now) => {
@@ -681,12 +716,14 @@ function createWorkService(options) {
         const reason = optionalText(body.reason, SHORT_BYTES, 'reason') ?? '';
         const isAnswerer = actor.subject_id === item.asked_of.subject_id;
         if (!isAnswerer && !actor.owner) fail('not-answerer');
+        guardFirstOwnersAnswer(item, actor);
         const onBehalf = !isAnswerer;
         const previous = item.answer;
         if ((onBehalf || previous !== null) && reason.trim() === '') fail('invalid-reason');
         item.answer = {
           kind: 'direct', text, conditions, source: 'recorded here',
           by: refOf(actor), attributed_to: refOf(actor), at: now, reason,
+          first_owner_protected: actor.first_owner === true,
         };
         touch(item, now);
         if (previous) {
@@ -749,7 +786,7 @@ function createWorkService(options) {
         const reason = optionalText(body.reason, SHORT_BYTES, 'reason') ?? '';
         const previous = item.answer;
         item.answer = {
-          kind: 'direct', text: previous.text, conditions: previous.conditions, source: 'confirmed here',
+          kind: 'direct', text: previous.text, conditions: previous.conditions, source: 'confirmed here', first_owner_protected: actor.first_owner === true,
           by: refOf(actor), attributed_to: refOf(actor), at: now, reason,
         };
         touch(item, now);
@@ -768,6 +805,7 @@ function createWorkService(options) {
         checkRevision(item, body.expected_revision);
         const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
         if (decisionState(item) === 'awaiting') fail('invalid-state');
+        guardFirstOwnersAnswer(item, actor);
         const askedOf = optionalRef(body.asked_of, 'asked-of');
         if (askedOf === null) fail('invalid-asked-of');
         const previous = item.answer;
@@ -775,13 +813,159 @@ function createWorkService(options) {
         item.answer = null;
         item.withdrawn = false;
         if (askedOf !== undefined) item.asked_of = askedOf;
+        // Re-addressed, the decision is no longer the room ask's: that ask was
+        // put to someone else. Asking again means "Ask a decision" again.
+        const unbound = askedOf !== undefined && item.ask_message_id &&
+          (askedOf.subject_id !== previousAskedOf.subject_id) ? item.ask_message_id : null;
+        if (unbound !== null) item.ask_message_id = null;
         touch(item, now);
-        appendEvent(draft, now, actor, {
+        appendEvent(draft, now, actor, Object.assign({
           item: item.id, project: item.project, kind: 'reopened', reason,
           asked_of: clone(item.asked_of), previous_asked_of: previousAskedOf, previous: clone(previous),
+        }, unbound !== null ? { unbound_ask: unbound } : {}));
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
+  function killAsk(actor, rawInput) {
+    return operation(actor, 'decisions.kill', rawInput, ['id', 'expected_revision', 'question'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        if (actor.subject_id === item.asked_by.subject_id) fail('kill-own-pick');
+        checkRevision(item, body.expected_revision);
+        if (item.withdrawn) fail('invalid-state');
+        if (item.kill) fail('kill-slot-filled');
+        const question = requiredText(body.question, SHORT_BYTES, 'question');
+        item.kill = { question, by: refOf(actor), at: now, reply: null };
+        touch(item, now);
+        appendEvent(draft, now, actor, {
+          item: item.id, project: item.project, kind: 'kill-asked', before: null, after: clone(item.kill),
         });
         return { ok: true, item: publicItem(item) };
       });
+  }
+
+  function killReply(actor, rawInput) {
+    return operation(actor, 'decisions.kill-reply', rawInput, ['id', 'expected_revision', 'words', 'outcome'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        if (actor.subject_id !== item.asked_by.subject_id) fail('not-asker');
+        checkRevision(item, body.expected_revision);
+        if (!item.kill) fail('kill-slot-empty');
+        if (item.kill.reply) fail('kill-slot-replied');
+        if (body.outcome !== 'survived' && body.outcome !== 'killed') fail('invalid-outcome');
+        const words = requiredText(body.words, SHORT_BYTES, 'words');
+        const before = clone(item.kill);
+        item.kill.reply = { words, outcome: body.outcome, by: refOf(actor), at: now };
+        touch(item, now);
+        appendEvent(draft, now, actor, {
+          item: item.id, project: item.project, kind: 'kill-replied', before, after: clone(item.kill),
+        });
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
+  /* Whether the room's addressee of an ask is this decision's asked_of. The
+   * room's rule, applied once: an AI by name, a person by identity. */
+  function sameAddressee(item, of) {
+    if (!plainObject(of) || (of.kind !== 'person' && of.kind !== 'seat')) return false;
+    if (item.asked_of.kind !== of.kind) return false;
+    if (of.kind === 'seat') {
+      return typeof of.name === 'string' && of.name.toLowerCase() === item.asked_of.name.toLowerCase();
+    }
+    return of.subject_id === item.asked_of.subject_id;
+  }
+
+  /* Bind a decision to the ask the host just posted for it, in the room, as
+   * this actor. Never a route: only "Ask a decision" calls it, with a message
+   * it wrote itself and that ask's room addressee. A citation alone never
+   * binds; the room ask and the record must name the same person; one ask,
+   * one decision. The bind is on the record's trail. */
+  function bindAsk(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['id', 'ask_message_id', 'of']);
+    if (!body || !Number.isSafeInteger(body.ask_message_id) || body.ask_message_id < 1) fail('invalid-input');
+    return store.commit(draft => {
+      const item = findDecision(draft, body.id);
+      if (item.ask_message_id === body.ask_message_id) return { ok: true, item: publicItem(item), replayed: true };
+      if (item.ask_message_id !== null && item.ask_message_id !== undefined) fail('invalid-state');
+      if (item.created_by.subject_id !== actor.subject_id || !item.source_message ||
+          item.source_message.message_id !== body.ask_message_id) fail('not-authorized');
+      if (!sameAddressee(item, body.of)) fail('invalid-asked-of');
+      if (draft.items.some(row => row.kind === 'decision' && row.ask_message_id === body.ask_message_id)) {
+        fail('invalid-state');
+      }
+      const now = clock();
+      item.ask_message_id = body.ask_message_id;
+      touch(item, now);
+      appendEvent(draft, now, actor, {
+        item: item.id, project: item.project, kind: 'ask-bound', ask_message_id: body.ask_message_id, before: null,
+      });
+      return { ok: true, item: publicItem(item) };
+    });
+  }
+
+  /* The room answer is the decision's answer. When the room says an answer
+   * to the ask this decision was asked with came from that ask's addressee,
+   * and that addressee is still the one this decision is asked of, the answer
+   * is recorded here as theirs, directly, with its Yes or No. The addressee's
+   * latest room answer is the record; earlier ones stay on the trail. A room
+   * message is recorded at most once in a decision's life. */
+  function answerFromRoom(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['ask_id', 'message_id', 'text', 'choice', 'by_addressee', 'of']);
+    if (!body || !Number.isSafeInteger(body.ask_id) || body.ask_id < 1 ||
+        !Number.isSafeInteger(body.message_id) || body.message_id < 1 ||
+        !(body.choice === null || body.choice === 'yes' || body.choice === 'no') ||
+        typeof body.by_addressee !== 'boolean') fail('invalid-input');
+    const text = requiredText(body.text, BODY_BYTES, 'text');
+    const source = 'answered in the room #' + body.message_id;
+    return store.commit(draft => {
+      const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
+      // The room's facts, and the exact identity the decision is asked of: on
+      // the record, a name is never enough. A seat that rejoined under the
+      // name is re-asked, not answered for.
+      if (!item || item.withdrawn || body.by_addressee !== true || !sameAddressee(item, body.of) ||
+          actor.subject_id !== item.asked_of.subject_id || actor.kind !== item.asked_of.kind) {
+        return { ok: true, recorded: null };
+      }
+      // A room answer never replaces the first owner's recorded answer unless
+      // it is hers.
+      if (protectedAnswer(item) && actor.first_owner !== true) return { ok: true, recorded: null };
+      const bridged = Array.isArray(item.bridged_message_ids) ? item.bridged_message_ids : [];
+      if (bridged.includes(body.message_id)) return { ok: true, recorded: item.id, replayed: true };
+      // Latest by the room's order, not by arrival: an older message never
+      // replaces a newer room answer.
+      if (item.answer && Number.isSafeInteger(item.answer.room_message_id) &&
+          item.answer.room_message_id > body.message_id) return { ok: true, recorded: null };
+      const now = clock();
+      const previous = item.answer;
+      item.answer = {
+        kind: 'direct', text, choice: body.choice, conditions: '', source, room_message_id: body.message_id,
+        by: refOf(actor), attributed_to: refOf(actor), at: now, reason: '',
+        first_owner_protected: actor.first_owner === true,
+      };
+      item.bridged_message_ids = bridged.concat([body.message_id]);
+      touch(item, now);
+      appendEvent(draft, now, actor, previous
+        ? { item: item.id, project: item.project, kind: 'answer-replaced', text, choice: body.choice,
+          conditions: '', reason: source, previous: clone(previous) }
+        : { item: item.id, project: item.project, kind: 'answered', text, choice: body.choice, conditions: '',
+          reason: '', on_behalf: false, asked_of: clone(item.asked_of), source });
+      return { ok: true, recorded: item.id };
+    });
+  }
+
+  /* An operation this actor already completed, by its id alone, so a host
+   * can answer a retry before doing anything with side effects. */
+  function priorResult(actor, operationId) {
+    requireActor(actor);
+    if (typeof operationId !== 'string' || !UUID.test(operationId)) return null;
+    const prior = snapshot().operations[operationId.toLowerCase()];
+    const result = prior && prior.result;
+    if (!result || !result.item || !result.item.created_by ||
+        result.item.created_by.subject_id !== actor.subject_id) return null;
+    return Object.assign({}, clone(result), { replayed: true });
   }
 
   function withdraw(actor, rawInput) {
@@ -1025,7 +1209,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw,
+    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, priorResult,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });

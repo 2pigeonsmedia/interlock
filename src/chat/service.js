@@ -126,12 +126,12 @@ function createChatService(options) {
   }
 
   async function append(body, actor) {
-    return await appendWith(body, actor, null);
+    return await appendWith(body, actor, false, null);
   }
 
   /* A message and its annotation in one call: the ask has to be known before
    * recipients are frozen on the row, or it could neither ring nor hold. */
-  async function appendAnnotated(body, actor, annotationIn) {
+  async function appendAnnotated(body, actor, annotationIn, requireNew = false) {
     // Every key is optional on the wire; absent means none.
     const input = closedObject(annotationIn, ['ask', 'answers', 'status', 'read_through']);
     if (!input) throw fail('invalid-annotation');
@@ -144,7 +144,7 @@ function createChatService(options) {
       if (!entry) throw fail('invalid-annotation');
       return { ask_id: entry.ask_id, choice: entry.choice === undefined ? null : entry.choice };
     });
-    return await appendWith(body, actor, {
+    return await appendWith(body, actor, requireNew === true, {
       ask: input.ask === undefined ? null : input.ask,
       answers: normalized,
       status: input.status === undefined ? null : input.status,
@@ -152,7 +152,7 @@ function createChatService(options) {
     });
   }
 
-  async function appendWith(body, actor, annotationIn) {
+  async function appendWith(body, actor, requireNew, annotationIn) {
     requireOpen();
     const now = Date.now();
     await store.touch(actor.subject_id, now);
@@ -163,15 +163,15 @@ function createChatService(options) {
     let deliver = 'now';
     if (annotationIn !== null) {
       const askIn = annotationIn.ask === null ? null
-        : (closedObject(annotationIn.ask, ['of', 'means', 'deliver']) ||
-          closedObject(annotationIn.ask, ['of', 'means']));
+        : closedObject(annotationIn.ask, ['of', 'means', 'deliver', 'project']);
       if (annotationIn.ask !== null && !askIn) throw fail('invalid-annotation');
       let ask = null;
       if (askIn) {
         // A retry is answered by its first post, not by today's roster.
         const prior = actor.client_message_id === null ? null
           : await store.priorAsk(actor.subject_id, actor.client_message_id);
-        askTarget = prior && prior.name === askIn.of ? prior : resolveAskTarget(askIn.of, everyone);
+        askTarget = prior && typeof askIn.of === 'string' &&
+          prior.name.toLowerCase() === askIn.of.toLowerCase() ? prior : resolveAskTarget(askIn.of, everyone);
         if (!askTarget) throw fail('ask-target-unknown');
         if (askTarget.subject_id === actor.subject_id) throw fail('ask-of-self');
         deliver = askIn.deliver === undefined ? 'now' : askIn.deliver;
@@ -179,12 +179,14 @@ function createChatService(options) {
         const means = askIn.means === undefined ? null : askIn.means;
         if (means === null && askTarget.kind === 'person') throw fail('means-required');
         if (means !== null && !Annotations.validMeans(means)) throw fail('invalid-annotation');
+        const project = askIn.project === undefined ? null : askIn.project;
         ask = {
           of_subject_id: askTarget.subject_id,
           of_name: askTarget.name,
           of_kind: askTarget.kind,
           means,
           deliver,
+          project,
         };
       }
       annotation = {
@@ -197,7 +199,7 @@ function createChatService(options) {
     const recipients = ringRecipients(
       body && body.text, roster, actor && actor.subject_id, askTarget, deliver,
     );
-    const saved = await store.append(body, Object.assign({}, actor, { recipients }), annotation);
+    const saved = await store.append(body, Object.assign({}, actor, { recipients }), annotation, requireNew);
     // Store append resolves only after its durable commit. A waiter can never
     // observe a wake for a message the append caller has not durably earned.
     for (const waiter of [...waiters]) waiter.notify();
@@ -587,13 +589,23 @@ function createChatService(options) {
     return await store.readAnnotationRows(query);
   }
 
-  async function openAsks(subjectId) {
+  async function postFacts(messageId) {
     requireOpen();
-    return await store.openAsks(subjectId);
+    return await store.postFacts(messageId);
+  }
+
+  async function addresseeAnswers(askId) {
+    requireOpen();
+    return await store.addresseeAnswers(askId);
+  }
+
+  async function openAsks(subjectId, name) {
+    requireOpen();
+    return await store.openAsks(subjectId, name);
   }
 
   return Object.freeze({
-    append, appendAnnotated, annotate, readAnnotations, openAsks,
+    append, appendAnnotated, annotate, readAnnotations, openAsks, postFacts, addresseeAnswers,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,

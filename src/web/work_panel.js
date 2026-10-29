@@ -139,7 +139,7 @@
 
   function renderNeedsYou(brief) {
     const state = session;
-    const needs = model().needsYou(brief, Date.now(), state ? state.asks : []);
+    const needs = model().needsYou(brief, Date.now(), state ? state.asks : [], state ? state.answers.settled() : new Set());
     element('needs-you-count').textContent = String(needs.count);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
     element('needs-you-list').replaceChildren(...needs.rows.map(row => {
@@ -147,9 +147,10 @@
       const open = row.kind === 'ask' ? () => showAsk(row) : () => openItem(row.id);
       card.append(
         openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, open, row.id),
-        make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting),
+        make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting + (row.kill ? ' · ' + row.kill : '')),
         make('p', '', row.ask + ' — ' + row.by),
       );
+      if (row.note) card.append(make('p', 'work-state', row.note));
       return card;
     }));
   }
@@ -347,13 +348,36 @@
 
   async function loadBrief() {
     const state = session;
+    const started = state.answers.beginRead();
     const brief = await workGet('/api/work/brief');
     if (!current(state)) return;
+    state.answers.settle(started);
     state.brief = brief;
     renderNeedsYou(brief);
     renderReported(brief);
     renderActions(brief);
     renderProjects(brief);
+    refreshOpenDrawer(state, brief);
+  }
+
+  // The open dialog follows its record. A half-written form is never wiped:
+  // the dialog says the record changed, and the form's own write will meet
+  // the stale-revision refusal if it goes ahead.
+  function refreshOpenDrawer(state, brief) {
+    if (!element('work-drawer').open || state.drawerItem === null ||
+        !model().changedSince(brief, state.drawerItem, state.drawerUpdatedAt)) return;
+    if (element('work-drawer-actions').querySelector('.work-action-form form')) {
+      element('work-drawer-status').textContent = 'This record changed since you opened it.';
+      return;
+    }
+    const hadFocus = element('work-drawer').contains(document.activeElement);
+    openItem(state.drawerItem).then(() => {
+      if (hadFocus && current(state) && !element('work-drawer').contains(document.activeElement)) {
+        const heading = element('work-drawer-heading');
+        if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+        heading.focus();
+      }
+    });
   }
 
   function setStatus(text) {
@@ -366,7 +390,13 @@
 
   async function refresh() {
     const state = session;
-    if (!state || state.refreshing) return;
+    if (!state) return;
+    // A refresh asked for during a read runs once more after it, so an answer
+    // that arrived mid-read is settled by a read that began after it.
+    if (state.refreshing) {
+      state.refreshAgain = true;
+      return;
+    }
     state.refreshing = true;
     try {
       await loadBrief();
@@ -376,6 +406,10 @@
       if (current(state)) setStatus([state.notice, model().errorWords(error.code)].filter(Boolean).join(' '));
     } finally {
       state.refreshing = false;
+    }
+    if (state.refreshAgain && current(state)) {
+      state.refreshAgain = false;
+      refresh();
     }
   }
 
@@ -441,7 +475,7 @@
     const item = result.item;
     const section = element('work-drawer-state');
     section.append(make('p', 'work-state', model().stateLabel(item)));
-    for (const line of model().drawerLines(item, result.history)) section.append(make('p', 'work-drawer-line', line));
+    for (const line of model().drawerLines(item, result.history, state.answers.settled())) section.append(make('p', 'work-drawer-line', line));
     if (item.kind !== 'decision' && item.state === 'done') {
       section.append(make('p', 'work-drawer-line',
         model().doneLine(item, result.evidence, childrenOf(state, item), closerOf(result.history))));
@@ -713,7 +747,41 @@
     })];
   }
 
+  // The kill slot: anyone but the asker asks the one question that would sink
+  // the decision; only the asker replies, and says whether it survived.
+  function killForm(item) {
+    const question = control('textarea', 'question', 'The one question that would sink it', { required: true });
+    return [actionForm('work-kill', [question], 'Ask the kill question', async operation => {
+      const result = await write('decisions/kill',
+        { id: item.id, expected_revision: item.revision, question: question.node.value }, null, operation);
+      if (result) await afterDecisionWrite(result, item);
+    })];
+  }
+
+  function killReplyForm(item) {
+    const words = control('textarea', 'words', 'Your reply', { required: true });
+    const outcome = choice('outcome', 'Outcome', [
+      { value: 'survived', text: 'It survives the question' },
+      { value: 'killed', text: 'The question kills it' },
+    ], 'survived');
+    return [
+      make('p', '', 'Kill question from ' + model().who(item.kill.by) + ': ' + item.kill.question),
+      actionForm('work-killreply', [words, outcome], 'Record reply', async operation => {
+        const result = await write('decisions/kill-reply', {
+          id: item.id, expected_revision: item.revision, words: words.node.value, outcome: outcome.node.value,
+        }, null, operation);
+        if (result) await afterDecisionWrite(result, item);
+      }),
+    ];
+  }
+
   function renderDecisionActions(buttons, slot, item) {
+    if (item.kill_state === 'unattacked' && !isMe(item.asked_by)) {
+      actionButton(buttons, slot, 'Ask the kill question', item, () => killForm(item));
+    }
+    if (item.kill_state === 'attacked' && item.kill && isMe(item.asked_by)) {
+      actionButton(buttons, slot, 'Reply to the kill question', item, () => killReplyForm(item));
+    }
     if (item.state === 'awaiting') {
       if (isMe(item.asked_of)) actionButton(buttons, slot, 'Answer', item, () => answerForm(item, null, 'Record answer'));
       else {
@@ -1015,6 +1083,9 @@
     showCreateField('work-create-project', !evidence);
     showCreateField('work-create-to', !evidence);
     showCreateField('work-create-next-action', kind === 'work');
+    showCreateField('work-create-scope', kind === 'decision');
+    element('work-create-scope').value = '';
+    element('work-create-save').textContent = kind === 'decision' ? 'Ask a decision' : 'Save';
     showCreateField('work-create-item', evidence);
     element('work-create-status').textContent = '';
   }
@@ -1070,6 +1141,18 @@
         id: element('work-create-item').value, target: element('work-create-title').value,
         observed: prefill.observed, limits: element('work-create-body').value, source_message: prefill.source_message,
       };
+    } else if (kind === 'decision') {
+      // "Ask a decision": the server posts a new message carrying the ask,
+      // then records the decision citing it, so a yes in the room answers
+      // it. The message it was made from is linked, not cited.
+      op = 'decisions/ask';
+      body = {
+        project: element('work-create-project').value,
+        title: element('work-create-title').value, body: element('work-create-body').value,
+        asked_of: element('work-create-to').value, about_message: message.id,
+      };
+      const scope = element('work-create-scope').value;
+      if (scope.trim() !== '') body.scope = scope;
     } else {
       op = 'items/create';
       body = {
@@ -1078,8 +1161,7 @@
         source_message: prefill.source_message,
       };
       const to = element('work-create-to').value;
-      if (kind === 'decision') body.asked_of = to;
-      else if (to !== '') {
+      if (to !== '') {
         body.next_to = to;
         body.next_action = element('work-create-next-action').value;
       }
@@ -1195,6 +1277,7 @@
     if (!current(state) || request !== state.drawerRequest) return;
     const item = result.item;
     state.drawerItem = item.id;
+    state.drawerUpdatedAt = item.updated_at;
     clearDrawer(item.id + ' · ' + item.title, projectName(state, item.project));
     renderDrawerState(state, result);
     renderDrawerActions(result);
@@ -1213,6 +1296,9 @@
     state.asks = addressed.filter(ask => ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
       typeof ask.by === 'string' && Number.isSafeInteger(ask.asked_at) &&
       (ask.means === null || typeof ask.means === 'string'));
+    const answered = event && event.detail && Array.isArray(event.detail.answered) ? event.detail.answered : [];
+    // A new room answer waits for a brief read that began after it.
+    if (state.answers.observe(answered)) refresh();
     if (state.brief) renderNeedsYou(state.brief);
   }
 
@@ -1236,8 +1322,8 @@
   function start(user, deps) {
     stop();
     const state = {
-      user, deps, brief: null, projectViews: new Map(), asks: [],
-      refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
+      user, deps, brief: null, projectViews: new Map(), asks: [], answers: model().createAnswerTracker(), refreshAgain: false,
+      refreshing: false, drawerRequest: 0, drawerItem: null, drawerUpdatedAt: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },
     };

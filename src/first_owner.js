@@ -28,7 +28,13 @@ const ANNOTATION_REFUSALS = Object.freeze({
 });
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(allow|decline)$/;
-const WORK_ROUTE = /^\/api\/(ai\/)?work\/([a-z]+(?:\/[a-z]+)?)$/;
+const WORK_ROUTE = /^\/api\/(ai\/)?work\/([a-z]+(?:\/[a-z][a-z-]*)?)$/;
+// "Ask a decision": a room post and the record that cites it, in that order.
+const ASK_DECISION_OP = 'decisions/ask';
+const ASK_DECISION_KEYS = Object.freeze([
+  'operation_id', 'project', 'title', 'body', 'asked_of', 'proposal', 'rationale', 'scope',
+  'conditions', 'links', 'parent', 'about_message',
+]);
 const WORK_ITEM_ROUTE = /^\/api\/(ai\/)?work\/items\/([WD]-[1-9][0-9]*)$/;
 const WORK_READS = Object.freeze(['brief', 'list', 'changes', 'export']);
 const TRANSCRIPT_EXPORT_ROUTE = /^\/api\/transcript\/exports\/(transcript-[0-9]{8}T[0-9]{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(json|md|annotations\.jsonl)$/;
@@ -1602,6 +1608,13 @@ function createFirstOwnerHandler(options) {
   // Two doors to one service. A browser session or an admitted seat bearer
   // becomes a trusted actor here; the request body never contributes identity.
 
+  /* Whether this request's own signed-in person is the first owner, by
+   * identity. Anything less is false. */
+  function isFirstOwner(request, subjectId, now, activity = 'ordinary') {
+    const who = house.whoami({ cookie_header: request.headers.cookie, activity, now });
+    return !!(who && who.subject_id === subjectId && who.first_owner === true);
+  }
+
   function workOwnerFlag(request, authorized, now, activity) {
     const who = house.whoami({ cookie_header: request.headers.cookie, activity, now });
     return !!(who && who.subject_id === authorized.subject_id && Array.isArray(who.roles) &&
@@ -1631,6 +1644,8 @@ function createFirstOwnerHandler(options) {
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null,
       owner: workOwnerFlag(request, authorized, now, activity), now,
+      // Writes only: a read is a passive poll and must not touch the session.
+      first_owner: mutation && isFirstOwner(request, actor.subject_id, now, activity),
     });
   }
 
@@ -1645,7 +1660,7 @@ function createFirstOwnerHandler(options) {
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: 'seat',
       session: discriminator && discriminator.session !== undefined ? discriminator.session : null,
-      owner: false, now: Date.now(),
+      owner: false, now: Date.now(), first_owner: false,
     });
   }
 
@@ -1726,6 +1741,10 @@ function createFirstOwnerHandler(options) {
         sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
         return;
       }
+    }
+    if (op === ASK_DECISION_OP) {
+      await askDecision(request, response, body, actor, ai);
+      return;
     }
     sendWorkResult(request, response, await work.mutate(op, actor, body, actor.now));
   }
@@ -2060,6 +2079,131 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // ── decisions asked in the room ───────────────────────────────────────────
+  // The ask goes into the room first and the record cites it, so a crash
+  // between the two leaves an ordinary ask that can still be answered. An AI's
+  // operation id doubles as its message id, so its retry posts nothing twice.
+
+  async function askDecision(request, response, body, workActor, ai) {
+    const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : null;
+    if (!keys || keys.some(key => !ASK_DECISION_KEYS.includes(key)) ||
+        typeof body.operation_id !== 'string' || typeof body.title !== 'string' ||
+        body.title.trim() === '' || typeof body.asked_of !== 'string' ||
+        (body.about_message !== undefined &&
+          !(Number.isSafeInteger(body.about_message) && body.about_message > 0)) ||
+        (body.scope !== undefined && typeof body.scope !== 'string')) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), body.operation_id.toLowerCase());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return;
+    }
+    // A retry of a completed ask is answered from its record; nothing is posted.
+    const prior = work.priorResult(workActor, body.operation_id);
+    if (prior) {
+      const cited = prior.body.item && prior.body.item.source_message;
+      const page = cited ? await chat.read({ after: cited.message_id - 1, limit: 1 }) : null;
+      const message = page && page.messages[0] && page.messages[0].id === cited.message_id
+        ? publicMessage(page.messages[0]) : null;
+      sendJson(request, response, 200, Object.assign({}, prior.body, { message }));
+      return;
+    }
+    const text = (body.about_message ? `re #${body.about_message} ` : '') + `Decision: ${body.title.trim()}`;
+    const ask = { of: body.asked_of };
+    if (typeof body.project === 'string') ask.project = body.project;
+    if (typeof body.scope === 'string' && body.scope.trim() !== '') ask.means = body.scope.trim();
+    // The post must be new. An earlier post under this operation id that no
+    // completed ask owns is never bound to a new decision: answers already
+    // given to it were given to something else. The store refuses it in the
+    // same step as the append, so nothing can land in between.
+    let saved;
+    try {
+      saved = publicMessage(await chat.appendAnnotated({ text }, chatActor, { ask }, true));
+      if (!saved) throw new Error('invalid chat result');
+    } catch (error) {
+      if (error && error.code === 'already-posted') {
+        sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
+        return;
+      }
+      annotationRefusal(request, response, error);
+      return;
+    }
+    // The addressee is resolved once, by the room: the record is asked of the
+    // participant the room ask is addressed to, never of a string from the body.
+    const facts = await chat.postFacts(saved.id);
+    if (!facts || !facts.ask) {
+      sendJson(request, response, 503, { ok: false, error: 'work-unavailable', message: saved });
+      return;
+    }
+    const create = Object.assign({}, body, {
+      kind: 'decision', asked_of: facts.ask.subject_id, source_message: { message_id: saved.id, quote: text },
+    });
+    delete create.about_message;
+    // A refused record still names its message: the ask stands in the room.
+    const result = await work.mutate('items/create', workActor, create, workActor.now);
+    if (result.status >= 400) {
+      sendJson(request, response, result.status, Object.assign({}, result.body, { message: saved }));
+      return;
+    }
+    // Only now is the record the ask's decision. This request posted the ask,
+    // so an answer given before the binding is its own and is caught up.
+    const bound = work.bindAsk(workActor, {
+      id: result.body.item.id, ask_message_id: saved.id, of: facts.ask,
+    });
+    if (bound.status !== 200) {
+      sendJson(request, response, bound.status, Object.assign({}, bound.body, { message: saved }));
+      return;
+    }
+    await catchUpAnswer(saved.id);
+    sendJson(request, response, result.status, Object.assign({}, result.body, { item: bound.body.item, message: saved }));
+  }
+
+  /* After a room answer is saved: each answer the room stored as coming from
+   * its ask's addressee goes to the decision bound to that ask, if any. The
+   * room's facts decide, not the request. The post's response never changes. */
+  async function bridgeRoomAnswers(chatActor, saved, request) {
+    if (!work) return;
+    const facts = await chat.postFacts(saved.id);
+    if (!facts) return;
+    const actor = {
+      subject_id: chatActor.subject_id, name: chatActor.name, kind: chatActor.kind,
+      session: saved.session === undefined ? null : saved.session, owner: false,
+      first_owner: chatActor.kind === 'person' && isFirstOwner(request, chatActor.subject_id, Date.now()),
+    };
+    for (const answer of facts.answers) {
+      if (!answer.by_addressee || !answer.of) continue;
+      work.answerFromRoom(actor, {
+        ask_id: answer.ask_id, message_id: saved.id, text: saved.text, choice: answer.choice,
+        by_addressee: answer.by_addressee, of: answer.of,
+      });
+    }
+  }
+
+  /* An answer the addressee gave between the ask's post and its binding:
+   * the latest one is recorded now, as it would have been. */
+  async function catchUpAnswer(askId) {
+    const answers = await chat.addresseeAnswers(askId);
+    const latest = answers[answers.length - 1];
+    if (!latest) return;
+    // The answerer is not this request's person, so whether a person is the
+    // first owner cannot be shown here: a person's answer is protected.
+    work.answerFromRoom({
+      subject_id: latest.author.subject_id, name: latest.author.name, kind: latest.author.kind,
+      session: null, owner: false, first_owner: latest.author.kind === 'person',
+    }, {
+      ask_id: askId, message_id: latest.message_id, text: latest.text, choice: latest.choice,
+      by_addressee: true, of: latest.of,
+    });
+  }
+
   // ── asks, answers and status: the side-car ────────────────────────────────
   // The message object never changes. A message and its annotation arrive in
   // one call, because the ask must be known before the row's recipients are
@@ -2104,6 +2248,7 @@ function createFirstOwnerHandler(options) {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (!saved) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
+      await bridgeRoomAnswers(actor, saved, request);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2140,6 +2285,7 @@ function createFirstOwnerHandler(options) {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (saved === null) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
+      await bridgeRoomAnswers(actor, saved, request);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2386,7 +2532,7 @@ function createFirstOwnerHandler(options) {
     }
     try {
       await chat.touchParticipant(authorized.subject_id, Date.now());
-      const asks = await chat.openAsks(authorized.subject_id);
+      const asks = await chat.openAsks(authorized.subject_id, authorized.subject_name);
       sendJson(request, response, 200, { ok: true, addressed: asks.addressed, asked: asks.asked });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
@@ -3004,7 +3150,8 @@ function createFirstOwnerHandler(options) {
 
     if (work && (pathname.startsWith('/api/work/') || pathname.startsWith('/api/ai/work/'))) {
       const workRoute = WORK_ROUTE.exec(pathname);
-      const op = workRoute && work.MUTATION_OPS.includes(workRoute[2]) ? workRoute[2] : null;
+      const op = workRoute && (work.MUTATION_OPS.includes(workRoute[2]) || workRoute[2] === ASK_DECISION_OP)
+        ? workRoute[2] : null;
       if (request.method !== 'POST') {
         sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' }, { allow: 'POST' });
         return;

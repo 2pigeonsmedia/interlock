@@ -40,9 +40,40 @@
     awaiting: 'Awaiting answer', answered: 'Answered here', reported: 'Answer reported', withdrawn: 'Withdrawn',
   });
 
+  // A direct answer the room recorded (the person asked said it in the room)
+  // reads as that, not as answered here. The source is the room's own words.
+  const ROOM_SOURCE = /^answered in the room #[1-9][0-9]*$/;
+
   function stateLabel(item) {
+    const answer = item.answer || item.answer_summary;
+    if (item.kind === 'decision' && item.state === 'answered' && answer && typeof answer.source === 'string' &&
+        ROOM_SOURCE.test(answer.source)) return 'Answered in the room';
     const labels = item.kind === 'decision' ? DECISION_STATES : WORK_STATES;
     return Object.hasOwn(labels, item.state) ? labels[item.state] : String(item.state);
+  }
+
+  // The kill slot's state in words (design §7): derived by the store, shown
+  // here. A record from before the kill slot has no state and shows none.
+  const KILL_WORDS = Object.freeze({
+    unattacked: 'unattacked', attacked: 'attacked', survived: 'attacked, survived', killed: 'killed',
+  });
+
+  function killWord(item) {
+    return item && Object.hasOwn(KILL_WORDS, item.kill_state) ? KILL_WORDS[item.kill_state] : null;
+  }
+
+  function killLines(item) {
+    const word = killWord(item);
+    if (word === null) return [];
+    const lines = ['Kill slot: ' + word];
+    if (item.kill) {
+      lines.push('Kill question from ' + who(item.kill.by) + ': ' + oneLine(item.kill.question));
+      if (item.kill.reply) {
+        lines.push('Reply from ' + who(item.kill.reply.by) + ' (' + item.kill.reply.outcome + '): ' +
+          oneLine(item.kill.reply.words));
+      }
+    }
+    return lines;
   }
 
   function projectNames(brief) {
@@ -69,11 +100,67 @@
   // Everything that waits on the viewer, across every active project, and
   // every open ask addressed to the viewer, oldest first. The brief's
   // needs_me is already unfiltered; nothing here narrows it.
-  function needsYou(brief, now, asks = []) {
+  // A decision still awaiting whose own ask was answered in the room by the
+  // person asked: the room has the answer, the record does not (yet).
+  const ROOM_NOT_RECORDED = 'Answered in the room, not recorded here';
+
+  // Only an ask the server bound to the decision ("Ask a decision") counts;
+  // a decision merely citing a message has no ask of its own.
+  function answeredInRoom(decision, answered) {
+    return decision.state === 'awaiting' && Number.isSafeInteger(decision.ask_message_id) &&
+      answered.has(decision.ask_message_id);
+  }
+
+  // Which room answers the work record has been read since. The asks event
+  // reports an answer the moment it is saved; the brief that says whether
+  // the decision recorded it comes later. An answer is settled only by a
+  // brief read that began after it arrived, so "not recorded here" is never
+  // drawn from a brief older than the answer.
+  function createAnswerTracker() {
+    let answered = new Set();
+    const unconfirmed = new Set();
+    return Object.freeze({
+      // The room's current answered ids; true when any is new.
+      observe(ids) {
+        const next = new Set(ids.filter(id => Number.isSafeInteger(id) && id > 0));
+        const fresh = [...next].filter(id => !answered.has(id));
+        for (const id of fresh) unconfirmed.add(id);
+        answered = next;
+        return fresh.length > 0;
+      },
+      // Call as a brief read starts; pass the result to settle when it lands.
+      beginRead() {
+        return new Set(unconfirmed);
+      },
+      settle(started) {
+        for (const id of started) unconfirmed.delete(id);
+      },
+      settled() {
+        return new Set([...answered].filter(id => !unconfirmed.has(id)));
+      },
+    });
+  }
+
+  // Whether the record open in the dialog has changed since it was read: the
+  // brief lists it with a newer update time. A record the brief does not
+  // list (done, or in another project's archive) is left as it is.
+  function changedSince(brief, id, updatedAt) {
+    const rows = [].concat(brief.needs_me || [], brief.open || [], brief.decisions || []);
+    const row = rows.find(entry => entry && entry.id === id);
+    return !!row && Number.isSafeInteger(row.updated_at) && row.updated_at !== updatedAt;
+  }
+
+  function needsYou(brief, now, asks = [], answered = new Set()) {
     const names = projectNames(brief);
+    // An ask bound to a decision is that decision's row, never a second one.
+    const cited = new Set(brief.needs_me.concat(brief.decisions || [])
+      .filter(row => row.kind === 'decision' && Number.isSafeInteger(row.ask_message_id))
+      .map(row => row.ask_message_id));
     const workRows = brief.needs_me.map(row => {
       const decision = row.kind === 'decision';
-      return { at: row.updated_at, row: {
+      const kill = decision ? killWord(row) : null;
+      const room = decision && answeredInRoom(row, answered) ? { note: ROOM_NOT_RECORDED } : {};
+      return { at: row.updated_at, row: Object.assign({
         id: row.id,
         kind: row.kind,
         projectName: names.has(row.project) ? names.get(row.project) : row.project,
@@ -85,9 +172,10 @@
           : 'asked by ' + who(row.created_by) + (row.responsible ? ' · responsible: ' + who(row.responsible) : ''),
         waiting: waitingLabel(row.updated_at, now),
         action: decision ? 'Answer' : 'Open work',
-      } };
+      }, kill === null ? {} : { kill }, room) };
     });
-    const rows = workRows.concat(asks.map(ask => ({ at: ask.asked_at, row: askRow(ask, now) })))
+    const rows = workRows.concat(asks.filter(ask => !cited.has(ask.ask_id))
+      .map(ask => ({ at: ask.asked_at, row: askRow(ask, now) })))
       .sort((a, b) => a.at - b.at).map(entry => entry.row);
     return { count: rows.length, rows };
   }
@@ -315,6 +403,9 @@
       return ['Answered by ' + who(answer.by) + ' · asked of ' + who(last.asked_of)]
         .concat(answer.reason ? ['Reason: ' + answer.reason] : []);
     }
+    if (typeof answer.source === 'string' && ROOM_SOURCE.test(answer.source)) {
+      return ['Answered in the room by ' + who(answer.by) + ' (message #' + answer.source.slice(answer.source.indexOf('#') + 1) + ')'];
+    }
     return ['Answered here by ' + who(answer.by)];
   }
 
@@ -334,10 +425,11 @@
   // next action with no recipient reads unassigned, as in the tile. A done
   // item's done line is added by the caller, which holds its closer and
   // follow-ups.
-  function drawerLines(item, history) {
+  function drawerLines(item, history, answered = new Set()) {
     if (item.kind === 'decision') {
       const answer = item.answer;
       return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by)]
+        .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.ask_message_id + ').'] : [])
         .concat(answerLines(item, history))
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])
         .concat(item.rationale ? ['Rationale: ' + item.rationale] : [])
@@ -346,6 +438,7 @@
         .concat(answer ? ['Answer: ' + answer.text] : [])
         .concat(answer && answer.conditions ? ['Answer conditions: ' + answer.conditions] : [])
         .concat(answer && answer.kind === 'reported' && answer.source ? ['Answer source: ' + answer.source] : [])
+        .concat(killLines(item))
         .concat(placeLines(item));
     }
     const lines = ['Responsible: ' + (item.responsible ? who(item.responsible) : UNASSIGNED)];
@@ -512,6 +605,10 @@
     'store-damaged': 'The work record cannot be read right now; nothing was changed.',
     'fresh-step-up-required': 'Confirm it is you with your passkey, then try again.',
     'unavailable': 'The work record is not reachable right now. It will try again.',
+    'kill-slot-filled': 'Someone has already asked this decision\'s kill question.',
+    'kill-slot-replied': 'The kill question already has its reply.',
+    'means-required': 'Asking a person needs a line saying what a yes means.',
+    'ask-target-unknown': 'That name is not anyone in the room.',
   });
 
   function errorWords(code) {
@@ -535,7 +632,7 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
+    who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });
