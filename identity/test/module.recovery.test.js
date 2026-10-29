@@ -108,27 +108,30 @@ test('stopped-server recovery replaces password and passkey through the package 
     harness: true,
     webauthn: true,
   });
-  assert.deepStrictEqual(await normal.login.login(loginRequest(Step.PASSWORD, world.T + 1000)),
+  // Recovery stamps the replacement passkey with the real clock, so the
+  // service's clock here starts from now, not from when the room was made.
+  const afterRecovery = Date.now();
+  assert.deepStrictEqual(await normal.login.login(loginRequest(Step.PASSWORD, afterRecovery + 1000)),
     { ok: false, reason: 'invalid-credentials' },
     'the old password must no longer sign in');
-  const loggedIn = await normal.login.login(loginRequest(newPassword, world.T + 1001));
+  const loggedIn = await normal.login.login(loginRequest(newPassword, afterRecovery + 1001));
   assert.strictEqual(loggedIn.ok, true, JSON.stringify(loggedIn));
 
   const oldBegin = await normal.authenticators.beginElevation(
-    Step.env(loggedIn, world.T + 1002));
+    Step.env(loggedIn, afterRecovery + 1002));
   assert.strictEqual(oldBegin.ok, true);
   const oldFinish = await normal.authenticators.finishElevation(Object.assign(
-    Step.env(loggedIn, world.T + 1003), {
+    Step.env(loggedIn, afterRecovery + 1003), {
       ceremony_id: oldBegin.ceremony_id,
       response: world.device.assertion(oldBegin.options.challenge),
     }));
   assert.strictEqual(oldFinish.ok, false, 'the revoked old passkey must fail real verification');
 
   const newBegin = await normal.authenticators.beginElevation(
-    Step.env(loggedIn, world.T + 1004));
+    Step.env(loggedIn, afterRecovery + 1004));
   assert.strictEqual(newBegin.ok, true);
   const newFinish = await normal.authenticators.finishElevation(Object.assign(
-    Step.env(loggedIn, world.T + 1005), {
+    Step.env(loggedIn, afterRecovery + 1005), {
       ceremony_id: newBegin.ceremony_id,
       response: newDevice.assertion(newBegin.options.challenge),
     }));

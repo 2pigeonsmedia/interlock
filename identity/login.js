@@ -190,9 +190,12 @@ function createLoginThrottle(opts) {
   }
   // A full primary map is when one more distinct source or name starts filling
   // the overflow set, and a full overflow set refuses everyone. Until then the
-  // block limit stays out of the way.
+  // block limit stays out of the way. Distinct keys still inside their password
+  // check count as entries already: a burst held in flight would otherwise all
+  // pass before the first failure is recorded and fill the maps at once.
   function underPressure() {
-    return source.size >= THROTTLE_MAX_ENTRIES || account.size >= THROTTLE_MAX_ENTRIES;
+    return source.size + inflightSource.size >= THROTTLE_MAX_ENTRIES ||
+      account.size + inflightAccount.size >= THROTTLE_MAX_ENTRIES;
   }
   function bumpBlock(k, now) {
     if (k === null) return;

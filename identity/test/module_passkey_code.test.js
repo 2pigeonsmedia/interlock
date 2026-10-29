@@ -289,3 +289,40 @@ test('a code is spent only once its ceremony exists', async () => {
   const begun = await r.redeem(await r.signIn(cal, later), code.secret, later + 1);
   assert.equal(begun.ok, true, JSON.stringify(begun));
 });
+
+test('a refused code withdraws the ceremony it began', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  const code = r.issue(await r.asOwner(), cal);
+  assert.equal(code.ok, true, 'ARRANGEMENT: a live code exists');
+  const store = r.world.instance.challenges;
+  const session = await r.signIn(cal);
+  const before = store.health().challenges;
+  const refused = await r.redeem(session, code.secret + 'x');
+  assert.equal(refused.reason, 'code-invalid', 'ARRANGEMENT: the code is refused after its ceremony began');
+  assert.equal(store.health().challenges, before, 'a refused code leaves no ceremony behind');
+  assert.equal(r.repo.read().admission_capabilities.find(c => c.id === code.capability_id).consumed_at, null);
+});
+
+test('a member whose membership is suspended cannot begin a passkey with a code', async () => {
+  const r = await room();
+  const cal = await r.join('Cal', false);
+  const code = r.issue(await r.asOwner(), cal);
+  const session = await r.signIn(cal);
+  // Suspend the membership in the store without ending the session. The
+  // session layer re-checks the membership on every use, and the code
+  // ceremony checks it again; either refuses.
+  const suspendedAt = r.tick();
+  r.repo.transact(draft => {
+    const membership = draft.memberships.find(m => m.person_subject_id === cal.id);
+    membership.status = 'suspended';
+    membership.suspended_at = suspendedAt;
+  });
+  const state = r.repo.read();
+  assert.equal(state.subjects.find(s => s.id === cal.id).status, 'active', 'ARRANGEMENT: Cal is still active');
+  const refused = await r.redeem(session, code.secret);
+  assert.equal(refused.ok, false, 'a suspended member is refused');
+  assert.equal(refused.options, undefined);
+  assert.equal(r.repo.read().admission_capabilities.find(c => c.id === code.capability_id).consumed_at, null,
+    'and the code is not spent');
+});
