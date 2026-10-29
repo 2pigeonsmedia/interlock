@@ -29,6 +29,7 @@ function options(extra) {
   const chat = stubs([
     'append', 'read', 'readForSeat', 'wait', 'waitForSeat', 'waitForSeatRings', 'acknowledge', 'touchParticipant',
     'listParticipants', 'participantState', 'readDeliveryChanges', 'transcriptCleared', 'peekBefore', 'peekFind',
+    'appendAnnotated', 'annotate', 'readAnnotations', 'openAsks',
   ]);
   return Object.assign({
     house, chat,

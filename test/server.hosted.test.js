@@ -364,6 +364,7 @@ test('hosted mode: a wrong code whose client has already gone arms no wait', asy
   const chat = stubs([
     'append', 'read', 'readForSeat', 'wait', 'waitForSeat', 'waitForSeatRings', 'acknowledge', 'touchParticipant',
     'listParticipants', 'participantState', 'readDeliveryChanges', 'transcriptCleared', 'peekBefore', 'peekFind',
+    'appendAnnotated', 'annotate', 'readAnnotations', 'openAsks',
   ]);
   const admission = stubs(['knock', 'list', 'allow', 'decline']);
   const archive = stubs(['exportTranscript', 'clearTranscript', 'listArchives', 'readArtifact']);

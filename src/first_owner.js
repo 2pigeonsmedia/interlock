@@ -12,6 +12,18 @@ const AI_ADMISSION_WAIT_MS = 20_000;
 const AI_MESSAGE_WAIT_MS = 45_000;
 const CHAT_READ_LIMIT = 100;
 const CHAT_RESOURCE = 'room:main';
+// Refusals an annotated post or a lifecycle row can earn, by HTTP status.
+// `unread-addressed` (409) also carries the ids; see annotationRefusal.
+const ANNOTATION_REFUSALS = Object.freeze({
+  'invalid-annotation': 400,
+  'ask-target-unknown': 400,
+  'ask-of-self': 400,
+  'means-required': 400,
+  'ask-not-found': 404,
+  'not-asker': 403,
+  'ask-not-open': 409,
+  'ask-not-answered': 409,
+});
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(allow|decline)$/;
 const WORK_ROUTE = /^\/api\/(ai\/)?work\/([a-z]+(?:\/[a-z]+)?)$/;
@@ -369,7 +381,9 @@ function createFirstOwnerHandler(options) {
       typeof chat.touchParticipant !== 'function' || typeof chat.listParticipants !== 'function' ||
       typeof chat.participantState !== 'function' ||
       typeof chat.readDeliveryChanges !== 'function' || typeof chat.transcriptCleared !== 'function' ||
-      typeof chat.peekBefore !== 'function' || typeof chat.peekFind !== 'function') {
+      typeof chat.peekBefore !== 'function' || typeof chat.peekFind !== 'function' ||
+      typeof chat.appendAnnotated !== 'function' || typeof chat.annotate !== 'function' ||
+      typeof chat.readAnnotations !== 'function' || typeof chat.openAsks !== 'function') {
     throw new TypeError('first owner transport: a complete chat service is required');
   }
   if (!admission || typeof admission.knock !== 'function' ||
@@ -1856,6 +1870,204 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // ── asks, answers and status: the side-car ────────────────────────────────
+  // The message object never changes. A message and its annotation arrive in
+  // one call, because the ask must be known before the row's recipients are
+  // frozen; withdraw and keep-open are rows of their own and never ring.
+
+  function annotationRefusal(request, response, error) {
+    const code = error && error.code;
+    if (code === 'unread-addressed') {
+      sendJson(request, response, 409, {
+        ok: false, error: code, unread_count: error.unread_count, unread_ids: error.unread_ids,
+      });
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(ANNOTATION_REFUSALS, code)) {
+      sendJson(request, response, ANNOTATION_REFUSALS[code], { ok: false, error: code });
+      return;
+    }
+    if (code === 'invalid-text' || code === 'message-id-collision') {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-message' });
+      return;
+    }
+    sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+  }
+
+  async function appendAiAnnotatedMessage(request, response, body) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const input = closedObject(body, ['text', 'client_message_id', 'annotation']);
+    if (!input || typeof input.client_message_id !== 'string') {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-message' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'write');
+    const actor = seatActor(authorized, input.client_message_id);
+    if (!actor) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    try {
+      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
+      if (!saved) throw new Error('invalid chat result');
+      sendJson(request, response, 201, { ok: true, message: saved });
+    } catch (error) {
+      annotationRefusal(request, response, error);
+    }
+  }
+
+  async function appendAnnotatedMessage(request, response, body) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const input = closedObject(body, ['text', 'annotation']);
+    if (!input) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-message' });
+      return;
+    }
+    const now = Date.now();
+    const authorized = house.authorizeWrite(authorizationMeta(request, now), 'write', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) {
+      const sessionState = house.resolveSession({
+        cookie_header: request.headers.cookie,
+        activity: 'passive-delivery',
+        now,
+      });
+      refuseAuthorization(request, response, authorized, sessionState);
+      return;
+    }
+    const actor = authorizedActor(request, authorized, now);
+    if (actor === null) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    try {
+      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
+      if (saved === null) throw new Error('invalid chat result');
+      sendJson(request, response, 201, { ok: true, message: saved });
+    } catch (error) {
+      annotationRefusal(request, response, error);
+    }
+  }
+
+  function lifecycleInput(body) {
+    const input = closedObject(body, ['kind', 'ask_id']);
+    return input && (input.kind === 'withdraw' || input.kind === 'keep_open') &&
+      Number.isSafeInteger(input.ask_id) && input.ask_id > 0 ? input : null;
+  }
+
+  async function annotateAsAi(request, response, body) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const input = lifecycleInput(body);
+    if (!input) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-annotation' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'write');
+    if (!authorized || authorized.allow !== true || typeof authorized.subject_name !== 'string') {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    try {
+      const row = await chat.annotate({ subject_id: authorized.subject_id, name: authorized.subject_name },
+        input.kind, input.ask_id);
+      sendJson(request, response, 201, { ok: true, row });
+    } catch (error) {
+      annotationRefusal(request, response, error);
+    }
+  }
+
+  async function annotateAsPerson(request, response, body) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const input = lifecycleInput(body);
+    if (!input) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-annotation' });
+      return;
+    }
+    const now = Date.now();
+    const authorized = house.authorizeWrite(authorizationMeta(request, now), 'write', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) {
+      refuseAuthorization(request, response, authorized);
+      return;
+    }
+    const actor = authorizedActor(request, authorized, now);
+    if (actor === null) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    try {
+      const row = await chat.annotate(actor, input.kind, input.ask_id);
+      sendJson(request, response, 201, { ok: true, row });
+    } catch (error) {
+      annotationRefusal(request, response, error);
+    }
+  }
+
+  /* The side-car read. `first_id` is the era; a client that sees it change
+   * starts again from 0, as it does for messages. */
+  async function readAnnotations(request, response, target, seat) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const query = deliveryQuery(target);
+    if (!query) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-annotation-query' });
+      return;
+    }
+    if (seat) {
+      const authorized = seatAuthorization(request, 'read');
+      if (!authorized || authorized.allow !== true) {
+        sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+        return;
+      }
+    } else if (!roomReader(request, response, Date.now())) {
+      return;
+    }
+    try {
+      const page = await chat.readAnnotations(query);
+      sendJson(request, response, 200, {
+        ok: true, rows: page.rows, cursor: page.cursor, first_id: page.first_id,
+      });
+    } catch (error) {
+      const status = error && error.code === 'invalid-read' ? 400 : 503;
+      sendJson(request, response, status, {
+        ok: false, error: status === 400 ? 'invalid-annotation-query' : 'chat-unavailable',
+      });
+    }
+  }
+
+  /* The asks an AI cannot derive without keeping the whole side-car: the open
+   * asks addressed to it, and the open asks it made. */
+  async function readAiAsks(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    try {
+      await chat.touchParticipant(authorized.subject_id, Date.now());
+      const asks = await chat.openAsks(authorized.subject_id);
+      sendJson(request, response, 200, { ok: true, addressed: asks.addressed, asked: asks.asked });
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+    }
+  }
+
   async function acknowledgeAiMessages(request, response, body) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -2071,6 +2283,8 @@ function createFirstOwnerHandler(options) {
     ['/api/transcript/export', exportTranscript],
     ['/api/transcript/clear', clearTranscript],
     ['/api/messages', appendMessage],
+    ['/api/annotated-messages', appendAnnotatedMessage],
+    ['/api/annotations', annotateAsPerson],
   ]);
 
   return async function firstOwnerHandler(request, response) {
@@ -2228,6 +2442,28 @@ function createFirstOwnerHandler(options) {
         await listRoomParticipants(request, response);
         return;
       }
+      if (pathname === '/api/annotations' || pathname === '/api/ai/annotations') {
+        if (request.method !== 'GET') {
+          sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+            { allow: 'GET, POST' });
+          return;
+        }
+        await readAnnotations(request, response, target, pathname === '/api/ai/annotations');
+        return;
+      }
+      if (pathname === '/api/ai/asks') {
+        if (request.method !== 'GET') {
+          sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+            { allow: 'GET' });
+          return;
+        }
+        if (target.search !== '') {
+          sendJson(request, response, 400, { ok: false, error: 'invalid-ask-query' });
+          return;
+        }
+        await readAiAsks(request, response);
+        return;
+      }
       if (pathname === '/api/deliveries') {
         if (request.method !== 'GET') {
           sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
@@ -2375,7 +2611,8 @@ function createFirstOwnerHandler(options) {
       return;
     }
 
-    if ((pathname === '/api/ai/messages' || pathname === '/api/ai/receipts') &&
+    if ((pathname === '/api/ai/messages' || pathname === '/api/ai/receipts' ||
+        pathname === '/api/ai/annotated-messages' || pathname === '/api/ai/annotations') &&
         request.method === 'POST') {
       if (target.search !== '') {
         sendJson(request, response, 400, { ok: false, error: 'invalid-message-query' });
@@ -2384,6 +2621,9 @@ function createFirstOwnerHandler(options) {
       try {
         const body = await readJson(request);
         if (pathname === '/api/ai/messages') await appendAiMessage(request, response, body);
+        else if (pathname === '/api/ai/annotated-messages') {
+          await appendAiAnnotatedMessage(request, response, body);
+        } else if (pathname === '/api/ai/annotations') await annotateAsAi(request, response, body);
         else await acknowledgeAiMessages(request, response, body);
       } catch (error) {
         if (response.headersSent || response.destroyed) return;
