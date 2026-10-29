@@ -97,19 +97,49 @@
   // person asked: the room has the answer, the record does not (yet).
   const ROOM_NOT_RECORDED = 'Answered in the room, not recorded here';
 
+  // Only an ask the server bound to the decision ("Ask a decision") counts;
+  // a decision merely citing a message has no ask of its own.
   function answeredInRoom(decision, answered) {
-    const cited = decision.source_message_id !== undefined ? decision.source_message_id
-      : decision.source_message ? decision.source_message.message_id : null;
-    return decision.state === 'awaiting' && Number.isSafeInteger(cited) && answered.has(cited);
+    return decision.state === 'awaiting' && Number.isSafeInteger(decision.ask_message_id) &&
+      answered.has(decision.ask_message_id);
+  }
+
+  // Which room answers the work record has been read since. The asks event
+  // reports an answer the moment it is saved; the brief that says whether
+  // the decision recorded it comes later. An answer is settled only by a
+  // brief read that began after it arrived, so "not recorded here" is never
+  // drawn from a brief older than the answer.
+  function createAnswerTracker() {
+    let answered = new Set();
+    const unconfirmed = new Set();
+    return Object.freeze({
+      // The room's current answered ids; true when any is new.
+      observe(ids) {
+        const next = new Set(ids.filter(id => Number.isSafeInteger(id) && id > 0));
+        const fresh = [...next].filter(id => !answered.has(id));
+        for (const id of fresh) unconfirmed.add(id);
+        answered = next;
+        return fresh.length > 0;
+      },
+      // Call as a brief read starts; pass the result to settle when it lands.
+      beginRead() {
+        return new Set(unconfirmed);
+      },
+      settle(started) {
+        for (const id of started) unconfirmed.delete(id);
+      },
+      settled() {
+        return new Set([...answered].filter(id => !unconfirmed.has(id)));
+      },
+    });
   }
 
   function needsYou(brief, now, asks = [], answered = new Set()) {
     const names = projectNames(brief);
-    // An ask that a decision cites as its message is that decision's row,
-    // never a second one.
+    // An ask bound to a decision is that decision's row, never a second one.
     const cited = new Set(brief.needs_me.concat(brief.decisions || [])
-      .filter(row => row.kind === 'decision' && Number.isSafeInteger(row.source_message_id))
-      .map(row => row.source_message_id));
+      .filter(row => row.kind === 'decision' && Number.isSafeInteger(row.ask_message_id))
+      .map(row => row.ask_message_id));
     const workRows = brief.needs_me.map(row => {
       const decision = row.kind === 'decision';
       const kill = decision ? killWord(row) : null;
@@ -380,7 +410,7 @@
     if (item.kind === 'decision') {
       const answer = item.answer;
       return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by)]
-        .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.source_message.message_id + ').'] : [])
+        .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.ask_message_id + ').'] : [])
         .concat(answerLines(item, history))
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])
         .concat(item.rationale ? ['Rationale: ' + item.rationale] : [])
@@ -582,7 +612,7 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, killWord, killLines, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
+    who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });
