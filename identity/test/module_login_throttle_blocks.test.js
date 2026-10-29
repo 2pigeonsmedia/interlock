@@ -82,6 +82,69 @@ test('under pressure, sign-ins still in their password check count against their
     'released attempts that never failed leave nothing behind');
 });
 
+test('a burst from one /48 held in its password checks cannot fill the throttle before it records', () => {
+  const { createLoginThrottle } = F.load('login.js');
+  const throttle = createLoginThrottle({});
+  const BURST = 20_480;
+  const admitted = [];
+  let refused = 0;
+  for (let i = 0; i < BURST; i += 1) {
+    const args = { source: inBlock(i), account: `burst-${i}`, now: NOW };
+    if (throttle.check(args).allowed) {
+      admitted.push({ args, release: throttle.begin(args) });
+    } else {
+      throttle.recordThrottled(args);
+      refused += 1;
+    }
+  }
+  const held = throttle.health();
+  assert.equal(held.source_entries, 0, 'ARRANGEMENT: no failure is recorded while the burst is in flight');
+  assert.ok(held.inflight_source_entries >= MAP_CAP,
+    `ARRANGEMENT: the burst in flight is enough to fill a primary map (${held.inflight_source_entries})`);
+  assert.equal(admitted.length + refused, BURST, 'ARRANGEMENT: every burst attempt was decided');
+  for (const { args, release } of admitted) {
+    throttle.recordFailure(args);
+    release();
+  }
+  assert.equal(throttle.check({ source: '2001:db8:2:1::/64', account: 'Owner', now: NOW }).allowed, true,
+    'the owner signs in from another IPv6 block after the burst fails');
+  assert.equal(throttle.check({ source: '192.0.2.10', account: 'Owner', now: NOW }).allowed, true,
+    'and from an IPv4 address');
+  assert.equal(throttle.check({ source: inBlock(60000), account: 'Owner', now: NOW }).allowed, false,
+    'a sign-in from inside the bursting block waits');
+  assert.ok(admitted.length <= MAP_CAP + BLOCK_THRESHOLD,
+    `the block stopped reaching the password check once the map would fill (${admitted.length} of ${BURST})`);
+  assert.equal(held.under_pressure, true, 'attempts in flight count toward a full map');
+});
+
+// A burst held in flight that reuses one dimension fills only the other: names
+// reused five times each from distinct /64s, or /64s reused five times each with
+// distinct names. Either alone must stop the block at the map's size.
+for (const [label, sourceOf, accountOf] of [
+  ['names reused, addresses distinct', i => inBlock(i), i => `name-${Math.floor(i / 5)}`],
+  ['addresses reused, names distinct', i => inBlock(Math.floor(i / 5)), i => `name-${i}`],
+]) {
+  test(`a held burst from one /48 with ${label} stops at the map's size`, () => {
+    const { createLoginThrottle } = F.load('login.js');
+    const throttle = createLoginThrottle({});
+    const BURST = 15_000;
+    const releases = [];
+    for (let i = 0; i < BURST; i += 1) {
+      const args = { source: sourceOf(i), account: accountOf(i), now: NOW };
+      if (throttle.check(args).allowed) releases.push(throttle.begin(args));
+      else throttle.recordThrottled(args);
+    }
+    const held = throttle.health();
+    assert.ok(Math.min(held.inflight_source_entries, held.inflight_account_entries) < MAP_CAP,
+      'ARRANGEMENT: the reused dimension alone stays below a full map');
+    assert.ok(Math.max(held.inflight_source_entries, held.inflight_account_entries) >= MAP_CAP,
+      'ARRANGEMENT: the distinct dimension alone reaches a full map');
+    assert.ok(releases.length <= MAP_CAP + BLOCK_THRESHOLD,
+      `the block stopped reaching the password check (${releases.length} of ${BURST})`);
+    for (const release of releases) release();
+  });
+}
+
 test('the remaining limit: one /64 in each of 4,096 blocks still fills the throttle', () => {
   const { createLoginThrottle } = F.load('login.js');
   const throttle = createLoginThrottle({});
