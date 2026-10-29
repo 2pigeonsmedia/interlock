@@ -333,6 +333,23 @@ function verifyArchiveSet(dataDir, id) {
   });
 }
 
+function validAnnotationsArchive(body) {
+  const text = body.toString('utf8');
+  if (text === '') return true;
+  if (!text.endsWith('\n')) return false;
+  let seq = 0;
+  for (const line of text.slice(0, -1).split('\n')) {
+    let row;
+    try { row = JSON.parse(line); } catch (_) { return false; }
+    if (!row || typeof row !== 'object' || Array.isArray(row) ||
+        !Number.isSafeInteger(row.seq) || row.seq <= seq ||
+        !['post', 'withdraw', 'keep_open', 'carry'].includes(row.kind) ||
+        Object.prototype.hasOwnProperty.call(row, 'subject_id')) return false;
+    seq = row.seq;
+  }
+  return true;
+}
+
 function validClearMarker(value) {
   const marker = closedObject(value, CLEAR_KEYS);
   return marker && marker.schema === CLEAR_MARKER_SCHEMA &&
@@ -488,10 +505,24 @@ function createArchiveService(options) {
   }
 
   function readArtifact(id, format) {
-    if (!ARCHIVE_ID.test(id) || (format !== 'json' && format !== 'md')) {
+    if (!ARCHIVE_ID.test(id) ||
+        (format !== 'json' && format !== 'md' && format !== 'annotations.jsonl')) {
       throw error('invalid-archive');
     }
     const verified = verifyArchiveSet(input.dataDir, id);
+    if (format === 'annotations.jsonl') {
+      // Served only beside a verified transcript, and only when every line is
+      // a side-car row. An archive from before the side-car has no such file.
+      let body;
+      try { body = fs.readFileSync(archivePaths(input.dataDir, id).annotations); }
+      catch (_) { throw error('archive-not-found'); }
+      if (!validAnnotationsArchive(body)) throw error('archive-verification-failed');
+      return Object.freeze({
+        body,
+        content_type: 'application/x-ndjson; charset=utf-8',
+        filename: id + '.annotations.jsonl',
+      });
+    }
     return Object.freeze({
       body: format === 'json' ? verified.json : verified.markdown,
       content_type: format === 'json'

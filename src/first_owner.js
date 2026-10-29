@@ -29,7 +29,7 @@ const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a
 const WORK_ROUTE = /^\/api\/(ai\/)?work\/([a-z]+(?:\/[a-z]+)?)$/;
 const WORK_ITEM_ROUTE = /^\/api\/(ai\/)?work\/items\/([WD]-[1-9][0-9]*)$/;
 const WORK_READS = Object.freeze(['brief', 'list', 'changes', 'export']);
-const TRANSCRIPT_EXPORT_ROUTE = /^\/api\/transcript\/exports\/(transcript-[0-9]{8}T[0-9]{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(json|md)$/;
+const TRANSCRIPT_EXPORT_ROUTE = /^\/api\/transcript\/exports\/(transcript-[0-9]{8}T[0-9]{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(json|md|annotations\.jsonl)$/;
 
 const SECURITY_HEADERS = Object.freeze({
   'cache-control': 'no-store',

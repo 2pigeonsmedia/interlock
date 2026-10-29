@@ -250,6 +250,22 @@ test('asks, answers and status ride the side-car routes; the message and the pla
     assert.equal(history.status, 200, history.text);
     assert.deepEqual(history.json.archives.map(row => row.archive_id), [cleared.json.archive_id],
       'the side-car archive file is not listed as an archive of its own');
+    const download = await get(runtime,
+      `/api/transcript/exports/${cleared.json.archive_id}.annotations.jsonl`, owner);
+    assert.equal(download.status, 200, download.text);
+    assert.match(download.headers['content-type'], /^application\/x-ndjson/);
+    assert.equal(download.text, fs.readFileSync(sidecarArchive, 'utf8'));
+    assert.equal((await call(runtime, {
+      path: `/api/transcript/exports/${cleared.json.archive_id}.annotations.jsonl`,
+    })).status, 401, 'the download needs a session');
+    fs.writeFileSync(sidecarArchive, '{"seq":1,"kind":"post","subject_id":"x"}\n');
+    assert.equal((await get(runtime,
+      `/api/transcript/exports/${cleared.json.archive_id}.annotations.jsonl`, owner)).status, 404,
+    'a side-car archive carrying a subject id is never served');
+    fs.unlinkSync(sidecarArchive);
+    assert.equal((await get(runtime,
+      `/api/transcript/exports/${cleared.json.archive_id}.annotations.jsonl`, owner)).status, 404,
+    'an archive without a side-car file has no such download');
     const read = await aiGet(runtime, messageQuery(0), scout.token);
     assert.equal(read.status, 200, read.text);
   } finally {
