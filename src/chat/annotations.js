@@ -1,0 +1,371 @@
+'use strict';
+
+// Per-message facts that live beside the transcript, never inside it. The
+// message object is closed; an ask, its answers, a status mark and a
+// read-through point are annotation rows keyed by message id, kept in
+// `chat/annotations.jsonl` by the chat store under its own lock.
+//
+// This module is pure: row shapes, the open-ask index, and the public
+// projection. The store owns every file write.
+//
+// Rows (closed key sets, `v: 1`, `seq` = 1-based line number within an era):
+//   post      written with its message; binds only when a message with the
+//             same id, author and ts exists, so a row left by a crash between
+//             the two writes can never attach to another message
+//   withdraw  the asker closes an open ask
+//   keep_open the asker re-opens an answered ask; later answers attach
+//   carry     an ask still open when the transcript was cleared, re-seeded
+//             in the next era with the archive it came from
+//
+// Nothing here reads message text. Status is what the client set; an answer
+// binds to the ask the client named.
+
+const crypto = require('node:crypto');
+
+const ROW_VERSION = 1;
+const KINDS = Object.freeze(['person', 'seat']);
+const DELIVER = Object.freeze(['now', 'later']);
+const STATUS = Object.freeze(['done', 'ready', 'stop']);
+const CHOICES = Object.freeze(['yes', 'no']);
+const MAX_MEANS_CHARS = 300;
+const MAX_ANSWERS = 8;
+const MAX_NAME_BYTES = 256;
+const MAX_UNREAD_IDS = 20;
+const ARCHIVE_ID = /^transcript-[0-9]{8}T[0-9]{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+const POST_KEYS = Object.freeze([
+  'v', 'seq', 'ts', 'kind', 'message_id', 'subject_id', 'name',
+  'ask', 'answers', 'status', 'read_through',
+]);
+const LIFECYCLE_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id']);
+const CARRY_KEYS = Object.freeze([
+  'v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id', 'archive_id', 'asked_at', 'ask',
+]);
+const ASK_KEYS = Object.freeze(['of_subject_id', 'of_name', 'of_kind', 'means', 'deliver']);
+const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by']);
+const REQUEST_KEYS = Object.freeze(['ask', 'answers', 'status', 'read_through']);
+const REQUEST_ANSWER_KEYS = Object.freeze(['ask_id', 'choice']);
+
+function closedObject(value, keys) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return null;
+  const actual = Object.keys(value);
+  if (actual.length !== keys.length || actual.some(key => !keys.includes(key))) return null;
+  for (const key of actual) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || typeof descriptor.get === 'function' || typeof descriptor.set === 'function') {
+      return null;
+    }
+  }
+  return value;
+}
+
+function boundedString(value, maxBytes) {
+  return typeof value === 'string' && value.length > 0 && !value.includes('\0') &&
+    Buffer.byteLength(value, 'utf8') <= maxBytes;
+}
+
+function positiveId(value) {
+  return Number.isSafeInteger(value) && value >= 1;
+}
+
+function validTs(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/* One line of scope: no line breaks, no control characters, bounded. */
+function validMeans(value) {
+  if (typeof value !== 'string' || value.trim().length === 0) return false;
+  if (Array.from(value).length > MAX_MEANS_CHARS) return false;
+  return !/[\p{Cc}\p{Cs}\u2028\u2029]/u.test(value);
+}
+
+function parseAsk(value) {
+  const ask = closedObject(value, ASK_KEYS);
+  if (!ask || !boundedString(ask.of_subject_id, 64) || !boundedString(ask.of_name, MAX_NAME_BYTES) ||
+      !KINDS.includes(ask.of_kind) || !DELIVER.includes(ask.deliver) ||
+      !(ask.means === null || validMeans(ask.means)) ||
+      (ask.of_kind === 'person' && ask.means === null)) return null;
+  return Object.freeze({
+    of_subject_id: ask.of_subject_id,
+    of_name: ask.of_name,
+    of_kind: ask.of_kind,
+    means: ask.means,
+    deliver: ask.deliver,
+  });
+}
+
+function parseAnswers(value, withCrossing) {
+  if (!Array.isArray(value) || value.length > MAX_ANSWERS) return null;
+  const seen = new Set();
+  const answers = [];
+  for (const candidate of value) {
+    const answer = closedObject(candidate, withCrossing ? ANSWER_KEYS : REQUEST_ANSWER_KEYS);
+    if (!answer || !positiveId(answer.ask_id) || seen.has(answer.ask_id) ||
+        !(answer.choice === null || CHOICES.includes(answer.choice)) ||
+        (withCrossing && !(answer.crossed_by === null || positiveId(answer.crossed_by)))) {
+      return null;
+    }
+    seen.add(answer.ask_id);
+    answers.push(Object.freeze(withCrossing
+      ? { ask_id: answer.ask_id, choice: answer.choice, crossed_by: answer.crossed_by }
+      : { ask_id: answer.ask_id, choice: answer.choice }));
+  }
+  return Object.freeze(answers);
+}
+
+/* The trusted annotation the chat service hands the store: the ask's
+ * addressee is already resolved to a participant. Returns null when the shape
+ * is wrong; an annotation that says nothing is not an annotation. */
+function parseRequest(value) {
+  const request = closedObject(value, REQUEST_KEYS);
+  if (!request) return null;
+  const ask = request.ask === null ? null : parseAsk(request.ask);
+  if (request.ask !== null && ask === null) return null;
+  const answers = parseAnswers(request.answers, false);
+  if (answers === null) return null;
+  if (!(request.status === null || STATUS.includes(request.status))) return null;
+  if (!(request.read_through === null ||
+      (Number.isSafeInteger(request.read_through) && request.read_through >= 0))) return null;
+  if (request.status !== null && request.read_through === null) return null;
+  if (ask === null && answers.length === 0 && request.status === null &&
+      request.read_through === null) return null;
+  return Object.freeze({
+    ask, answers, status: request.status, read_through: request.read_through,
+  });
+}
+
+function parseRow(value, expectedSeq) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const kind = value.kind;
+  const keys = kind === 'post' ? POST_KEYS
+    : (kind === 'withdraw' || kind === 'keep_open') ? LIFECYCLE_KEYS
+      : kind === 'carry' ? CARRY_KEYS : null;
+  const row = keys && closedObject(value, keys);
+  if (!row || row.v !== ROW_VERSION || row.seq !== expectedSeq || !validTs(row.ts) ||
+      !boundedString(row.subject_id, 64) || !boundedString(row.name, MAX_NAME_BYTES)) return null;
+  const base = { v: row.v, seq: row.seq, ts: row.ts, kind, subject_id: row.subject_id, name: row.name };
+  if (kind === 'post') {
+    const ask = row.ask === null ? null : parseAsk(row.ask);
+    const answers = parseAnswers(row.answers, true);
+    if (!positiveId(row.message_id) || (row.ask !== null && ask === null) || answers === null ||
+        !(row.status === null || STATUS.includes(row.status)) ||
+        !(row.read_through === null ||
+          (Number.isSafeInteger(row.read_through) && row.read_through >= 0))) return null;
+    return Object.freeze(Object.assign(base, {
+      message_id: row.message_id, ask, answers, status: row.status, read_through: row.read_through,
+    }));
+  }
+  if (!positiveId(row.ask_id)) return null;
+  if (kind !== 'carry') return Object.freeze(Object.assign(base, { ask_id: row.ask_id }));
+  const ask = parseAsk(row.ask);
+  if (!ask || !ARCHIVE_ID.test(row.archive_id) || !validTs(row.asked_at)) return null;
+  return Object.freeze(Object.assign(base, {
+    ask_id: row.ask_id, archive_id: row.archive_id, asked_at: row.asked_at, ask,
+  }));
+}
+
+function encodeRow(row) {
+  return JSON.stringify(row) + '\n';
+}
+
+/* The open-ask index. `apply*` mutate; `check*` say why a live write must be
+ * refused. On load the same rows replay through apply with every check, and a
+ * row (or one answer) whose reference no longer resolves is skipped, not
+ * fatal: after a rollback an older server may have cleared messages this file
+ * still points at. */
+function createAskIndex() {
+  const asks = new Map();
+  const posts = new Map();
+  const rows = [];
+
+  function addAsk(askId, row, ask, askedAt, carriedFrom) {
+    asks.set(askId, {
+      ask_id: askId,
+      asked_at: askedAt,
+      asker_subject_id: row.subject_id,
+      asker_name: row.name,
+      of_subject_id: ask.of_subject_id,
+      of_name: ask.of_name,
+      of_kind: ask.of_kind,
+      means: ask.means,
+      deliver: ask.deliver,
+      carried_from: carriedFrom,
+      state: 'open',
+      kept_open: false,
+      answers: [],
+    });
+  }
+
+  function checkAnswer(askId) {
+    const ask = asks.get(askId);
+    if (!ask) return 'ask-not-found';
+    if (ask.state !== 'open') return 'ask-not-open';
+    return null;
+  }
+
+  function applyAnswer(askId, messageId, row, choice) {
+    const ask = asks.get(askId);
+    ask.answers.push({ message_id: messageId, subject_id: row.subject_id, name: row.name, choice });
+    if (row.subject_id === ask.of_subject_id && !ask.kept_open) ask.state = 'answered';
+  }
+
+  function checkLifecycle(kind, askId, subjectId) {
+    const ask = asks.get(askId);
+    if (!ask) return 'ask-not-found';
+    if (ask.asker_subject_id !== subjectId) return 'not-asker';
+    if (kind === 'withdraw' && ask.state !== 'open') return 'ask-not-open';
+    if (kind === 'keep_open' && ask.state !== 'answered') return 'ask-not-answered';
+    return null;
+  }
+
+  function applyLifecycle(row) {
+    const ask = asks.get(row.ask_id);
+    if (row.kind === 'withdraw') {
+      ask.state = 'withdrawn';
+    } else {
+      ask.state = 'open';
+      ask.kept_open = true;
+    }
+  }
+
+  /* The newest open ask of the same addressee that came after the one being
+   * answered, unless this same message answers it too: a crossing. */
+  function crossingFor(askId, answererId, answeredIds) {
+    const ask = asks.get(askId);
+    if (!ask || ask.of_subject_id !== answererId) return null;
+    let crossing = null;
+    for (const other of asks.values()) {
+      if (other.ask_id > askId && other.state === 'open' &&
+          other.of_subject_id === answererId && !answeredIds.has(other.ask_id) &&
+          (crossing === null || other.ask_id < crossing)) crossing = other.ask_id;
+    }
+    return crossing;
+  }
+
+  /* Replay one stored row. `message` is the transcript row with this post's
+   * id, or undefined. Returns whether the row bound. */
+  function replay(row, message) {
+    rows.push({ row, bound: false });
+    const entry = rows[rows.length - 1];
+    if (row.kind === 'post') {
+      if (!message || message.subject_id !== row.subject_id || message.ts !== row.ts ||
+          posts.has(row.message_id) || asks.has(row.message_id)) return false;
+      posts.set(row.message_id, row);
+      for (const answer of row.answers) {
+        if (checkAnswer(answer.ask_id) === null) {
+          applyAnswer(answer.ask_id, row.message_id, row, answer.choice);
+        }
+      }
+      if (row.ask) addAsk(row.message_id, row, row.ask, row.ts, null);
+    } else if (row.kind === 'carry') {
+      if (asks.has(row.ask_id)) return false;
+      addAsk(row.ask_id, row, row.ask, row.asked_at, row.archive_id);
+    } else {
+      if (checkLifecycle(row.kind, row.ask_id, row.subject_id) !== null) return false;
+      applyLifecycle(row);
+    }
+    entry.bound = true;
+    return true;
+  }
+
+  function isOpenAskOf(messageId, subjectId) {
+    const ask = asks.get(messageId);
+    return !!ask && ask.state === 'open' && ask.of_subject_id === subjectId;
+  }
+
+  function openAsksFor(subjectId) {
+    const addressed = [];
+    const asked = [];
+    for (const ask of [...asks.values()].sort((a, b) => a.ask_id - b.ask_id)) {
+      if (ask.state !== 'open') continue;
+      if (ask.of_subject_id === subjectId) addressed.push(publicAsk(ask));
+      if (ask.asker_subject_id === subjectId) asked.push(publicAsk(ask));
+    }
+    return Object.freeze({ addressed: Object.freeze(addressed), asked: Object.freeze(asked) });
+  }
+
+  function openAsks() {
+    return [...asks.values()].filter(ask => ask.state === 'open')
+      .sort((a, b) => a.ask_id - b.ask_id);
+  }
+
+  return {
+    rows, posts, asks, checkAnswer, checkLifecycle, crossingFor, replay,
+    isOpenAskOf, openAsksFor, openAsks,
+  };
+}
+
+function publicAskFields(ask) {
+  return Object.freeze({
+    of: ask.of_name, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver,
+  });
+}
+
+function publicAsk(ask) {
+  return Object.freeze({
+    ask_id: ask.ask_id,
+    asked_at: ask.asked_at,
+    by: ask.asker_name,
+    of: ask.of_name,
+    of_kind: ask.of_kind,
+    means: ask.means,
+    deliver: ask.deliver,
+    state: ask.state,
+    kept_open: ask.kept_open,
+    carried_from: ask.carried_from,
+    answers: Object.freeze(ask.answers.map(answer => Object.freeze({
+      message_id: answer.message_id, by: answer.name, choice: answer.choice,
+    }))),
+  });
+}
+
+/* What leaves the store: names, never subject ids. The archive is built from
+ * this same projection, so it carries only public facts like the transcript. */
+function publicRow(row) {
+  const base = { seq: row.seq, ts: row.ts, kind: row.kind, by: row.name };
+  if (row.kind === 'post') {
+    return Object.freeze(Object.assign(base, {
+      message_id: row.message_id,
+      ask: row.ask ? publicAskFields(row.ask) : null,
+      answers: Object.freeze(row.answers.map(answer => Object.freeze({
+        ask_id: answer.ask_id, choice: answer.choice, crossed_by: answer.crossed_by,
+      }))),
+      status: row.status,
+      read_through: row.read_through,
+    }));
+  }
+  if (row.kind === 'carry') {
+    return Object.freeze(Object.assign(base, {
+      ask_id: row.ask_id, archive_id: row.archive_id, asked_at: row.asked_at,
+      ask: publicAskFields(row.ask),
+    }));
+  }
+  return Object.freeze(Object.assign(base, { ask_id: row.ask_id }));
+}
+
+function encodeArchive(publicRows) {
+  return Buffer.from(publicRows.map(row => JSON.stringify(row) + '\n').join(''), 'utf8');
+}
+
+function sha256(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+module.exports = Object.freeze({
+  ROW_VERSION,
+  MAX_ANSWERS,
+  MAX_MEANS_CHARS,
+  MAX_UNREAD_IDS,
+  closedObject,
+  createAskIndex,
+  encodeArchive,
+  encodeRow,
+  parseRequest,
+  parseRow,
+  publicAsk,
+  publicRow,
+  sha256,
+  validMeans,
+});

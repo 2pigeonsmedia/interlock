@@ -8,6 +8,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { encodeArchive, sha256: sha256Buffer } = require('./annotations.js');
+
 const ARCHIVE_SCHEMA = 2;
 const LEGACY_ARCHIVE_SCHEMA = 1;
 const CLEAR_MARKER_SCHEMA = 1;
@@ -84,6 +86,9 @@ function archivePaths(dataDir, archiveId) {
     root,
     json: path.join(root, archiveId + '.json'),
     markdown: path.join(root, archiveId + '.md'),
+    // The side-car's public projection. Its name ends in neither .json nor
+    // .md, so a listing that predates it skips the file instead of refusing.
+    annotations: path.join(root, archiveId + '.annotations.jsonl'),
   });
 }
 
@@ -273,10 +278,24 @@ function writeArchive(dataDir, snapshot, exportedAt = Date.now()) {
   fsyncFile(files.json);
   fs.writeFileSync(files.markdown, markdown, { mode: 0o600, flag: 'wx' });
   fsyncFile(files.markdown);
+  const annotations = Array.isArray(snapshot.annotations)
+    ? encodeArchive(snapshot.annotations) : null;
+  if (annotations !== null) {
+    fs.writeFileSync(files.annotations, annotations, { mode: 0o600, flag: 'wx' });
+    fsyncFile(files.annotations);
+  }
   fsyncDirectory(files.root);
   const verified = verifyArchiveSet(dataDir, id);
   if (!verified.json.equals(json) || !verified.markdown.equals(markdown)) {
     throw error('archive-verification-failed');
+  }
+  let annotationsSha256 = null;
+  if (annotations !== null) {
+    let written;
+    try { written = fs.readFileSync(files.annotations); }
+    catch (_) { throw error('archive-verification-failed'); }
+    if (!written.equals(annotations)) throw error('archive-verification-failed');
+    annotationsSha256 = sha256Buffer(written);
   }
   return Object.freeze({
     archive_id: id,
@@ -284,6 +303,7 @@ function writeArchive(dataDir, snapshot, exportedAt = Date.now()) {
     message_count: document.transcript.message_count,
     json_sha256: verified.json_sha256,
     markdown_sha256: verified.markdown_sha256,
+    annotations_sha256: annotationsSha256,
   });
 }
 
@@ -417,6 +437,7 @@ function createArchiveService(options) {
       exported_at: receipt.exported_at,
       json_sha256: receipt.json_sha256,
       markdown_sha256: receipt.markdown_sha256,
+      annotations_sha256: receipt.annotations_sha256,
     });
     return Object.freeze(Object.assign({}, publicReceipt(receipt), {
       first_id: result.first_id,
@@ -490,6 +511,7 @@ module.exports = Object.freeze({
   documentFromSnapshot,
   writeArchive,
   verifyArchiveSet,
+  archivePaths,
   commitVerifiedClear,
   recoverPendingClear,
 });

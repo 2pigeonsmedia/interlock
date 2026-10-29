@@ -14,6 +14,10 @@
 //   metadata from a crash after log fsync; reopen finishes that commit.
 //   A torn tail after an exact committed range is uncommitted write residue
 //   and is truncated. Lost, gapped, or truncated committed history refuses.
+//
+// Annotations (the side-car, see annotations.js) share this store's lock, so
+// an ask is written with its message and a clear takes both or neither. A
+// missing side-car is an empty one: dropping it is the rollback.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,7 +27,9 @@ const {
   documentFromSnapshot,
   recoverPendingClear,
   verifyArchiveSet,
+  archivePaths,
 } = require('./archive.js');
+const Annotations = require('./annotations.js');
 
 const SCHEMA = 2;
 const LEGACY_SCHEMA = 1;
@@ -50,8 +56,12 @@ const TRUSTED_KEYS = Object.freeze([
   'recipients', 'client_message_id',
 ]);
 const CLEAR_KEYS = Object.freeze([
-  'archive_id', 'exported_at', 'json_sha256', 'markdown_sha256',
+  'archive_id', 'exported_at', 'json_sha256', 'markdown_sha256', 'annotations_sha256',
 ]);
+const ANNOTATIONS_MARKER_KEYS = Object.freeze([
+  'schema', 'archive_id', 'source_next_id', 'staged_sha256',
+]);
+const LIFECYCLE_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'kind', 'ask_id']);
 const {
   DIRECTORY_SYNC_SUPPORTED, atomicWriteJson, fsyncDirectory, fsyncFile,
 } = require('../atomic_json.js');
@@ -65,6 +75,8 @@ const OWN_CODES = Object.freeze([
   'corrupt-activity', 'torn-write', 'inconsistent-state', 'missing-history',
   'invalid-clear', 'archive-invalid', 'archive-stale',
   'invalid-session-discriminator',
+  'corrupt-annotations', 'invalid-annotation', 'ask-of-self', 'ask-not-found', 'ask-not-open',
+  'ask-not-answered', 'not-asker', 'unread-addressed',
 ]);
 
 function fail(code) {
@@ -333,6 +345,82 @@ function publicMessage(message, receiptMap, discriminator) {
   });
 }
 
+function refuseUnread(ids, count) {
+  const error = new Error('chat.store: unread-addressed');
+  error.code = 'unread-addressed';
+  error.unread_ids = Object.freeze(ids);
+  error.unread_count = count;
+  throw error;
+}
+
+/* Finish or abandon a side-car clear, decided by whether the transcript clear
+ * landed. The transcript's own marker (archive.js) is recovered first, so
+ * `firstId` is final here. An era moved to `source_next_id` means the clear
+ * happened and the staged next side-car (the carried asks) is installed; any
+ * other floor means it never did, and the live side-car stands. */
+function recoverAnnotationsClear(root, firstId) {
+  const livePath = path.join(root, 'annotations.jsonl');
+  const nextPath = path.join(root, 'annotations.next.jsonl');
+  const markerPath = path.join(root, 'annotations.clear.pending.json');
+  if (!fs.existsSync(markerPath)) {
+    if (fs.existsSync(nextPath)) {
+      fs.unlinkSync(nextPath);
+      fsyncDirectory(root);
+    }
+    return;
+  }
+  let marker;
+  try { marker = closedObject(JSON.parse(fs.readFileSync(markerPath, 'utf8')), ANNOTATIONS_MARKER_KEYS); }
+  catch (_) { marker = null; }
+  if (!marker || marker.schema !== 1 || typeof marker.archive_id !== 'string' ||
+      !Number.isSafeInteger(marker.source_next_id) || marker.source_next_id < 1 ||
+      !/^[0-9a-f]{64}$/.test(marker.staged_sha256)) fail('inconsistent-state');
+  if (firstId === marker.source_next_id) {
+    if (fs.existsSync(nextPath)) {
+      if (Annotations.sha256(fs.readFileSync(nextPath)) !== marker.staged_sha256) {
+        fail('inconsistent-state');
+      }
+      fs.renameSync(nextPath, livePath);
+    } else if (!fs.existsSync(livePath) ||
+        Annotations.sha256(fs.readFileSync(livePath)) !== marker.staged_sha256) {
+      fail('inconsistent-state');
+    }
+  } else if (fs.existsSync(nextPath)) {
+    fs.unlinkSync(nextPath);
+  }
+  fs.unlinkSync(markerPath);
+  fsyncDirectory(root);
+}
+
+function readAnnotations(filePath, messages) {
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const torn = raw.length > 0 && !raw.endsWith('\n');
+  const kept = torn ? raw.slice(0, raw.lastIndexOf('\n') + 1) : raw;
+  const lines = kept === '' ? [] : kept.slice(0, -1).split('\n');
+  const byId = new Map(messages.map(message => [message.id, message]));
+  const index = Annotations.createAskIndex();
+  lines.forEach((line, i) => {
+    let value;
+    try { value = JSON.parse(line); } catch (_) { fail('corrupt-annotations'); }
+    const row = Annotations.parseRow(value, i + 1);
+    if (!row) fail('corrupt-annotations');
+    index.replay(row, row.kind === 'post' ? byId.get(row.message_id) : undefined);
+  });
+  return { index, torn, kept };
+}
+
+function sameAnnotation(row, request) {
+  if (!row || !request) return !row && !request;
+  const askSame = row.ask === null || request.ask === null
+    ? row.ask === request.ask
+    : row.ask.of_subject_id === request.ask.of_subject_id &&
+      row.ask.means === request.ask.means && row.ask.deliver === request.ask.deliver;
+  return askSame && row.status === request.status && row.read_through === request.read_through &&
+    row.answers.length === request.answers.length &&
+    row.answers.every((answer, i) => answer.ask_id === request.answers[i].ask_id &&
+      answer.choice === request.answers[i].choice);
+}
+
 function ensureBackup(source, backup) {
   const current = fs.readFileSync(source);
   if (fs.existsSync(backup)) {
@@ -365,6 +453,9 @@ function openStore(opts) {
   const messagesPath = path.join(root, 'messages.jsonl');
   const receiptsPath = path.join(root, 'receipts.jsonl');
   const activityPath = path.join(root, 'activity.json');
+  const annotationsPath = path.join(root, 'annotations.jsonl');
+  const annotationsNextPath = path.join(root, 'annotations.next.jsonl');
+  const annotationsMarkerPath = path.join(root, 'annotations.clear.pending.json');
   recoverPendingClear(dataDir);
   const metaExists = fs.existsSync(metaPath);
   const messagesExist = fs.existsSync(messagesPath);
@@ -434,12 +525,26 @@ function openStore(opts) {
   const receipts = receiptLog.receipts;
   const receiptRows = receiptLog.rows.slice();
   const activity = parseActivity(fs.readFileSync(activityPath, 'utf8'));
+  recoverAnnotationsClear(root, meta.first_id);
+  if (!fs.existsSync(annotationsPath)) {
+    fs.writeFileSync(annotationsPath, '', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    fsyncFile(annotationsPath);
+    fsyncDirectory(root);
+  }
+  const annotationLog = readAnnotations(annotationsPath, messages);
+  if (annotationLog.torn) {
+    fs.writeFileSync(annotationsPath, annotationLog.kept, { encoding: 'utf8', flag: 'w' });
+    fsyncFile(annotationsPath);
+  }
+  let asks = annotationLog.index;
   let expected = fileIdentity(messagesPath);
   if (!expected) fail('inconsistent-state');
   let expectedReceipts = fileIdentity(receiptsPath);
   if (!expectedReceipts) fail('inconsistent-state');
   let expectedActivity = fileIdentity(activityPath);
   if (!expectedActivity) fail('inconsistent-state');
+  let expectedAnnotations = fileIdentity(annotationsPath);
+  if (!expectedAnnotations) fail('inconsistent-state');
   let closed = false;
   let fatal = null;
   let queue = Promise.resolve();
@@ -476,18 +581,60 @@ function openStore(opts) {
     const identity = fileIdentity(activityPath);
     if (!identity) noteFatal('log-missing');
     if (!sameIdentity(identity, expectedActivity)) noteFatal('log-changed');
+    const annotationsIdentity = fileIdentity(annotationsPath);
+    if (!annotationsIdentity) noteFatal('log-missing');
+    if (!sameIdentity(annotationsIdentity, expectedAnnotations)) noteFatal('log-changed');
+  }
+
+  function boundPublicRows() {
+    return asks.rows.filter(entry => entry.bound).map(entry => Annotations.publicRow(entry.row));
+  }
+
+  /* The rules a post annotation must pass against live state. Returns the
+   * answers with their crossings, computed now and stored as fact. */
+  function checkPostAnnotation(annotation, actor) {
+    if (annotation.ask && annotation.ask.of_subject_id === actor.subject_id) fail('ask-of-self');
+    if (annotation.read_through !== null && annotation.read_through > highWater()) {
+      fail('invalid-annotation');
+    }
+    const answeredIds = new Set(annotation.answers.map(answer => answer.ask_id));
+    const answers = annotation.answers.map(answer => {
+      const refusal = asks.checkAnswer(answer.ask_id);
+      if (refusal) fail(refusal);
+      return Object.freeze({
+        ask_id: answer.ask_id,
+        choice: answer.choice,
+        crossed_by: asks.crossingFor(answer.ask_id, actor.subject_id, answeredIds),
+      });
+    });
+    if (annotation.status !== null) {
+      const unread = [];
+      let count = 0;
+      for (const message of messages) {
+        if (message.id <= annotation.read_through || message.subject_id === actor.subject_id) continue;
+        if (message.recipients.some(recipient => recipient.subject_id === actor.subject_id) ||
+            asks.isOpenAskOf(message.id, actor.subject_id)) {
+          count += 1;
+          if (unread.length < Annotations.MAX_UNREAD_IDS) unread.push(message.id);
+        }
+      }
+      if (count > 0) refuseUnread(unread, count);
+    }
+    return Object.freeze(answers);
   }
 
   function highWater() {
     return meta.next_id - 1;
   }
 
-  function append(untrusted, trusted) {
+  function append(untrusted, trusted, annotationInput = null) {
     return exclusive(() => {
       requireOpen();
       const body = closedObject(untrusted, UNTRUSTED_KEYS);
       const actor = closedObject(trusted, TRUSTED_KEYS);
       if (!body || !isAllowedText(body.text)) fail('invalid-text');
+      const annotation = annotationInput === null ? null : Annotations.parseRequest(annotationInput);
+      if (annotationInput !== null && annotation === null) fail('invalid-annotation');
       if (!actor || !boundedString(actor.subject_id, 64) ||
           !boundedString(actor.name, MAX_BYLINE_BYTES) || !KINDS.includes(actor.kind) ||
           !Array.isArray(actor.recipients) || actor.recipients.length > 32) {
@@ -528,10 +675,13 @@ function openStore(opts) {
           const exact = prior.text === body.text && prior.byline === actor.name &&
             prior.kind === actor.kind && prior.product === actor.product &&
             prior.product_provenance === actor.product_provenance;
-          if (!exact) fail('message-id-collision');
+          if (!exact || !sameAnnotation(asks.posts.get(prior.id) || null, annotation)) {
+            fail('message-id-collision');
+          }
           return publicMessage(prior, receipts, aiSessionDiscriminator);
         }
       }
+      const answers = annotation ? checkPostAnnotation(annotation, actor) : null;
       const record = Object.freeze({
         id: meta.next_id,
         ts: Date.now(),
@@ -544,7 +694,28 @@ function openStore(opts) {
         recipients: Object.freeze(normalizedRecipients),
         client_message_id: actor.client_message_id,
       });
+      // The post row goes first. A crash before the message line leaves a row
+      // that fails the bind check (no message with this id, author and ts).
+      const row = annotation === null ? null : Annotations.parseRow({
+        v: Annotations.ROW_VERSION,
+        seq: asks.rows.length + 1,
+        ts: record.ts,
+        kind: 'post',
+        message_id: record.id,
+        subject_id: actor.subject_id,
+        name: actor.name,
+        ask: annotation.ask,
+        answers,
+        status: annotation.status,
+        read_through: annotation.read_through,
+      }, asks.rows.length + 1);
+      if (annotation !== null && row === null) fail('invalid-annotation');
       try {
+        if (row !== null) {
+          appendLineExisting(annotationsPath, Annotations.encodeRow(row));
+          expectedAnnotations = fileIdentity(annotationsPath);
+          if (!expectedAnnotations) noteFatal('log-missing');
+        }
         appendLineExisting(messagesPath, JSON.stringify(record) + '\n');
         const nextMeta = { schema: SCHEMA, first_id: meta.first_id, next_id: record.id + 1 };
         atomicWriteJson(metaPath, nextMeta);
@@ -552,6 +723,7 @@ function openStore(opts) {
         if (!expected) noteFatal('log-missing');
         messages.push(record);
         meta = nextMeta;
+        if (row !== null) asks.replay(row, record);
         return publicMessage(record, receipts, aiSessionDiscriminator);
       } catch (error) {
         if (error && (error.code === 'store-fatal' || error.code === 'log-missing' ||
@@ -695,7 +867,86 @@ function openStore(opts) {
         next_id: meta.next_id,
         messages: Object.freeze(messages.map(message =>
           publicMessage(message, receipts, aiSessionDiscriminator))),
+        annotations: Object.freeze(boundPublicRows()),
       });
+    });
+  }
+
+  /* A lifecycle row: the asker withdraws an open ask or keeps an answered one
+   * open. Never rings. */
+  function annotate(input) {
+    return exclusive(() => {
+      requireOpen();
+      const request = closedObject(input, LIFECYCLE_INPUT_KEYS);
+      if (!request || !boundedString(request.subject_id, 64) ||
+          !boundedString(request.name, MAX_BYLINE_BYTES) ||
+          (request.kind !== 'withdraw' && request.kind !== 'keep_open') ||
+          !Number.isSafeInteger(request.ask_id) || request.ask_id < 1) fail('invalid-annotation');
+      assertLiveLog();
+      assertLiveReceipts();
+      assertLiveActivity();
+      const refusal = asks.checkLifecycle(request.kind, request.ask_id, request.subject_id);
+      if (refusal) fail(refusal);
+      const row = Annotations.parseRow({
+        v: Annotations.ROW_VERSION,
+        seq: asks.rows.length + 1,
+        ts: Date.now(),
+        kind: request.kind,
+        subject_id: request.subject_id,
+        name: request.name,
+        ask_id: request.ask_id,
+      }, asks.rows.length + 1);
+      if (!row) fail('invalid-annotation');
+      try {
+        appendLineExisting(annotationsPath, Annotations.encodeRow(row));
+        expectedAnnotations = fileIdentity(annotationsPath);
+        if (!expectedAnnotations) noteFatal('log-missing');
+        asks.replay(row, undefined);
+        return Annotations.publicRow(row);
+      } catch (error) {
+        if (error && (error.code === 'store-fatal' || error.code === 'log-missing' ||
+            error.code === 'log-changed')) {
+          fatal = error.code;
+          throw error;
+        }
+        if (error && OWN_CODES.includes(error.code)) throw error;
+        noteFatal('store-fatal');
+      }
+    });
+  }
+
+  /* Bound rows after `after` (a side-car seq). The cursor passes over rows
+   * that never bound. `first_id` is the era: a client that sees it change
+   * starts again from 0, as it does for messages. */
+  function readAnnotationRows(query) {
+    return exclusive(() => {
+      requireOpen();
+      const q = closedObject(query, ['after', 'limit']);
+      if (!q || !Number.isSafeInteger(q.after) || q.after < 0 ||
+          !Number.isSafeInteger(q.limit) || q.limit < 1 || q.limit > MAX_READ_LIMIT) {
+        fail('invalid-read');
+      }
+      assertLiveLog();
+      assertLiveReceipts();
+      assertLiveActivity();
+      const page = [];
+      let cursor = Math.min(q.after, asks.rows.length);
+      for (let i = cursor; i < asks.rows.length && page.length < q.limit; i++) {
+        cursor = i + 1;
+        if (asks.rows[i].bound) page.push(Annotations.publicRow(asks.rows[i].row));
+      }
+      return Object.freeze({ rows: Object.freeze(page), cursor, first_id: meta.first_id });
+    });
+  }
+
+  function openAsks(subjectId) {
+    return exclusive(() => {
+      requireOpen();
+      if (!boundedString(subjectId, 64)) fail('invalid-read');
+      assertLiveLog();
+      assertLiveReceipts();
+      assertLiveActivity();
+      return asks.openAsksFor(subjectId);
     });
   }
 
@@ -706,7 +957,8 @@ function openStore(opts) {
       if (!request || typeof request.archive_id !== 'string' ||
           !Number.isSafeInteger(request.exported_at) || request.exported_at < 0 ||
           !/^[0-9a-f]{64}$/.test(request.json_sha256) ||
-          !/^[0-9a-f]{64}$/.test(request.markdown_sha256)) fail('invalid-clear');
+          !/^[0-9a-f]{64}$/.test(request.markdown_sha256) ||
+          !/^[0-9a-f]{64}$/.test(request.annotations_sha256)) fail('invalid-clear');
       assertLiveLog();
       assertLiveReceipts();
       assertLiveActivity();
@@ -728,6 +980,39 @@ function openStore(opts) {
           JSON.stringify(verified.document) !== JSON.stringify(expectedDocument)) {
         fail('archive-stale');
       }
+      // The side-car's archive is checked the way the transcript's is: the
+      // live public projection, re-encoded, must be byte-identical to it.
+      let archivedAnnotations;
+      try { archivedAnnotations = fs.readFileSync(archivePaths(dataDir, request.archive_id).annotations); }
+      catch (_) { fail('archive-invalid'); }
+      if (Annotations.sha256(archivedAnnotations) !== request.annotations_sha256 ||
+          !archivedAnnotations.equals(Annotations.encodeArchive(boundPublicRows()))) {
+        fail('archive-stale');
+      }
+      // Open asks survive the clear (Patti's ruling, 2026-10-28): each becomes
+      // a carry row in the next era, pointing at the archive that holds its
+      // message. An ask already carried keeps its first archive.
+      const carriedAt = Date.now();
+      const carryRows = asks.openAsks().map((ask, i) => Annotations.parseRow({
+        v: Annotations.ROW_VERSION,
+        seq: i + 1,
+        ts: carriedAt,
+        kind: 'carry',
+        subject_id: ask.asker_subject_id,
+        name: ask.asker_name,
+        ask_id: ask.ask_id,
+        archive_id: ask.carried_from || request.archive_id,
+        asked_at: ask.asked_at,
+        ask: {
+          of_subject_id: ask.of_subject_id,
+          of_name: ask.of_name,
+          of_kind: ask.of_kind,
+          means: ask.means,
+          deliver: ask.deliver,
+        },
+      }, i + 1));
+      if (carryRows.some(row => row === null)) fail('archive-invalid');
+      const staged = Buffer.from(carryRows.map(Annotations.encodeRow).join(''), 'utf8');
       const marker = Object.freeze({
         schema: 1,
         archive_id: request.archive_id,
@@ -739,14 +1024,32 @@ function openStore(opts) {
         markdown_sha256: request.markdown_sha256,
       });
       try {
+        // Order is the recovery contract (recoverAnnotationsClear): staged
+        // side-car, its marker, then the transcript clear, then the install.
+        fs.writeFileSync(annotationsNextPath, staged, { mode: 0o600, flag: 'w' });
+        fsyncFile(annotationsNextPath);
+        atomicWriteJson(annotationsMarkerPath, {
+          schema: 1,
+          archive_id: request.archive_id,
+          source_next_id: meta.next_id,
+          staged_sha256: Annotations.sha256(staged),
+        });
+        fsyncDirectory(root);
         commitVerifiedClear(dataDir, marker);
+        fs.renameSync(annotationsNextPath, annotationsPath);
+        fsyncDirectory(root);
+        fs.unlinkSync(annotationsMarkerPath);
+        fsyncDirectory(root);
         meta = { schema: SCHEMA, first_id: marker.source_next_id, next_id: marker.source_next_id };
         messages = [];
         receipts.clear();
         receiptRows.length = 0;
+        asks = Annotations.createAskIndex();
+        for (const row of carryRows) asks.replay(row, undefined);
         expected = fileIdentity(messagesPath);
         expectedReceipts = fileIdentity(receiptsPath);
-        if (!expected || !expectedReceipts) noteFatal('log-missing');
+        expectedAnnotations = fileIdentity(annotationsPath);
+        if (!expected || !expectedReceipts || !expectedAnnotations) noteFatal('log-missing');
         return Object.freeze({ ok: true, first_id: meta.first_id, next_id: meta.next_id });
       } catch (caught) {
         fatal = 'store-fatal';
@@ -941,6 +1244,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
+    annotate, readAnnotationRows, openAsks,
   });
 }
 

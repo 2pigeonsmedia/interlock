@@ -49,6 +49,7 @@ function clearInput(receipt) {
     exported_at: receipt.exported_at,
     json_sha256: receipt.json_sha256,
     markdown_sha256: receipt.markdown_sha256,
+    annotations_sha256: receipt.annotations_sha256,
   };
 }
 
