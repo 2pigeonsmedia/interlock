@@ -1465,9 +1465,10 @@ function createFirstOwnerHandler(options) {
       return null;
     }
     // Who the first owner is, so an administrator cannot overwrite her
-    // recorded answer on a decision (her ruling, 2026-10-29).
-    const who = house.whoami({ cookie_header: request.headers.cookie, activity, now });
-    const roster = house.administrators(requestMeta(request, now));
+    // recorded answer on a decision (her ruling, 2026-10-29). Writes only: a
+    // read is a passive poll and must not touch the session.
+    const who = mutation ? house.whoami({ cookie_header: request.headers.cookie, activity, now }) : null;
+    const roster = mutation ? house.administrators(requestMeta(request, now)) : null;
     const first = roster && roster.ok === true ? roster.people.find(row => row.first_owner === true) : null;
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null,
