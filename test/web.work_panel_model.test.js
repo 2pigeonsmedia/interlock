@@ -115,6 +115,28 @@ test('needs you lists decisions to answer and work to open, oldest first', () =>
   for (const row of relayed.rows) assert.doesNotMatch(row.by, /unassigned/);
 });
 
+test('needs you lists each open ask addressed to the viewer as its own row, by age with the work', () => {
+  const asks = [
+    { ask_id: 41, asked_at: NOW - 5 * HOUR, by: 'Lead', of: 'Ana', of_kind: 'person', means: 'I merge\nthe candidate',
+      deliver: 'now', state: 'open', kept_open: false, carried_from: null, answers: [] },
+    { ask_id: 7, asked_at: NOW - 3 * DAY, by: 'Builder', of: 'Ana', of_kind: 'person', means: 'I rotate the keys tonight',
+      deliver: 'now', state: 'open', kept_open: false, carried_from: 'transcript-x', answers: [] },
+    { ask_id: 42, asked_at: NOW - 5 * HOUR, by: 'Lead', of: 'Ana', of_kind: 'person', means: null,
+      deliver: 'now', state: 'open', kept_open: false, carried_from: null, answers: [] },
+  ];
+  const result = needsYou(BRIEF, NOW, asks);
+  assert.equal(result.count, needsYou(BRIEF, NOW).count + 3, 'one ask, one row');
+  assert.deepEqual(result.rows.map(row => row.id), ['ask-7', 'W-1', 'ask-41', 'ask-42', 'W-3'],
+    'asks and work interleave oldest first');
+  assert.deepEqual(result.rows.find(row => row.id === 'ask-41'), {
+    id: 'ask-41', kind: 'ask', askId: 41, projectName: 'Ask', title: 'A yes means: I merge ⏎ the candidate',
+    ask: 'Message #41', by: 'asked by Lead', waiting: 'waiting 5h', action: 'Show ask',
+  });
+  assert.equal(result.rows.find(row => row.id === 'ask-7').ask, 'Asked before the transcript was cleared');
+  assert.equal(result.rows.find(row => row.id === 'ask-42').title, 'Ask in message #42');
+  assert.deepEqual(needsYou(BRIEF, NOW, []).rows, needsYou(BRIEF, NOW).rows, 'no asks, the work rows unchanged');
+});
+
 test('needs you is never narrowed by a project filter', () => {
   const filtered = Object.assign({}, BRIEF, { projects: [PROJECTS[1]] });
   const result = needsYou(filtered, NOW);
