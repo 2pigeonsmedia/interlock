@@ -994,6 +994,15 @@ function openStore(opts) {
     });
   }
 
+  /* Whether this seat already posted a message under this client id. */
+  function hasClientMessage(subjectId, clientMessageId) {
+    return exclusive(() => {
+      requireOpen();
+      return messages.some(message => message.subject_id === subjectId &&
+        message.client_message_id === clientMessageId);
+    });
+  }
+
   /* The ask a seat's earlier post with this client id carried, so a retry
    * can be answered by the idempotency rule even if the addressee has since
    * left the roster. */
@@ -1317,7 +1326,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers,
+    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, hasClientMessage,
   });
 }
 

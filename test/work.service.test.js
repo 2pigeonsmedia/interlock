@@ -998,3 +998,20 @@ test('on the record, a room answer from a seat that only shares the asked seat\'
     ask_id: 70, message_id: 72, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
   }).recorded, decision.id);
 });
+
+test('the latest room answer is the one latest in the room, not the one that arrived last', () => {
+  const { work } = fresh();
+  const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const decision = work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Order?', body: 'b',
+    asked_of: ref(owner), source_message: { message_id: 90, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Order?' },
+  }).item;
+  work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 90, of: ANA_OF });
+  const asOwner = Object.assign({}, owner, { session: null });
+  const say = (message_id, choice) => work.answerFromRoom(asOwner, {
+    ask_id: 90, message_id, text: choice, choice, by_addressee: true, of: ANA_OF,
+  });
+  assert.equal(say(95, 'no').recorded, decision.id);
+  assert.equal(say(93, 'yes').recorded, null, 'an older message arriving later does not replace her newer answer');
+  assert.equal(work.get(owner, { id: decision.id }).item.answer.choice, 'no');
+});

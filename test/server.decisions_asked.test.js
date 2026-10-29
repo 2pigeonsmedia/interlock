@@ -313,6 +313,29 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     assert.equal((await get(runtime, '/api/messages?after=0&limit=100&wait=0', owner)).json.messages.length, roomBefore,
       'no twin ask in the room');
 
+    // N1: a message posted earlier under the same id is never bound to a new decision.
+    const reused = uuid();
+    const plain = await aiPost(runtime, '/api/ai/annotated-messages', {
+      text: 'Decision: Rename the repo', client_message_id: reused,
+      annotation: { ask: { of: 'Ana', means: 'I rename the repo' } },
+    }, lead.token);
+    assert.equal(plain.status, 201, plain.text);
+    await post(runtime, '/api/annotated-messages', {
+      text: 'yes', annotation: { answers: [{ ask_id: plain.json.message.id, choice: 'yes' }] },
+    }, owner);
+    const hijack = await aiPost(runtime, '/api/ai/work/decisions/ask', {
+      operation_id: reused, project: 'ops', title: 'Rename the repo', body: 'and delete the old one',
+      asked_of: 'Ana', scope: 'I rename the repo',
+    }, lead.token);
+    assert.equal(hijack.status, 409, hijack.text);
+    assert.equal(hijack.json.error, 'operation-conflict');
+
+    // F3: the record is asked of the participant the room ask is addressed to.
+    const folded = await askOf(runtime, lead.token, { project: 'ops', title: 'Fold', body: 'b', asked_of: 'scout' });
+    assert.equal(folded.status, 201, folded.text);
+    assert.equal(folded.json.item.asked_of.name, 'Scout');
+    assert.equal(folded.json.item.ask_message_id, folded.json.message.id, 'bound, not left loose');
+
     // A record refused after its ask was posted: the ask stands and is answerable.
     const orphan = await askOf(runtime, lead.token, {
       project: 'nowhere', title: 'Ship it', body: 'b', asked_of: 'Ana', scope: 'I ship it',

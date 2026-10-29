@@ -908,10 +908,14 @@ function createWorkService(options) {
       }
       const bridged = Array.isArray(item.bridged_message_ids) ? item.bridged_message_ids : [];
       if (bridged.includes(body.message_id)) return { ok: true, recorded: item.id, replayed: true };
+      // Latest by the room's order, not by arrival: an older message never
+      // replaces a newer room answer.
+      if (item.answer && Number.isSafeInteger(item.answer.room_message_id) &&
+          item.answer.room_message_id > body.message_id) return { ok: true, recorded: null };
       const now = clock();
       const previous = item.answer;
       item.answer = {
-        kind: 'direct', text, choice: body.choice, conditions: '', source,
+        kind: 'direct', text, choice: body.choice, conditions: '', source, room_message_id: body.message_id,
         by: refOf(actor), attributed_to: refOf(actor), at: now, reason: '',
       };
       item.bridged_message_ids = bridged.concat([body.message_id]);

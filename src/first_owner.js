@@ -1936,6 +1936,13 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 200, Object.assign({}, prior.body, { message }));
       return;
     }
+    // An earlier post under this operation id that no completed ask owns is
+    // never bound to a new decision: answers already given to it were given
+    // to something else.
+    if (ai && await chat.hasClientMessage(chatActor.subject_id, chatActor.client_message_id)) {
+      sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
+      return;
+    }
     const text = (body.about_message ? `re #${body.about_message} ` : '') + `Decision: ${body.title.trim()}`;
     const ask = { of: body.asked_of };
     if (typeof body.scope === 'string' && body.scope.trim() !== '') ask.means = body.scope.trim();
@@ -1947,8 +1954,15 @@ function createFirstOwnerHandler(options) {
       annotationRefusal(request, response, error);
       return;
     }
+    // The addressee is resolved once, by the room: the record is asked of the
+    // participant the room ask is addressed to, never of a string from the body.
+    const facts = await chat.postFacts(saved.id);
+    if (!facts || !facts.ask) {
+      sendJson(request, response, 503, { ok: false, error: 'work-unavailable', message: saved });
+      return;
+    }
     const create = Object.assign({}, body, {
-      kind: 'decision', source_message: { message_id: saved.id, quote: text },
+      kind: 'decision', asked_of: facts.ask.subject_id, source_message: { message_id: saved.id, quote: text },
     });
     delete create.about_message;
     // A refused record still names its message: the ask stands in the room.
@@ -1957,15 +1971,17 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, result.status, Object.assign({}, result.body, { message: saved }));
       return;
     }
-    // Only now is the record the ask's decision: the room answer binds to it,
-    // provided the room ask and the record name the same person.
-    const facts = await chat.postFacts(saved.id);
+    // Only now is the record the ask's decision. This request posted the ask,
+    // so an answer given before the binding is its own and is caught up.
     const bound = work.bindAsk(workActor, {
-      id: result.body.item.id, ask_message_id: saved.id, of: facts && facts.ask,
+      id: result.body.item.id, ask_message_id: saved.id, of: facts.ask,
     });
-    if (bound.status === 200) await catchUpAnswer(saved.id);
-    const reply = bound.status === 200 ? Object.assign({}, result.body, { item: bound.body.item }) : result.body;
-    sendJson(request, response, result.status, Object.assign({}, reply, { message: saved }));
+    if (bound.status !== 200) {
+      sendJson(request, response, bound.status, Object.assign({}, bound.body, { message: saved }));
+      return;
+    }
+    await catchUpAnswer(saved.id);
+    sendJson(request, response, result.status, Object.assign({}, result.body, { item: bound.body.item, message: saved }));
   }
 
   /* After a room answer is saved: each answer the room stored as coming from

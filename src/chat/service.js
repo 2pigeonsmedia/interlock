@@ -588,6 +588,11 @@ function createChatService(options) {
     return await store.readAnnotationRows(query);
   }
 
+  async function hasClientMessage(subjectId, clientMessageId) {
+    requireOpen();
+    return await store.hasClientMessage(subjectId, clientMessageId);
+  }
+
   async function postFacts(messageId) {
     requireOpen();
     return await store.postFacts(messageId);
@@ -604,7 +609,7 @@ function createChatService(options) {
   }
 
   return Object.freeze({
-    append, appendAnnotated, annotate, readAnnotations, openAsks, postFacts, addresseeAnswers,
+    append, appendAnnotated, annotate, readAnnotations, openAsks, postFacts, addresseeAnswers, hasClientMessage,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
