@@ -27,7 +27,13 @@ const ANNOTATION_REFUSALS = Object.freeze({
 });
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(allow|decline)$/;
-const WORK_ROUTE = /^\/api\/(ai\/)?work\/([a-z]+(?:\/[a-z]+)?)$/;
+const WORK_ROUTE = /^\/api\/(ai\/)?work\/([a-z]+(?:\/[a-z][a-z-]*)?)$/;
+// "Ask a decision": a room post and the record that cites it, in that order.
+const ASK_DECISION_OP = 'decisions/ask';
+const ASK_DECISION_KEYS = Object.freeze([
+  'operation_id', 'project', 'title', 'body', 'asked_of', 'proposal', 'rationale', 'scope',
+  'conditions', 'links', 'parent', 'about_message',
+]);
 const WORK_ITEM_ROUTE = /^\/api\/(ai\/)?work\/items\/([WD]-[1-9][0-9]*)$/;
 const WORK_READS = Object.freeze(['brief', 'list', 'changes', 'export']);
 const TRANSCRIPT_EXPORT_ROUTE = /^\/api\/transcript\/exports\/(transcript-[0-9]{8}T[0-9]{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(json|md|annotations\.jsonl)$/;
@@ -1557,6 +1563,10 @@ function createFirstOwnerHandler(options) {
         return;
       }
     }
+    if (op === ASK_DECISION_OP) {
+      await askDecision(request, response, body, actor, ai);
+      return;
+    }
     sendWorkResult(request, response, await work.mutate(op, actor, body, actor.now));
   }
 
@@ -1889,6 +1899,68 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // ── decisions asked in the room ───────────────────────────────────────────
+  // The ask goes into the room first and the record cites it, so a crash
+  // between the two leaves an ordinary ask that can still be answered. An AI's
+  // operation id doubles as its message id, so its retry posts nothing twice.
+
+  async function askDecision(request, response, body, workActor, ai) {
+    const keys = body && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : null;
+    if (!keys || keys.some(key => !ASK_DECISION_KEYS.includes(key)) ||
+        typeof body.operation_id !== 'string' || typeof body.title !== 'string' ||
+        body.title.trim() === '' || typeof body.asked_of !== 'string' ||
+        (body.about_message !== undefined &&
+          !(Number.isSafeInteger(body.about_message) && body.about_message > 0)) ||
+        (body.scope !== undefined && typeof body.scope !== 'string')) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), body.operation_id.toLowerCase());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return;
+    }
+    const text = (body.about_message ? `re #${body.about_message} ` : '') + `Decision: ${body.title.trim()}`;
+    const ask = { of: body.asked_of };
+    if (typeof body.scope === 'string' && body.scope.trim() !== '') ask.means = body.scope.trim();
+    let saved;
+    try {
+      saved = publicMessage(await chat.appendAnnotated({ text }, chatActor, { ask }));
+      if (!saved) throw new Error('invalid chat result');
+    } catch (error) {
+      annotationRefusal(request, response, error);
+      return;
+    }
+    const create = Object.assign({}, body, {
+      kind: 'decision', source_message: { message_id: saved.id, quote: text },
+    });
+    delete create.about_message;
+    // A refused record still names its message: the ask stands in the room.
+    const result = await work.mutate('items/create', workActor, create, workActor.now);
+    sendJson(request, response, result.status, Object.assign({}, result.body, { message: saved }));
+  }
+
+  /* After a room answer is saved: each ask it answers that a decision cites
+   * becomes that decision's direct answer, when the answerer is the person it
+   * was asked of. The post's own response never changes. */
+  function bridgeRoomAnswers(chatActor, saved, annotation) {
+    if (!work || !annotation || !Array.isArray(annotation.answers)) return;
+    const actor = {
+      subject_id: chatActor.subject_id, name: chatActor.name, kind: chatActor.kind,
+      session: saved.session === undefined ? null : saved.session, owner: false,
+    };
+    for (const answer of annotation.answers) {
+      if (!answer || !Number.isSafeInteger(answer.ask_id)) continue;
+      work.answerFromRoom(actor, { ask_id: answer.ask_id, message_id: saved.id, text: saved.text });
+    }
+  }
+
   // ── asks, answers and status: the side-car ────────────────────────────────
   // The message object never changes. A message and its annotation arrive in
   // one call, because the ask must be known before the row's recipients are
@@ -1932,6 +2004,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (!saved) throw new Error('invalid chat result');
+      bridgeRoomAnswers(actor, saved, input.annotation);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -1967,6 +2040,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (saved === null) throw new Error('invalid chat result');
+      bridgeRoomAnswers(actor, saved, input.annotation);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2658,7 +2732,8 @@ function createFirstOwnerHandler(options) {
 
     if (work && (pathname.startsWith('/api/work/') || pathname.startsWith('/api/ai/work/'))) {
       const workRoute = WORK_ROUTE.exec(pathname);
-      const op = workRoute && work.MUTATION_OPS.includes(workRoute[2]) ? workRoute[2] : null;
+      const op = workRoute && (work.MUTATION_OPS.includes(workRoute[2]) || workRoute[2] === ASK_DECISION_OP)
+        ? workRoute[2] : null;
       if (request.method !== 'POST') {
         sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' }, { allow: 'POST' });
         return;
