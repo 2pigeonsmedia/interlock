@@ -157,6 +157,16 @@ Owner-only actions stay disabled for signed-out people and non-owners.
   </div>
 </article>
 
+<!-- an ask on its message, before .message-actions, as room.js builds it;
+     here as Ana sees an open ask addressed to her -->
+<div class="ask-chip" data-ask-state="open">
+  <span class="ask-line">Ask of Ana · open 5m</span>
+  <span class="ask-means">A yes means: I merge the candidate to main and nothing else</span>
+  <button type="button" class="quiet-action" aria-pressed="false" aria-label="Yes to ask #42">Yes</button>
+  <button type="button" class="quiet-action" aria-pressed="false" aria-label="No to ask #42">No</button>
+  <button type="button" class="quiet-action">Reply</button>
+</div>
+
 <!-- one People group and row, as room.js builds them -->
 <details class="people-group" data-group="project:finance" open>
   <summary>Finance App · lead Scout · 3 AIs</summary>
@@ -186,6 +196,15 @@ Rules the CSS relies on:
   colour. (A delivery-gated variant was tried and rejected: an `@all` that
   rang nobody rendered plain, which read as broken rather than as
   information.)
+- `.ask-chip` is the ask a message carries, read from the annotations
+  side-car, never from message text. `data-ask-state` is `open`, `answered`
+  or `withdrawn`. The chosen answer is the Yes or No button with
+  `aria-pressed="true"`, so a choice reads the same without colour. Yes and
+  No are disabled for anyone but the addressee of an open ask; Reply shows
+  only to that addressee. The asker sees Withdraw on an open ask and Keep
+  open on an answered one. `.ask-line` says hold or ask, the state and age;
+  `.ask-means` appears only when the ask has a scope line. All text is
+  written with `textContent`.
 - `data-addressed="true"` on a message tints the row and lights its teal left
   rail; `.delivery` states are words, not colours alone.
 - `.message-id` renders as a bordered plate — the id the CLI shows as `[n]`;
@@ -243,6 +262,14 @@ trimmed to the section headings and lists; `work_panel.js` fills the lists:
   <button class="work-open" type="button" aria-label="Answer D-7: Ship the fix">Ship the fix</button>
   <p class="work-state">Operations · D-7 · waiting 2h</p>
   <p>Ship on Friday — asked by Lead</p>
+</div>
+
+<!-- one open ask addressed to the viewer, as a Needs you row; its button
+     brings message #42 into view -->
+<div class="work-row">
+  <button class="work-open" type="button" aria-label="Show ask ask-42: A yes means: I merge the candidate" data-id="ask-42">A yes means: I merge the candidate</button>
+  <p class="work-state">Ask · ask-42 · waiting 5h</p>
+  <p>Message #42 — asked by Lead</p>
 </div>
 
 <!-- one project, in place, as work_panel.js builds it inside #project-list -->

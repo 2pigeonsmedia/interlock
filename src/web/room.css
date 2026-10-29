@@ -755,6 +755,71 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   white-space: nowrap;
 }
 
+/* Asks. The ask is a line under the message, never a new colour: teal is the
+ * signal path an ask rings on, violet stays the owner's. States are words. */
+.ask-chip {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 7px;
+  padding: 6px 9px;
+  border-left: 3px solid var(--signal);
+  background: var(--signal-wash);
+  font-family: var(--font-ai);
+  font-size: 0.8rem;
+  color: var(--ink-2);
+}
+.ask-line { font-weight: 600; }
+.ask-means { flex-basis: 100%; color: var(--ink-2); overflow-wrap: anywhere; }
+.ask-chip button, .ask-bind-chips button {
+  padding: 2px 9px;
+  font-family: var(--font-ai);
+  font-size: 0.78rem;
+}
+.ask-chip button[aria-pressed="true"] {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: #fff;
+}
+.ask-chip button[disabled]:not([aria-pressed="true"]) { opacity: 0.45; }
+.answer-line {
+  grid-column: 2;
+  margin-top: 5px;
+  font-family: var(--font-ai);
+  font-size: 0.76rem;
+  color: var(--ink-3);
+}
+.answer-line button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ask-bind, .ask-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 9px;
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+.ask-bind[hidden], .ask-fields[hidden] { display: none; }
+.ask-bind-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ask-bind-chips button[aria-pressed="true"] {
+  background: var(--signal-soft);
+  border-color: var(--signal);
+  color: var(--ink);
+}
+.ask-fields input[type="text"] { flex: 1 1 16em; min-width: 0; }
+.ask-later { display: inline-flex; gap: 6px; align-items: center; }
+.ask-tools { display: flex; margin-top: 9px; }
+
 /* The notice band: crimson is for problems only. A confirmation or a
  * progress note is ordinary ink — one hue, one meaning. */
 .room-notice {
@@ -841,6 +906,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   .message-id { margin-top: 0; }
   .delivery { grid-column: 1; }
   .message-actions { grid-column: 1; }
+  .ask-chip, .answer-line { grid-column: 1; }
   .conversation-heading, .composer, .room-notice { padding-left: 14px; padding-right: 14px; }
 }
 

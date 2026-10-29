@@ -109,6 +109,7 @@ function loadPage() {
     InterlockMentions: standIn(),
     InterlockMessagePage: standIn(),
     InterlockReplyReference: standIn(),
+    InterlockAsks: standIn(),
     InterlockTranscriptScroll: standIn(),
     InterlockWorkPanel: standIn(),
     InterlockPeopleModel: require('../src/web/people_model.js'),

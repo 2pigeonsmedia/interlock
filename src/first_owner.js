@@ -997,11 +997,17 @@ function createFirstOwnerHandler(options) {
         !Number.isSafeInteger(value.first_id) || value.first_id < 1 ||
         !Number.isSafeInteger(value.next_id) || value.next_id < value.first_id ||
         value.message_count !== value.next_id - value.first_id ||
-        !closedObject(value.downloads, ['markdown', 'json'])) return null;
+        !closedObject(value.downloads, ['markdown', 'json', 'annotations'])) return null;
     const markdownRoute = TRANSCRIPT_EXPORT_ROUTE.exec(value.downloads.markdown);
     const jsonRoute = TRANSCRIPT_EXPORT_ROUTE.exec(value.downloads.json);
+    const annotationsRoute = value.downloads.annotations === null ? null
+      : TRANSCRIPT_EXPORT_ROUTE.exec(value.downloads.annotations);
     if (!markdownRoute || markdownRoute[1] !== value.archive_id || markdownRoute[2] !== 'md' ||
-        !jsonRoute || jsonRoute[1] !== value.archive_id || jsonRoute[2] !== 'json') return null;
+        !jsonRoute || jsonRoute[1] !== value.archive_id || jsonRoute[2] !== 'json' ||
+        (value.downloads.annotations !== null && (!annotationsRoute ||
+          annotationsRoute[1] !== value.archive_id || annotationsRoute[2] !== 'annotations.jsonl'))) {
+      return null;
+    }
     return Object.freeze({
       archive_id: value.archive_id,
       exported_at: value.exported_at,
@@ -1011,6 +1017,7 @@ function createFirstOwnerHandler(options) {
       downloads: Object.freeze({
         markdown: value.downloads.markdown,
         json: value.downloads.json,
+        annotations: value.downloads.annotations,
       }),
     });
   }

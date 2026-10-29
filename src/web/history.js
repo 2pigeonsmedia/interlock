@@ -44,10 +44,12 @@ function validArchive(value) {
       !Number.isSafeInteger(value.first_id) || value.first_id < 1 ||
       !Number.isSafeInteger(value.next_id) || value.next_id < value.first_id ||
       value.message_count !== value.next_id - value.first_id ||
-      !exactObject(value.downloads, ['markdown', 'json'])) return false;
+      !exactObject(value.downloads, ['markdown', 'json', 'annotations'])) return false;
   return value.downloads.markdown ===
       `/api/transcript/exports/${value.archive_id}.md` &&
-    value.downloads.json === `/api/transcript/exports/${value.archive_id}.json`;
+    value.downloads.json === `/api/transcript/exports/${value.archive_id}.json` &&
+    (value.downloads.annotations === null || value.downloads.annotations ===
+      `/api/transcript/exports/${value.archive_id}.annotations.jsonl`);
 }
 
 function setStatus(element, message, kind = '') {
@@ -161,7 +163,8 @@ function downloadLink(archive, format, label) {
   const link = document.createElement('a');
   link.className = 'quiet-action';
   link.href = archive.downloads[format];
-  link.download = `${archive.archive_id}.${format === 'markdown' ? 'md' : 'json'}`;
+  link.download = `${archive.archive_id}.${
+    { markdown: 'md', json: 'json', annotations: 'annotations.jsonl' }[format]}`;
   link.textContent = label;
   return link;
 }
@@ -189,6 +192,9 @@ function renderArchives(archives) {
       downloadLink(archive, 'markdown', 'Download Markdown'),
       downloadLink(archive, 'json', 'Download JSON'),
     );
+    if (archive.downloads.annotations !== null) {
+      actions.append(downloadLink(archive, 'annotations', 'Download asks (JSONL)'));
+    }
     article.append(heading, summary, actions);
     archiveHistory.append(article);
   }

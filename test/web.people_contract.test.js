@@ -108,6 +108,7 @@ function loadPage() {
     InterlockReplyReference: standIn(),
     InterlockTranscriptScroll: standIn(),
     InterlockWorkPanel: standIn(),
+    InterlockAsks: standIn(),
     InterlockPeopleModel: require('../src/web/people_model.js'),
   };
   page.window = page;

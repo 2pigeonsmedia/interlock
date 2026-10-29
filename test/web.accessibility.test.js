@@ -77,14 +77,15 @@ test('dynamic decisions have specific names and narrow layouts wrap', () => {
 test('stale browser code receives reload guidance without disguising outages', () => {
   const guidance = 'Interlock may have been updated since this page loaded. Reload this page.';
   assert.ok(ROOM_JS.includes(`const HARD_REFRESH_GUIDANCE = '${guidance}'`));
-  assert.equal((ROOM_JS.match(/\$\{HARD_REFRESH_GUIDANCE\}/g) || []).length, 5,
-    'waiting AIs, People, grants, delivery, and messages must share the stale-page remedy');
+  assert.equal((ROOM_JS.match(/\$\{HARD_REFRESH_GUIDANCE\}/g) || []).length, 6,
+    'waiting AIs, People, grants, delivery, asks, and messages must share the stale-page remedy');
   assert.match(ROOM_JS, /const GRANTS_MALFORMED = `Interlock returned a grants response[^`]*\$\{HARD_REFRESH_GUIDANCE\}`/);
   assert.match(ROOM_JS, /error\.code === 'malformed-response'\) setRoomNotice\(GRANTS_MALFORMED\)/);
   for (const temporaryFailure of [
     'Interlock could not refresh the waiting list. It will try again.',
     'The participant roster is temporarily unavailable. Messages will keep trying.',
     'Delivery confirmations are temporarily unavailable. Interlock will try again.',
+    'Asks are temporarily unavailable. Interlock will try again.',
     'Messages are temporarily unavailable. Interlock will try again.',
   ]) assert.ok(ROOM_JS.includes(temporaryFailure),
     'ordinary network and service failures must retain retry guidance');
@@ -203,6 +204,19 @@ test('the work panel writes through deliberate forms', () => {
   // Label in name: an action button's accessible name is "<action> <id>: <title>".
   assert.match(WORK_PANEL_JS, /row\.action \+ ' ' \+ row\.id \+ ': ' \+ row\.title/);
   assert.match(WORK_PANEL_JS, /text \+ ' ' \+ item\.id \+ ': ' \+ item\.title/);
+});
+
+test('Needs you takes the open asks addressed to the viewer from the room\'s asks event', () => {
+  assert.match(WORK_PANEL_JS, /document\.addEventListener\('interlock:asks', asksChanged, \{ signal \}\)/,
+    'the listener is removed with the panel session');
+  assert.match(WORK_PANEL_JS, /event\.detail\.addressed/);
+  assert.doesNotMatch(WORK_PANEL_JS, /detail\.asked\b/, 'asks the viewer made never wait on the viewer');
+  assert.match(WORK_PANEL_JS, /model\(\)\.needsYou\(brief, Date\.now\(\), state \? state\.asks : \[\]\)/);
+  assert.match(WORK_PANEL_JS, /querySelector\('\[data-message-id="' \+ row\.askId \+ '"\]'\)/,
+    'an ask row shows its message in the transcript');
+  assert.match(WORK_PANEL_JS, /an ask from before a clear is in History/);
+  assert.match(WORK_PANEL_JS, /user, deps, brief: null, projectViews: new Map\(\), asks: \[\]/,
+    'a new viewer starts with no asks from the last one');
 });
 
 test('exposure and notify travel through the ordinary composer, and a message can become work', () => {

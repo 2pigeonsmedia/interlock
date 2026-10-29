@@ -40,6 +40,7 @@ class Element {
     this.classList = standIn();
     this.dataset = {};
     this.style = {};
+    this.options = [];
   }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
   set textContent(value) { this._text = String(value); this.children = []; }
@@ -119,6 +120,7 @@ function loadPage() {
     InterlockReplyReference: standIn(),
     InterlockTranscriptScroll: standIn(),
     InterlockWorkPanel: standIn(),
+    InterlockAsks: standIn(),
   };
   page.window = page;
   page.window.addEventListener = () => {};
@@ -126,6 +128,8 @@ function loadPage() {
   vm.createContext(page);
   vm.runInContext(PEOPLE_MODEL_JS, page, { filename: 'people_model.js' });
   vm.runInContext(ROOM_JS, page, { filename: 'room.js' });
+  // The ask picker beside the composer is not under test here.
+  page.renderAskTargets = () => {};
   return { page, el: id => document.querySelector(id) };
 }
 

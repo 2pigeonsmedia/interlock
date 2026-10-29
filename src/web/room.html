@@ -116,6 +116,20 @@
             <div id="mention-suggestions" class="mention-suggestions"></div>
           </div>
           <p id="mention-preview" class="mention-preview" aria-live="polite">No AI will be rung.</p>
+          <div id="ask-bind" class="ask-bind" hidden>
+            <span id="ask-bind-label">Answer an ask?</span>
+            <div id="ask-bind-chips" class="ask-bind-chips"></div>
+          </div>
+          <div id="ask-fields" class="ask-fields" hidden>
+            <label for="ask-of">Ask</label>
+            <select id="ask-of"></select>
+            <label for="ask-means">A yes means</label>
+            <input id="ask-means" type="text" maxlength="300" autocomplete="off" placeholder="what a yes allows, in one line">
+            <label class="ask-later"><input id="ask-later" type="checkbox"> Hold for later (does not ring)</label>
+          </div>
+          <div class="ask-tools">
+            <button id="ask-toggle" class="quiet-action" type="button" aria-expanded="false" aria-controls="ask-fields">Ask…</button>
+          </div>
           <div id="work-share-bar" class="work-share-bar" hidden><span id="work-share-text"></span><button id="work-share-decline" class="quiet-action" type="button">Decline</button></div>
           <div class="composer-footer">
             <span>Plain text</span>
@@ -361,6 +375,7 @@
 
   <script src="/mentions.js" defer></script>
   <script src="/reply_reference.js" defer></script>
+  <script src="/asks_model.js" defer></script>
   <script src="/message_page.js" defer></script>
   <script src="/request_generation.js" defer></script>
   <script src="/transcript_scroll.js" defer></script>

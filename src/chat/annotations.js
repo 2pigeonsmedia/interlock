@@ -15,7 +15,9 @@
 //   withdraw  the asker closes an open ask
 //   keep_open the asker re-opens an answered ask; later answers attach
 //   carry     an ask still open when the transcript was cleared, re-seeded
-//             in the next era with the archive it came from
+//             in the next era with the archive it came from. It binds only in
+//             the era it was carried into (`era_first_id`), so a clear made
+//             by an older server during a rollback leaves it unbound
 //
 // Nothing here reads message text. Status is what the client set; an answer
 // binds to the ask the client named.
@@ -40,6 +42,7 @@ const POST_KEYS = Object.freeze([
 const LIFECYCLE_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id']);
 const CARRY_KEYS = Object.freeze([
   'v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id', 'archive_id', 'asked_at', 'ask',
+  'era_first_id', 'kept_open',
 ]);
 const ASK_KEYS = Object.freeze(['of_subject_id', 'of_name', 'of_kind', 'means', 'deliver']);
 const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by']);
@@ -136,6 +139,19 @@ function parseRequest(value) {
   });
 }
 
+const KNOWN_KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry']);
+
+/* A row a later release wrote: a well-formed line in sequence whose `v` or
+ * kind this release does not know. It keeps its place in the sequence and is
+ * skipped, so a room rolled back to this release still opens. */
+function laterRow(value, expectedSeq) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!Number.isSafeInteger(value.v) || value.v < ROW_VERSION || value.seq !== expectedSeq ||
+      typeof value.kind !== 'string' || value.kind.length === 0) return null;
+  if (value.v === ROW_VERSION && KNOWN_KINDS.includes(value.kind)) return null;
+  return Object.freeze({ v: value.v, seq: value.seq, kind: 'later' });
+}
+
 function parseRow(value, expectedSeq) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const kind = value.kind;
@@ -160,9 +176,11 @@ function parseRow(value, expectedSeq) {
   if (!positiveId(row.ask_id)) return null;
   if (kind !== 'carry') return Object.freeze(Object.assign(base, { ask_id: row.ask_id }));
   const ask = parseAsk(row.ask);
-  if (!ask || !ARCHIVE_ID.test(row.archive_id) || !validTs(row.asked_at)) return null;
+  if (!ask || !ARCHIVE_ID.test(row.archive_id) || !validTs(row.asked_at) ||
+      !positiveId(row.era_first_id) || typeof row.kept_open !== 'boolean') return null;
   return Object.freeze(Object.assign(base, {
     ask_id: row.ask_id, archive_id: row.archive_id, asked_at: row.asked_at, ask,
+    era_first_id: row.era_first_id, kept_open: row.kept_open,
   }));
 }
 
@@ -175,7 +193,7 @@ function encodeRow(row) {
  * row (or one answer) whose reference no longer resolves is skipped, not
  * fatal: after a rollback an older server may have cleared messages this file
  * still points at. */
-function createAskIndex() {
+function createAskIndex(eraFirstId) {
   const asks = new Map();
   const posts = new Map();
   const rows = [];
@@ -249,6 +267,7 @@ function createAskIndex() {
   function replay(row, message) {
     rows.push({ row, bound: false });
     const entry = rows[rows.length - 1];
+    if (row.kind === 'later') return false;
     if (row.kind === 'post') {
       if (!message || message.subject_id !== row.subject_id || message.ts !== row.ts ||
           posts.has(row.message_id) || asks.has(row.message_id)) return false;
@@ -260,8 +279,9 @@ function createAskIndex() {
       }
       if (row.ask) addAsk(row.message_id, row, row.ask, row.ts, null);
     } else if (row.kind === 'carry') {
-      if (asks.has(row.ask_id)) return false;
+      if (row.era_first_id !== eraFirstId || asks.has(row.ask_id)) return false;
       addAsk(row.ask_id, row, row.ask, row.asked_at, row.archive_id);
+      asks.get(row.ask_id).kept_open = row.kept_open;
     } else {
       if (checkLifecycle(row.kind, row.ask_id, row.subject_id) !== null) return false;
       applyLifecycle(row);
@@ -341,7 +361,7 @@ function publicRow(row) {
   if (row.kind === 'carry') {
     return Object.freeze(Object.assign(base, {
       ask_id: row.ask_id, archive_id: row.archive_id, asked_at: row.asked_at,
-      ask: publicAskFields(row.ask),
+      ask: publicAskFields(row.ask), kept_open: row.kept_open,
     }));
   }
   return Object.freeze(Object.assign(base, { ask_id: row.ask_id }));
@@ -364,6 +384,7 @@ module.exports = Object.freeze({
   createAskIndex,
   encodeArchive,
   encodeRow,
+  laterRow,
   parseRequest,
   parseRow,
   publicAsk,

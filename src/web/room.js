@@ -67,6 +67,14 @@ const emptyState = document.querySelector('#empty-state');
 const messageForm = document.querySelector('#message-form');
 const messageBody = document.querySelector('#message-body');
 const sendButton = document.querySelector('#send-button');
+const askBind = document.querySelector('#ask-bind');
+const askBindLabel = document.querySelector('#ask-bind-label');
+const askBindChips = document.querySelector('#ask-bind-chips');
+const askFields = document.querySelector('#ask-fields');
+const askOf = document.querySelector('#ask-of');
+const askMeans = document.querySelector('#ask-means');
+const askLater = document.querySelector('#ask-later');
+const askToggle = document.querySelector('#ask-toggle');
 const mentionSuggestions = document.querySelector('#mention-suggestions');
 const mentionPreview = document.querySelector('#mention-preview');
 const presenceForm = document.querySelector('#presence-form');
@@ -111,6 +119,12 @@ const rosterExpanded = new Set();
 let roomFactTimer = null;
 let deliveryLoading = false;
 let deliveryCursor = 0;
+// The asks side-car: its own cursor and era, replayed into one state.
+const asksState = InterlockAsks.createAsksState();
+const pickedAsks = new Set();
+let annotationCursor = 0;
+let annotationEra = null;
+let annotationsLoading = false;
 let initialTranscriptPosition = false;
 let forceFollowAfterSend = false;
 let forceFollowMessageId = null;
@@ -282,6 +296,7 @@ function resetTranscript() {
   knownEra = null;
   seenMessageIds.clear();
   deliveryCursor = 0;
+  resetAsks();
   initialTranscriptPosition = false;
   forceFollowAfterSend = false;
   forceFollowMessageId = null;
@@ -365,6 +380,7 @@ function showRoom(user) {
     loadRoster();
     loadGrants();
     loadDeliveryChanges();
+    loadAnnotations();
     if (owner) loadPendingAis();
     roomFactTicks += 1;
     if (roomFactTicks % PEOPLE_PROJECTS_EVERY === 0) loadPeopleProjects();
@@ -936,6 +952,7 @@ function renderRoster(participants) {
   renderMentionSuggestions();
   updateMentionPreview();
   refreshPendingDeliveryPresence();
+  if (!askFields.hidden) renderAskTargets();
 }
 
 // People, grouped: people first, one group per project, Not yet assigned
@@ -1889,6 +1906,255 @@ function renderMessageTextRuns(element, text) {
   element.append(document.createTextNode(text.slice(cursor)));
 }
 
+// ── asks ────────────────────────────────────────────────────────────────────
+// An ask, its answers and a status mark are drawn from the side-car, never
+// from message text. Every piece is written with textContent.
+
+/* State only: the next side-car read redraws and tells the work panel. */
+function resetAsks() {
+  asksState.reset();
+  pickedAsks.clear();
+  annotationCursor = 0;
+  annotationEra = null;
+  renderBindChips([]);
+}
+
+async function loadAnnotations() {
+  if (annotationsLoading || roomView.hidden) return;
+  annotationsLoading = true;
+  const requestGeneration = roomRequestGeneration.capture();
+  try {
+    while (!roomView.hidden) {
+      const response = await fetch(`/api/annotations?after=${annotationCursor}&limit=100`, {
+        cache: 'no-store', credentials: 'same-origin',
+      });
+      const result = await readJson(response);
+      if (!roomRequestGeneration.isCurrent(requestGeneration)) return;
+      if (response.status === 401) {
+        forgetCsrf();
+        showLogin('Your session ended. Sign in again to continue.');
+        return;
+      }
+      if (!response.ok) throw new Error('asks-unavailable');
+      if (!InterlockAsks.validPage(result)) {
+        throw Object.assign(new Error('malformed-response'), { code: 'malformed-response' });
+      }
+      if (annotationEra !== result.first_id) {
+        // A new era (or the first read): start the side-car again from 0.
+        const restart = annotationEra !== null || annotationCursor !== 0;
+        asksState.reset();
+        pickedAsks.clear();
+        annotationEra = result.first_id;
+        annotationCursor = 0;
+        if (restart) continue;
+      }
+      const changed = asksState.apply(result.rows);
+      annotationCursor = result.cursor;
+      if (changed || result.rows.length === 0) refreshAsks();
+      if (result.rows.length < 100) break;
+    }
+  } catch (error) {
+    if (!roomRequestGeneration.isCurrent(requestGeneration)) return;
+    setRoomNotice(error.code === 'malformed-response'
+      ? `Interlock returned an asks response this page could not safely use. ${HARD_REFRESH_GUIDANCE}`
+      : 'Asks are temporarily unavailable. Interlock will try again.');
+  } finally {
+    annotationsLoading = false;
+  }
+}
+
+function viewerName() {
+  return currentUser && typeof currentUser.name === 'string' ? currentUser.name : null;
+}
+
+function refreshAsks() {
+  for (const article of transcript.querySelectorAll('.message')) {
+    decorateMessage(article, Number(article.dataset.messageId));
+  }
+  const open = asksState.openFor(viewerName());
+  for (const id of [...pickedAsks]) {
+    if (!open.addressed.some(ask => ask.ask_id === id)) pickedAsks.delete(id);
+  }
+  renderBindChips(open.addressed);
+  document.dispatchEvent(new CustomEvent('interlock:asks', {
+    detail: { addressed: open.addressed, asked: open.asked },
+  }));
+}
+
+function askButton(label, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'quiet-action';
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function decorateMessage(article, messageId) {
+  for (const old of article.querySelectorAll('.ask-chip, .answer-line')) old.remove();
+  const anchor = article.querySelector('.message-actions');
+  const ask = asksState.ask(messageId);
+  const post = asksState.post(messageId);
+  const viewer = viewerName();
+  if (ask) {
+    const chip = document.createElement('div');
+    chip.className = 'ask-chip';
+    chip.dataset.askState = ask.state;
+    const line = document.createElement('span');
+    line.className = 'ask-line';
+    line.textContent = InterlockAsks.askLine(ask, Date.now());
+    chip.append(line);
+    if (ask.means !== null) {
+      const means = document.createElement('span');
+      means.className = 'ask-means';
+      means.textContent = `A yes means: ${ask.means}`;
+      chip.append(means);
+    }
+    const mine = viewer !== null && ask.of === viewer && ask.state === 'open';
+    const chosen = InterlockAsks.chosen(ask);
+    for (const choice of ['yes', 'no']) {
+      const button = askButton(choice === 'yes' ? 'Yes' : 'No', () => answerAsk(ask.ask_id, choice));
+      button.setAttribute('aria-pressed', chosen === choice ? 'true' : 'false');
+      button.disabled = !mine;
+      button.setAttribute('aria-label', `${choice === 'yes' ? 'Yes' : 'No'} to ask #${ask.ask_id}`);
+      chip.append(button);
+    }
+    if (mine) chip.append(askButton('Reply', () => pickAsk(ask.ask_id)));
+    if (viewer !== null && ask.by === viewer && ask.state === 'open') {
+      chip.append(askButton('Withdraw', () => askLifecycle('withdraw', ask.ask_id)));
+    }
+    if (viewer !== null && ask.by === viewer && ask.state === 'answered') {
+      chip.append(askButton('Keep open', () => askLifecycle('keep_open', ask.ask_id)));
+    }
+    article.insertBefore(chip, anchor);
+  }
+  if (post && (post.answers.length > 0 || post.status !== null)) {
+    const answers = document.createElement('p');
+    answers.className = 'answer-line';
+    post.answers.forEach((answer, i) => {
+      if (i > 0) answers.append(document.createTextNode(' · '));
+      const target = document.createElement('button');
+      target.type = 'button';
+      target.textContent = `answers #${answer.ask_id}`;
+      target.addEventListener('click', () => {
+        const found = transcript.querySelector(`[data-message-id="${answer.ask_id}"]`);
+        if (found) found.scrollIntoView({ block: 'center' });
+      });
+      answers.append(target);
+      if (answer.crossed_by !== null) {
+        answers.append(document.createTextNode(` · #${answer.crossed_by} came after`));
+      }
+    });
+    if (post.status !== null) {
+      if (post.answers.length > 0) answers.append(document.createTextNode(' · '));
+      answers.append(document.createTextNode(`status: ${post.status}`));
+    }
+    article.insertBefore(answers, anchor);
+  }
+}
+
+function renderBindChips(addressed) {
+  askBindChips.replaceChildren();
+  askBind.hidden = addressed.length === 0;
+  askBindLabel.textContent = addressed.length > 1 ? 'Answering which?' : 'Answer this ask?';
+  for (const ask of addressed) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'quiet-action';
+    chip.setAttribute('aria-pressed', pickedAsks.has(ask.ask_id) ? 'true' : 'false');
+    chip.textContent = `#${ask.ask_id} from ${ask.by}${ask.means === null ? '' : `: ${ask.means}`}`;
+    chip.addEventListener('click', () => {
+      if (pickedAsks.has(ask.ask_id)) pickedAsks.delete(ask.ask_id);
+      else pickedAsks.add(ask.ask_id);
+      chip.setAttribute('aria-pressed', pickedAsks.has(ask.ask_id) ? 'true' : 'false');
+    });
+    askBindChips.append(chip);
+  }
+}
+
+function pickAsk(askId) {
+  pickedAsks.add(askId);
+  renderBindChips(asksState.openFor(viewerName()).addressed);
+  messageBody.focus();
+}
+
+function renderAskTargets() {
+  const keep = askOf.value;
+  askOf.replaceChildren();
+  for (const participant of rosterParticipants) {
+    if (participant.name === viewerName()) continue;
+    const option = document.createElement('option');
+    option.value = participant.name;
+    option.textContent = participant.kind === 'seat' ? `${participant.name} (AI)` : participant.name;
+    option.dataset.kind = participant.kind;
+    askOf.append(option);
+  }
+  if ([...askOf.options].some(option => option.value === keep)) askOf.value = keep;
+  updateAskMeansRequired();
+}
+
+function updateAskMeansRequired() {
+  const option = askOf.selectedOptions[0];
+  const person = !!option && option.dataset.kind === 'person';
+  askMeans.required = !askFields.hidden && person;
+  askMeans.placeholder = person
+    ? 'required for a person: what a yes allows, in one line'
+    : 'optional: what a yes allows, in one line';
+}
+
+function setAskMode(on) {
+  askFields.hidden = !on;
+  askToggle.setAttribute('aria-expanded', on ? 'true' : 'false');
+  askToggle.textContent = on ? 'No ask' : 'Ask…';
+  if (on) renderAskTargets();
+  updateAskMeansRequired();
+}
+
+/* The annotation the composer will send, or null for a plain message. */
+function composerAnnotation() {
+  const annotation = {};
+  const answers = InterlockAsks.bindAnswers(asksState.openFor(viewerName()).addressed, pickedAsks);
+  if (answers) annotation.answers = answers;
+  if (!askFields.hidden && askOf.value) {
+    annotation.ask = { of: askOf.value, deliver: askLater.checked ? 'later' : 'now' };
+    if (askMeans.value.trim() !== '') annotation.ask.means = askMeans.value.trim();
+  }
+  return Object.keys(annotation).length === 0 ? null : annotation;
+}
+
+const ASK_REFUSALS = Object.freeze({
+  'means-required': 'An ask of a person needs one line saying what a yes means.',
+  'ask-target-unknown': 'That participant is not in the room.',
+  'ask-of-self': 'You cannot ask yourself.',
+  'ask-not-open': 'That ask was already answered or withdrawn.',
+  'ask-not-found': 'That ask is not in this room.',
+  'ask-not-answered': 'Only an answered ask can be kept open.',
+  'not-asker': 'Only the one who asked can do that.',
+  'invalid-annotation': 'Interlock refused the ask. Check the scope line: one line, at most 300 characters.',
+});
+
+async function answerAsk(askId, choice) {
+  try {
+    await ownerMutation('/api/annotated-messages', {
+      text: choice, annotation: { answers: [{ ask_id: askId, choice }] },
+    });
+    pickedAsks.delete(askId);
+    setRoomNotice(`Answered "${choice}" to #${askId}.`, 'success');
+  } catch (error) {
+    setRoomNotice(ASK_REFUSALS[error.code] || 'Interlock could not confirm the answer. Check the transcript.');
+  }
+  loadAnnotations();
+}
+
+async function askLifecycle(kind, askId) {
+  try {
+    await ownerMutation('/api/annotations', { kind, ask_id: askId });
+  } catch (error) {
+    setRoomNotice(ASK_REFUSALS[error.code] || 'Interlock could not confirm that change. Try again.');
+  }
+  loadAnnotations();
+}
+
 function seedReply(messageId) {
   messageBody.value = InterlockReplyReference.seed(messageBody.value, messageId);
   updateMentionPreview();
@@ -1975,6 +2241,7 @@ function renderMessage(message) {
     article.append(delivery);
   }
   transcript.append(article);
+  decorateMessage(article, message.id);
   seenMessageIds.add(message.id);
   emptyState.hidden = true;
   return true;
@@ -2240,22 +2507,32 @@ messageForm.addEventListener('submit', async event => {
   setRoomNotice('Saving message…', 'progress');
   let saved = false;
   const sentText = messageBody.value;
+  const annotation = composerAnnotation();
   const failed = (status, code) => document.dispatchEvent(
     new CustomEvent('interlock:message-failed', { detail: { text: sentText, status, code } }));
   try {
-    const response = await fetch('/api/messages', {
+    const request = {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
         'content-type': 'application/json',
         'x-csrf-token': sendCsrf,
       },
-      body: JSON.stringify({ text: sentText }),
-    });
+      body: JSON.stringify(annotation === null ? { text: sentText } : { text: sentText, annotation }),
+    };
+    // A message with an ask or an answer is one write with its annotation.
+    const response = annotation === null
+      ? await fetch('/api/messages', request)
+      : await fetch('/api/annotated-messages', request);
     const result = await readJson(response);
     if (response.status === 401) {
       forgetCsrf();
       showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    if (result && Object.prototype.hasOwnProperty.call(ASK_REFUSALS, result.error)) {
+      setRoomNotice(ASK_REFUSALS[result.error]);
+      failed(response.status, result.error);
       return;
     }
     if (response.status === 400) {
@@ -2277,6 +2554,13 @@ messageForm.addEventListener('submit', async event => {
     document.dispatchEvent(new CustomEvent('interlock:message-saved', { detail: { id: result.message.id, text: sentText } }));
     forceFollowMessageId = result.message.id;
     messageBody.value = '';
+    if (annotation !== null) {
+      pickedAsks.clear();
+      askMeans.value = '';
+      askLater.checked = false;
+      setAskMode(false);
+      loadAnnotations();
+    }
     updateMentionPreview();
     setRoomNotice('Message saved.', 'success');
     followTranscriptBottom(true);
@@ -2299,6 +2583,8 @@ messageForm.addEventListener('submit', async event => {
 });
 
 messageBody.addEventListener('input', updateMentionPreview);
+askToggle.addEventListener('click', () => setAskMode(askFields.hidden));
+askOf.addEventListener('change', updateAskMeansRequired);
 
 logoutButton.addEventListener('click', async () => {
   const logoutCsrf = readCsrf();

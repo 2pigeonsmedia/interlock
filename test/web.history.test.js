@@ -39,6 +39,12 @@ test('History validates closed server envelopes and renders only through DOM tex
   assert.match(HISTORY_JS, /exactObject\(value, \[[\s\S]*'ended_how'/);
   assert.match(HISTORY_JS, /exactObject\(value, \[[\s\S]*'archive_id'[\s\S]*'downloads'/);
   assert.match(HISTORY_JS, /value\.downloads\.markdown ===[\s\S]*value\.downloads\.json ===/);
+  assert.match(HISTORY_JS,
+    /value\.downloads\.annotations === null \|\| value\.downloads\.annotations ===\s*`\/api\/transcript\/exports\/\$\{value\.archive_id\}\.annotations\.jsonl`/,
+    'the side-car link is null or exactly its own archive\'s route');
+  assert.match(HISTORY_JS,
+    /if \(archive\.downloads\.annotations !== null\) \{\s*actions\.append\(downloadLink\(archive, 'annotations', 'Download asks \(JSONL\)'\)\)/,
+    'the side-car link is rendered only when listed');
   assert.match(HISTORY_JS, /heading\.textContent = group\[0\]\.name/);
   assert.match(HISTORY_JS, /cell\(row, `\$\{session\.product\} · \$\{session\.product_provenance\}`\)/);
   assert.match(HISTORY_JS, /link\.textContent = label/);

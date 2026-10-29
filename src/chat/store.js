@@ -59,7 +59,7 @@ const CLEAR_KEYS = Object.freeze([
   'archive_id', 'exported_at', 'json_sha256', 'markdown_sha256', 'annotations_sha256',
 ]);
 const ANNOTATIONS_MARKER_KEYS = Object.freeze([
-  'schema', 'archive_id', 'source_next_id', 'staged_sha256',
+  'schema', 'archive_id', 'source_next_id', 'staged_sha256', 'archive_sha256',
 ]);
 const LIFECYCLE_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'kind', 'ask_id']);
 const {
@@ -358,7 +358,7 @@ function refuseUnread(ids, count) {
  * `firstId` is final here. An era moved to `source_next_id` means the clear
  * happened and the staged next side-car (the carried asks) is installed; any
  * other floor means it never did, and the live side-car stands. */
-function recoverAnnotationsClear(root, firstId) {
+function recoverAnnotationsClear(dataDir, root, firstId) {
   const livePath = path.join(root, 'annotations.jsonl');
   const nextPath = path.join(root, 'annotations.next.jsonl');
   const markerPath = path.join(root, 'annotations.clear.pending.json');
@@ -374,17 +374,26 @@ function recoverAnnotationsClear(root, firstId) {
   catch (_) { marker = null; }
   if (!marker || marker.schema !== 1 || typeof marker.archive_id !== 'string' ||
       !Number.isSafeInteger(marker.source_next_id) || marker.source_next_id < 1 ||
-      !/^[0-9a-f]{64}$/.test(marker.staged_sha256)) fail('inconsistent-state');
+      !/^[0-9a-f]{64}$/.test(marker.staged_sha256) ||
+      !/^[0-9a-f]{64}$/.test(marker.archive_sha256)) fail('inconsistent-state');
   if (firstId === marker.source_next_id) {
     if (fs.existsSync(nextPath)) {
-      if (Annotations.sha256(fs.readFileSync(nextPath)) !== marker.staged_sha256) {
+      // The era's live rows are replaced only while their archive is intact,
+      // as the transcript is truncated only after its own archive verifies.
+      let archived;
+      try { archived = fs.readFileSync(archivePaths(dataDir, marker.archive_id).annotations); }
+      catch (_) { fail('inconsistent-state'); }
+      if (Annotations.sha256(archived) !== marker.archive_sha256 ||
+          Annotations.sha256(fs.readFileSync(nextPath)) !== marker.staged_sha256) {
         fail('inconsistent-state');
       }
       fs.renameSync(nextPath, livePath);
-    } else if (!fs.existsSync(livePath) ||
+    } else if (fs.existsSync(livePath) &&
         Annotations.sha256(fs.readFileSync(livePath)) !== marker.staged_sha256) {
       fail('inconsistent-state');
     }
+    // No staged and no live file: the side-car was dropped, and missing
+    // means empty. The marker goes with it.
   } else if (fs.existsSync(nextPath)) {
     fs.unlinkSync(nextPath);
   }
@@ -392,21 +401,22 @@ function recoverAnnotationsClear(root, firstId) {
   fsyncDirectory(root);
 }
 
-function readAnnotations(filePath, messages) {
-  const raw = fs.readFileSync(filePath, 'utf8');
-  const torn = raw.length > 0 && !raw.endsWith('\n');
-  const kept = torn ? raw.slice(0, raw.lastIndexOf('\n') + 1) : raw;
+function readAnnotations(filePath, messages, firstId) {
+  const bytes = fs.readFileSync(filePath);
+  const torn = bytes.length > 0 && bytes[bytes.length - 1] !== 0x0a;
+  const keptBytes = torn ? bytes.lastIndexOf(0x0a) + 1 : bytes.length;
+  const kept = bytes.subarray(0, keptBytes).toString('utf8');
   const lines = kept === '' ? [] : kept.slice(0, -1).split('\n');
   const byId = new Map(messages.map(message => [message.id, message]));
-  const index = Annotations.createAskIndex();
+  const index = Annotations.createAskIndex(firstId);
   lines.forEach((line, i) => {
     let value;
     try { value = JSON.parse(line); } catch (_) { fail('corrupt-annotations'); }
-    const row = Annotations.parseRow(value, i + 1);
+    const row = Annotations.parseRow(value, i + 1) || Annotations.laterRow(value, i + 1);
     if (!row) fail('corrupt-annotations');
     index.replay(row, row.kind === 'post' ? byId.get(row.message_id) : undefined);
   });
-  return { index, torn, kept };
+  return { index, torn, keptBytes };
 }
 
 function sameAnnotation(row, request) {
@@ -525,15 +535,16 @@ function openStore(opts) {
   const receipts = receiptLog.receipts;
   const receiptRows = receiptLog.rows.slice();
   const activity = parseActivity(fs.readFileSync(activityPath, 'utf8'));
-  recoverAnnotationsClear(root, meta.first_id);
+  recoverAnnotationsClear(dataDir, root, meta.first_id);
   if (!fs.existsSync(annotationsPath)) {
     fs.writeFileSync(annotationsPath, '', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     fsyncFile(annotationsPath);
     fsyncDirectory(root);
   }
-  const annotationLog = readAnnotations(annotationsPath, messages);
+  const annotationLog = readAnnotations(annotationsPath, messages, meta.first_id);
   if (annotationLog.torn) {
-    fs.writeFileSync(annotationsPath, annotationLog.kept, { encoding: 'utf8', flag: 'w' });
+    // Truncate, never rewrite: the side-car has no meta to catch a short file.
+    fs.truncateSync(annotationsPath, annotationLog.keptBytes);
     fsyncFile(annotationsPath);
   }
   let asks = annotationLog.index;
@@ -939,6 +950,21 @@ function openStore(opts) {
     });
   }
 
+  /* The ask a seat's earlier post with this client id carried, so a retry
+   * can be answered by the idempotency rule even if the addressee has since
+   * left the roster. */
+  function priorAsk(subjectId, clientMessageId) {
+    return exclusive(() => {
+      requireOpen();
+      const prior = messages.find(message => message.subject_id === subjectId &&
+        message.client_message_id === clientMessageId);
+      const row = prior ? asks.posts.get(prior.id) : null;
+      return row && row.ask ? Object.freeze({
+        subject_id: row.ask.of_subject_id, name: row.ask.of_name, kind: row.ask.of_kind,
+      }) : null;
+    });
+  }
+
   function openAsks(subjectId) {
     return exclusive(() => {
       requireOpen();
@@ -1003,6 +1029,8 @@ function openStore(opts) {
         ask_id: ask.ask_id,
         archive_id: ask.carried_from || request.archive_id,
         asked_at: ask.asked_at,
+        era_first_id: meta.next_id,
+        kept_open: ask.kept_open,
         ask: {
           of_subject_id: ask.of_subject_id,
           of_name: ask.of_name,
@@ -1033,6 +1061,7 @@ function openStore(opts) {
           archive_id: request.archive_id,
           source_next_id: meta.next_id,
           staged_sha256: Annotations.sha256(staged),
+          archive_sha256: request.annotations_sha256,
         });
         fsyncDirectory(root);
         commitVerifiedClear(dataDir, marker);
@@ -1044,7 +1073,7 @@ function openStore(opts) {
         messages = [];
         receipts.clear();
         receiptRows.length = 0;
-        asks = Annotations.createAskIndex();
+        asks = Annotations.createAskIndex(marker.source_next_id);
         for (const row of carryRows) asks.replay(row, undefined);
         expected = fileIdentity(messagesPath);
         expectedReceipts = fileIdentity(receiptsPath);
@@ -1244,7 +1273,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, readAnnotationRows, openAsks,
+    annotate, readAnnotationRows, openAsks, priorAsk,
   });
 }
 
