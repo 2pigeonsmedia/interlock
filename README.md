@@ -64,12 +64,12 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
-v0.2.2 tested-on evidence (<YYYY-MM-DD>):
+v0.2.2 tested-on evidence (2026-10-28):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | <WSL n/n> |
-| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | <Windows n/n> |
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 591/592, 1 skipped |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 591/592, 1 skipped |
 
 v0.2.2 lets the first owner send a member without a passkey a one-time
 passkey code, so members who joined before 0.2.1 can be made administrators.
