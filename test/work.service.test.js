@@ -1050,3 +1050,16 @@ test('the first owner\'s recorded answer stands: no admin replaces or reopens it
   assert.equal(work.reopen(Object.assign({}, admin, { subject_id: 'p-3', name: 'Cy' }),
     { operation_id: uuid(), id: other.id, expected_revision: byAdmin.revision, reason: 'r' }).item.state, 'awaiting');
 });
+
+test('an answer written before protection was recorded counts as protected when a person gave it', () => {
+  const { store, work } = fresh();
+  const admin = Object.freeze({ subject_id: 'p-2', name: 'Bea', kind: 'person', owner: true, first_owner: false });
+  const decision = newDecision(work, lead, owner);
+  const answered = work.answer(Object.assign({}, owner, { first_owner: true }),
+    { operation_id: uuid(), id: decision.id, expected_revision: decision.revision, text: 'yes' }).item;
+  // Arrange the older shape: the same answer without the stored fact.
+  store.commit(draft => { delete draft.items.find(row => row.id === decision.id).answer.first_owner_protected; });
+  assert.equal(work.get(owner, { id: decision.id }).item.answer.first_owner_protected, undefined, 'the arrangement');
+  assert.throws(() => work.reopen(admin, { operation_id: uuid(), id: decision.id, expected_revision: answered.revision, reason: 'r' }),
+    error => error.code === 'first-owner-answer');
+});

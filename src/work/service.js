@@ -690,7 +690,11 @@ function createWorkService(options) {
    * the first owner, known by identity, or by a person not known not to be
    * her. An administrator who is not her may not replace or reopen it. */
   function protectedAnswer(item) {
-    return !!(item.answer && item.answer.kind === 'direct' && item.answer.first_owner_protected === true);
+    const recorded = item.answer;
+    if (!recorded || recorded.kind !== 'direct') return false;
+    if (typeof recorded.first_owner_protected === 'boolean') return recorded.first_owner_protected;
+    // Written before the fact existed: a person's answer is protected.
+    return !!(recorded.by && recorded.by.kind === 'person');
   }
 
   function guardFirstOwnersAnswer(item, actor) {
