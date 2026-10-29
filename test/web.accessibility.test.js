@@ -406,3 +406,10 @@ test('the room-answer line comes from the asks event\'s answered ids', () => {
   assert.match(WORK_PANEL_JS, /if \(state\.refreshing\) \{\s*state\.refreshAgain = true;/, 'a refresh asked for mid-read runs again after it');
   assert.match(WORK_PANEL_JS, /if \(row\.note\) card\.append\(make\('p', 'work-state', row\.note\)\)/);
 });
+
+test('the open dialog follows its record without wiping a half-written form', () => {
+  assert.match(WORK_PANEL_JS, /renderProjects\(brief\);\s*refreshOpenDrawer\(state, brief\);/);
+  assert.match(WORK_PANEL_JS, /model\(\)\.changedSince\(brief, state\.drawerItem, state\.drawerUpdatedAt\)/);
+  assert.match(WORK_PANEL_JS, /querySelector\('\.work-action-form form'\)\) \{\s*element\('work-drawer-status'\)\.textContent = 'This record changed since you opened it\.';/);
+  assert.match(WORK_PANEL_JS, /state\.drawerUpdatedAt = item\.updated_at;/);
+});

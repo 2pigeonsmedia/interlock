@@ -40,7 +40,14 @@
     awaiting: 'Awaiting answer', answered: 'Answered here', reported: 'Answer reported', withdrawn: 'Withdrawn',
   });
 
+  // A direct answer the room recorded (the person asked said it in the room)
+  // reads as that, not as answered here. The source is the room's own words.
+  const ROOM_SOURCE = /^answered in the room #[1-9][0-9]*$/;
+
   function stateLabel(item) {
+    const answer = item.answer || item.answer_summary;
+    if (item.kind === 'decision' && item.state === 'answered' && answer && typeof answer.source === 'string' &&
+        ROOM_SOURCE.test(answer.source)) return 'Answered in the room';
     const labels = item.kind === 'decision' ? DECISION_STATES : WORK_STATES;
     return Object.hasOwn(labels, item.state) ? labels[item.state] : String(item.state);
   }
@@ -132,6 +139,15 @@
         return new Set([...answered].filter(id => !unconfirmed.has(id)));
       },
     });
+  }
+
+  // Whether the record open in the dialog has changed since it was read: the
+  // brief lists it with a newer update time. A record the brief does not
+  // list (done, or in another project's archive) is left as it is.
+  function changedSince(brief, id, updatedAt) {
+    const rows = [].concat(brief.needs_me || [], brief.open || [], brief.decisions || []);
+    const row = rows.find(entry => entry && entry.id === id);
+    return !!row && Number.isSafeInteger(row.updated_at) && row.updated_at !== updatedAt;
   }
 
   function needsYou(brief, now, asks = [], answered = new Set()) {
@@ -612,7 +628,7 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
+    who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });

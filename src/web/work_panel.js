@@ -357,6 +357,27 @@
     renderReported(brief);
     renderActions(brief);
     renderProjects(brief);
+    refreshOpenDrawer(state, brief);
+  }
+
+  // The open dialog follows its record. A half-written form is never wiped:
+  // the dialog says the record changed, and the form's own write will meet
+  // the stale-revision refusal if it goes ahead.
+  function refreshOpenDrawer(state, brief) {
+    if (!element('work-drawer').open || state.drawerItem === null ||
+        !model().changedSince(brief, state.drawerItem, state.drawerUpdatedAt)) return;
+    if (element('work-drawer-actions').querySelector('.work-action-form form')) {
+      element('work-drawer-status').textContent = 'This record changed since you opened it.';
+      return;
+    }
+    const hadFocus = element('work-drawer').contains(document.activeElement);
+    openItem(state.drawerItem).then(() => {
+      if (hadFocus && current(state) && !element('work-drawer').contains(document.activeElement)) {
+        const heading = element('work-drawer-heading');
+        if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+        heading.focus();
+      }
+    });
   }
 
   function setStatus(text) {
@@ -1256,6 +1277,7 @@
     if (!current(state) || request !== state.drawerRequest) return;
     const item = result.item;
     state.drawerItem = item.id;
+    state.drawerUpdatedAt = item.updated_at;
     clearDrawer(item.id + ' · ' + item.title, projectName(state, item.project));
     renderDrawerState(state, result);
     renderDrawerActions(result);
@@ -1301,7 +1323,7 @@
     stop();
     const state = {
       user, deps, brief: null, projectViews: new Map(), asks: [], answers: model().createAnswerTracker(), refreshAgain: false,
-      refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
+      refreshing: false, drawerRequest: 0, drawerItem: null, drawerUpdatedAt: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },
     };
