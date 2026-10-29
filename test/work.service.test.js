@@ -942,6 +942,19 @@ test('a room answer to the ask a decision cites is the addressee\'s direct answe
     operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Merge?', body: 'b',
     asked_of: ref(owner), source_message: { message_id: 41, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Merge?' },
   }).item;
+  const asOwner = Object.assign({}, owner, { session: null });
+  // A decision that only cites the ask is not that ask's decision.
+  assert.equal(work.answerFromRoom(asOwner, { ask_id: 41, message_id: 49, text: 'yes' }).recorded, null,
+    'before the bind, a citation alone records nothing');
+  const attacker = work.createItem(reviewer, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Something else', body: 'b',
+    asked_of: ref(owner), source_message: { message_id: 41, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Merge?' },
+  }).item;
+  // bindAsk is never a route: only "Ask a decision" calls it, on the message it
+  // just posted for that actor. Here: once bound, no second decision can bind.
+  work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 41 });
+  assert.throws(() => work.bindAsk(Object.assign({}, reviewer, { session: null }), { id: attacker.id, ask_message_id: 41 }),
+    error => error.code === 'not-authorized' || error.code === 'invalid-state', 'one ask, one decision');
   const asOwnerAdmin = Object.assign({}, reviewer, { session: null });
   assert.equal(work.answerFromRoom(asOwnerAdmin, { ask_id: 41, message_id: 50, text: 'yes' }).recorded, null,
     'a bystander records nothing');
@@ -957,4 +970,6 @@ test('a room answer to the ask a decision cites is the addressee\'s direct answe
   assert.equal(after.history.filter(event => event.kind === 'answered').length, 1, 'recorded once');
   assert.equal(work.answerFromRoom(Object.assign({}, owner, { session: null }),
     { ask_id: 41, message_id: 60, text: 'no' }).recorded, null, 'a later room answer does not replace a direct one');
+  assert.equal(work.get(owner, { id: attacker.id }).item.state, 'awaiting',
+    'the decision that only cited the ask got nothing');
 });

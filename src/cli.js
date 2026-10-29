@@ -605,10 +605,11 @@ function validAskFields(value) {
 }
 
 function validAnswerEntry(value) {
-  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by']);
+  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
   return !!answer && Number.isSafeInteger(answer.ask_id) && answer.ask_id > 0 &&
     (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
-    (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0));
+    (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0)) &&
+    typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean';
 }
 
 function validPostRow(value) {

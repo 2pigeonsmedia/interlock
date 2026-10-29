@@ -247,8 +247,17 @@ function createWorkRoutes(options) {
     }
   }
 
+  // "Ask a decision" only: binds the record to the ask the host just posted.
+  function bindAsk(actor, body) {
+    try {
+      return Object.freeze({ status: 200, body: stripIds(work.bindAsk(actor, body)) });
+    } catch (error) {
+      return errorResponse(error);
+    }
+  }
+
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }
