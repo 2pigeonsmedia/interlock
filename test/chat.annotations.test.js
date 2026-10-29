@@ -364,3 +364,28 @@ test('a torn side-car tail is cut back to its last whole row', async () => {
   reopen();
   assert.equal(fs.statSync(file).size, before.size);
 });
+
+test('a row a later release wrote is counted and skipped; the room still opens and appends after it', async () => {
+  const { chat, dir, reopen } = room();
+  await chat.appendAnnotated({ text: 'A?' }, PERSON, { ask: { of: 'Marlow' } });
+  await chat.close();
+  const file = path.join(dir, 'chat', 'annotations.jsonl');
+  fs.appendFileSync(file, JSON.stringify({ v: 1, seq: 2, kind: 'stamp', message_id: 1, project: 'finance' }) + '\n');
+  fs.appendFileSync(file, JSON.stringify({ v: 2, seq: 3, kind: 'post', message_id: 1, anything: true }) + '\n');
+  const again = reopen();
+  assert.equal((await again.openAsks(MARLOW)).addressed.length, 1);
+  const next = await again.appendAnnotated({ text: 'B?' }, PERSON, { ask: { of: 'Codex' } });
+  const rows = (await again.readAnnotations({ after: 0, limit: 10 })).rows;
+  assert.deepEqual(rows.map(row => [row.seq, row.message_id]), [[1, 1], [4, next.id]],
+    'later rows keep their places and are never served');
+  await again.close();
+  assert.equal((await reopen().openAsks(CODEX)).addressed.length, 1);
+});
+
+test('a malformed row of a kind this release knows still refuses to open', async () => {
+  const { chat, dir } = room();
+  await chat.close();
+  fs.appendFileSync(path.join(dir, 'chat', 'annotations.jsonl'),
+    JSON.stringify({ v: 1, seq: 1, kind: 'withdraw', ask_id: 1 }) + '\n');
+  assert.throws(() => openStore({ dataDir: dir }), error => code(error) === 'corrupt-annotations');
+});

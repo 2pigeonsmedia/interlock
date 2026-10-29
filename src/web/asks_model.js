@@ -41,7 +41,15 @@
       (ask.deliver === 'now' || ask.deliver === 'later');
   }
 
+  /* A kind a later release adds is passed over, never a reason to refuse
+   * the page: the side-car grows by kinds. */
+  function laterKind(row) {
+    return !!row && typeof row === 'object' && positive(row.seq) &&
+      typeof row.kind === 'string' && !KINDS.includes(row.kind);
+  }
+
   function validRow(row) {
+    if (laterKind(row)) return true;
     if (!row || typeof row !== 'object' || !KINDS.includes(row.kind)) return false;
     if (row.kind === 'post') {
       return exact(row, POST_KEYS) && positive(row.seq) && Number.isSafeInteger(row.ts) &&
@@ -108,6 +116,7 @@
     function apply(rows) {
       let changed = false;
       for (const row of rows) {
+        if (!KINDS.includes(row.kind)) continue;
         if (row.kind === 'post') {
           posts.set(row.message_id, row);
           for (const answer of row.answers) {

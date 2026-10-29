@@ -139,6 +139,19 @@ function parseRequest(value) {
   });
 }
 
+const KNOWN_KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry']);
+
+/* A row a later release wrote: a well-formed line in sequence whose `v` or
+ * kind this release does not know. It keeps its place in the sequence and is
+ * skipped, so a room rolled back to this release still opens. */
+function laterRow(value, expectedSeq) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!Number.isSafeInteger(value.v) || value.v < ROW_VERSION || value.seq !== expectedSeq ||
+      typeof value.kind !== 'string' || value.kind.length === 0) return null;
+  if (value.v === ROW_VERSION && KNOWN_KINDS.includes(value.kind)) return null;
+  return Object.freeze({ v: value.v, seq: value.seq, kind: 'later' });
+}
+
 function parseRow(value, expectedSeq) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const kind = value.kind;
@@ -254,6 +267,7 @@ function createAskIndex(eraFirstId) {
   function replay(row, message) {
     rows.push({ row, bound: false });
     const entry = rows[rows.length - 1];
+    if (row.kind === 'later') return false;
     if (row.kind === 'post') {
       if (!message || message.subject_id !== row.subject_id || message.ts !== row.ts ||
           posts.has(row.message_id) || asks.has(row.message_id)) return false;
@@ -370,6 +384,7 @@ module.exports = Object.freeze({
   createAskIndex,
   encodeArchive,
   encodeRow,
+  laterRow,
   parseRequest,
   parseRow,
   publicAsk,

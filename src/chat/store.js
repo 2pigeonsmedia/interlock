@@ -412,7 +412,7 @@ function readAnnotations(filePath, messages, firstId) {
   lines.forEach((line, i) => {
     let value;
     try { value = JSON.parse(line); } catch (_) { fail('corrupt-annotations'); }
-    const row = Annotations.parseRow(value, i + 1);
+    const row = Annotations.parseRow(value, i + 1) || Annotations.laterRow(value, i + 1);
     if (!row) fail('corrupt-annotations');
     index.replay(row, row.kind === 'post' ? byId.get(row.message_id) : undefined);
   });

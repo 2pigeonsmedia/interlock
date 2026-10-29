@@ -105,3 +105,14 @@ test('the room page loads the model before room.js and posts asks through the an
     ROOM_JS.indexOf('function renderBindChips'));
   assert.doesNotMatch(decorate, /innerHTML|insertAdjacentHTML/);
 });
+
+test('a page carrying a kind from a later release is used, and that row is passed over', () => {
+  const page = { ok: true, first_id: 1, cursor: 2, rows: [
+    post(1, 10, 'Lead', { ask: ask('Ana', 'm') }),
+    { seq: 2, ts: 2, kind: 'stamp', by: 'Lead', message_id: 10, project: 'finance' },
+  ] };
+  assert.equal(Asks.validPage(page), true);
+  const state = Asks.createAsksState();
+  state.apply(page.rows);
+  assert.deepEqual(state.openFor('Ana').addressed.map(row => row.ask_id), [10]);
+});
