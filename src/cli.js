@@ -53,6 +53,9 @@ Usage:
   interlock listen --connection NAME [--json]
   interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
   interlock leave --connection NAME [--json]
+  interlock presence --connection NAME --file PATH | --clear [--json]
+  interlock presence --connection NAME --project ID|none [--assign NAME] [--json]
+  interlock grants --connection NAME [--json]
   interlock codex-policy install --connection NAME --mode receive|participate
   interlock codex-policy check --connection NAME [--json]
   interlock codex-policy remove --connection NAME
@@ -1462,6 +1465,137 @@ async function runAsk(args, io, dependencies = {}) {
   return EXIT_OK;
 }
 
+// A connection, then one action: a presence line from a JSON file
+// ({ middle, waiting_on, need }, the lines never in argv), a clear, or a
+// project (this AI's own, or with --assign another seat's, which only the
+// project's lead may set).
+function presenceOptions(args) {
+  const options = { connection: null, file: null, clear: false, project: undefined, assign: null, json: false };
+  const seen = new Set();
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (seen.has(flag)) return null;
+    seen.add(flag);
+    if (flag === '--json') { options.json = true; continue; }
+    if (flag === '--clear') { options.clear = true; continue; }
+    const value = args[index + 1];
+    if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) return null;
+    index += 1;
+    if (flag === '--connection') options.connection = value;
+    else if (flag === '--file') options.file = value;
+    else if (flag === '--project') options.project = value === 'none' ? null : value;
+    else if (flag === '--assign') options.assign = value;
+    else return null;
+  }
+  const actions = [options.file !== null, options.clear, options.project !== undefined].filter(Boolean).length;
+  if (options.connection === null || actions !== 1) return null;
+  if (options.assign !== null && options.project === undefined) return null;
+  return Object.freeze(options);
+}
+
+async function runPresence(args, io, dependencies = {}) {
+  const parsed = presenceOptions(args);
+  if (!parsed) {
+    line(io.stderr, 'interlock: usage: interlock presence --connection NAME --file PATH | --clear | --project ID|none [--assign NAME] [--json]');
+    return EXIT_USAGE;
+  }
+  let body;
+  let route = '/api/ai/presence';
+  if (parsed.project !== undefined) {
+    route = '/api/ai/project';
+    body = parsed.assign === null ? { project: parsed.project } : { seat_name: parsed.assign, project: parsed.project };
+  } else if (parsed.clear) {
+    body = { middle: null, waiting_on: null, need: null };
+  } else {
+    let text;
+    try { text = (dependencies.readFile || fs.readFileSync)(parsed.file, 'utf8'); }
+    catch (_) {
+      line(io.stderr, 'interlock: could not read the presence file safely.');
+      return EXIT_RUNTIME;
+    }
+    let input;
+    try { input = JSON.parse(text); } catch (_) { input = null; }
+    if (!input || typeof input !== 'object' || Array.isArray(input) ||
+        Object.keys(input).some(key => !['middle', 'waiting_on', 'need'].includes(key))) {
+      line(io.stderr, 'interlock: the presence file must be a JSON object with middle, waiting_on and need (each text or null).');
+      return EXIT_USAGE;
+    }
+    body = { middle: input.middle ?? null, waiting_on: input.waiting_on ?? null, need: input.need ?? null };
+  }
+  let selected;
+  try { selected = selectedConnection(parsed.connection, dependencies); }
+  catch (error) {
+    reportConnectionError(io.stderr, error, parsed.connection);
+    return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+  }
+  const fetcher = dependencies.fetch || globalThis.fetch;
+  try {
+    const result = await localRequest(fetcher, selected.profile, route, {
+      method: 'POST', body, timeoutMs: COMMAND_FETCH_TIMEOUT_MS, stderr: io.stderr,
+    });
+    if (parsed.json) line(io.stdout, JSON.stringify(result));
+    else if (route === '/api/ai/project') {
+      const who = parsed.assign === null ? 'This AI' : terminalSafe(parsed.assign);
+      line(io.stdout, parsed.project === null ? `${who} is now not assigned to a project.`
+        : `${who} is now on project ${terminalSafe(parsed.project)}.`);
+    } else line(io.stdout, parsed.clear ? 'Presence line cleared.' : 'Presence line set.');
+    return EXIT_OK;
+  } catch (error) {
+    reportRequestError(io.stderr, error, selected.profile);
+    return EXIT_RUNTIME;
+  }
+}
+
+function grantsOptions(args) {
+  const options = { connection: null, json: false };
+  const seen = new Set();
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (seen.has(flag)) return null;
+    seen.add(flag);
+    if (flag === '--json') options.json = true;
+    else if (flag === '--connection' && typeof args[index + 1] === 'string' && args[index + 1].length > 0 &&
+      !args[index + 1].startsWith('--')) {
+      options.connection = args[index + 1];
+      index += 1;
+    } else return null;
+  }
+  return options.connection === null ? null : Object.freeze(options);
+}
+
+async function runGrants(args, io, dependencies = {}) {
+  const parsed = grantsOptions(args);
+  if (!parsed) {
+    line(io.stderr, 'interlock: usage: interlock grants --connection NAME [--json]');
+    return EXIT_USAGE;
+  }
+  let selected;
+  try { selected = selectedConnection(parsed.connection, dependencies); }
+  catch (error) {
+    reportConnectionError(io.stderr, error, parsed.connection);
+    return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+  }
+  const fetcher = dependencies.fetch || globalThis.fetch;
+  try {
+    const result = await localRequest(fetcher, selected.profile, '/api/ai/grants', {
+      timeoutMs: COMMAND_FETCH_TIMEOUT_MS, stderr: io.stderr,
+    });
+    if (!Array.isArray(result.grants)) throw incompatibleResponse();
+    if (parsed.json) { line(io.stdout, JSON.stringify(result)); return EXIT_OK; }
+    if (result.grants.length === 0) line(io.stdout, 'No grants in this room.');
+    for (const grant of result.grants) {
+      const until = grant.until === null ? 'until revoked' : `until ${new Date(grant.until).toISOString()}`;
+      line(io.stdout, `${terminalSafe(grant.grant_id)} · ${terminalSafe(grant.state)} · ${terminalSafe(grant.holder_name)}` +
+        ` · ${grant.project === null ? 'whole room' : terminalSafe(grant.project)} · ${terminalSafe(grant.scope)}` +
+        ` · by ${terminalSafe(grant.by_name)} · ${until}`);
+    }
+    return EXIT_OK;
+  } catch (error) {
+    reportRequestError(io.stderr, error, selected.profile);
+    return EXIT_RUNTIME;
+  }
+}
+
 async function runLeave(args, io, dependencies = {}) {
   const parsed = commandOptions('leave', args);
   if (!parsed) {
@@ -2822,6 +2956,8 @@ function run(argv, io, dependencies = {}) {
   if (argv[0] === 'ask') return runAsk(argv.slice(1), io, dependencies);
 
   if (argv[0] === 'leave') return runLeave(argv.slice(1), io, dependencies);
+  if (argv[0] === 'presence') return runPresence(argv.slice(1), io, dependencies);
+  if (argv[0] === 'grants') return runGrants(argv.slice(1), io, dependencies);
 
   if (argv[0] === 'codex-policy') return runCodexPolicy(argv.slice(1), io, dependencies);
 

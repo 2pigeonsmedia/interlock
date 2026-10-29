@@ -2851,3 +2851,47 @@ test('join carries a declared project and model on the knock only when they are 
   const declared = await knockBodies(['--project', 'finance', '--model', 'GPT-5 Codex']);
   assert.deepEqual([declared[0].project, declared[0].model], ['finance', 'GPT-5 Codex']);
 });
+
+test('presence sets a line from a file, clears it, and sets or assigns a project', async () => {
+  const calls = [];
+  const world = admittedConnection();
+  world.dependencies.fetch = async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return fakeResponse(200, { ok: true, seq: calls.length });
+  };
+  world.dependencies.readFile = () => JSON.stringify({ middle: 'building the import', waiting_on: 'Ana' });
+  const set = await captureCommand(['presence', '--connection', 'Marlow', '--file', 'line.json'], world.dependencies);
+  assert.equal(set.code, EXIT_OK, set.stderr);
+  assert.equal(set.stdout, 'Presence line set.\n');
+  assert.deepEqual(calls[0], { url: 'http://localhost:8788/api/ai/presence',
+    body: { middle: 'building the import', waiting_on: 'Ana', need: null } });
+  await captureCommand(['presence', '--connection', 'Marlow', '--clear'], world.dependencies);
+  assert.deepEqual(calls[1].body, { middle: null, waiting_on: null, need: null });
+  await captureCommand(['presence', '--connection', 'Marlow', '--project', 'finance'], world.dependencies);
+  assert.deepEqual(calls[2], { url: 'http://localhost:8788/api/ai/project', body: { project: 'finance' } });
+  const assigned = await captureCommand(['presence', '--connection', 'Marlow', '--project', 'none', '--assign', 'Wren'],
+    world.dependencies);
+  assert.equal(assigned.stdout, 'Wren is now not assigned to a project.\n');
+  assert.deepEqual(calls[3].body, { seat_name: 'Wren', project: null });
+  for (const argv of [
+    ['presence', '--connection', 'Marlow'],
+    ['presence', '--connection', 'Marlow', '--clear', '--project', 'x'],
+    ['presence', '--connection', 'Marlow', '--assign', 'Wren', '--clear'],
+    ['presence', '--connection', 'Marlow', '--middle', 'typed in argv'],
+  ]) assert.equal((await captureCommand(argv, world.dependencies)).code, EXIT_USAGE, argv.join(' '));
+  assert.equal(calls.length, 4, 'refused commands send nothing');
+});
+
+test('grants lists the room\'s grants with their state', async () => {
+  const world = admittedConnection();
+  world.dependencies.fetch = async url => {
+    assert.equal(url, 'http://localhost:8788/api/ai/grants');
+    return fakeResponse(200, { ok: true, grants: [{ grant_id: 'G-1', holder_name: 'Scout', holder_kind: 'seat',
+      project: 'finance', scope: 'leads the map', until: null, by_name: 'Ana', at: 1, state: 'active',
+      revoked_at: null, revoked_by: null, reason: null }] });
+  };
+  const listed = await captureCommand(['grants', '--connection', 'Marlow'], world.dependencies);
+  assert.equal(listed.code, EXIT_OK, listed.stderr);
+  assert.equal(listed.stdout, 'G-1 · active · Scout · finance · leads the map · by Ana · until revoked\n');
+  assert.equal((await captureCommand(['grants', '--connection', 'Marlow', '--clear'], world.dependencies)).code, EXIT_USAGE);
+});
