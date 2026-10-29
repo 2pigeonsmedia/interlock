@@ -899,7 +899,11 @@ function createWorkService(options) {
     const source = 'answered in the room #' + body.message_id;
     return store.commit(draft => {
       const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
-      if (!item || item.withdrawn || body.by_addressee !== true || !sameAddressee(item, body.of)) {
+      // The room's facts, and the exact identity the decision is asked of: on
+      // the record, a name is never enough. A seat that rejoined under the
+      // name is re-asked, not answered for.
+      if (!item || item.withdrawn || body.by_addressee !== true || !sameAddressee(item, body.of) ||
+          actor.subject_id !== item.asked_of.subject_id || actor.kind !== item.asked_of.kind) {
         return { ok: true, recorded: null };
       }
       const bridged = Array.isArray(item.bridged_message_ids) ? item.bridged_message_ids : [];

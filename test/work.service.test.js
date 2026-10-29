@@ -981,3 +981,20 @@ test('a room answer reaches only the decision bound to its ask, from its address
   }).recorded, null);
   assert.equal(say(61, 'yes').recorded, null, 'her answer to the ask put to her no longer reaches it either');
 });
+
+test('on the record, a room answer from a seat that only shares the asked seat\'s name records nothing', () => {
+  const { work } = fresh();
+  const BUILDER_OF = { kind: 'seat', subject_id: builder.subject_id, name: 'Builder' };
+  const decision = work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Rerun?', body: 'b',
+    asked_of: ref(builder), source_message: { message_id: 70, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Rerun?' },
+  }).item;
+  work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 70, of: BUILDER_OF });
+  // The room counts a rejoined Builder as the addressee (by name); the record does not.
+  assert.equal(work.answerFromRoom(Object.assign({}, sameName, { session: null }), {
+    ask_id: 70, message_id: 71, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
+  }).recorded, null);
+  assert.equal(work.answerFromRoom(Object.assign({}, builder, { session: null }), {
+    ask_id: 70, message_id: 72, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
+  }).recorded, decision.id);
+});
