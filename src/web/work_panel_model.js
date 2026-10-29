@@ -83,12 +83,13 @@
   // An open ask addressed to the viewer, as one Needs you row: who asked,
   // what a yes means, how long it has waited. The ask is a message in the
   // room, so its row shows the message rather than opening a work record.
-  function askRow(ask, now) {
+  function askRow(ask, now, names) {
     return {
       id: 'ask-' + ask.ask_id,
       kind: 'ask',
       askId: ask.ask_id,
-      projectName: 'Ask',
+      // Every ask belongs to a project; an ask from before that rule names none.
+      projectName: ask.project ? (names && names.get(ask.project)) || ask.project : 'Ask',
       title: ask.means === null ? 'Ask in message #' + ask.ask_id : 'A yes means: ' + oneLine(ask.means),
       ask: ask.carried_from ? 'Asked before the transcript was cleared' : 'Message #' + ask.ask_id,
       by: 'asked by ' + ask.by,
@@ -175,7 +176,7 @@
       }, kill === null ? {} : { kill }, room) };
     });
     const rows = workRows.concat(asks.filter(ask => !cited.has(ask.ask_id))
-      .map(ask => ({ at: ask.asked_at, row: askRow(ask, now) })))
+      .map(ask => ({ at: ask.asked_at, row: askRow(ask, now, names) })))
       .sort((a, b) => a.at - b.at).map(entry => entry.row);
     return { count: rows.length, rows };
   }

@@ -2017,7 +2017,7 @@ function decorateMessage(article, messageId) {
     chip.dataset.askState = ask.state;
     const line = document.createElement('span');
     line.className = 'ask-line';
-    line.textContent = InterlockAsks.askLine(ask, Date.now());
+    line.textContent = InterlockAsks.askLine(ask, Date.now()) + (ask.project ? ` · ${projectName(ask.project)}` : '');
     chip.append(line);
     if (ask.means !== null) {
       const means = document.createElement('span');

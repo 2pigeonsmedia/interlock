@@ -453,3 +453,7 @@ test('the open dialog follows its record without wiping a half-written form', ()
   assert.match(WORK_PANEL_JS, /querySelector\('\.work-action-form form'\)\) \{\s*element\('work-drawer-status'\)\.textContent = 'This record changed since you opened it\.';/);
   assert.match(WORK_PANEL_JS, /state\.drawerUpdatedAt = item\.updated_at;/);
 });
+
+test('an ask chip names the project the ask belongs to', () => {
+  assert.match(ROOM_JS, /InterlockAsks\.askLine\(ask, Date\.now\(\)\) \+ \(ask\.project \? ` · \$\{projectName\(ask\.project\)\}` : ''\)/);
+});

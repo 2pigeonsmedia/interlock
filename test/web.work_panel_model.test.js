@@ -135,6 +135,12 @@ test('needs you lists each open ask addressed to the viewer as its own row, by a
   assert.equal(result.rows.find(row => row.id === 'ask-7').ask, 'Asked before the transcript was cleared');
   assert.equal(result.rows.find(row => row.id === 'ask-42').title, 'Ask in message #42');
   assert.deepEqual(needsYou(BRIEF, NOW, []).rows, needsYou(BRIEF, NOW).rows, 'no asks, the work rows unchanged');
+  const inProject = needsYou(BRIEF, NOW, [Object.assign({}, asks[0], { project: 'finance' })]).rows
+    .find(row => row.id === 'ask-41');
+  assert.equal(inProject.projectName, 'Finance', 'an ask shows the project it belongs to');
+  const unknown = needsYou(BRIEF, NOW, [Object.assign({}, asks[0], { project: 'gone' })]).rows
+    .find(row => row.id === 'ask-41');
+  assert.equal(unknown.projectName, 'gone', 'a project the brief does not list shows its id');
 });
 
 test('needs you is never narrowed by a project filter', () => {
