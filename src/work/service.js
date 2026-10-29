@@ -685,13 +685,16 @@ function createWorkService(options) {
     item.updated_at = now;
   }
 
-  /* The first owner's recorded answer stands against an administrator: an
-   * admin who is not her may not replace it or reopen it away. */
+  /* The first owner's recorded answer stands (her ruling, 2026-10-29). Each
+   * direct answer stores, when written, whether it is protected: recorded by
+   * the first owner, known by identity, or by a person not known not to be
+   * her. An administrator who is not her may not replace or reopen it. */
+  function protectedAnswer(item) {
+    return !!(item.answer && item.answer.kind === 'direct' && item.answer.first_owner_protected === true);
+  }
+
   function guardFirstOwnersAnswer(item, actor) {
-    const recorded = item.answer;
-    if (!recorded || recorded.kind !== 'direct' || !actor.owner || actor.first_owner === true) return;
-    if (typeof actor.first_owner_name === 'string' && recorded.by && recorded.by.kind === 'person' &&
-        recorded.by.name === actor.first_owner_name) fail('first-owner-answer');
+    if (protectedAnswer(item) && actor.owner && actor.first_owner !== true) fail('first-owner-answer');
   }
 
   function answer(actor, rawInput) {
@@ -712,6 +715,7 @@ function createWorkService(options) {
         item.answer = {
           kind: 'direct', text, conditions, source: 'recorded here',
           by: refOf(actor), attributed_to: refOf(actor), at: now, reason,
+          first_owner_protected: actor.first_owner === true,
         };
         touch(item, now);
         if (previous) {
@@ -774,7 +778,7 @@ function createWorkService(options) {
         const reason = optionalText(body.reason, SHORT_BYTES, 'reason') ?? '';
         const previous = item.answer;
         item.answer = {
-          kind: 'direct', text: previous.text, conditions: previous.conditions, source: 'confirmed here',
+          kind: 'direct', text: previous.text, conditions: previous.conditions, source: 'confirmed here', first_owner_protected: actor.first_owner === true,
           by: refOf(actor), attributed_to: refOf(actor), at: now, reason,
         };
         touch(item, now);
@@ -917,6 +921,9 @@ function createWorkService(options) {
           actor.subject_id !== item.asked_of.subject_id || actor.kind !== item.asked_of.kind) {
         return { ok: true, recorded: null };
       }
+      // A room answer never replaces the first owner's recorded answer unless
+      // it is hers.
+      if (protectedAnswer(item) && actor.first_owner !== true) return { ok: true, recorded: null };
       const bridged = Array.isArray(item.bridged_message_ids) ? item.bridged_message_ids : [];
       if (bridged.includes(body.message_id)) return { ok: true, recorded: item.id, replayed: true };
       // Latest by the room's order, not by arrival: an older message never
@@ -928,6 +935,7 @@ function createWorkService(options) {
       item.answer = {
         kind: 'direct', text, choice: body.choice, conditions: '', source, room_message_id: body.message_id,
         by: refOf(actor), attributed_to: refOf(actor), at: now, reason: '',
+        first_owner_protected: actor.first_owner === true,
       };
       item.bridged_message_ids = bridged.concat([body.message_id]);
       touch(item, now);

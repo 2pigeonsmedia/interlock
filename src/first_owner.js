@@ -1438,6 +1438,13 @@ function createFirstOwnerHandler(options) {
   // Two doors to one service. A browser session or an admitted seat bearer
   // becomes a trusted actor here; the request body never contributes identity.
 
+  /* Whether this request's own signed-in person is the first owner, by
+   * identity. Anything less is false. */
+  function isFirstOwner(request, subjectId, now, activity = 'ordinary') {
+    const who = house.whoami({ cookie_header: request.headers.cookie, activity, now });
+    return !!(who && who.subject_id === subjectId && who.first_owner === true);
+  }
+
   function workOwnerFlag(request, authorized, now, activity) {
     const who = house.whoami({ cookie_header: request.headers.cookie, activity, now });
     return !!(who && who.subject_id === authorized.subject_id && Array.isArray(who.roles) &&
@@ -1464,17 +1471,11 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return null;
     }
-    // Who the first owner is, so an administrator cannot overwrite her
-    // recorded answer on a decision (her ruling, 2026-10-29). Writes only: a
-    // read is a passive poll and must not touch the session.
-    const who = mutation ? house.whoami({ cookie_header: request.headers.cookie, activity, now }) : null;
-    const roster = mutation ? house.administrators(requestMeta(request, now)) : null;
-    const first = roster && roster.ok === true ? roster.people.find(row => row.first_owner === true) : null;
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null,
       owner: workOwnerFlag(request, authorized, now, activity), now,
-      first_owner: !!(who && who.subject_id === actor.subject_id && who.first_owner === true),
-      first_owner_name: first ? first.name : null,
+      // Writes only: a read is a passive poll and must not touch the session.
+      first_owner: mutation && isFirstOwner(request, actor.subject_id, now, activity),
     });
   }
 
@@ -1489,7 +1490,7 @@ function createFirstOwnerHandler(options) {
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: 'seat',
       session: discriminator && discriminator.session !== undefined ? discriminator.session : null,
-      owner: false, now: Date.now(), first_owner: false, first_owner_name: null,
+      owner: false, now: Date.now(), first_owner: false,
     });
   }
 
@@ -1995,13 +1996,14 @@ function createFirstOwnerHandler(options) {
   /* After a room answer is saved: each answer the room stored as coming from
    * its ask's addressee goes to the decision bound to that ask, if any. The
    * room's facts decide, not the request. The post's response never changes. */
-  async function bridgeRoomAnswers(chatActor, saved) {
+  async function bridgeRoomAnswers(chatActor, saved, request) {
     if (!work) return;
     const facts = await chat.postFacts(saved.id);
     if (!facts) return;
     const actor = {
       subject_id: chatActor.subject_id, name: chatActor.name, kind: chatActor.kind,
       session: saved.session === undefined ? null : saved.session, owner: false,
+      first_owner: chatActor.kind === 'person' && isFirstOwner(request, chatActor.subject_id, Date.now()),
     };
     for (const answer of facts.answers) {
       if (!answer.by_addressee || !answer.of) continue;
@@ -2018,9 +2020,11 @@ function createFirstOwnerHandler(options) {
     const answers = await chat.addresseeAnswers(askId);
     const latest = answers[answers.length - 1];
     if (!latest) return;
+    // The answerer is not this request's person, so whether a person is the
+    // first owner cannot be shown here: a person's answer is protected.
     work.answerFromRoom({
       subject_id: latest.author.subject_id, name: latest.author.name, kind: latest.author.kind,
-      session: null, owner: false,
+      session: null, owner: false, first_owner: latest.author.kind === 'person',
     }, {
       ask_id: askId, message_id: latest.message_id, text: latest.text, choice: latest.choice,
       by_addressee: true, of: latest.of,
@@ -2070,7 +2074,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (!saved) throw new Error('invalid chat result');
-      await bridgeRoomAnswers(actor, saved);
+      await bridgeRoomAnswers(actor, saved, request);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2106,7 +2110,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (saved === null) throw new Error('invalid chat result');
-      await bridgeRoomAnswers(actor, saved);
+      await bridgeRoomAnswers(actor, saved, request);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);

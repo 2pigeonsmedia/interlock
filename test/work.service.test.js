@@ -1018,12 +1018,13 @@ test('the latest room answer is the one latest in the room, not the one that arr
   assert.equal(row.answer_summary.source, 'answered in the room #95', 'list rows can say where it was answered');
 });
 
-test('an administrator who is not the first owner cannot replace or reopen her recorded answer', () => {
+test('the first owner\'s recorded answer stands: no admin replaces or reopens it, no room answer replaces it', () => {
   const { work } = fresh();
-  const first = Object.assign({}, owner, { first_owner: true, first_owner_name: 'Ana' });
-  const admin = Object.freeze({ subject_id: 'p-2', name: 'Bea', kind: 'person', owner: true, first_owner: false, first_owner_name: 'Ana' });
+  const first = Object.assign({}, owner, { first_owner: true });
+  const admin = Object.freeze({ subject_id: 'p-2', name: 'Bea', kind: 'person', owner: true, first_owner: false });
   const decision = newDecision(work, lead, owner);
   const answered = work.answer(first, { operation_id: uuid(), id: decision.id, expected_revision: decision.revision, text: 'yes' }).item;
+  assert.equal(answered.answer.first_owner_protected, true);
   assert.throws(() => work.answer(admin, { operation_id: uuid(), id: decision.id, expected_revision: answered.revision, text: 'no', reason: 'overruled' }),
     error => error.code === 'first-owner-answer');
   assert.throws(() => work.reopen(admin, { operation_id: uuid(), id: decision.id, expected_revision: answered.revision, reason: 'again' }),
@@ -1031,6 +1032,18 @@ test('an administrator who is not the first owner cannot replace or reopen her r
   assert.equal(work.get(owner, { id: decision.id }).item.answer.text, 'yes', 'her answer stands');
   const reopened = work.reopen(first, { operation_id: uuid(), id: decision.id, expected_revision: answered.revision, reason: 'mine to reopen' }).item;
   assert.equal(reopened.state, 'awaiting', 'she may reopen her own');
+  // Her answer on a seat's behalf is not replaced by that seat's room answer.
+  const BUILDER_OF = { kind: 'seat', subject_id: builder.subject_id, name: 'Builder' };
+  const ofSeat = work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Rerun?', body: 'b', asked_of: ref(builder),
+    source_message: { message_id: 110, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Rerun?' },
+  }).item;
+  const bound = work.bindAsk(Object.assign({}, lead, { session: null }), { id: ofSeat.id, ask_message_id: 110, of: BUILDER_OF }).item;
+  work.answer(first, { operation_id: uuid(), id: ofSeat.id, expected_revision: bound.revision, text: 'no', reason: 'on its behalf' });
+  assert.equal(work.answerFromRoom(Object.assign({}, builder, { session: null, first_owner: false }), {
+    ask_id: 110, message_id: 111, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
+  }).recorded, null);
+  assert.equal(work.get(owner, { id: ofSeat.id }).item.answer.text, 'no');
   // An admin's own recorded answer is not protected from another admin.
   const other = newDecision(work, lead, builder);
   const byAdmin = work.answer(admin, { operation_id: uuid(), id: other.id, expected_revision: other.revision, text: 'go', reason: 'on behalf' }).item;
