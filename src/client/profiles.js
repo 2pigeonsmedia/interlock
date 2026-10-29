@@ -201,7 +201,9 @@ function openProfiles(options) {
         // fsyncing the owner record. A simultaneous contender can therefore
         // observe a momentarily incomplete record. Wait without touching it;
         // a record that stays corrupt through the ceiling still fails loud.
-        if (!error || (error.code !== 'already-running' && error.code !== 'corrupt-lock')) {
+        // 'lock-busy' is a contender's release seen mid-delete on Windows.
+        if (!error || (error.code !== 'already-running' && error.code !== 'corrupt-lock' &&
+            error.code !== 'lock-busy')) {
           throw error;
         }
         contentionError = error;
@@ -210,7 +212,10 @@ function openProfiles(options) {
     }
     if (lock === null) {
       if (contentionError && contentionError.code === 'corrupt-lock') throw contentionError;
-      throw failure('profile-busy');
+      // A sharing violation that outlasts the wait keeps its OS error as the cause.
+      const busy = failure('profile-busy');
+      if (contentionError && contentionError.code === 'lock-busy') busy.cause = contentionError.cause;
+      throw busy;
     }
     try {
       return operation();
@@ -231,9 +236,10 @@ function openProfiles(options) {
         if (error && error.code === 'already-running') throw failure('reader-active');
         // A contender can observe the exclusive lock file before its owner has
         // finished writing the record. Wait only for that bounded creation
-        // race; an established reader must refuse immediately.
-        if (!error || error.code !== 'corrupt-lock') throw error;
-        corruptError = error;
+        // race, or a reader's release seen mid-delete on Windows ('lock-busy');
+        // an established reader must refuse immediately.
+        if (!error || (error.code !== 'corrupt-lock' && error.code !== 'lock-busy')) throw error;
+        if (error.code === 'corrupt-lock') corruptError = error;
         Atomics.wait(PROFILE_LOCK_SLEEP, 0, 0, PROFILE_LOCK_WAIT_MS);
       }
     }
