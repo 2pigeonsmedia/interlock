@@ -1357,6 +1357,7 @@ function renderMessageText(element, message) {
     control.className = 'message-reference';
     control.type = 'button';
     control.textContent = `Reply to #${reference.id}`;
+    control.dataset.replyTo = String(reference.id);
     control.setAttribute('aria-label', `Go to message #${reference.id}`);
     control.addEventListener('click', () => {
       const target = transcript.querySelector(`[data-message-id="${reference.id}"]`);
@@ -1471,6 +1472,20 @@ function askButton(label, onClick) {
 function decorateMessage(article, messageId) {
   for (const old of article.querySelectorAll('.ask-chip, .answer-line')) old.remove();
   const anchor = article.querySelector('.message-actions');
+  // A reply to an ask says whose ask and what it asked, so a busy room keeps
+  // the discussion next to its question.
+  const reference = article.querySelector('.message-reference[data-reply-to]');
+  if (reference) {
+    const target = Number(reference.dataset.replyTo);
+    const asked = asksState.ask(target);
+    if (asked) {
+      const text = transcript.querySelector(`[data-message-id="${target}"] .message-text`);
+      const firstLine = text ? text.textContent.replace(/^Reply to #\d+/u, '').trim().split('\n')[0].slice(0, 80) : '';
+      reference.textContent = `Re: ${asked.by}'s ask #${target}` + (firstLine ? ` — ${firstLine}` : '');
+    } else {
+      reference.textContent = `Reply to #${target}`;
+    }
+  }
   const ask = asksState.ask(messageId);
   const post = asksState.post(messageId);
   const viewer = viewerName();
@@ -1497,7 +1512,6 @@ function decorateMessage(article, messageId) {
       button.setAttribute('aria-label', `${choice === 'yes' ? 'Yes' : 'No'} to ask #${ask.ask_id}`);
       chip.append(button);
     }
-    if (mine) chip.append(askButton('Reply', () => pickAsk(ask.ask_id)));
     if (viewer !== null && ask.by === viewer && ask.state === 'open') {
       chip.append(askButton('Withdraw', () => askLifecycle('withdraw', ask.ask_id)));
     }
@@ -1550,12 +1564,6 @@ function renderBindChips(addressed) {
     });
     askBindChips.append(chip);
   }
-}
-
-function pickAsk(askId) {
-  pickedAsks.add(askId);
-  renderBindChips(asksState.openFor(viewerName()).addressed);
-  messageBody.focus();
 }
 
 function renderAskTargets() {
@@ -1635,8 +1643,14 @@ async function askLifecycle(kind, askId) {
   loadAnnotations();
 }
 
+/* Reply on a message that carries an ask is a discussion, not an answer: it
+ * names the asker and points at the ask, and it binds and closes nothing. */
 function seedReply(messageId) {
+  const ask = asksState.ask(messageId);
   messageBody.value = InterlockReplyReference.seed(messageBody.value, messageId);
+  if (ask && ask.by !== viewerName() && !messageBody.value.includes(`@${ask.by}`)) {
+    messageBody.value = messageBody.value.replace(/^(re #\d+ ?)/u, `$1@${ask.by} `);
+  }
   updateMentionPreview();
   messageBody.focus();
   messageBody.setSelectionRange(messageBody.value.length, messageBody.value.length);

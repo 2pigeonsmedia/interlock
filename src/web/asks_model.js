@@ -14,7 +14,7 @@
   const CARRY_KEYS = Object.freeze([
     'seq', 'ts', 'kind', 'by', 'ask_id', 'archive_id', 'asked_at', 'ask', 'kept_open',
   ]);
-  const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver']);
+  const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver', 'project']);
   const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
   // A message that is exactly one of these words, in any case, answers the
   // sender's one open ask with no tap (Patti, 2026-10-29). Anything else, or
@@ -39,7 +39,8 @@
     return exact(ask, ASK_KEYS) && name(ask.of) &&
       (ask.of_kind === 'person' || ask.of_kind === 'seat') &&
       (ask.means === null || name(ask.means)) &&
-      (ask.deliver === 'now' || ask.deliver === 'later');
+      (ask.deliver === 'now' || ask.deliver === 'later') &&
+      (ask.project === null || name(ask.project));
   }
 
   /* A kind a later release adds is passed over, never a reason to refuse
@@ -89,6 +90,7 @@
       of_kind: ask.of_kind,
       means: ask.means,
       deliver: ask.deliver,
+      project: ask.project,
       state: ask.state,
       kept_open: ask.kept_open,
       carried_from: ask.carried_from,
@@ -108,7 +110,7 @@
     function addAsk(askId, by, ask, askedAt, carriedFrom) {
       asks.set(askId, {
         ask_id: askId, asked_at: askedAt, by, of: ask.of, of_kind: ask.of_kind,
-        means: ask.means, deliver: ask.deliver, state: 'open', kept_open: false,
+        means: ask.means, deliver: ask.deliver, project: ask.project, state: 'open', kept_open: false,
         carried_from: carriedFrom, answers: [],
       });
     }

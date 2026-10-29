@@ -1085,6 +1085,7 @@ function openStore(opts) {
           of_kind: ask.of_kind,
           means: ask.means,
           deliver: ask.deliver,
+          project: ask.project,
         },
       }, i + 1));
       if (carryRows.some(row => row === null)) fail('archive-invalid');

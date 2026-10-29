@@ -18,7 +18,7 @@ function post(seq, messageId, by, extra = {}) {
 }
 
 function ask(of, means = null, deliver = 'now') {
-  return { of, of_kind: of === 'Ana' ? 'person' : 'seat', means, deliver };
+  return { of, of_kind: of === 'Ana' ? 'person' : 'seat', means, deliver, project: null };
 }
 
 // The server's stored facts: was the answerer the one asked, did it close it.
@@ -60,7 +60,7 @@ test('open asks for the viewer: addressed and asked, carried asks included, in i
     [[4, 'Lead', 'transcript-x'], [21, 'Scout', null]]);
   assert.deepEqual(open.asked.map(row => row.ask_id), [20]);
   assert.deepEqual(Object.keys(open.addressed[0]).sort(), ['answers', 'ask_id', 'asked_at', 'by',
-    'carried_from', 'deliver', 'kept_open', 'means', 'of', 'of_kind', 'state'],
+    'carried_from', 'deliver', 'kept_open', 'means', 'of', 'of_kind', 'project', 'state'],
   'the event carries the same ask shape GET /api/ai/asks returns');
 });
 
@@ -145,4 +145,13 @@ test('answered lists every ask its addressee has answered, by the stored fact, o
     post(4, 13, 'Ana', { answers: [answer(11, 'yes', null, false, false)] }),
   ]);
   assert.deepEqual(state.answeredIds(), [10]);
+});
+
+test('one Reply on an ask, and it is a discussion that names the asker and binds nothing', () => {
+  const decorate = ROOM_JS.slice(ROOM_JS.indexOf('function decorateMessage'), ROOM_JS.indexOf('function renderBindChips'));
+  assert.doesNotMatch(decorate, /askButton\('Reply'/, 'the ask chip has no Reply of its own');
+  const seed = ROOM_JS.slice(ROOM_JS.indexOf('function seedReply'), ROOM_JS.indexOf('function renderMessage('));
+  assert.match(seed, /@\$\{ask\.by\}/, 'a reply to an ask names the asker');
+  assert.doesNotMatch(seed, /pickedAsks/, 'a discussion reply never binds an ask');
+  assert.match(decorate, /Re: \$\{asked\.by\}'s ask #\$\{target\}/, 'the reference says whose ask');
 });

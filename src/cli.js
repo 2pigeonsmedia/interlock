@@ -602,7 +602,7 @@ const ANNOTATION_PAGES = 50;
 const ANNOTATION_SEEK_STEPS = 48;
 
 function validAskFields(value) {
-  const ask = exactObject(value, ['of', 'of_kind', 'means', 'deliver']);
+  const ask = exactObject(value, ['of', 'of_kind', 'means', 'deliver', 'project']);
   return !!ask && typeof ask.of === 'string' && ask.of.length > 0 &&
     (ask.of_kind === 'person' || ask.of_kind === 'seat') &&
     (ask.means === null || typeof ask.means === 'string') &&
@@ -1400,12 +1400,12 @@ function askOptions(args) {
 
 function validPublicAsk(value) {
   const ask = exactObject(value, [
-    'ask_id', 'asked_at', 'by', 'of', 'of_kind', 'means', 'deliver', 'state', 'kept_open',
+    'ask_id', 'asked_at', 'by', 'of', 'of_kind', 'means', 'deliver', 'project', 'state', 'kept_open',
     'carried_from', 'answers',
   ]);
   return !!ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
     typeof ask.by === 'string' && validAskFields({
-      of: ask.of, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver,
+      of: ask.of, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver, project: ask.project,
     }) && typeof ask.state === 'string' && Array.isArray(ask.answers);
 }
 

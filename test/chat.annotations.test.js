@@ -63,7 +63,7 @@ test('an ask of an AI rings it without an @, and the row carries the scope', asy
   assert.deepEqual(ringed(saved), ['Marlow']);
   const page = await chat.readAnnotations({ after: 0, limit: 10 });
   assert.equal(page.rows.length, 1);
-  assert.deepEqual(page.rows[0].ask, { of: 'Marlow', of_kind: 'seat', means: null, deliver: 'now' });
+  assert.deepEqual(page.rows[0].ask, { of: 'Marlow', of_kind: 'seat', means: null, deliver: 'now', project: null });
   assert.equal(page.rows[0].message_id, saved.id);
   assert.equal(page.rows[0].by, 'Ana');
 });
@@ -248,7 +248,7 @@ test('a post row left by a crash before its message never binds to the next mess
   // no real message will have.
   const orphan = {
     v: 1, seq: 1, ts: 5, kind: 'post', message_id: 2, subject_id: ANA, name: 'Ana',
-    ask: { of_subject_id: MARLOW, of_name: 'Marlow', of_kind: 'seat', means: null, deliver: 'now' },
+    ask: { of_subject_id: MARLOW, of_name: 'Marlow', of_kind: 'seat', means: null, deliver: 'now', project: null },
     answers: [], status: null, read_through: null,
   };
   fs.appendFileSync(path.join(dir, 'chat', 'annotations.jsonl'), JSON.stringify(orphan) + '\n');
@@ -461,4 +461,13 @@ test('a post that must be new is refused, not replayed, when its client id was u
   await assert.rejects(chat.appendAnnotated({ text: 'Decision: x' }, seat(MARLOW, 'Marlow', id),
     { ask: { of: 'Codex' } }, true), error => code(error) === 'already-posted');
   assert.equal((await chat.read({ after: 0, limit: 10 })).messages.length, 1);
+});
+
+test('an ask may carry its project; a malformed project is refused', async () => {
+  const { chat } = room();
+  await chat.appendAnnotated({ text: 'ok?' }, PERSON, { ask: { of: 'Marlow', project: 'finance-app' } });
+  assert.equal((await chat.readAnnotations({ after: 0, limit: 10 })).rows[0].ask.project, 'finance-app');
+  assert.equal((await chat.openAsks(MARLOW, 'Marlow')).addressed[0].project, 'finance-app');
+  await assert.rejects(chat.appendAnnotated({ text: 'ok?' }, PERSON, { ask: { of: 'Marlow', project: 'Finance App' } }),
+    error => code(error) === 'invalid-annotation');
 });

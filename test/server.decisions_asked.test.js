@@ -197,6 +197,7 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     const rows = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows;
     assert.deepEqual(rows.map(row => [row.message_id, row.ask && row.ask.of, row.ask && row.ask.means]),
       [[asked.json.message.id, 'Ana', 'I merge the candidate to main and nothing else']]);
+    assert.equal(rows[0].ask.project, 'ops', 'a decision\'s ask carries its project');
 
     const again = await aiPost(runtime, '/api/ai/work/decisions/ask', body, lead.token);
     assert.equal(again.status, 200, again.text);

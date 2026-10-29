@@ -163,8 +163,7 @@ function createChatService(options) {
     let deliver = 'now';
     if (annotationIn !== null) {
       const askIn = annotationIn.ask === null ? null
-        : (closedObject(annotationIn.ask, ['of', 'means', 'deliver']) ||
-          closedObject(annotationIn.ask, ['of', 'means']));
+        : closedObject(annotationIn.ask, ['of', 'means', 'deliver', 'project']);
       if (annotationIn.ask !== null && !askIn) throw fail('invalid-annotation');
       let ask = null;
       if (askIn) {
@@ -180,12 +179,14 @@ function createChatService(options) {
         const means = askIn.means === undefined ? null : askIn.means;
         if (means === null && askTarget.kind === 'person') throw fail('means-required');
         if (means !== null && !Annotations.validMeans(means)) throw fail('invalid-annotation');
+        const project = askIn.project === undefined ? null : askIn.project;
         ask = {
           of_subject_id: askTarget.subject_id,
           of_name: askTarget.name,
           of_kind: askTarget.kind,
           means,
           deliver,
+          project,
         };
       }
       annotation = {

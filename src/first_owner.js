@@ -1947,6 +1947,7 @@ function createFirstOwnerHandler(options) {
     }
     const text = (body.about_message ? `re #${body.about_message} ` : '') + `Decision: ${body.title.trim()}`;
     const ask = { of: body.asked_of };
+    if (typeof body.project === 'string') ask.project = body.project;
     if (typeof body.scope === 'string' && body.scope.trim() !== '') ask.means = body.scope.trim();
     // The post must be new. An earlier post under this operation id that no
     // completed ask owns is never bound to a new decision: answers already

@@ -44,7 +44,10 @@ const CARRY_KEYS = Object.freeze([
   'v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id', 'archive_id', 'asked_at', 'ask',
   'era_first_id', 'kept_open',
 ]);
-const ASK_KEYS = Object.freeze(['of_subject_id', 'of_name', 'of_kind', 'means', 'deliver']);
+const ASK_KEYS = Object.freeze(['of_subject_id', 'of_name', 'of_kind', 'means', 'deliver', 'project']);
+// A project id, as the Work record names it; whether the project exists and
+// whether one is required is the Work side's rule, not the room's.
+const PROJECT_ID = /^[a-z][a-z0-9-]{1,31}$/;
 const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
 const REQUEST_KEYS = Object.freeze(['ask', 'answers', 'status', 'read_through']);
 const REQUEST_ANSWER_KEYS = Object.freeze(['ask_id', 'choice']);
@@ -89,6 +92,7 @@ function parseAsk(value) {
   if (!ask || !boundedString(ask.of_subject_id, 64) || !boundedString(ask.of_name, MAX_NAME_BYTES) ||
       !KINDS.includes(ask.of_kind) || !DELIVER.includes(ask.deliver) ||
       !(ask.means === null || validMeans(ask.means)) ||
+      !(ask.project === null || (typeof ask.project === 'string' && PROJECT_ID.test(ask.project))) ||
       (ask.of_kind === 'person' && ask.means === null)) return null;
   return Object.freeze({
     of_subject_id: ask.of_subject_id,
@@ -96,6 +100,7 @@ function parseAsk(value) {
     of_kind: ask.of_kind,
     means: ask.means,
     deliver: ask.deliver,
+    project: ask.project,
   });
 }
 
@@ -225,6 +230,7 @@ function createAskIndex(eraFirstId) {
       of_kind: ask.of_kind,
       means: ask.means,
       deliver: ask.deliver,
+      project: ask.project,
       carried_from: carriedFrom,
       state: 'open',
       kept_open: false,
@@ -348,7 +354,7 @@ function createAskIndex(eraFirstId) {
 
 function publicAskFields(ask) {
   return Object.freeze({
-    of: ask.of_name, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver,
+    of: ask.of_name, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver, project: ask.project,
   });
 }
 
@@ -361,6 +367,7 @@ function publicAsk(ask) {
     of_kind: ask.of_kind,
     means: ask.means,
     deliver: ask.deliver,
+    project: ask.project,
     state: ask.state,
     kept_open: ask.kept_open,
     carried_from: ask.carried_from,
