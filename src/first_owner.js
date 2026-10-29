@@ -13,6 +13,8 @@ const AI_ADMISSION_WAIT_MS = 20_000;
 const AI_MESSAGE_WAIT_MS = 45_000;
 const CHAT_READ_LIMIT = 100;
 const PARTICIPANT_STATE_BATCH = 64;
+// The Work record's built-in project, where an ask with no other project goes.
+const DEFAULT_PROJECT_ID = require('./work/store.js').DEFAULT_PROJECT.id;
 const CHAT_RESOURCE = 'room:main';
 // Refusals an annotated post or a lifecycle row can earn, by HTTP status.
 // `unread-addressed` (409) also carries the ids; see annotationRefusal.
@@ -2228,6 +2230,25 @@ function createFirstOwnerHandler(options) {
     sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
   }
 
+  // Every ask belongs to a project: the asker's choice, else the asker's own
+  // project, else Operations. A missing project is never refused; a named one
+  // that is not a live project is (a typo should not be quietly replaced).
+  function withAskProject(annotation, actor) {
+    if (!people || annotation === null || typeof annotation !== 'object' || Array.isArray(annotation) ||
+        annotation.ask === null || typeof annotation.ask !== 'object' || Array.isArray(annotation.ask)) {
+      return { annotation };
+    }
+    const live = people.liveProjects();
+    const chosen = Object.hasOwn(annotation.ask, 'project') ? annotation.ask.project : null;
+    if (chosen !== null) {
+      return live.includes(chosen) ? { annotation } : { error: 'unknown-project' };
+    }
+    const assignment = actor.kind === 'seat' ? people.service.assignmentOf(actor.name) : null;
+    const project = assignment && assignment.project !== null && live.includes(assignment.project)
+      ? assignment.project : DEFAULT_PROJECT_ID;
+    return { annotation: Object.assign({}, annotation, { ask: Object.assign({}, annotation.ask, { project }) }) };
+  }
+
   async function appendAiAnnotatedMessage(request, response, body) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -2244,8 +2265,13 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
       return;
     }
+    const asked = withAskProject(input.annotation, actor);
+    if (asked.error) {
+      sendJson(request, response, 400, { ok: false, error: asked.error });
+      return;
+    }
     try {
-      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
+      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation));
       if (!saved) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
       await bridgeRoomAnswers(actor, saved, request);
@@ -2281,8 +2307,13 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
+    const asked = withAskProject(input.annotation, actor);
+    if (asked.error) {
+      sendJson(request, response, 400, { ok: false, error: asked.error });
+      return;
+    }
     try {
-      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
+      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation));
       if (saved === null) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
       await bridgeRoomAnswers(actor, saved, request);

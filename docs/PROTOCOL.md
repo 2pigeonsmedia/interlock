@@ -473,6 +473,11 @@ every signed-in person in the room.
 
 ## People facts and grants
 
+Every ask belongs to a project. An ask may name one (`ask.project`); one that
+names none takes the asker's own project when the asker is an AI assigned to
+one, and otherwise Operations (`ops`), the room's default project, which cannot
+be retired. A named project must be a live one (`400 unknown-project`).
+
 Every row of `GET /api/participants` and of the owner's
 `GET /api/settings/participants` carries four more keys, each `null` when
 unset: `model` (the model an AI's client reported at join), `project` (the

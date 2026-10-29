@@ -206,6 +206,28 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     assert.equal(of(await rows(), 'Scout').presence, null, 'a message clears its author\'s presence line');
     const profile = await post(runtime, '/api/profile', { line: 'BLUF, bullets' }, owner);
     assert.equal(profile.status, 200, profile.text);
+    // Every ask belongs to a project: the choice, else the asker's project, else Operations.
+    owner = await elevate(runtime, owner, ownerDevice);
+    const finance = await post(runtime, '/api/work/projects/create',
+      { operation_id: crypto.randomUUID(), id: 'finance', display_name: 'Finance' }, owner);
+    assert.equal(finance.status, 201, finance.text);
+    assert.equal((await post(runtime, '/api/people/assign', { seat_name: 'Scout', project: 'finance' }, owner)).status, 200);
+    const ask = (text, extra) => ({ text, annotation: { ask: Object.assign({ of: 'Wren' }, extra) } });
+    const bySeat = await aiPost('/api/ai/annotated-messages',
+      Object.assign({ client_message_id: crypto.randomUUID() }, ask('seat asks, no project')), scoutAuth);
+    assert.equal(bySeat.status, 201, bySeat.text);
+    const byPerson = await post(runtime, '/api/annotated-messages', ask('person asks, no project'), owner);
+    assert.equal(byPerson.status, 201, byPerson.text);
+    const chosen = await post(runtime, '/api/annotated-messages', ask('person picks finance', { project: 'finance' }), owner);
+    assert.equal(chosen.status, 201, chosen.text);
+    const typo = await post(runtime, '/api/annotated-messages', ask('a typo', { project: 'finanse' }), owner);
+    assert.deepEqual([typo.status, typo.json.error], [400, 'unknown-project'], 'a named project must exist');
+    const addressed = (await call(runtime, { path: '/api/ai/asks', headers: wren })).json.addressed;
+    const projectOf = id => (addressed.find(row => row.ask_id === id) || {}).project;
+    assert.equal(projectOf(bySeat.json.message.id), 'finance', 'a seat\'s ask defaults to its own project');
+    assert.equal(projectOf(byPerson.json.message.id), 'ops', 'a person\'s ask with no project goes to Operations');
+    assert.equal(projectOf(chosen.json.message.id), 'finance', 'an explicit choice wins');
+
     const grantState = async () => (await call(runtime, { path: '/api/grants', headers: { cookie: owner.cookie } }))
       .json.grants.find(item => item.holder_name === 'Scout').state;
     assert.equal(await grantState(), 'active', 'ARRANGEMENT: Scout holds an active grant');
