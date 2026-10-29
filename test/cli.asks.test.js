@@ -481,3 +481,83 @@ test('a body line cannot pass for an annotation by hiding its arrow behind a bla
   assert.equal(code, EXIT_OK);
   assert.equal((stdout.match(/↳/g) || []).length, 0, 'no arrow from a body survives, wherever it sits: ' + JSON.stringify(stdout));
 });
+
+// The story of an ask: discuss, revise, and whose turn it is.
+function storyWorld(respond) {
+  const calls = [];
+  const profile = Object.freeze({
+    schema: 2, name: 'Scout', product: 'Codex CLI', product_provenance: 'client-reported',
+    server_url: 'http://localhost:8788', request_id: crypto.randomUUID(), token: 'test-bearer-not-a-real-credential',
+    selector: 'selectorselectorselecto', digest: 'a'.repeat(64), state: 'admitted',
+    created_at: 1, admitted_at: 2, subject_id: 'seat-1', expires_at: Number.MAX_SAFE_INTEGER, cursor: 3,
+  });
+  const dependencies = {
+    config: { resolveConnectionDir: () => '/unused' },
+    profiles: { validName: () => true, openProfiles: () => ({ load: () => profile }) },
+    readFile: path => ({ 'm.md': 'Refurbished rollers are in stock, $14 each.\n', 's.txt': 'I order one refurbished roller, up to $15, and nothing else\n' })[path],
+    fetch: async (url, init = {}) => {
+      const body = init.body === undefined ? undefined : JSON.parse(init.body);
+      calls.push({ url: String(url), body });
+      const { status = 200, json } = respond(String(url), body);
+      return { ok: status < 300, status, json: async () => json };
+    },
+  };
+  return { calls, dependencies };
+}
+
+async function storyRun(world, argv) {
+  let stdout = '';
+  let stderr = '';
+  const code = await run(argv, { stdout: { write: v => { stdout += v; } }, stderr: { write: v => { stderr += v; } } }, world.dependencies);
+  return { code, stdout, stderr };
+}
+
+const SAVED = { ok: true, message: { id: 9, ts: 1, byline: 'Scout', kind: 'seat', session: null, text: 'x',
+  product: 'Codex CLI', product_provenance: 'client-reported', delivery: [] } };
+
+test('say --discusses attaches a reply to an ask without answering it, and is refused with --answers', async () => {
+  const world = storyWorld(() => ({ status: 201, json: SAVED }));
+  const said = await storyRun(world, ['say', '--connection', 'Scout', '--file', 'm.md', '--discusses', '6']);
+  assert.equal(said.code, EXIT_OK, said.stderr);
+  assert.equal(world.calls[0].url, 'http://localhost:8788/api/ai/annotated-messages');
+  assert.deepEqual(world.calls[0].body.annotation, { discusses: 6 });
+  const both = await storyRun(world, ['say', '--connection', 'Scout', '--file', 'm.md', '--discusses', '6', '--answers', '6']);
+  assert.equal(both.code, EXIT_USAGE, 'a post discusses an ask or answers it, never both');
+  assert.equal(world.calls.length, 1);
+});
+
+test('ask revise sends the new scope from a file; never from argv', async () => {
+  const world = storyWorld(() => ({ status: 201, json: { ok: true, row: { kind: 'revise', ask_id: 6 } } }));
+  const revised = await storyRun(world, ['ask', 'revise', '6', '--means-file', 's.txt', '--connection', 'Scout']);
+  assert.equal(revised.code, EXIT_OK, revised.stderr);
+  assert.deepEqual(world.calls[0].body, { kind: 'revise', ask_id: 6, means: 'I order one refurbished roller, up to $15, and nothing else' });
+  assert.match(revised.stdout, /Revised ask 6: a yes now means: I order one refurbished roller, up to \$15, and nothing else\. It is their turn again\./);
+  for (const argv of [
+    ['ask', 'revise', '6', '--means', 'x', '--connection', 'Scout'],
+    ['ask', 'revise', '6', '--connection', 'Scout'],
+    ['ask', 'withdraw', '6', '--means-file', 's.txt', '--connection', 'Scout'],
+  ]) {
+    const refused = await storyRun(world, argv);
+    assert.equal(refused.code, EXIT_USAGE, argv.join(' '));
+  }
+  assert.equal(world.calls.length, 1, 'no refused form reached the room');
+});
+
+test('interlock asks shows whose turn it is and the latest exchange; an older room still reads', async () => {
+  const base = { ask_id: 6, asked_at: 1, by: 'Scout', of: 'Patti', of_kind: 'person', means: 'I order one roller', deliver: 'now',
+    project: 'ops', state: 'open', kept_open: false, carried_from: null, answers: [] };
+  const withStory = Object.assign({}, base, {
+    turn: { state: 'waiting', on: 'Scout', word: 'waiting on Scout' },
+    latest: { by: 'Patti', kind: 'reply', line: 'Can we buy refurbished rollers?', at: 2 },
+    revisions: [],
+  });
+  const world = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [withStory] } }));
+  const listed = await storyRun(world, ['asks', '--connection', 'Scout']);
+  assert.equal(listed.code, EXIT_OK, listed.stderr);
+  assert.match(listed.stdout, /ask 6 of Patti \[waiting on Scout\]/);
+  assert.match(listed.stdout, /latest: Patti: Can we buy refurbished rollers\?/);
+  const older = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [base] } }));
+  assert.equal((await storyRun(older, ['asks', '--connection', 'Scout'])).code, EXIT_OK, 'an ask without the story fields still lists');
+  const odd = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [Object.assign({}, base, { surprise: 1 })] } }));
+  assert.equal((await storyRun(odd, ['asks', '--connection', 'Scout'])).code, EXIT_RUNTIME, 'an unknown field is still refused');
+});

@@ -47,9 +47,10 @@ Usage:
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
       [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]]
-      [--answers N[,N...] [--choice yes|no]] [--status done|ready|stop]
+      [--answers N[,N...] [--choice yes|no] | --discusses N] [--status done|ready|stop]
   interlock asks --connection NAME [--json]
   interlock ask withdraw|keep-open N --connection NAME [--json]
+  interlock ask revise N --means-file PATH|--means-stdin --connection NAME [--json]
   interlock listen --connection NAME [--json]
   interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
   interlock leave --connection NAME [--json]
@@ -102,7 +103,7 @@ function commandOptions(command, args) {
   const options = {
     connection: null, drain: false, skipToCurrent: false, before: null, find: null,
     after: null, json: false, source: null,
-    asksOf: null, means: null, deliver: null, answers: null, choice: null, status: null,
+    asksOf: null, means: null, deliver: null, answers: null, choice: null, status: null, discusses: null,
   };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
@@ -219,6 +220,15 @@ function commandOptions(command, args) {
       index += 1;
       continue;
     }
+    // A reply that discusses an ask without answering it.
+    if (command === 'say' && flag === '--discusses') {
+      const value = sayValue(args, index);
+      if (seen.has(flag) || value === null || !/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) return null;
+      seen.add(flag);
+      options.discusses = Number(value);
+      index += 1;
+      continue;
+    }
     if (command === 'say' && flag === '--choice') {
       if (seen.has(flag) || (args[index + 1] !== 'yes' && args[index + 1] !== 'no')) return null;
       seen.add(flag);
@@ -238,6 +248,7 @@ function commandOptions(command, args) {
   if (options.connection === null || (command === 'say') !== (options.source !== null)) return null;
   if ((options.means !== null || options.deliver !== null) && options.asksOf === null) return null;
   if (options.choice !== null && options.answers === null) return null;
+  if (options.discusses !== null && options.answers !== null) return null;
   if (options.means !== null && options.means.kind === 'stdin' && options.source.kind === 'stdin') {
     return null;
   }
@@ -1295,6 +1306,7 @@ function sayAnnotation(parsed, means, cursor) {
   if (parsed.answers !== null) {
     annotation.answers = parsed.answers.map(askId => ({ ask_id: askId, choice: parsed.choice }));
   }
+  if (parsed.discusses !== null) annotation.discusses = parsed.discusses;
   if (parsed.status !== null) {
     annotation.status = parsed.status;
     annotation.read_through = cursor;
@@ -1314,8 +1326,8 @@ async function runSay(args, io, dependencies = {}) {
   const parsed = commandOptions('say', args);
   if (!parsed) {
     if (args.some(arg => ['--asks-of', '--means-file', '--means-stdin', '--deliver', '--answers',
-      '--choice', '--status'].includes(arg))) {
-      line(io.stderr, 'interlock: usage: interlock say --connection NAME --file PATH|--stdin [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]] [--answers N[,N...] [--choice yes|no]] [--status done|ready|stop] [--json]');
+      '--choice', '--status', '--discusses'].includes(arg))) {
+      line(io.stderr, 'interlock: usage: interlock say --connection NAME --file PATH|--stdin [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]] [--answers N[,N...] [--choice yes|no] | --discusses N] [--status done|ready|stop] [--json]');
       return EXIT_USAGE;
     }
     return refuseSay(io.stderr);
@@ -1401,11 +1413,29 @@ function askOptions(args) {
   return options.connection === null ? null : options;
 }
 
+const ASK_BASE_KEYS = Object.freeze([
+  'ask_id', 'asked_at', 'by', 'of', 'of_kind', 'means', 'deliver', 'project', 'state', 'kept_open',
+  'carried_from', 'answers',
+]);
+// Later fields an ask may carry: whose turn it is, its latest exchange, and
+// its earlier scopes. Each is optional, so an older room still reads.
+const ASK_STORY_KEYS = Object.freeze(['turn', 'latest', 'revisions']);
+
+function askWithStory(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (!ASK_BASE_KEYS.every(key => keys.includes(key)) ||
+      !keys.every(key => ASK_BASE_KEYS.includes(key) || ASK_STORY_KEYS.includes(key))) return null;
+  if (value.turn !== undefined && value.turn !== null &&
+      !(typeof value.turn === 'object' && typeof value.turn.word === 'string')) return null;
+  if (value.latest !== undefined && value.latest !== null &&
+      !(typeof value.latest === 'object' && typeof value.latest.by === 'string' && typeof value.latest.line === 'string')) return null;
+  if (value.revisions !== undefined && !Array.isArray(value.revisions)) return null;
+  return value;
+}
+
 function validPublicAsk(value) {
-  const ask = exactObject(value, [
-    'ask_id', 'asked_at', 'by', 'of', 'of_kind', 'means', 'deliver', 'project', 'state', 'kept_open',
-    'carried_from', 'answers',
-  ]);
+  const ask = askWithStory(value);
   return !!ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
     typeof ask.by === 'string' && validAskFields({
       of: ask.of, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver, project: ask.project,
@@ -1418,7 +1448,9 @@ function renderAsk(ask, mine) {
   const carried = ask.carried_from ? ' · from an archived era' : '';
   const kept = ask.kept_open ? ' · kept open' : '';
   const means = ask.means === null ? '' : ` — a yes means: ${terminalSafe(ask.means)}`;
-  return `  ask ${ask.ask_id} ${who}${later}${carried}${kept}${means}`;
+  const turn = ask.turn ? ` [${terminalSafe(ask.turn.word)}]` : '';
+  const latest = ask.latest ? `\n      latest: ${terminalSafe(ask.latest.by)}: ${terminalSafe(ask.latest.line)}` : '';
+  return `  ask ${ask.ask_id} ${who}${turn}${later}${carried}${kept}${means}${latest}`;
 }
 
 async function connectedProfile(parsed, io, dependencies) {
@@ -1473,24 +1505,60 @@ async function runAsks(args, io, dependencies = {}) {
   return EXIT_OK;
 }
 
-const ASK_VERBS = Object.freeze({ withdraw: 'withdraw', 'keep-open': 'keep_open' });
+const ASK_VERBS = Object.freeze({ withdraw: 'withdraw', 'keep-open': 'keep_open', revise: 'revise' });
+
+// A revision's new scope line is text, so like any message it comes from a
+// file or stdin, never argv.
+function reviseSource(args) {
+  const rest = [];
+  let means = null;
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if ((flag === '--means-file' || flag === '--means-stdin') && means !== null) return null;
+    if (flag === '--means-file') {
+      if (sayValue(args, index) === null) return null;
+      means = { kind: 'file', path: args[index + 1] };
+      index += 1;
+    } else if (flag === '--means-stdin') {
+      means = { kind: 'stdin' };
+    } else rest.push(flag);
+  }
+  return { means, rest };
+}
 
 async function runAsk(args, io, dependencies = {}) {
   const verb = args[0];
   const id = args[1];
-  const parsed = Object.prototype.hasOwnProperty.call(ASK_VERBS, verb) &&
+  if (args.some(arg => arg === '--means' || String(arg).startsWith('--means='))) {
+    line(io.stderr, 'interlock: refusing an ask\'s scope line in command arguments; use --means-file PATH or --means-stdin.');
+    return EXIT_USAGE;
+  }
+  const source = verb === 'revise' ? reviseSource(args.slice(2)) : { means: null, rest: args.slice(2) };
+  const parsed = Object.prototype.hasOwnProperty.call(ASK_VERBS, verb) && source &&
+    (verb === 'revise') === (source.means !== null) &&
     typeof id === 'string' && /^[1-9][0-9]*$/.test(id) && Number.isSafeInteger(Number(id))
-    ? askOptions(args.slice(2)) : null;
+    ? askOptions(source.rest) : null;
   if (!parsed) {
-    line(io.stderr, 'interlock: usage: interlock ask withdraw|keep-open N --connection NAME [--json]');
+    line(io.stderr, 'interlock: usage: interlock ask withdraw|keep-open N --connection NAME [--json]  ·  interlock ask revise N --means-file PATH|--means-stdin --connection NAME [--json]');
     return EXIT_USAGE;
   }
   const { profile, code } = await connectedProfile(parsed, io, dependencies);
   if (!profile) return code;
+  const body = { kind: ASK_VERBS[verb], ask_id: Number(id) };
+  if (verb === 'revise') {
+    try {
+      body.means = readScopeLine(source.means.kind === 'file'
+        ? (dependencies.readFile || fs.readFileSync)(source.means.path, 'utf8')
+        : await (dependencies.readStdin || readStdin)(io.stdin || process.stdin));
+    } catch (_) {
+      line(io.stderr, 'interlock: could not read the new scope line safely.');
+      return EXIT_RUNTIME;
+    }
+  }
   let result;
   try {
     result = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/annotations', {
-      method: 'POST', body: { kind: ASK_VERBS[verb], ask_id: Number(id) },
+      method: 'POST', body,
     });
     if (!exactObject(result, ['ok', 'row'])) throw incompatibleResponse();
   } catch (error) {
@@ -1498,6 +1566,7 @@ async function runAsk(args, io, dependencies = {}) {
     return EXIT_RUNTIME;
   }
   if (parsed.json) line(io.stdout, JSON.stringify(result));
+  else if (verb === 'revise') line(io.stdout, `Revised ask ${id}: a yes now means: ${terminalSafe(body.means)}. It is their turn again.`);
   else line(io.stdout, verb === 'withdraw' ? `Withdrew ask ${id}.` : `Ask ${id} is open again.`);
   return EXIT_OK;
 }
