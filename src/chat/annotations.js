@@ -87,8 +87,13 @@ function validMeans(value) {
   return !/[\p{Cc}\p{Cs}\u2028\u2029]/u.test(value);
 }
 
+// An ask stored before asks carried a project (the first slice-1 builds) has
+// the five keys without it; it reads as belonging to Operations.
+const ASK_KEYS_BEFORE_PROJECT = Object.freeze(ASK_KEYS.filter(key => key !== 'project'));
+
 function parseAsk(value) {
-  const ask = closedObject(value, ASK_KEYS);
+  const earlier = closedObject(value, ASK_KEYS_BEFORE_PROJECT);
+  const ask = earlier ? Object.assign({}, earlier, { project: 'ops' }) : closedObject(value, ASK_KEYS);
   if (!ask || !boundedString(ask.of_subject_id, 64) || !boundedString(ask.of_name, MAX_NAME_BYTES) ||
       !KINDS.includes(ask.of_kind) || !DELIVER.includes(ask.deliver) ||
       !(ask.means === null || validMeans(ask.means)) ||

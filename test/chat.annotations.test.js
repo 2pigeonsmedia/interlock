@@ -472,3 +472,17 @@ test('an ask may carry its project; a malformed project is refused', async () =>
   await assert.rejects(chat.appendAnnotated({ text: 'ok?' }, PERSON, { ask: { of: 'Marlow', project: 'Finance App' } }),
     error => code(error) === 'invalid-annotation');
 });
+
+test('a room whose asks were stored before asks carried a project still opens; those asks belong to Operations', async () => {
+  const { chat, dir, reopen } = room();
+  await chat.appendAnnotated({ text: 'A?' }, PERSON, { ask: { of: 'Marlow', project: 'finance-app' } });
+  await chat.close();
+  // Arrange the earlier shape: the same row with its ask's project key removed.
+  const file = path.join(dir, 'chat', 'annotations.jsonl');
+  const row = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete row.ask.project;
+  fs.writeFileSync(file, JSON.stringify(row) + '\n');
+  assert.equal(Object.keys(row.ask).length, 5, 'the arrangement: a five-key ask');
+  const again = reopen();
+  assert.equal((await again.openAsks(MARLOW, 'Marlow')).addressed[0].project, 'ops');
+});
