@@ -37,7 +37,7 @@
     open: 'Open', active: 'Active', blocked: 'Blocked', ready: 'Ready', done: 'Done',
   });
   const DECISION_STATES = Object.freeze({
-    awaiting: 'Awaiting answer', answered: 'Answered here', reported: 'Answer reported', withdrawn: 'Withdrawn',
+    awaiting: 'Awaiting answer', answered: 'Answered', reported: 'Answer reported', withdrawn: 'Withdrawn',
   });
 
   // A direct answer the room recorded (the person asked said it in the room)
@@ -249,6 +249,89 @@
     return rows.filter(row => row.project === projectId && predicate(row)).length;
   }
 
+  // How long ago, in the room's plain words; the exact time goes on hover.
+  function ageText(at, now) {
+    const elapsed = Math.max(0, now - at);
+    if (elapsed < MINUTE) return 'just now';
+    if (elapsed < HOUR) return Math.floor(elapsed / MINUTE) + ' m ago';
+    if (elapsed < DAY) return Math.floor(elapsed / HOUR) + ' h ago';
+    return Math.floor(elapsed / DAY) + ' d ago';
+  }
+
+  function firstLine(text) {
+    const line = String(text || '').split(/\r\n|\r|\n/).find(part => part.trim() !== '');
+    return line === undefined ? '' : line.trim();
+  }
+
+  // Needs you as cards: one per thing waiting on the viewer, oldest first.
+  // A decision asked in the room and its ask are one card, answered through
+  // the ask (askId), so the room and the record hear the same answer.
+  function needsCards(brief, now, asks = [], answered = new Set()) {
+    const names = projectNames(brief);
+    const askById = new Map(asks.map(ask => [ask.ask_id, ask]));
+    const project = id => id ? (names.get(id) || id) : 'Operations';
+    const cards = [];
+    for (const row of brief.needs_me) {
+      const decision = row.kind === 'decision';
+      const bound = decision && Number.isSafeInteger(row.ask_message_id) ? askById.get(row.ask_message_id) : null;
+      if (bound) askById.delete(row.ask_message_id);
+      const card = {
+        key: row.id, kind: row.kind, id: row.id, at: row.updated_at,
+        who: decision ? who(row.asked_by) : who(row.created_by),
+        question: row.title,
+        means: decision ? (bound && bound.means) || null : null,
+        detail: decision ? (row.proposal ? 'Proposal: ' + row.proposal : null) : (row.next_action || null),
+        project: project(row.project),
+        askId: bound ? bound.ask_id : null,
+      };
+      if (decision && killWord(row)) card.kill = killWord(row);
+      if (decision && answeredInRoom(row, answered)) card.note = ROOM_NOT_RECORDED;
+      cards.push(card);
+    }
+    for (const ask of askById.values()) {
+      cards.push({
+        key: 'ask-' + ask.ask_id, kind: 'ask', id: 'ask-' + ask.ask_id, at: ask.asked_at,
+        who: ask.by,
+        question: ask.question ? firstLine(ask.question) : 'Message #' + ask.ask_id,
+        means: ask.means, detail: ask.carried_from ? 'Asked before the transcript was cleared' : null,
+        project: project(ask.project),
+        askId: ask.ask_id,
+      });
+    }
+    cards.sort((a, b) => a.at - b.at);
+    for (const card of cards) {
+      card.age = ageText(card.at, now);
+      card.when = stamp(card.at);
+    }
+    return { count: cards.length, cards };
+  }
+
+  // A work item made to track a decision (created from the decision's own
+  // ask message, or waiting on it) is that decision's, not a row of its own.
+  function trackedBy(brief) {
+    const byAsk = new Map((brief.decisions || []).concat(brief.needs_me || [])
+      .filter(row => row && row.kind === 'decision' && Number.isSafeInteger(row.ask_message_id))
+      .map(row => [row.ask_message_id, row.id]));
+    const tracked = new Map();
+    for (const row of brief.open || []) {
+      if (!row || row.kind === 'decision') continue;
+      const decision = row.awaiting || (Number.isSafeInteger(row.source_message_id) ? byAsk.get(row.source_message_id) : null);
+      if (decision) tracked.set(row.id, decision);
+    }
+    return tracked;
+  }
+
+  // A folded project's one line: only the counts that are not zero.
+  function projectLine(summary) {
+    const parts = [];
+    if (summary.needsYou) parts.push(summary.needsYou + ' waiting on you');
+    if (summary.open) parts.push(summary.open + ' open');
+    if (summary.blocked) parts.push(summary.blocked + ' blocked');
+    if (summary.ready) parts.push(summary.ready + ' ready');
+    if (summary.awaiting) parts.push(summary.awaiting + ' awaiting an answer');
+    return parts.length ? parts.join(' · ') : 'nothing open';
+  }
+
   function projectSummaries(brief) {
     return brief.projects.map(project => ({
       id: project.id,
@@ -354,6 +437,17 @@
   // at top level.
   function projectSections(brief) {
     const rows = brief.open.concat(brief.decisions);
+    const tracked = trackedBy(brief);
+    // A work item that tracks a decision sits under that decision's row.
+    function nest(nodes) {
+      const byId = new Map(nodes.map(node => [node.row.id, node]));
+      return nodes.filter(node => {
+        const decision = tracked.get(node.row.id);
+        if (!decision || !byId.has(decision)) return true;
+        byId.get(decision).children.push(node);
+        return false;
+      });
+    }
     return brief.projects.map(project => ({
       id: project.id,
       display_name: project.display_name,
@@ -364,7 +458,7 @@
       updated_at: project.updated_at,
       doneCount: Number.isSafeInteger(project.done_count) ? project.done_count : 0,
       withdrawnCount: Number.isSafeInteger(project.withdrawn_count) ? project.withdrawn_count : 0,
-      rows: rowNodes(rows.filter(row => row.project === project.id)),
+      rows: nest(rowNodes(rows.filter(row => row.project === project.id))),
     }));
   }
 
@@ -633,7 +727,8 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
+    who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou,
+    ageText, firstLine, needsCards, trackedBy, projectLine, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });

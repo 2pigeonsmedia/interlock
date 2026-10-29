@@ -202,7 +202,7 @@ test('the work panel writes through deliberate forms', () => {
     assert.match(WORK_PANEL_JS, words);
   }
   // Label in name: an action button's accessible name is "<action> <id>: <title>".
-  assert.match(WORK_PANEL_JS, /row\.action \+ ' ' \+ row\.id \+ ': ' \+ row\.title/);
+  assert.match(WORK_PANEL_JS, /openButton\('work-open', card\.question, 'Open ' \+ card\.id \+ ': ' \+ card\.question, open, card\.id\)/);
   assert.match(WORK_PANEL_JS, /text \+ ' ' \+ item\.id \+ ': ' \+ item\.title/);
 });
 
@@ -211,11 +211,11 @@ test('Needs you takes the open asks addressed to the viewer from the room\'s ask
     'the listener is removed with the panel session');
   assert.match(WORK_PANEL_JS, /event\.detail\.addressed/);
   assert.doesNotMatch(WORK_PANEL_JS, /detail\.asked\b/, 'asks the viewer made never wait on the viewer');
-  assert.match(WORK_PANEL_JS, /model\(\)\.needsYou\(brief, Date\.now\(\), state \? state\.asks : \[\], state \? state\.answers\.settled\(\) : new Set\(\)\)/);
+  assert.match(WORK_PANEL_JS, /model\(\)\.needsCards\(brief, Date\.now\(\), state \? state\.asks : \[\], state \? state\.answers\.settled\(\) : new Set\(\)\)/);
   assert.match(WORK_PANEL_JS, /querySelector\('\[data-message-id="' \+ row\.askId \+ '"\]'\)/,
     'an ask row shows its message in the transcript');
   assert.match(WORK_PANEL_JS, /an ask from before a clear is in History/);
-  assert.match(WORK_PANEL_JS, /user, deps, brief: null, projectViews: new Map\(\), asks: \[\]/,
+  assert.match(WORK_PANEL_JS, /user, deps, brief: null, projectViews: new Map\(\), holderOpen: new Set\(\), asks: \[\]/,
     'a new viewer starts with no asks from the last one');
 });
 
@@ -269,7 +269,9 @@ test('a write with no error code reads as unavailable, and an open form keeps on
 });
 
 test('the tile says who is responsible, the drawer says whom an owner answered for, and the project id pattern is valid', () => {
-  assert.match(WORK_PANEL_JS, /row\.ask \+ ' — ' \+ row\.by/);
+  // A Needs-you card names who asked at its head, then the question and what a yes means.
+  assert.match(WORK_PANEL_JS, /head\.append\(make\('span', 'work-card-who', card\.who\), ageNode\(card\.at\)\)/);
+  assert.match(WORK_PANEL_JS, /make\('p', 'work-means', 'A yes means: ' \+ card\.means\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /asked by ' \+ row\.askedBy/);
   // The drawer's answer lines come from the model's drawerLines, which calls answerLines.
   assert.match(WORK_PANEL_JS, /model\(\)\.drawerLines\(item, result\.history, state\.answers\.settled\(\)\)/);
@@ -336,7 +338,9 @@ test('an Actions section every participant sees, between Reported to you and Pro
 });
 
 test('Actions group headings keep names as stored, and the drawer\'s actions are named apart from the section', () => {
-  assert.match(WORK_PANEL_JS, /make\('h4', 'work-tree-facts', group\.who \+ ' · ' \+ group\.rows\.length\)/);
+  assert.match(WORK_PANEL_JS, /make\('h4', 'work-tree-facts', group\.who \+ ' holds ' \+ group\.rows\.length\)/);
+  // Everyone's view is a strip of names and counts; a name opens its rows.
+  assert.match(WORK_PANEL_JS, /make\('button', 'work-hold', group\.who \+ ' '\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /make\('h4', 'work-state'/);
   assert.match(ROOM, /<section id="work-drawer-actions" aria-label="Actions on this record"><\/section>/);
   assert.doesNotMatch(ROOM, /aria-label="Actions"/);
@@ -348,7 +352,11 @@ test('each project lists its work in place: a heading, an inline edit, rows, and
   assert.match(WORK_PANEL_JS, /setAttribute\('aria-labelledby', 'project-' \+ id \+ '-heading'\)/);
   assert.match(WORK_PANEL_JS, /make\('h4', 'work-project-heading'\)/);
   assert.match(WORK_PANEL_JS, /make\('p', 'work-project-brief'\)/);
-  assert.match(WORK_PANEL_JS, /'Edit ' \+ section\.display_name \+ "'s objective and today"/);
+  // The edit sits in a small menu on the heading; the project folds unless something in it is for the viewer.
+  assert.match(WORK_PANEL_JS, /make\('button', 'quiet-action', 'Edit objective and today'\)/);
+  assert.match(WORK_PANEL_JS, /setAttribute\('aria-label', 'More for ' \+ section\.display_name\)/);
+  assert.match(WORK_PANEL_JS, /if \(!view\.foldChosen\) view\.folded = !\(count\.needsYou > 0\) && !view\.editing;/);
+  assert.match(WORK_PANEL_JS, /model\(\)\.projectLine\(count\)/);
   assert.match(WORK_PANEL_JS, /'done \(' \+ section\.doneCount \+ '\)'/);
   // Withdrawn decisions stay reachable (and so can be reopened) under the same toggle.
   assert.match(WORK_PANEL_JS, /' · withdrawn \(' \+ section\.withdrawnCount \+ '\)'/);
@@ -420,7 +428,7 @@ test('the kill slot is asked by anyone but the asker and replied to only by the 
   assert.match(WORK_PANEL_JS, /if \(item\.kill_state === 'attacked' && item\.kill && isMe\(item\.asked_by\)\) \{\s*actionButton\(buttons, slot, 'Reply to the kill question'/);
   assert.match(WORK_PANEL_JS, /write\('decisions\/kill',\s*\{ id: item\.id, expected_revision: item\.revision, question: question\.node\.value \}/);
   assert.match(WORK_PANEL_JS, /write\('decisions\/kill-reply', \{\s*id: item\.id, expected_revision: item\.revision, words: words\.node\.value, outcome: outcome\.node\.value,/);
-  assert.match(WORK_PANEL_JS, /row\.waiting \+ \(row\.kill \? ' · ' \+ row\.kill : ''\)/, 'the Needs you row shows the kill state');
+  assert.match(WORK_PANEL_JS, /if \(card\.kill\) facts\.push\(card\.kill\);/, 'the Needs you card shows the kill state');
 });
 
 test('a decision made from a message is asked in the room through the ask route', () => {
@@ -444,7 +452,7 @@ test('the room-answer line comes from the asks event\'s answered ids', () => {
   assert.match(WORK_PANEL_JS, /const started = state\.answers\.beginRead\(\);\s*const brief = await workGet\('\/api\/work\/brief'\);\s*if \(!current\(state\)\) return;\s*state\.answers\.settle\(started\);/,
     'a brief settles only the answers that arrived before it was requested');
   assert.match(WORK_PANEL_JS, /if \(state\.refreshing\) \{\s*state\.refreshAgain = true;/, 'a refresh asked for mid-read runs again after it');
-  assert.match(WORK_PANEL_JS, /if \(row\.note\) card\.append\(make\('p', 'work-state', row\.note\)\)/);
+  assert.match(WORK_PANEL_JS, /if \(card\.note\) node\.append\(make\('p', 'work-tree-facts', card\.note\)\)/);
 });
 
 test('the open dialog follows its record without wiping a half-written form', () => {
@@ -456,4 +464,14 @@ test('the open dialog follows its record without wiping a half-written form', ()
 
 test('an ask chip names the project the ask belongs to', () => {
   assert.match(ROOM_JS, /InterlockAsks\.askLine\(ask, Date\.now\(\)\) \+ \(ask\.project \? ` · \$\{projectName\(ask\.project\)\}` : ''\)/);
+});
+
+test('the Work tile hides what is empty and shows ages, not raw timestamps', () => {
+  assert.match(WORK_PANEL_JS, /sectionOf\('reported-list'\)\.hidden = rows\.length === 0;/);
+  assert.match(WORK_PANEL_JS, /sectionOf\('actions-list'\)\.hidden = actions\.count === 0;/);
+  assert.match(WORK_PANEL_JS, /view\.doneToggle\.hidden = closedCount\(section\) === 0;/);
+  assert.match(WORK_PANEL_JS, /model\(\)\.ageText\(ms, Date\.now\(\)\)/);
+  assert.doesNotMatch(WORK_PANEL_JS, /toISOString\(\)\)?;\s*\n\s*\}\s*\n\s*\/\/ A relative/, 'the tile never prints a raw ISO stamp');
+  assert.match(WORK_PANEL_JS, /new CustomEvent\('interlock:answer-ask', \{ detail: \{ ask_id: askId, choice \} \}\)/,
+    'a card answers through the room, never the work record');
 });

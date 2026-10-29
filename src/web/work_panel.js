@@ -36,7 +36,19 @@
   }
 
   function stampOf(ms) {
-    return new Date(ms).toISOString();
+    return new Date(ms).toLocaleString();
+  }
+
+  // A relative age that shows the exact time on hover.
+  function ageNode(ms) {
+    const node = make('time', 'work-age', model().ageText(ms, Date.now()));
+    node.dateTime = new Date(ms).toISOString();
+    node.title = stampOf(ms);
+    return node;
+  }
+
+  function sectionOf(id) {
+    return element(id).closest('section');
   }
 
   function workError(code, status) {
@@ -137,31 +149,68 @@
     target.focus();
   }
 
+  // The room answers an ask; the panel only asks it to, so an answer from
+  // a card is the same room message a chip's Yes or No would post.
+  function answerAsk(askId, choice) {
+    document.dispatchEvent(new CustomEvent('interlock:answer-ask', { detail: { ask_id: askId, choice } }));
+  }
+
+  function replyAsk(askId) {
+    document.dispatchEvent(new CustomEvent('interlock:reply-ask', { detail: { ask_id: askId } }));
+  }
+
+  function cardButton(text, label, onClick) {
+    const button = make('button', 'quiet-action', text);
+    button.type = 'button';
+    button.setAttribute('aria-label', label);
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  // One card per thing waiting on the viewer: who asked, the question, what
+  // a yes means, then its answers, its project and its age.
   function renderNeedsYou(brief) {
     const state = session;
-    const needs = model().needsYou(brief, Date.now(), state ? state.asks : [], state ? state.answers.settled() : new Set());
+    const needs = model().needsCards(brief, Date.now(), state ? state.asks : [], state ? state.answers.settled() : new Set());
     element('needs-you-count').textContent = String(needs.count);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
-    element('needs-you-list').replaceChildren(...needs.rows.map(row => {
-      const card = make('div', 'work-row');
-      const open = row.kind === 'ask' ? () => showAsk(row) : () => openItem(row.id);
-      card.append(
-        openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, open, row.id),
-        make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting + (row.kill ? ' · ' + row.kill : '')),
-        make('p', '', row.ask + ' — ' + row.by),
-      );
-      if (row.note) card.append(make('p', 'work-state', row.note));
-      return card;
-    }));
+    element('needs-you-list').replaceChildren(...(needs.count ? needs.cards.map(card => {
+      const node = make('div', 'work-row work-card');
+      const head = make('p', 'work-card-head');
+      head.append(make('span', 'work-card-who', card.who), ageNode(card.at));
+      const open = card.kind === 'ask' ? () => showAsk({ askId: card.askId }) : () => openItem(card.id);
+      node.append(head, openButton('work-open', card.question, 'Open ' + card.id + ': ' + card.question, open, card.id));
+      if (card.means) node.append(make('p', 'work-means', 'A yes means: ' + card.means));
+      if (card.detail) node.append(make('p', 'work-card-detail', card.detail));
+      const facts = [card.project, card.kind === 'ask' ? 'message #' + card.askId : card.id];
+      if (card.kill) facts.push(card.kill);
+      node.append(make('p', 'work-tree-facts', facts.join(' · ')));
+      if (card.note) node.append(make('p', 'work-tree-facts', card.note));
+      const actions = make('div', 'work-card-actions');
+      if (card.askId !== null) {
+        actions.append(
+          cardButton('Yes', 'Yes to ' + card.question, () => answerAsk(card.askId, 'yes')),
+          cardButton('No', 'No to ' + card.question, () => answerAsk(card.askId, 'no')),
+          cardButton('Reply', 'Reply to ' + card.question, () => replyAsk(card.askId)),
+        );
+      }
+      if (card.kind !== 'ask') actions.append(cardButton(card.kind === 'decision' ? 'Open' : 'Open work', 'Open ' + card.id, open));
+      node.append(actions);
+      return node;
+    }) : [make('p', 'work-tree-facts', 'Nothing needs you.')]));
   }
 
   function renderReported(brief) {
     const answers = new Map(brief.reported_to_me.map(row => [row.id, row.answer_summary]));
-    element('reported-list').replaceChildren(...model().reportedToYou(brief).map(row => {
+    const rows = model().reportedToYou(brief);
+    sectionOf('reported-list').hidden = rows.length === 0;
+    element('reported-list').replaceChildren(...rows.map(row => {
       const card = make('div', 'work-row');
+      const facts = make('p', 'work-tree-facts', row.id + ' · ');
+      facts.append(ageNode(row.at));
       card.append(
         openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id), row.id),
-        make('p', 'work-state', row.id + ' · ' + stampOf(row.at)),
+        facts,
         make('p', '', model().reportedLabel(answers.get(row.id))),
       );
       return card;
@@ -172,12 +221,29 @@
   // person or seat it is addressed to. A status only — it writes nothing,
   // rings nobody and never changes who a request is addressed to.
   function renderActions(brief) {
+    const state = session;
     const actions = model().actionsByPerson(brief);
     element('actions-count').textContent = String(actions.count);
-    element('actions-list').replaceChildren(...actions.groups.map(group => {
+    sectionOf('actions-list').hidden = actions.count === 0;
+    const strip = make('div', 'work-strip');
+    for (const group of actions.groups) {
+      const open = state.holderOpen.has(group.who);
+      const button = make('button', 'work-hold', group.who + ' ');
+      button.type = 'button';
+      button.append(make('b', '', String(group.rows.length)));
+      button.setAttribute('aria-pressed', open ? 'true' : 'false');
+      button.setAttribute('aria-label', group.who + ' holds ' + group.rows.length);
+      button.addEventListener('click', () => {
+        if (state.holderOpen.has(group.who)) state.holderOpen.delete(group.who);
+        else state.holderOpen.add(group.who);
+        renderActions(state.brief);
+      });
+      strip.append(button);
+    }
+    element('actions-list').replaceChildren(strip, ...actions.groups.filter(group => state.holderOpen.has(group.who)).map(group => {
       const block = make('div', 'work-group');
       // Names render as stored: the muted facts style, not the uppercase state style.
-      block.append(make('h4', 'work-tree-facts', group.who + ' · ' + group.rows.length));
+      block.append(make('h4', 'work-tree-facts', group.who + ' holds ' + group.rows.length));
       for (const row of group.rows) {
         const card = make('div', 'work-row');
         card.append(
@@ -202,10 +268,29 @@
     view.section.setAttribute('aria-labelledby', 'project-' + id + '-heading');
     view.heading = make('h4', 'work-project-heading');
     view.heading.id = 'project-' + id + '-heading';
+    view.fold = make('button', 'work-fold');
+    view.fold.type = 'button';
+    view.fold.setAttribute('aria-controls', 'project-' + id + '-body');
+    view.fold.addEventListener('click', () => {
+      view.folded = !view.folded;
+      view.foldChosen = true;
+      applyFold(view);
+    });
+    view.heading.append(view.fold);
+    view.body = make('div', 'work-project-body');
+    view.body.id = 'project-' + id + '-body';
     view.brief = make('p', 'work-project-brief');
-    view.edit = make('button', 'quiet-action', 'Edit');
-    view.edit.type = 'button';
-    view.edit.addEventListener('click', () => startProjectEdit(view));
+    // The edit lives in a small menu on the heading, not as a button per project.
+    view.edit = make('details', 'work-more');
+    const summary = make('summary', '', '⋯');
+    view.editSummary = summary;
+    view.editButton = make('button', 'quiet-action', 'Edit objective and today');
+    view.editButton.type = 'button';
+    view.editButton.addEventListener('click', () => {
+      view.edit.open = false;
+      startProjectEdit(view);
+    });
+    view.edit.append(summary, view.editButton);
     view.formSlot = make('div', 'work-project-form');
     view.status = make('p', 'status work-project-status');
     view.status.setAttribute('role', 'status');
@@ -218,9 +303,15 @@
     view.doneList = make('ul', 'work-tree');
     view.doneList.id = 'project-' + id + '-done';
     view.doneList.hidden = true;
-    view.section.append(view.heading, view.brief, view.edit, view.formSlot, view.status, view.rows, view.doneToggle, view.doneList);
+    view.body.append(view.brief, view.formSlot, view.status, view.rows, view.doneToggle, view.doneList);
+    view.section.append(view.heading, view.edit, view.body);
     state.projectViews.set(id, view);
     return view;
+  }
+
+  function applyFold(view) {
+    view.fold.setAttribute('aria-expanded', view.folded ? 'false' : 'true');
+    view.body.hidden = view.folded;
   }
 
   function renderTreeRow(node) {
@@ -238,7 +329,7 @@
   }
 
   function renderRowNodes(list, nodes, empty) {
-    list.replaceChildren(...(nodes.length ? nodes.map(renderTreeRow) : [make('li', 'work-tree-facts', empty)]));
+    list.replaceChildren(...(nodes.length ? nodes.map(renderTreeRow) : empty ? [make('li', 'work-tree-facts', empty)] : []));
   }
 
   function renderProjects(brief) {
@@ -248,13 +339,24 @@
       const view = projectView(state, section.id);
       const count = counts.get(section.id);
       view.project = section;
-      view.heading.replaceChildren(document.createTextNode(section.display_name + ' '), make('span', 'work-state',
-        'open ' + count.open + ' · blocked ' + count.blocked + ' · ready ' + count.ready + ' · awaiting ' + count.awaiting));
-      view.brief.textContent = [section.objective, section.today, section.updatedBy + ' · ' + stampOf(section.updated_at)]
-        .filter(Boolean).join(' · ');
-      view.edit.setAttribute('aria-label', 'Edit ' + section.display_name + "'s objective and today");
+      // Folded unless something in it is for the viewer; a fold the viewer
+      // chose stays as chosen.
+      if (!view.foldChosen) view.folded = !(count.needsYou > 0) && !view.editing;
+      view.fold.replaceChildren(make('span', 'work-fold-name', section.display_name), make('span', 'work-tree-facts',
+        model().projectLine(count)));
+      applyFold(view);
+      // The notes line shows only when someone has written them.
+      const notes = [section.objective, section.today].filter(Boolean);
+      view.brief.hidden = notes.length === 0;
+      if (notes.length) {
+        view.brief.replaceChildren(document.createTextNode(notes.concat([section.updatedBy]).join(' · ') + ' · '),
+          ageNode(section.updated_at));
+      }
+      view.editSummary.setAttribute('aria-label', 'More for ' + section.display_name);
       view.edit.hidden = view.editing;
-      renderRowNodes(view.rows, section.rows, 'Nothing open');
+      renderRowNodes(view.rows, section.rows, null);
+      view.rows.hidden = section.rows.length === 0;
+      view.doneToggle.hidden = closedCount(section) === 0;
       view.doneToggle.textContent = 'done (' + section.doneCount + ')' +
         (section.withdrawnCount ? ' · withdrawn (' + section.withdrawnCount + ')' : '');
       if (view.doneOpen && view.doneFor !== closedCount(section)) loadDone(view);
@@ -334,6 +436,8 @@
     form.append(cancel);
     view.editing = true;
     view.edit.hidden = true;
+    view.folded = false;
+    applyFold(view);
     view.status.textContent = '';
     view.formSlot.replaceChildren(form);
     objective.node.focus();
@@ -343,7 +447,7 @@
     view.editing = false;
     view.formSlot.replaceChildren();
     view.edit.hidden = false;
-    view.edit.focus();
+    view.editSummary.focus();
   }
 
   async function loadBrief() {
@@ -1322,7 +1426,7 @@
   function start(user, deps) {
     stop();
     const state = {
-      user, deps, brief: null, projectViews: new Map(), asks: [], answers: model().createAnswerTracker(), refreshAgain: false,
+      user, deps, brief: null, projectViews: new Map(), holderOpen: new Set(), asks: [], answers: model().createAnswerTracker(), refreshAgain: false,
       refreshing: false, drawerRequest: 0, drawerItem: null, drawerUpdatedAt: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },

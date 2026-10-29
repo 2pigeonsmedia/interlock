@@ -1168,3 +1168,29 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
   .room-layout { grid-template-columns: 1fr; }
   .work { order: 3; }
 }
+
+/* Work panel, as cards and folds: one thing, one row; empty sections hidden. */
+.work-card-head { display: flex; justify-content: space-between; gap: 8px; font-size: 0.8rem; color: var(--ink-2); }
+.work-card-who { font-weight: 600; color: var(--ink); }
+.work-age { font-family: var(--font-ai); font-size: 0.72rem; color: var(--ink-3); white-space: nowrap; }
+.work-means { font-size: 0.82rem; color: var(--ink-2); overflow-wrap: anywhere; }
+.work-card-detail { font-size: 0.8rem; color: var(--ink-3); overflow-wrap: anywhere; }
+.work-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.work-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.work-hold { font-family: var(--font-ai); font-size: 0.74rem; border: 1px solid var(--line); border-radius: 3px; padding: 3px 8px; background: transparent; color: var(--ink-2); cursor: pointer; }
+.work-hold b { font-weight: 600; color: var(--ink); }
+.work-hold[aria-pressed="true"] { border-color: var(--ink-2); color: var(--ink); }
+.work-project-heading { display: flex; align-items: baseline; gap: 6px; }
+.work-fold { flex: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; background: none; border: 0; padding: 2px 0; text-align: left; color: var(--ink); cursor: pointer; font: inherit; }
+.work-fold::before { content: '▸'; color: var(--ink-3); }
+.work-fold[aria-expanded="true"]::before { content: '▾'; }
+.work-fold-name { font-weight: 600; }
+.work-project { grid-template-columns: minmax(0, 1fr) auto; }
+.work-project > .work-project-heading { grid-column: 1; grid-row: 1; margin: 0; align-self: center; }
+.work-card-actions .quiet-action { padding: 3px 10px; font-size: 0.8rem; min-height: 0; }
+.work-project > .work-more { grid-column: 2; grid-row: 1; position: relative; align-self: center; }
+.work-project > .work-project-body { grid-column: 1 / -1; display: grid; gap: 6px; }
+.work-more summary { list-style: none; cursor: pointer; padding: 0 6px; color: var(--ink-3); }
+.work-more summary::-webkit-details-marker { display: none; }
+.work-more[open] > .quiet-action { position: absolute; right: 0; z-index: 2; white-space: nowrap; }
+[hidden] { display: none !important; }

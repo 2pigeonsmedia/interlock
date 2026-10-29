@@ -6,7 +6,8 @@ const test = require('node:test');
 const model = require('../src/web/work_panel_model.js');
 
 const {
-  who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
+  who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou, reportedToYou,
+  ageText, firstLine, needsCards, trackedBy, projectLine, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
   errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson, projectSections, drawerLines,
 } = model;
@@ -89,7 +90,7 @@ test('state labels name work states and decision states in plain words', () => {
     ['Open', 'Active', 'Blocked', 'Ready', 'Done']);
   assert.equal(stateLabel({ kind: 'finding', state: 'ready' }), 'Ready');
   assert.deepEqual(['awaiting', 'answered', 'reported', 'withdrawn'].map(state => stateLabel(decision(state))),
-    ['Awaiting answer', 'Answered here', 'Answer reported', 'Withdrawn']);
+    ['Awaiting answer', 'Answered', 'Answer reported', 'Withdrawn']);
 });
 
 test('needs you lists decisions to answer and work to open, oldest first', () => {
@@ -825,9 +826,9 @@ test('an answer reads who gave it, and an owner answering for someone names both
 
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'changedSince', 'createAnswerTracker', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
-    'needsYou', 'notifyText', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
-    'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
+  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'ageText', 'answerLines', 'changedSince', 'createAnswerTracker', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'firstLine', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
+    'needsCards', 'needsYou', 'notifyText', 'projectLine', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
+    'shareLine', 'sourceLine', 'stateLabel', 'trackedBy', 'waitingLabel', 'who']);
 });
 
 test('the kill slot reads in words on the decision and its Needs you row; an older record shows none', () => {
@@ -917,10 +918,10 @@ test('a decision the room answered reads as answered in the room, from the recor
   const room = { kind: 'direct', source: 'answered in the room #5' };
   assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer: room }), 'Answered in the room');
   assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer_summary: room }), 'Answered in the room');
-  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer: { kind: 'direct', source: '' } }), 'Answered here');
+  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer: { kind: 'direct', source: '' } }), 'Answered');
   assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer: { kind: 'direct', source: 'answered in the room #5 and more' } }),
-    'Answered here', 'only the room\'s exact words count');
-  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer_summary: { kind: 'direct' } }), 'Answered here',
+    'Answered', 'only the room\'s exact words count');
+  assert.equal(stateLabel({ kind: 'decision', state: 'answered', answer_summary: { kind: 'direct' } }), 'Answered',
     'a row without the answer\'s source keeps the old label');
   assert.equal(stateLabel({ kind: 'decision', state: 'reported', answer: room }), 'Answer reported');
 });
@@ -939,4 +940,55 @@ test('the dialog says a room answer was given in the room, naming the message', 
   assert.deepEqual(answerLines({ answer: { kind: 'direct', by, source: 'answered in the room #7' } }, []),
     ['Answered in the room by Scout (message #7)']);
   assert.deepEqual(answerLines({ answer: { kind: 'direct', by, source: '' } }, []), ['Answered here by Scout']);
+});
+
+test('ages read in plain words', () => {
+  assert.deepEqual([NOW, NOW - 30_000, NOW - 5 * MINUTE, NOW - 3 * HOUR, NOW - 2 * DAY].map(at => ageText(at, NOW)),
+    ['just now', 'just now', '5 m ago', '3 h ago', '2 d ago']);
+  assert.equal(firstLine('\n  The printer jams.\nShould I order?'), 'The printer jams.');
+});
+
+test('Needs you cards: a decision and its own ask are one card answered through the ask; a bare ask is its own', () => {
+  const brief = { projects: [{ id: 'ops', display_name: 'Operations' }], open: [], decisions: [],
+    needs_me: [{ id: 'D-1', kind: 'decision', project: 'ops', title: 'Pick the launch date', proposal: 'Monday',
+      asked_by: { name: 'Lark' }, ask_message_id: 2, state: 'awaiting', updated_at: NOW - 2 * HOUR, kill_state: 'unattacked' }] };
+  const asks = [
+    { ask_id: 2, asked_at: NOW - 2 * HOUR, by: 'Lark', means: 'I schedule Monday', project: 'ops' },
+    { ask_id: 6, asked_at: NOW - HOUR, by: 'Scout', means: 'I order one roller', project: null, question: 'The printer jams.\nOrder?' },
+  ];
+  const { count, cards } = needsCards(brief, NOW, asks);
+  assert.equal(count, 2, 'one card per thing, never the decision and its ask twice');
+  assert.deepEqual(cards.map(card => [card.id, card.askId, card.question, card.means, card.project, card.age]), [
+    ['D-1', 2, 'Pick the launch date', 'I schedule Monday', 'Operations', '2 h ago'],
+    ['ask-6', 6, 'The printer jams.', 'I order one roller', 'Operations', '1 h ago'],
+  ]);
+  assert.equal(cards[0].kill, 'unattacked');
+  assert.equal(cards[0].detail, 'Proposal: Monday');
+  const unbound = needsCards(Object.assign({}, brief, { needs_me: [Object.assign({}, brief.needs_me[0], { ask_message_id: null })] }), NOW, []);
+  assert.equal(unbound.cards[0].askId, null, 'a decision with no ask of its own is opened, not answered from the card');
+  assert.equal(needsCards(Object.assign({}, brief, { needs_me: [] }), NOW, [{ ask_id: 9, asked_at: NOW, by: 'Scout', means: null }]).cards[0].question,
+    'Message #9', 'an ask without its question line names its message');
+});
+
+test('a work item made to track a decision sits under the decision, never as a row of its own', () => {
+  const brief = {
+    projects: [{ id: 'ops', display_name: 'Operations', revision: 1, updated_by: null, updated_at: 0 }],
+    needs_me: [],
+    decisions: [{ id: 'D-1', kind: 'decision', project: 'ops', title: 'Pick', state: 'awaiting', ask_message_id: 2, asked_of: { name: 'Patti' }, asked_by: { name: 'Lark' }, updated_at: 1 }],
+    open: [
+      { id: 'W-2', kind: 'work', project: 'ops', title: 'Decision: Pick', state: 'open', source_message_id: 2, awaiting: null, updated_at: 2 },
+      { id: 'W-3', kind: 'work', project: 'ops', title: 'Wait on it', state: 'blocked', awaiting: 'D-1', updated_at: 3 },
+      { id: 'W-4', kind: 'work', project: 'ops', title: 'Unrelated', state: 'open', awaiting: null, updated_at: 4 },
+    ],
+  };
+  assert.deepEqual([...trackedBy(brief)], [['W-2', 'D-1'], ['W-3', 'D-1']]);
+  const [section] = projectSections(brief);
+  assert.deepEqual(section.rows.map(node => [node.row.id, node.children.map(child => child.row.id)]),
+    [['W-4', []], ['D-1', ['W-2', 'W-3']]].sort((a, b) => section.rows.findIndex(n => n.row.id === a[0]) - section.rows.findIndex(n => n.row.id === b[0])));
+  assert.equal(section.rows.some(node => node.row.id === 'W-2'), false, 'W-2 is not a top-level row');
+});
+
+test('a folded project line names only the counts that are not zero', () => {
+  assert.equal(projectLine({ needsYou: 1, open: 2, blocked: 0, ready: 0, awaiting: 1 }), '1 waiting on you · 2 open · 1 awaiting an answer');
+  assert.equal(projectLine({ needsYou: 0, open: 0, blocked: 0, ready: 0, awaiting: 0 }), 'nothing open');
 });
