@@ -175,7 +175,7 @@ codes · `401` `not-authenticated` (no usable session) or `invalid-connection`
 (no usable bearer) · `403` `not-authorized`, `not-answerer`, `not-asker`, `owner-only`,
 `not-a-relay`, `fresh-step-up-required`, `request-refused` · `404`
 `unknown-item`, `unknown-project` · `409` `stale-revision`, `operation-conflict`,
-`answer-recorded`, `project-retired`, `project-exists`, `invalid-state` · `503`
+`answer-recorded`, `project-retired`, `default-project` (Operations cannot be retired), `project-exists`, `invalid-state` · `503`
 `store-damaged`.
 
 ## CLI

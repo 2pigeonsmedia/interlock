@@ -935,3 +935,12 @@ test('an export names a block reason only while the item is blocked', () => {
   assert.match(itemLine(), / · done: Imported\./);
   code(() => work.updateWork(lead, { operation_id: uuid(), id: item.id, expected_revision: 3, title: 'x' }), 'invalid-note');
 });
+
+test('Operations, the default project, cannot be retired; another project can', () => {
+  const { work } = fresh();
+  work.createProject(owner, { operation_id: uuid(), id: 'finance', display_name: 'Finance' });
+  assert.equal(work.retireProject(owner, { operation_id: uuid(), id: 'finance' }).project.retired_at !== null, true,
+    'ARRANGEMENT: the owner can retire a project');
+  code(() => work.retireProject(owner, { operation_id: uuid(), id: 'ops' }), 'default-project');
+  assert.ok(work.brief(owner).projects.some(project => project.id === 'ops'), 'Operations stays live');
+});

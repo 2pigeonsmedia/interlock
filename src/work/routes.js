@@ -34,7 +34,7 @@ const STATUS = Object.freeze({
   'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-a-relay': 403,
   'ambiguous-participant': 400,
   'unknown-item': 404, 'unknown-project': 404,
-  'stale-revision': 409, 'operation-conflict': 409, 'answer-recorded': 409, 'project-retired': 409,
+  'stale-revision': 409, 'operation-conflict': 409, 'answer-recorded': 409, 'project-retired': 409, 'default-project': 409,
   'project-exists': 409, 'invalid-state': 409,
   'store-damaged': 503,
 });

@@ -11,6 +11,8 @@
 
 const crypto = require('node:crypto');
 
+const { DEFAULT_PROJECT } = require('./store.js');
+
 const KINDS = Object.freeze(['work', 'finding', 'decision']);
 const WORK_STATES = Object.freeze(['open', 'active', 'blocked', 'ready', 'done']);
 const SEVERITIES = Object.freeze(['blocking', 'non-blocking']);
@@ -386,6 +388,8 @@ function createWorkService(options) {
       if (!actor.owner) fail('owner-only');
       const project = findProject(draft, body.id);
       if (project.retired_at !== null) fail('project-retired');
+      // Operations is where a question with no other project goes; it stays.
+      if (project.id === DEFAULT_PROJECT.id) fail('default-project');
       project.retired_at = now;
       project.revision += 1;
       project.updated_by = refOf(actor);

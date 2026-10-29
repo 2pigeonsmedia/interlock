@@ -498,6 +498,7 @@
 
   const ERROR_WORDS = Object.freeze({
     'not-authenticated': 'You are signed out. Sign in again to continue.',
+    'default-project': 'Operations is the room\'s default project, so it cannot be retired.',
     'not-answerer': 'Only the person this question is asked of can answer it here.',
     'not-asker': 'Only the person who asked this question, or the owner, can change it.',
     'owner-only': 'Only the owner of this room can do that.',
