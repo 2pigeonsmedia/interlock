@@ -139,7 +139,7 @@
 
   function renderNeedsYou(brief) {
     const state = session;
-    const needs = model().needsYou(brief, Date.now(), state ? state.asks : []);
+    const needs = model().needsYou(brief, Date.now(), state ? state.asks : [], state ? state.answered : new Set());
     element('needs-you-count').textContent = String(needs.count);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
     element('needs-you-list').replaceChildren(...needs.rows.map(row => {
@@ -150,6 +150,7 @@
         make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting + (row.kill ? ' · ' + row.kill : '')),
         make('p', '', row.ask + ' — ' + row.by),
       );
+      if (row.note) card.append(make('p', 'work-state', row.note));
       return card;
     }));
   }
@@ -441,7 +442,7 @@
     const item = result.item;
     const section = element('work-drawer-state');
     section.append(make('p', 'work-state', model().stateLabel(item)));
-    for (const line of model().drawerLines(item, result.history)) section.append(make('p', 'work-drawer-line', line));
+    for (const line of model().drawerLines(item, result.history, state.answered)) section.append(make('p', 'work-drawer-line', line));
     if (item.kind !== 'decision' && item.state === 'done') {
       section.append(make('p', 'work-drawer-line',
         model().doneLine(item, result.evidence, childrenOf(state, item), closerOf(result.history))));
@@ -1113,7 +1114,7 @@
       // it. The message it was made from is linked, not cited.
       op = 'decisions/ask';
       body = {
-        kind, project: element('work-create-project').value,
+        project: element('work-create-project').value,
         title: element('work-create-title').value, body: element('work-create-body').value,
         asked_of: element('work-create-to').value, about_message: message.id,
       };
@@ -1261,6 +1262,8 @@
     state.asks = addressed.filter(ask => ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
       typeof ask.by === 'string' && Number.isSafeInteger(ask.asked_at) &&
       (ask.means === null || typeof ask.means === 'string'));
+    const answered = event && event.detail && Array.isArray(event.detail.answered) ? event.detail.answered : [];
+    state.answered = new Set(answered.filter(id => Number.isSafeInteger(id) && id > 0));
     if (state.brief) renderNeedsYou(state.brief);
   }
 
@@ -1284,7 +1287,7 @@
   function start(user, deps) {
     stop();
     const state = {
-      user, deps, brief: null, projectViews: new Map(), asks: [],
+      user, deps, brief: null, projectViews: new Map(), asks: [], answered: new Set(),
       refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },

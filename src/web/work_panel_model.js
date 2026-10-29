@@ -93,16 +93,27 @@
   // Everything that waits on the viewer, across every active project, and
   // every open ask addressed to the viewer, oldest first. The brief's
   // needs_me is already unfiltered; nothing here narrows it.
-  function needsYou(brief, now, asks = []) {
+  // A decision still awaiting whose own ask was answered in the room by the
+  // person asked: the room has the answer, the record does not (yet).
+  const ROOM_NOT_RECORDED = 'Answered in the room, not recorded here';
+
+  function answeredInRoom(decision, answered) {
+    const cited = decision.source_message_id !== undefined ? decision.source_message_id
+      : decision.source_message ? decision.source_message.message_id : null;
+    return decision.state === 'awaiting' && Number.isSafeInteger(cited) && answered.has(cited);
+  }
+
+  function needsYou(brief, now, asks = [], answered = new Set()) {
     const names = projectNames(brief);
     // An ask that a decision cites as its message is that decision's row,
     // never a second one.
     const cited = new Set(brief.needs_me.concat(brief.decisions || [])
-      .filter(row => row.kind === 'decision' && row.source_message && Number.isSafeInteger(row.source_message.message_id))
-      .map(row => row.source_message.message_id));
+      .filter(row => row.kind === 'decision' && Number.isSafeInteger(row.source_message_id))
+      .map(row => row.source_message_id));
     const workRows = brief.needs_me.map(row => {
       const decision = row.kind === 'decision';
       const kill = decision ? killWord(row) : null;
+      const room = decision && answeredInRoom(row, answered) ? { note: ROOM_NOT_RECORDED } : {};
       return { at: row.updated_at, row: Object.assign({
         id: row.id,
         kind: row.kind,
@@ -115,7 +126,7 @@
           : 'asked by ' + who(row.created_by) + (row.responsible ? ' · responsible: ' + who(row.responsible) : ''),
         waiting: waitingLabel(row.updated_at, now),
         action: decision ? 'Answer' : 'Open work',
-      }, kill === null ? {} : { kill }) };
+      }, kill === null ? {} : { kill }, room) };
     });
     const rows = workRows.concat(asks.filter(ask => !cited.has(ask.ask_id))
       .map(ask => ({ at: ask.asked_at, row: askRow(ask, now) })))
@@ -365,10 +376,11 @@
   // next action with no recipient reads unassigned, as in the tile. A done
   // item's done line is added by the caller, which holds its closer and
   // follow-ups.
-  function drawerLines(item, history) {
+  function drawerLines(item, history, answered = new Set()) {
     if (item.kind === 'decision') {
       const answer = item.answer;
       return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by)]
+        .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.source_message.message_id + ').'] : [])
         .concat(answerLines(item, history))
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])
         .concat(item.rationale ? ['Rationale: ' + item.rationale] : [])

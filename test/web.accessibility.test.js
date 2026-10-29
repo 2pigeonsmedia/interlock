@@ -209,7 +209,7 @@ test('Needs you takes the open asks addressed to the viewer from the room\'s ask
     'the listener is removed with the panel session');
   assert.match(WORK_PANEL_JS, /event\.detail\.addressed/);
   assert.doesNotMatch(WORK_PANEL_JS, /detail\.asked\b/, 'asks the viewer made never wait on the viewer');
-  assert.match(WORK_PANEL_JS, /model\(\)\.needsYou\(brief, Date\.now\(\), state \? state\.asks : \[\]\)/);
+  assert.match(WORK_PANEL_JS, /model\(\)\.needsYou\(brief, Date\.now\(\), state \? state\.asks : \[\], state \? state\.answered : new Set\(\)\)/);
   assert.match(WORK_PANEL_JS, /querySelector\('\[data-message-id="' \+ row\.askId \+ '"\]'\)/,
     'an ask row shows its message in the transcript');
   assert.match(WORK_PANEL_JS, /an ask from before a clear is in History/);
@@ -270,7 +270,7 @@ test('the tile says who is responsible, the drawer says whom an owner answered f
   assert.match(WORK_PANEL_JS, /row\.ask \+ ' — ' \+ row\.by/);
   assert.doesNotMatch(WORK_PANEL_JS, /asked by ' \+ row\.askedBy/);
   // The drawer's answer lines come from the model's drawerLines, which calls answerLines.
-  assert.match(WORK_PANEL_JS, /model\(\)\.drawerLines\(item, result\.history\)/);
+  assert.match(WORK_PANEL_JS, /model\(\)\.drawerLines\(item, result\.history, state\.answered\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /Every number and\s*\/\/ every sentence comes from/);
   const pattern = /<input id="project-id" pattern="([^"]+)"/.exec(ROOM)[1];
   // Browsers compile the pattern attribute with the v flag.
@@ -370,7 +370,7 @@ test('each project lists its work in place: a heading, an inline edit, rows, and
 });
 
 test('the item dialog renders every line the model gives it, keeping line breaks', () => {
-  assert.match(WORK_PANEL_JS, /for \(const line of model\(\)\.drawerLines\(item, result\.history\)\) section\.append\(make\('p', 'work-drawer-line', line\)\)/);
+  assert.match(WORK_PANEL_JS, /for \(const line of model\(\)\.drawerLines\(item, result\.history, state\.answered\)\) section\.append\(make\('p', 'work-drawer-line', line\)\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /'Responsible: '|'Blocked: '|'Asked of '/);
   assert.match(ROOM_CSS, /\.work-drawer-line \{[^}]*white-space: pre-wrap/);
 });
@@ -387,7 +387,19 @@ test('a decision made from a message is asked in the room through the ask route'
   assert.match(WORK_PANEL_JS, /op = 'decisions\/ask';[\s\S]{0,400}asked_of: element\('work-create-to'\)\.value, about_message: message\.id,/);
   assert.doesNotMatch(WORK_PANEL_JS.slice(WORK_PANEL_JS.indexOf("op = 'decisions/ask'"), WORK_PANEL_JS.indexOf("op = 'items/create'")),
     /source_message/, 'the server cites the new ask message; the panel does not send one');
+  const askBody = WORK_PANEL_JS.slice(WORK_PANEL_JS.indexOf("op = 'decisions/ask'"), WORK_PANEL_JS.indexOf("op = 'items/create'"));
+  const sent = askBody.slice(askBody.indexOf('body = {'), askBody.indexOf('};') + 2).match(/(?<=[{,]\s*)[a-z_]+(?=\s*[:,}])/g);
+  const serverKeys = /const ASK_DECISION_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/.exec(fs.readFileSync(path.join(ROOT, 'src', 'first_owner.js'), 'utf8'))[1]
+    .match(/'([a-z_]+)'/g).map(key => key.slice(1, -1));
+  assert.ok(sent.length >= 5, 'ARRANGEMENT: the panel ask body was found: ' + sent.join(','));
+  for (const key of sent.concat(['scope'])) assert.ok(serverKeys.includes(key), `the ask route accepts the panel's ${key}`);
   assert.match(WORK_PANEL_JS, /element\('work-create-save'\)\.textContent = kind === 'decision' \? 'Ask a decision' : 'Save'/);
   assert.match(ROOM, /<label for="work-create-scope">A yes means<\/label>\s*<input id="work-create-scope" maxlength="300">/);
   assert.match(WORK_PANEL_JS, /showCreateField\('work-create-scope', kind === 'decision'\)/);
+});
+
+test('the room-answer line comes from the asks event\'s answered ids', () => {
+  assert.match(WORK_PANEL_JS, /Array\.isArray\(event\.detail\.answered\) \? event\.detail\.answered : \[\]/);
+  assert.match(WORK_PANEL_JS, /state\.answered = new Set\(answered\.filter\(id => Number\.isSafeInteger\(id\) && id > 0\)\)/);
+  assert.match(WORK_PANEL_JS, /if \(row\.note\) card\.append\(make\('p', 'work-state', row\.note\)\)/);
 });
