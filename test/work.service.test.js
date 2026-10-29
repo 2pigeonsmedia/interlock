@@ -657,6 +657,20 @@ test('brief counts each project\'s done work and findings, never its decisions',
   assert.equal(work.brief(owner, { project: 'finance' }).projects[0].done_count, 1);
 });
 
+test('brief counts each project\'s withdrawn decisions, so the tile can still reach them', () => {
+  const { work } = fresh();
+  const withdrawn = () => work.brief(owner).projects.map(project => [project.id, project.withdrawn_count]);
+  const decision = newDecision(work, builder, owner);
+  newDecision(work, builder, owner);
+  assert.deepEqual(withdrawn(), [['ops', 0]], 'ARRANGEMENT: open decisions are not counted');
+  work.withdraw(builder, { operation_id: uuid(), id: decision.id, expected_revision: 1, reason: 'not needed' });
+  assert.deepEqual(withdrawn(), [['ops', 1]]);
+  assert.equal(work.brief(owner).decisions.some(row => row.id === decision.id), false,
+    'the brief still leaves a withdrawn decision out of its open list');
+  work.reopen(builder, { operation_id: uuid(), id: decision.id, expected_revision: 2, reason: 'needed after all' });
+  assert.deepEqual(withdrawn(), [['ops', 0]], 'a reopened decision is no longer counted');
+});
+
 test('retired projects drop out of the default list and brief but their records stay readable', () => {
   const { work } = fresh();
   work.createProject(owner, { operation_id: uuid(), id: 'finance', display_name: 'Finance' });

@@ -254,8 +254,9 @@
       view.edit.setAttribute('aria-label', 'Edit ' + section.display_name + "'s objective and today");
       view.edit.hidden = view.editing;
       renderRowNodes(view.rows, section.rows, 'Nothing open');
-      view.doneToggle.textContent = 'done (' + section.doneCount + ')';
-      if (view.doneOpen && view.doneFor !== section.doneCount) loadDone(view);
+      view.doneToggle.textContent = 'done (' + section.doneCount + ')' +
+        (section.withdrawnCount ? ' · withdrawn (' + section.withdrawnCount + ')' : '');
+      if (view.doneOpen && view.doneFor !== closedCount(section)) loadDone(view);
       return view;
     });
     for (const [id, view] of state.projectViews) {
@@ -267,24 +268,31 @@
     if (!same) list.replaceChildren(...sections);
   }
 
-  // Done rows are fetched when the list opens, and again when the count
-  // moves while it is open; every page is read, so the list never caps.
+  function closedCount(project) {
+    return project.doneCount + project.withdrawnCount;
+  }
+
+  // Done rows and withdrawn decisions are fetched when the list opens, and
+  // again when the count moves while it is open; every page is read, so the
+  // list never caps. Only the newest load for a view may render.
   async function loadDone(view) {
     const state = session;
-    view.doneFor = view.project.doneCount;
+    const load = (view.doneLoad || 0) + 1;
+    view.doneLoad = load;
+    view.doneFor = closedCount(view.project);
     const rows = [];
     try {
       let after = 0;
       for (;;) {
         const page = await workGet('/api/work/list?project=' + encodeURIComponent(view.id) + '&limit=' + PROJECT_LIMIT +
           (after ? '&after=' + after : ''));
-        if (!current(state)) return;
-        rows.push(...page.items.filter(row => row.state === 'done'));
+        if (!current(state) || view.doneLoad !== load) return;
+        rows.push(...page.items.filter(row => row.state === 'done' || row.state === 'withdrawn'));
         if (page.next === null || page.next === undefined) break;
         after = page.next;
       }
     } catch (error) {
-      if (!current(state)) return;
+      if (!current(state) || view.doneLoad !== load) return;
       view.doneFor = null;
       if (error.code !== 'not-authenticated') view.status.textContent = model().errorWords(error.code);
       return;

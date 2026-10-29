@@ -482,6 +482,11 @@ test('project sections list each project\'s open work and decisions in place, ne
   assert.equal(finance.rows[0].facts, 'asked of Ana by Builder (session 1) · reported by Builder (session 1) · attributed to Ana');
   // A brief from before done_count counts nothing rather than failing.
   assert.equal(projectSections(Object.assign({}, brief, { projects: [PROJECTS[0]] }))[0].doneCount, 0);
+  assert.equal(ops.withdrawnCount, 0);
+  const withdrawn = projectSections(Object.assign({}, brief, {
+    projects: [Object.assign({}, PROJECTS[0], { done_count: 2, withdrawn_count: 3 })],
+  }));
+  assert.deepEqual([withdrawn[0].doneCount, withdrawn[0].withdrawnCount], [2, 3]);
 });
 
 test('the item dialog shows every field of a work item or finding, and a block reason only while blocked', () => {
@@ -519,9 +524,14 @@ test('the item dialog shows every field of a decision, with its answer\'s condit
       attributed_to: ANA, at: NOW, reason: '' } });
   assert.deepEqual(drawerLines(reported, []), [
     'Asked of Ana by Lead', 'Reported by Builder (session 1) · attributed to Ana · not confirmed here',
-    'Proposal: Use the credit union', 'Answer: Yes', 'Conditions: after Friday', 'Answer source: phone call',
+    'Proposal: Use the credit union', 'Answer: Yes', 'Answer conditions: after Friday', 'Answer source: phone call',
     'Details: Which bank?',
   ]);
+  const limited = Object.assign({}, asked, { conditions: 'Only under 500' });
+  assert.deepEqual(drawerLines(limited, []), [
+    'Asked of Ana by Lead', 'Proposal: Use the credit union', 'Rationale: Lower fees', 'Scope: Checking only',
+    'Asked with conditions: Only under 500', 'Follow-up of W-12', 'Details: Which bank?',
+  ], 'the asker\'s own conditions show before an answer exists');
   const direct = Object.assign({}, reported, { state: 'answered',
     answer: { kind: 'direct', text: 'No', conditions: '', source: 'recorded here', by: ANA, attributed_to: ANA, at: NOW, reason: '' } });
   assert.deepEqual(drawerLines(direct, []), [

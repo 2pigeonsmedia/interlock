@@ -4,6 +4,7 @@ const path = require('node:path');
 const { clientSource } = require('./hosted.js');
 const { SETTINGS_ENDED_MS } = require('./idle.js');
 const { readRoomSettings, writeRoomSettings } = require('./room_settings.js');
+const { version: PACKAGE_VERSION } = require('../package.json');
 
 const MAX_JSON_BYTES = 384 * 1024;
 const JSON_TYPE = 'application/json; charset=utf-8';
@@ -46,8 +47,16 @@ function encodedJson(value) {
   return Buffer.from(JSON.stringify(value) + '\n', 'utf8');
 }
 
+// Open pages and AI clients poll these routes; a successful answer carries the
+// running version so a client loaded from an older release can say so. Error
+// answers (signed out included) never carry it.
+const VERSIONED_ROUTES = new Set(['/api/messages', '/api/participants', '/api/ai/messages']);
+const versionedResponses = new WeakSet();
+
 function send(response, status, body, contentType, method, extraHeaders = {}) {
-  const headers = Object.assign({}, SECURITY_HEADERS, extraHeaders, {
+  const version = versionedResponses.has(response) && status < 400
+    ? { 'x-interlock-version': PACKAGE_VERSION } : {};
+  const headers = Object.assign({}, SECURITY_HEADERS, extraHeaders, version, {
     'content-length': body.length,
     'content-type': contentType,
   });
@@ -1150,10 +1159,10 @@ function createFirstOwnerHandler(options) {
     }
   }
 
-  function authorizedActor(request, authorization, now) {
+  function authorizedActor(request, authorization, now, activity = 'ordinary') {
     const who = house.whoami({
       cookie_header: request.headers.cookie,
-      activity: 'ordinary',
+      activity,
       now,
     });
     if (!who || typeof who.subject_id !== 'string' || who.subject_id !== authorization.subject_id ||
@@ -1423,17 +1432,20 @@ function createFirstOwnerHandler(options) {
   // Two doors to one service. A browser session or an admitted seat bearer
   // becomes a trusted actor here; the request body never contributes identity.
 
-  function workOwnerFlag(request, authorized, now) {
-    const who = house.whoami({ cookie_header: request.headers.cookie, activity: 'ordinary', now });
+  function workOwnerFlag(request, authorized, now, activity) {
+    const who = house.whoami({ cookie_header: request.headers.cookie, activity, now });
     return !!(who && who.subject_id === authorized.subject_id && Array.isArray(who.roles) &&
       who.roles.some(role => role && role.slug === 'administrator'));
   }
 
   function browserWorkActor(request, response, mutation) {
     const now = Date.now();
+    // A read is a poll the open panel makes every few seconds: like the room's
+    // other polls it must not keep an idle session alive. Only a write is activity.
+    const activity = mutation ? 'ordinary' : 'passive-delivery';
     const authorized = mutation
-      ? house.authorizeWrite(requestMeta(request, now), 'write', CHAT_RESOURCE)
-      : house.authorizeRead(requestMeta(request, now), 'read', CHAT_RESOURCE);
+      ? house.authorizeWrite(authorizationMeta(request, now), 'write', CHAT_RESOURCE)
+      : house.authorizeRead(authorizationMeta(request, now), 'read', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true) {
       const sessionState = mutation ? house.resolveSession({
         cookie_header: request.headers.cookie, activity: 'passive-delivery', now,
@@ -1441,14 +1453,14 @@ function createFirstOwnerHandler(options) {
       refuseAuthorization(request, response, authorized, sessionState);
       return null;
     }
-    const actor = authorizedActor(request, authorized, now);
+    const actor = authorizedActor(request, authorized, now, activity);
     if (!actor) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return null;
     }
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null,
-      owner: workOwnerFlag(request, authorized, now), now,
+      owner: workOwnerFlag(request, authorized, now, activity), now,
     });
   }
 
@@ -2314,6 +2326,7 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const pathname = target.pathname;
+    if (VERSIONED_ROUTES.has(pathname)) versionedResponses.add(response);
 
     if (request.method === 'GET' || request.method === 'HEAD') {
       if (pathname === '/health') {
