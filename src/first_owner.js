@@ -11,6 +11,7 @@ const BROWSER_WAIT_MS = 25_000;
 const AI_ADMISSION_WAIT_MS = 20_000;
 const AI_MESSAGE_WAIT_MS = 45_000;
 const CHAT_READ_LIMIT = 100;
+const PARTICIPANT_STATE_BATCH = 64;
 const CHAT_RESOURCE = 'room:main';
 // Refusals an annotated post or a lifecycle row can earn, by HTTP status.
 // `unread-addressed` (409) also carries the ids; see annotationRefusal.
@@ -2143,7 +2144,12 @@ function createFirstOwnerHandler(options) {
       const live = (await chat.listParticipants()).filter(row => row.kind === 'seat' || row.kind === 'person');
       const ended = house.listRecentEndedSeats({ now, since: now - SETTINGS_ENDED_MS });
       const ids = [...live, ...ended].map(row => row.subject_id).filter(id => typeof id === 'string');
-      const states = await chat.participantState(ids);
+      // The chat store reads at most 64 participants per call; a busy room has
+      // more than that within its ended-seat window, so read them in batches.
+      const states = [];
+      for (let start = 0; start < ids.length; start += PARTICIPANT_STATE_BATCH) {
+        states.push(...await chat.participantState(ids.slice(start, start + PARTICIPANT_STATE_BATCH)));
+      }
       const stateById = new Map(states.map(row => [row.subject_id, row]));
       const people = live.filter(row => row.kind === 'person').map(row => Object.freeze({
         name: row.name,
