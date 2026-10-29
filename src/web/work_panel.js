@@ -147,7 +147,7 @@
       const open = row.kind === 'ask' ? () => showAsk(row) : () => openItem(row.id);
       card.append(
         openButton('work-open', row.title, row.action + ' ' + row.id + ': ' + row.title, open, row.id),
-        make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting),
+        make('p', 'work-state', row.projectName + ' · ' + row.id + ' · ' + row.waiting + (row.kill ? ' · ' + row.kill : '')),
         make('p', '', row.ask + ' — ' + row.by),
       );
       return card;
@@ -713,7 +713,41 @@
     })];
   }
 
+  // The kill slot: anyone but the asker asks the one question that would sink
+  // the decision; only the asker replies, and says whether it survived.
+  function killForm(item) {
+    const question = control('textarea', 'question', 'The one question that would sink it', { required: true });
+    return [actionForm('work-kill', [question], 'Ask the kill question', async operation => {
+      const result = await write('decisions/kill',
+        { id: item.id, expected_revision: item.revision, question: question.node.value }, null, operation);
+      if (result) await afterDecisionWrite(result, item);
+    })];
+  }
+
+  function killReplyForm(item) {
+    const words = control('textarea', 'words', 'Your reply', { required: true });
+    const outcome = choice('outcome', 'Outcome', [
+      { value: 'survived', text: 'It survives the question' },
+      { value: 'killed', text: 'The question kills it' },
+    ], 'survived');
+    return [
+      make('p', '', 'Kill question from ' + model().who(item.kill.by) + ': ' + item.kill.question),
+      actionForm('work-killreply', [words, outcome], 'Record reply', async operation => {
+        const result = await write('decisions/kill-reply', {
+          id: item.id, expected_revision: item.revision, words: words.node.value, outcome: outcome.node.value,
+        }, null, operation);
+        if (result) await afterDecisionWrite(result, item);
+      }),
+    ];
+  }
+
   function renderDecisionActions(buttons, slot, item) {
+    if (item.kill_state === 'unattacked' && !isMe(item.asked_by)) {
+      actionButton(buttons, slot, 'Ask the kill question', item, () => killForm(item));
+    }
+    if (item.kill_state === 'attacked' && item.kill && isMe(item.asked_by)) {
+      actionButton(buttons, slot, 'Reply to the kill question', item, () => killReplyForm(item));
+    }
     if (item.state === 'awaiting') {
       if (isMe(item.asked_of)) actionButton(buttons, slot, 'Answer', item, () => answerForm(item, null, 'Record answer'));
       else {
@@ -1015,6 +1049,9 @@
     showCreateField('work-create-project', !evidence);
     showCreateField('work-create-to', !evidence);
     showCreateField('work-create-next-action', kind === 'work');
+    showCreateField('work-create-scope', kind === 'decision');
+    element('work-create-scope').value = '';
+    element('work-create-save').textContent = kind === 'decision' ? 'Ask a decision' : 'Save';
     showCreateField('work-create-item', evidence);
     element('work-create-status').textContent = '';
   }
@@ -1070,6 +1107,18 @@
         id: element('work-create-item').value, target: element('work-create-title').value,
         observed: prefill.observed, limits: element('work-create-body').value, source_message: prefill.source_message,
       };
+    } else if (kind === 'decision') {
+      // "Ask a decision": the server posts a new message carrying the ask,
+      // then records the decision citing it, so a yes in the room answers
+      // it. The message it was made from is linked, not cited.
+      op = 'decisions/ask';
+      body = {
+        kind, project: element('work-create-project').value,
+        title: element('work-create-title').value, body: element('work-create-body').value,
+        asked_of: element('work-create-to').value, about_message: message.id,
+      };
+      const scope = element('work-create-scope').value;
+      if (scope.trim() !== '') body.scope = scope;
     } else {
       op = 'items/create';
       body = {
@@ -1078,8 +1127,7 @@
         source_message: prefill.source_message,
       };
       const to = element('work-create-to').value;
-      if (kind === 'decision') body.asked_of = to;
-      else if (to !== '') {
+      if (to !== '') {
         body.next_to = to;
         body.next_action = element('work-create-next-action').value;
       }

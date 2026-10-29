@@ -6,7 +6,7 @@ const test = require('node:test');
 const model = require('../src/web/work_panel_model.js');
 
 const {
-  who, waitingLabel, stateLabel, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
+  who, waitingLabel, stateLabel, killWord, killLines, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
   errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson, projectSections, drawerLines,
 } = model;
@@ -819,7 +819,47 @@ test('an answer reads who gave it, and an owner answering for someone names both
 
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
     'needsYou', 'notifyText', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
+});
+
+test('the kill slot reads in words on the decision and its Needs you row; an older record shows none', () => {
+  assert.deepEqual(['unattacked', 'attacked', 'survived', 'killed'].map(state => killWord({ kill_state: state })),
+    ['unattacked', 'attacked', 'attacked, survived', 'killed']);
+  assert.equal(killWord({}), null);
+  assert.equal(killWord({ kill_state: 'sunk' }), null);
+  const lead = { name: 'Lead', kind: 'seat', session: null };
+  const marlow = { name: 'Marlow', kind: 'seat', session: 1 };
+  assert.deepEqual(killLines({ kill_state: 'killed', kill: { question: 'Would the bank\nrefuse?', by: marlow, at: 1,
+    reply: { words: 'It would.', outcome: 'killed', by: lead, at: 2 } } }), [
+    'Kill slot: killed',
+    'Kill question from Marlow (session 1): Would the bank ⏎ refuse?',
+    'Reply from Lead (killed): It would.',
+  ]);
+  assert.deepEqual(killLines({ kill_state: 'unattacked', kill: null }), ['Kill slot: unattacked']);
+  assert.deepEqual(killLines({}), []);
+  const brief = Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row.kind === 'decision'
+    ? Object.assign({}, row, { kill_state: 'attacked' }) : row) });
+  const rows = needsYou(brief, NOW).rows;
+  assert.equal(rows.find(row => row.kind === 'decision').kill, 'attacked');
+  assert.equal(Object.hasOwn(rows.find(row => row.kind === 'work'), 'kill'), false);
+});
+
+test('an ask that a decision cites as its message is drawn once, as the decision', () => {
+  const decision = BRIEF.needs_me.find(row => row.kind === 'decision');
+  const brief = Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row === decision
+    ? Object.assign({}, row, { source_message: { message_id: 41, byline: 'Lead', session: null, quote: 'Decision W-3' } }) : row) });
+  const ask = id => ({ ask_id: id, asked_at: NOW - HOUR, by: 'Lead', of: 'Ana', of_kind: 'person', means: 'I pick it',
+    deliver: 'now', state: 'open', kept_open: false, carried_from: null, answers: [] });
+  const result = needsYou(brief, NOW, [ask(41), ask(42)]);
+  assert.deepEqual(result.rows.map(row => row.id).sort(), ['W-1', 'W-3', 'ask-42'],
+    'the cited ask is the decision row; the uncited ask keeps its own');
+  assert.equal(result.count, 3);
+  const viaDecisions = needsYou(Object.assign({}, BRIEF, { decisions: [{ kind: 'decision', id: 'D-9',
+    source_message: { message_id: 42 } }] }), NOW, [ask(42)]);
+  assert.equal(viaDecisions.rows.some(row => row.id === 'ask-42'), false,
+    'a decision in the brief\'s decision list also claims its ask');
+  assert.equal(needsYou(BRIEF, NOW, [ask(41)]).rows.some(row => row.id === 'ask-41'), true,
+    'ARRANGEMENT: without the citation the ask has its own row');
 });

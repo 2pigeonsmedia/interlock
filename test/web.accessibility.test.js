@@ -257,7 +257,7 @@ test('a write with no error code reads as unavailable, and an open form keeps on
   assert.match(WORK_PANEL_JS, /if \(operation\) operation\.id = crypto\.randomUUID\(\);/);
   const forms = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+'/g);
   const wired = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+', [^\n]*async operation => \{/g);
-  assert.equal(forms.length, 9);
+  assert.equal(forms.length, 11, 'nine forms, plus the kill question and its reply');
   assert.equal(wired.length, forms.length, 'every form hands its operation to its write');
   // Every drawer form reports in the drawer; the project notes form reports beside its project.
   assert.equal((WORK_PANEL_JS.match(/, null, operation\)/g) || []).length, forms.length - 1);
@@ -373,4 +373,21 @@ test('the item dialog renders every line the model gives it, keeping line breaks
   assert.match(WORK_PANEL_JS, /for \(const line of model\(\)\.drawerLines\(item, result\.history\)\) section\.append\(make\('p', 'work-drawer-line', line\)\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /'Responsible: '|'Blocked: '|'Asked of '/);
   assert.match(ROOM_CSS, /\.work-drawer-line \{[^}]*white-space: pre-wrap/);
+});
+
+test('the kill slot is asked by anyone but the asker and replied to only by the asker', () => {
+  assert.match(WORK_PANEL_JS, /if \(item\.kill_state === 'unattacked' && !isMe\(item\.asked_by\)\) \{\s*actionButton\(buttons, slot, 'Ask the kill question'/);
+  assert.match(WORK_PANEL_JS, /if \(item\.kill_state === 'attacked' && item\.kill && isMe\(item\.asked_by\)\) \{\s*actionButton\(buttons, slot, 'Reply to the kill question'/);
+  assert.match(WORK_PANEL_JS, /write\('decisions\/kill',\s*\{ id: item\.id, expected_revision: item\.revision, question: question\.node\.value \}/);
+  assert.match(WORK_PANEL_JS, /write\('decisions\/kill-reply', \{\s*id: item\.id, expected_revision: item\.revision, words: words\.node\.value, outcome: outcome\.node\.value,/);
+  assert.match(WORK_PANEL_JS, /row\.waiting \+ \(row\.kill \? ' · ' \+ row\.kill : ''\)/, 'the Needs you row shows the kill state');
+});
+
+test('a decision made from a message is asked in the room through the ask route', () => {
+  assert.match(WORK_PANEL_JS, /op = 'decisions\/ask';[\s\S]{0,400}asked_of: element\('work-create-to'\)\.value, about_message: message\.id,/);
+  assert.doesNotMatch(WORK_PANEL_JS.slice(WORK_PANEL_JS.indexOf("op = 'decisions/ask'"), WORK_PANEL_JS.indexOf("op = 'items/create'")),
+    /source_message/, 'the server cites the new ask message; the panel does not send one');
+  assert.match(WORK_PANEL_JS, /element\('work-create-save'\)\.textContent = kind === 'decision' \? 'Ask a decision' : 'Save'/);
+  assert.match(ROOM, /<label for="work-create-scope">A yes means<\/label>\s*<input id="work-create-scope" maxlength="300">/);
+  assert.match(WORK_PANEL_JS, /showCreateField\('work-create-scope', kind === 'decision'\)/);
 });
