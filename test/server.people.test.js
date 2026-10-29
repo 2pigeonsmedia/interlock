@@ -174,6 +174,39 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     assert.equal(Object.keys(scout).length, 15);
     assert.deepEqual([scout.model, scout.project, scout.assigned.how], ['Opus 5.5', 'ops', 'join']);
 
+    // Presence, own project, a lead assigning, the owner assigning, a post clearing.
+    const scoutAuth = { authorization: `Bearer ${candidate.token}` };
+    const wren = { authorization: `Bearer ${plain}` };
+    const aiPost = (pathname, body, headers) => call(runtime, { path: pathname, method: 'POST', body, headers });
+    const rows = async () => (await call(runtime, { path: '/api/participants', headers: { cookie: owner.cookie } }))
+      .json.participants;
+    const of = (list, name) => list.find(item => item.name === name);
+    const set = await aiPost('/api/ai/presence', { middle: 'building the import', waiting_on: 'Ana', need: null }, scoutAuth);
+    assert.equal(set.status, 200, set.text);
+    assert.deepEqual([of(await rows(), 'Scout').presence.middle, of(await rows(), 'Scout').presence.waiting_on],
+      ['building the import', 'Ana']);
+    const notLead = await aiPost('/api/ai/project', { seat_name: 'Wren', project: 'ops' }, scoutAuth);
+    assert.deepEqual([notLead.status, notLead.json.error], [403, 'not-authorized'], 'a seat without a grant cannot assign another');
+    const own = await aiPost('/api/ai/project', { project: null }, wren);
+    assert.equal(own.status, 200, own.text);
+    assert.equal(of(await rows(), 'Wren').assigned.how, 'self');
+    owner = await elevate(runtime, owner, ownerDevice);
+    const granted = await post(runtime, '/api/grants/create',
+      { holder_name: 'Scout', holder_kind: 'seat', project: 'ops', scope: 'leads ops', until: null }, owner);
+    assert.equal(granted.status, 201, granted.text);
+    const byLead = await aiPost('/api/ai/project', { seat_name: 'Wren', project: 'ops' }, scoutAuth);
+    assert.equal(byLead.status, 200, 'the lead assigns into its own project: ' + byLead.text);
+    assert.deepEqual([of(await rows(), 'Wren').project, of(await rows(), 'Wren').assigned.how,
+      of(await rows(), 'Wren').assigned.by_name], ['ops', 'assigned', 'Scout']);
+    const byOwner = await post(runtime, '/api/people/assign', { seat_name: 'Wren', project: null }, owner);
+    assert.equal(byOwner.status, 200, byOwner.text);
+    assert.deepEqual([of(await rows(), 'Wren').project, of(await rows(), 'Wren').assigned.by_name], [null, 'Ana']);
+    const said = await aiPost('/api/ai/messages', { text: 'done with the import', client_message_id: crypto.randomUUID() }, scoutAuth);
+    assert.equal(said.status, 201, said.text);
+    assert.equal(of(await rows(), 'Scout').presence, null, 'a message clears its author\'s presence line');
+    const profile = await post(runtime, '/api/profile', { line: 'BLUF, bullets' }, owner);
+    assert.equal(profile.status, 200, profile.text);
+
     const bad = await call(runtime, { path: '/api/ai/admissions', method: 'POST',
       body: Object.assign({}, knock, { request_id: crypto.randomUUID(), name: 'Bad', model: 'a\nb' }) });
     assert.deepEqual([bad.status, bad.json.error], [400, 'invalid-request'], 'a model with a line break is refused');

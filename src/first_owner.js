@@ -1295,6 +1295,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.append(body, actor));
       if (saved === null) throw new Error('invalid chat result');
+      clearPresenceAfterPost(actor);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       if (error && error.code === 'invalid-text') {
@@ -1356,6 +1357,98 @@ function createFirstOwnerHandler(options) {
           { projects: people.liveProjects() });
       }
     } catch (_) { /* the seat is in; its declared facts are advisory */ }
+  }
+
+  // A message is the clear for its author's presence line.
+  function clearPresenceAfterPost(actor) {
+    if (!people || !actor || typeof actor.subject_id !== 'string') return;
+    try {
+      people.service.clearPresenceOnPost({ subject_id: actor.subject_id, name: actor.name, kind: actor.kind,
+        now: Date.now() });
+    } catch (_) { /* the message is saved; a presence line is advisory */ }
+  }
+
+  const PEOPLE_ERRORS = Object.freeze({
+    'invalid-request': 400, 'unknown-project': 400, 'not-authorized': 403, 'store-damaged': 503,
+  });
+
+  function sendPeopleResult(request, response, write) {
+    try {
+      const row = write();
+      sendJson(request, response, 200, { ok: true, seq: row ? row.seq : null });
+    } catch (error) {
+      const code = error && PEOPLE_ERRORS[error.code] ? error.code : null;
+      sendJson(request, response, code ? PEOPLE_ERRORS[code] : 503, { ok: false, error: code || 'unavailable' });
+    }
+  }
+
+  function peopleBody(request, response, body, keys) {
+    if (!people) {
+      sendJson(request, response, 404, { ok: false, error: 'not-found' });
+      return null;
+    }
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return null;
+    }
+    if (!closedObject(body, keys)) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return null;
+    }
+    return body;
+  }
+
+  // A person's own presence line, profile line, and (for the first owner, an
+  // administrator, or a project's lead) a seat's project.
+  function setPersonPresence(request, response, body) {
+    if (!peopleBody(request, response, body, ['middle', 'waiting_on', 'need'])) return;
+    const actor = browserWorkActor(request, response, true);
+    if (!actor) return;
+    sendPeopleResult(request, response, () => people.service.presence(actor, body));
+  }
+
+  function setPersonProfile(request, response, body) {
+    if (!peopleBody(request, response, body, ['line'])) return;
+    const actor = browserWorkActor(request, response, true);
+    if (!actor) return;
+    sendPeopleResult(request, response, () => people.service.profile(actor, body));
+  }
+
+  function assignSeat(request, response, body) {
+    if (!peopleBody(request, response, body, ['seat_name', 'project'])) return;
+    const actor = browserWorkActor(request, response, true);
+    if (!actor) return;
+    sendPeopleResult(request, response, () => people.service.assign(actor,
+      { seat_name: body.seat_name, project: body.project, how: 'assigned' }, { projects: people.liveProjects() }));
+  }
+
+  // An AI's own presence line and its own project.
+  function setAiPresence(request, response, body) {
+    if (!peopleBody(request, response, body, ['middle', 'waiting_on', 'need'])) return;
+    const authorized = seatAuthorization(request, 'write');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    const actor = Object.assign({ owner: false, now: Date.now() }, seatActor(authorized, null));
+    sendPeopleResult(request, response, () => people.service.presence(actor, body));
+  }
+
+  // `{ project }` sets the AI's own project; `{ seat_name, project }` is a lead
+  // assigning another seat, allowed only into its own grant's project.
+  function setAiProject(request, response, body) {
+    const other = body !== null && typeof body === 'object' && Object.hasOwn(body, 'seat_name');
+    if (!peopleBody(request, response, body, other ? ['seat_name', 'project'] : ['project'])) return;
+    const authorized = seatAuthorization(request, 'write');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    const actor = Object.assign({ owner: false, now: Date.now() }, seatActor(authorized, null));
+    const self = !other || body.seat_name === actor.name;
+    sendPeopleResult(request, response, () => people.service.assign(actor,
+      { seat_name: self ? actor.name : body.seat_name, project: body.project, how: self ? 'self' : 'assigned' },
+      { projects: people.liveProjects() }));
   }
 
   async function knockAdmission(request, response, body) {
@@ -1949,6 +2042,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.append({ text: input.text }, actor));
       if (!saved) throw new Error('invalid chat result');
+      clearPresenceAfterPost(actor);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       if (error && (error.code === 'invalid-text' || error.code === 'message-id-collision')) {
@@ -2002,6 +2096,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (!saved) throw new Error('invalid chat result');
+      clearPresenceAfterPost(actor);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2037,6 +2132,7 @@ function createFirstOwnerHandler(options) {
     try {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, input.annotation));
       if (saved === null) throw new Error('invalid chat result');
+      clearPresenceAfterPost(actor);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2506,6 +2602,9 @@ function createFirstOwnerHandler(options) {
     ['/api/annotations', annotateAsPerson],
     ['/api/grants/create', createGrant],
     ['/api/grants/revoke', revokeGrant],
+    ['/api/presence', setPersonPresence],
+    ['/api/profile', setPersonProfile],
+    ['/api/people/assign', assignSeat],
   ]);
 
   return async function firstOwnerHandler(request, response) {
@@ -2845,7 +2944,8 @@ function createFirstOwnerHandler(options) {
     }
 
     if ((pathname === '/api/ai/messages' || pathname === '/api/ai/receipts' ||
-        pathname === '/api/ai/annotated-messages' || pathname === '/api/ai/annotations') &&
+        pathname === '/api/ai/annotated-messages' || pathname === '/api/ai/annotations' ||
+        pathname === '/api/ai/presence' || pathname === '/api/ai/project') &&
         request.method === 'POST') {
       if (target.search !== '') {
         sendJson(request, response, 400, { ok: false, error: 'invalid-message-query' });
@@ -2857,6 +2957,8 @@ function createFirstOwnerHandler(options) {
         else if (pathname === '/api/ai/annotated-messages') {
           await appendAiAnnotatedMessage(request, response, body);
         } else if (pathname === '/api/ai/annotations') await annotateAsAi(request, response, body);
+        else if (pathname === '/api/ai/presence') setAiPresence(request, response, body);
+        else if (pathname === '/api/ai/project') setAiProject(request, response, body);
         else await acknowledgeAiMessages(request, response, body);
       } catch (error) {
         if (response.headersSent || response.destroyed) return;
