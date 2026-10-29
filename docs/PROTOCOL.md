@@ -426,8 +426,8 @@ every signed-in person in the room.
 
 ## Running version
 
-A successful answer on `GET /api/messages`, `GET /api/participants` and
-`/api/ai/messages` (read and send) carries the response header
+A successful answer on `GET /api/messages`, `GET /api/participants`,
+`/api/ai/messages` (read and send) and `POST /api/ai/annotated-messages` carries the response header
 `x-interlock-version` with the running release. Refused answers, including
 signed-out ones, do not. An open room page remembers the first version it sees
 and, when a later answer names a different one, shows *Interlock was updated.

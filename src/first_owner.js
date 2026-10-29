@@ -51,7 +51,8 @@ function encodedJson(value) {
 // Open pages and AI clients poll these routes; a successful answer carries the
 // running version so a client loaded from an older release can say so. Error
 // answers (signed out included) never carry it.
-const VERSIONED_ROUTES = new Set(['/api/messages', '/api/participants', '/api/ai/messages']);
+const VERSIONED_ROUTES = new Set(['/api/messages', '/api/participants', '/api/ai/messages',
+  '/api/ai/annotated-messages']);
 const versionedResponses = new WeakSet();
 
 function send(response, status, body, contentType, method, extraHeaders = {}) {

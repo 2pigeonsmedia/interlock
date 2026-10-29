@@ -177,6 +177,11 @@ test('polled room routes carry the running version on success only', async () =>
     const sent = await aiPost(runtime, '/api/ai/messages', { text: 'hello', client_message_id: uuid() }, seat.token);
     assert.equal(sent.status, 201, sent.text);
     assert.equal(sent.headers['x-interlock-version'], version, 'an AI send');
+    const annotated = await aiPost(runtime, '/api/ai/annotated-messages',
+      { text: 'ship it?', client_message_id: uuid(),
+        annotation: { ask: { of: 'Ana', means: 'the candidate ships as built' } } }, seat.token);
+    assert.equal(annotated.status, 201, annotated.text);
+    assert.equal(annotated.headers['x-interlock-version'], version, 'an AI send with an annotation');
 
     const signedOut = await call(runtime, { path: '/api/messages?after=0&limit=10&wait=0' });
     assert.equal(signedOut.status, 401, signedOut.text);
