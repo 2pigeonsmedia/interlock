@@ -82,10 +82,12 @@ no others.
   IPv6 failures are also counted per /48 block. While a table is full, a block
   with 25 failures waits and is refused as a whole, so failures arriving over
   time fill the tables only from several hundred separate /48 blocks (about
-  660, measured). A very large burst from one /48 can still fill them: tens of
-  thousands of attempts in flight at once, before their failures are recorded,
-  are not held back by that limit. A later release will count attempts in
-  flight. The throttle then cannot tell a
+  660, measured). Attempts still being checked count toward a full table, and
+  at most 16 password checks run at once from one /48, and 32 in total. An
+  attempt past either cap is refused at once and counted against nothing, so a
+  burst cannot queue password checks that every other sign-in waits behind;
+  while a burst lasts, a sign-in can be refused this way and works on retry.
+  When the tables do fill, the throttle cannot tell a
   new address or account from the attackers' and fails closed: nearly every
   sign-in, the owner's included, waits 30 seconds and is refused. Sessions
   already signed in keep working. Sign-in recovers once fifteen minutes pass

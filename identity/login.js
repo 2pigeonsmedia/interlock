@@ -51,6 +51,12 @@ const THROTTLE_OVERFLOW_KEYS = 16384;
 // Failed sign-ins counted per IPv6 /48, the block one site or tunnel account is
 // routinely given. The limit applies only while a primary map is full.
 const THROTTLE_BLOCK_THRESHOLD = 25;
+// Password checks are expensive and share a small thread pool. These cap how
+// many run at once, per IPv6 /48 and in total, so a burst is refused at once
+// instead of queueing hashes that every other sign-in would wait behind. They
+// apply always, not only under pressure, and record nothing.
+const THROTTLE_BLOCK_INFLIGHT = 16;
+const THROTTLE_MAX_INFLIGHT = 32;
 
 function isPlainObject(o) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
@@ -108,6 +114,10 @@ function createLoginThrottle(opts) {
   const decayMs = Number.isSafeInteger(o.decayMs) && o.decayMs > 0 ? o.decayMs : THROTTLE_DECAY_MS;
   const blockThreshold = Number.isSafeInteger(o.blockThreshold) && o.blockThreshold > 0
     ? o.blockThreshold : THROTTLE_BLOCK_THRESHOLD;
+  const blockInflight = Number.isSafeInteger(o.blockInflight) && o.blockInflight > 0
+    ? o.blockInflight : THROTTLE_BLOCK_INFLIGHT;
+  const maxInflight = Number.isSafeInteger(o.maxInflight) && o.maxInflight > 0
+    ? o.maxInflight : THROTTLE_MAX_INFLIGHT;
 
   // Fresh per process, never persisted, never exposed. Its whole job is to make
   // the stored keys unusable to anyone who reads the map.
@@ -137,6 +147,7 @@ function createLoginThrottle(opts) {
   // unseen block is not counted, which leaves the other dimensions as they are.
   const blocks = new Map();
   const inflightBlock = new Map();
+  let inflightTotal = 0;
 
   function keyOf(value) {
     return crypto.createHmac('sha256', HMAC_KEY).update(String(value)).digest('hex');
@@ -221,13 +232,18 @@ function createLoginThrottle(opts) {
     const ds = delayFor(countFor(source, sk, now) + (inflightSource.get(sk) || 0));
     const da = delayFor(countFor(account, ak, now) + (inflightAccount.get(ak) || 0));
     const db = blockDelay(bk, now);
-    return { now, sk, ak, bk, ds, da, db };
+    // Capacity, not a failure: past either in-flight cap the attempt waits the
+    // base delay and is refused, and recordThrottled() records nothing for it.
+    const full = inflightTotal >= maxInflight ||
+      (bk !== null && (inflightBlock.get(bk) || 0) >= blockInflight);
+    const dc = full ? baseDelayMs : 0;
+    return { now, sk, ak, bk, ds, da, db, dc };
   }
 
   return Object.freeze({
     check(args) {
-      const { ds, da, db } = delays(isPlainObject(args) ? args : {});
-      const delay_ms = Math.max(ds, da, db);  // all checked; the largest controls
+      const { ds, da, db, dc } = delays(isPlainObject(args) ? args : {});
+      const delay_ms = Math.max(ds, da, db, dc);  // all checked; the largest controls
       return Object.freeze({ allowed: delay_ms === 0, delay_ms, retry_after_ms: delay_ms });
     },
     // Marks one attempt as in flight. Returns the release function; calling it
@@ -240,10 +256,12 @@ function createLoginThrottle(opts) {
       inflightSource.set(sk, (inflightSource.get(sk) || 0) + 1);
       inflightAccount.set(ak, (inflightAccount.get(ak) || 0) + 1);
       if (bk !== null) inflightBlock.set(bk, (inflightBlock.get(bk) || 0) + 1);
+      inflightTotal += 1;
       let released = false;
       return function release() {
         if (released) return;
         released = true;
+        inflightTotal -= 1;
         for (const [map, k] of [[inflightSource, sk], [inflightAccount, ak], [inflightBlock, bk]]) {
           if (k === null) continue;
           const n = (map.get(k) || 0) - 1;
@@ -287,6 +305,9 @@ function createLoginThrottle(opts) {
         cap_overflow_keys: THROTTLE_OVERFLOW_KEYS,
         inflight_source_entries: inflightSource.size,
         inflight_account_entries: inflightAccount.size,
+        inflight_total: inflightTotal,
+        cap_inflight: maxInflight,
+        cap_block_inflight: blockInflight,
         block_entries: blocks.size,
         block_threshold: blockThreshold,
         under_pressure: underPressure(),
