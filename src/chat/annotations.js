@@ -270,9 +270,11 @@ function createAskIndex() {
     return true;
   }
 
+  /* An open ask that is waiting on this participant now. A hold is carried
+   * for later, so it neither rings nor holds up a status post. */
   function isOpenAskOf(messageId, subjectId) {
     const ask = asks.get(messageId);
-    return !!ask && ask.state === 'open' && ask.of_subject_id === subjectId;
+    return !!ask && ask.state === 'open' && ask.of_subject_id === subjectId && ask.deliver === 'now';
   }
 
   function openAsksFor(subjectId) {

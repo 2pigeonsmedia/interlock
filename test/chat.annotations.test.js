@@ -192,6 +192,17 @@ test('a status post with unread addressed messages is refused with the ids, and 
   assert.equal(done.id, ask.id + 1);
 });
 
+test('a hold neither rings nor holds up the addressee\'s status post', async () => {
+  const { chat } = room();
+  const hold = await chat.appendAnnotated({ text: 'when you are free: the rename' }, PERSON,
+    { ask: { of: 'Marlow', deliver: 'later' } });
+  assert.deepEqual(ringed(hold), [], 'the arrangement: the hold did not ring');
+  const done = await chat.appendAnnotated({ text: 'done' }, seat(MARLOW, 'Marlow'),
+    { status: 'done', read_through: 0 });
+  assert.equal(done.id, hold.id + 1);
+  assert.equal((await chat.openAsks(MARLOW)).addressed.length, 1, 'the hold is still carried');
+});
+
 test('an AI retry replays with the same annotation and collides with a different one', async () => {
   const { chat } = room();
   const id = 'bbbbbbbb-bbbb-4bbb-8bbb-000000000001';
