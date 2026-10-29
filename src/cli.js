@@ -42,7 +42,7 @@ Usage:
   interlock recover [--port PORT]
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
-  interlock join [--product LABEL] [--name NAME] [--url URL]
+  interlock join [--product LABEL] [--name NAME] [--url URL] [--project ID] [--model LABEL]
   interlock history --connection NAME [--drain | --skip-to-current | --before N | --find TEXT] [--json]
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
@@ -423,12 +423,12 @@ function runRestore(args, io, dependencies = {}) {
 }
 
 function joinOptions(args) {
-  const options = { name: null, product: null, url: DEFAULT_URL };
+  const options = { name: null, product: null, url: DEFAULT_URL, project: null, model: null };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
     const value = args[index + 1];
-    if (!['--name', '--product', '--url'].includes(flag) || seen.has(flag) ||
+    if (!['--name', '--product', '--url', '--project', '--model'].includes(flag) || seen.has(flag) ||
         typeof value !== 'string' || value.length === 0) return null;
     seen.add(flag);
     options[flag.slice(2)] = value;
@@ -1587,15 +1587,17 @@ async function confirmCandidate(fetcher, serverUrl, profile) {
   return (await candidateConfirmation(fetcher, serverUrl, profile)).connected;
 }
 
-function admissionBody(profile) {
-  return {
+// The project and model a seat declares travel on the knock only when given,
+// so a knock to an older room is exactly what it was.
+function admissionBody(profile, declared = {}) {
+  return Object.assign({
     request_id: profile.request_id,
     name: profile.name,
     product: profile.product,
     product_provenance: profile.product_provenance,
     selector: profile.selector,
     digest: profile.digest,
-  };
+  }, declared.project ? { project: declared.project } : {}, declared.model ? { model: declared.model } : {});
 }
 
 function joinedOutput(stdout, profile, start = 'tip') {
@@ -1886,7 +1888,7 @@ async function runJoin(args, io, dependencies = {}) {
       while (firstAttempt || clock() < deadline) {
         firstAttempt = false;
         try {
-          const result = await knock(fetcher, parsed.url, admissionBody(profile));
+          const result = await knock(fetcher, parsed.url, admissionBody(profile, parsed));
           lastNetworkFailure = false;
           if (result.state === 'waiting') {
             if (Number.isSafeInteger(result.expires_at) && result.expires_at > deadline) {

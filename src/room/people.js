@@ -88,6 +88,7 @@ function createPeopleService(options) {
   const grantsById = new Map(); // grant_id -> {row, revoked_at, revoked_by, reason}
   const presence = new Map(); // subject_id -> {middle, waiting_on, need, since}
   const profiles = new Map(); // person_name -> line
+  const models = new Map(); // seat_name -> model reported at join
 
   function apply(row) {
     switch (row.kind) {
@@ -121,6 +122,10 @@ function createPeopleService(options) {
       case 'profile':
         if (row.line === null) profiles.delete(row.person_name);
         else profiles.set(row.person_name, row.line);
+        break;
+      case 'model':
+        if (row.model === null) models.delete(row.seat_name);
+        else models.set(row.seat_name, row.model);
         break;
       default:
         break;
@@ -284,7 +289,22 @@ function createPeopleService(options) {
     }));
   }
 
+  /* The model a seat's client reported, recorded by the server when the seat
+   * is allowed in. Client-reported, like the product; keyed by seat name. */
+  function setModel(actor, input) {
+    requireActor(actor);
+    if (actor.kind !== 'server') fail('not-authorized');
+    const body = request(input, ['seat_name', 'model'], []);
+    if (!validName(body.seat_name) || !lineOrNull(body.model, LIMITS.model)) fail('invalid-request');
+    return write(Object.assign(base(actor, 'model'), { seat_name: body.seat_name, model: body.model }));
+  }
+
   // ---- reads (null while the store is damaged) ---------------------------
+
+  function modelOf(seatName) {
+    if (damaged()) return null;
+    return models.has(seatName) ? models.get(seatName) : null;
+  }
 
   function assignmentOf(seatName) {
     if (damaged()) return null;
@@ -333,6 +353,8 @@ function createPeopleService(options) {
     presence: presenceWrite,
     clearPresenceOnPost,
     profile,
+    setModel,
+    modelOf,
     assignmentOf,
     grants,
     activeGrants,

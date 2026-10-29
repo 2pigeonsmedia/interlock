@@ -1305,6 +1305,59 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // ── what a seat declares at join, and the people facts on a participant ──
+  // A knock may carry the project a seat says it is joining for and the model
+  // its client reports. They are held in memory until the knock is decided
+  // (never in the admission record, whose closed shape an earlier release
+  // must still read), shown on the Allow card as typed, and recorded in the
+  // people record only when the seat is allowed in.
+  const SERVER_ACTOR = Object.freeze({ subject_id: 'server', name: 'server', kind: 'server', owner: false });
+  const KNOCK_FACTS_MAX = 64;
+  const knockFacts = new Map();
+
+  function oneLineText(value, max) {
+    return typeof value === 'string' && value.trim() !== '' && Array.from(value).length <= max &&
+      !/[\p{Cc}\p{Cs}\u2028\u2029]/u.test(value);
+  }
+
+  function splitKnock(body) {
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) return { knock: body, facts: null };
+    const knock = Object.assign({}, body);
+    const project = Object.prototype.hasOwnProperty.call(knock, 'project') ? knock.project : null;
+    const model = Object.prototype.hasOwnProperty.call(knock, 'model') ? knock.model : null;
+    delete knock.project;
+    delete knock.model;
+    if ((project !== null && !oneLineText(project, 40)) || (model !== null && !oneLineText(model, 40))) {
+      return { knock, facts: false };
+    }
+    return { knock, facts: project === null && model === null ? null : { project, model } };
+  }
+
+  function peopleFacts(row) {
+    const none = { model: null, project: null, assigned: null, presence: null };
+    if (!people || !row) return none;
+    const service = people.service;
+    const assignment = row.kind === 'seat' ? service.assignmentOf(row.name) : null;
+    return {
+      model: row.kind === 'seat' ? service.modelOf(row.name) : null,
+      project: assignment ? assignment.project : null,
+      assigned: assignment ? Object.freeze({ how: assignment.how, by_name: assignment.by_name, at: assignment.at }) : null,
+      presence: typeof row.subject_id === 'string' ? service.presenceOf(row.subject_id) : null,
+    };
+  }
+
+  function recordJoin(name, facts) {
+    if (!people || !facts) return;
+    const actor = Object.assign({ now: Date.now() }, SERVER_ACTOR);
+    try {
+      if (facts.model !== null) people.service.setModel(actor, { seat_name: name, model: facts.model });
+      if (facts.project !== null && people.liveProjects().includes(facts.project)) {
+        people.service.assign(actor, { seat_name: name, project: facts.project, how: 'join' },
+          { projects: people.liveProjects() });
+      }
+    } catch (_) { /* the seat is in; its declared facts are advisory */ }
+  }
+
   async function knockAdmission(request, response, body) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -1315,9 +1368,18 @@ function createFirstOwnerHandler(options) {
     function responseClosed() { if (!response.writableEnded) controller.abort(); }
     request.once('aborted', clientGone);
     response.once('close', responseClosed);
+    const split = splitKnock(body);
+    if (split.facts === false) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    if (split.facts && split.knock && typeof split.knock.request_id === 'string' &&
+        knockFacts.size < KNOCK_FACTS_MAX) {
+      knockFacts.set(split.knock.request_id, split.facts);
+    }
     let result;
     try {
-      result = await admission.knock(body, {
+      result = await admission.knock(split.knock, {
         signal: controller.signal,
         timeoutMs: AI_ADMISSION_WAIT_MS,
       });
@@ -1352,7 +1414,12 @@ function createFirstOwnerHandler(options) {
     }
     if (!ownerSession(request, response, false)) return;
     try {
-      sendJson(request, response, 200, { ok: true, pending: admission.list() });
+      const pending = admission.list();
+      const live = new Set(pending.map(row => row.request_id));
+      for (const id of knockFacts.keys()) if (!live.has(id)) knockFacts.delete(id);
+      sendJson(request, response, 200, { ok: true, pending: pending.map(row => Object.freeze(Object.assign({}, row, {
+        declared_project: knockFacts.has(row.request_id) ? knockFacts.get(row.request_id).project : null,
+      }))) });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
     }
@@ -2246,7 +2313,10 @@ function createFirstOwnerHandler(options) {
     }
     try {
       await releaseIdle(now);
-      const participants = (await chat.listParticipants()).map(publicParticipant);
+      const participants = (await chat.listParticipants()).map(row => {
+        const base = publicParticipant(row);
+        return base === null ? null : Object.freeze(Object.assign({}, base, peopleFacts(row)));
+      });
       if (participants.some(row => row === null)) throw new Error('invalid participant');
       sendJson(request, response, 200, { ok: true, participants });
     } catch (_) {
@@ -2305,9 +2375,13 @@ function createFirstOwnerHandler(options) {
       // (the first owner only) may change that.
       const roster = house.administrators(requestMeta(request, now));
       const byName = new Map(roster && roster.ok === true ? roster.people.map(row => [row.name, row]) : []);
+      const subjectOf = new Map([...live, ...ended].map(row => [row.kind + '\0' + row.name +
+        '\0' + (row.kind === 'seat' ? row.session : ''), row.subject_id]));
       const withFlags = row => {
         const person = row.kind === 'person' ? byName.get(row.name) : null;
-        return Object.freeze(Object.assign({}, row, {
+        const facts = peopleFacts({ kind: row.kind, name: row.name,
+          subject_id: row.live ? subjectOf.get(row.kind + '\0' + row.name + '\0' + (row.kind === 'seat' ? row.session : '')) : null });
+        return Object.freeze(Object.assign({}, row, facts, {
           admin: Boolean(person && person.admin),
           first_owner: Boolean(person && person.first_owner),
           passkey: Boolean(person && person.passkey),
@@ -2385,6 +2459,8 @@ function createFirstOwnerHandler(options) {
       result = action === 'allow'
         ? admission.allow(requestId, requestMeta(request, Date.now()))
         : admission.decline(requestId);
+      if (result && result.ok === true && action === 'allow') recordJoin(result.name, knockFacts.get(requestId));
+      if (result && result.ok === true) knockFacts.delete(requestId);
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
       return;

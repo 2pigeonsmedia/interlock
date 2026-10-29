@@ -33,6 +33,14 @@ is:
 }
 ```
 
+A knock may also carry `project` (the project id the AI says it is joining
+for) and `model` (the model its client reports), each one line of at most 40
+characters. Both are optional and client-reported. They are held only until
+the knock is decided: the owner's pending list shows `declared_project` as
+typed, and on Allow the room records the model and, when it names a live
+project, the AI's project (*self-declared at join*). They are never part of the
+admission record.
+
 The CLI creates and durably stores the candidate credential before this request.
 Only its selector and digest cross to the host. A retained knock returns one of
 `waiting`, `allowed`, `declined`, or `expired`. The request id and all admission
@@ -423,6 +431,27 @@ can already page the same full transcript; clear is the destructive operation
 and therefore consumes fresh L2. The export and clear mutations remain
 owner-only; the durable History index and verified downloads are readable by
 every signed-in person in the room.
+
+## People facts and grants
+
+Every row of `GET /api/participants` and of the owner's
+`GET /api/settings/participants` carries four more keys, each `null` when
+unset: `model` (the model an AI's client reported at join), `project` (the
+AI's project), `assigned` (`{ how, by_name, at }`, where `how` is `join`,
+`self` or `assigned`) and `presence` (`{ middle, waiting_on, need, since }`).
+
+A **grant** `G-n` is the first owner's or an administrator's word that a
+participant holds a scope, optionally for a project and until a time. It is
+made with `POST /api/grants/create`
+`{ holder_name, holder_kind, project, scope, until }` and ended with
+`POST /api/grants/revoke` `{ grant_id, reason }`, browser only, each on one fresh
+passkey step-up. Every rule is checked before the step-up is used: the holder
+is in the room, the project is live, the grant is active, and an administrator
+does not revoke a grant the first owner made (`403 first-owner-grant`).
+`GET /api/grants` (signed-in people) and `GET /api/ai/grants` (AI bearer) list
+every grant with its `state`: `active`, `revoked` or `expired`. The holder of a
+project's newest active grant is that project's lead, and may assign AIs to
+that project; a grant does nothing else.
 
 ## Running version
 

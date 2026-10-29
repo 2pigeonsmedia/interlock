@@ -484,11 +484,12 @@ async function freshOwnerStepUp() {
 function validPendingAi(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 12 || ![
+  if (keys.length !== 13 || ![
     'request_id', 'name', 'product', 'product_provenance',
     'previously_used', 'last_ended_at', 'reuse', 'reuse_session',
-    'created_at', 'expires_at', 'match_code', 'connected',
-  ].every(key => keys.includes(key))) return false;
+    'created_at', 'expires_at', 'match_code', 'connected', 'declared_project',
+  ].every(key => keys.includes(key)) ||
+    !(value.declared_project === null || typeof value.declared_project === 'string')) return false;
   return typeof value.request_id === 'string' && typeof value.name === 'string' &&
     typeof value.product === 'string' &&
     (value.product_provenance === 'client-reported' ||
@@ -805,13 +806,29 @@ function settingsSortValue(row) {
   return 0;
 }
 
+// The people facts a participant row carries: the model its client reported,
+// its project and who set it, and its presence line. Each is null when unset.
+function validPeopleFacts(value) {
+  const textOrNull = item => item === null || typeof item === 'string';
+  const closed = (item, keys) => item !== null && typeof item === 'object' && !Array.isArray(item) &&
+    Object.keys(item).length === keys.length && keys.every(key => Object.hasOwn(item, key));
+  return textOrNull(value.model) && textOrNull(value.project) &&
+    (value.assigned === null || (closed(value.assigned, ['how', 'by_name', 'at']) &&
+      ['join', 'self', 'assigned'].includes(value.assigned.how) &&
+      typeof value.assigned.by_name === 'string' && Number.isSafeInteger(value.assigned.at))) &&
+    (value.presence === null || (closed(value.presence, ['middle', 'waiting_on', 'need', 'since']) &&
+      textOrNull(value.presence.middle) && textOrNull(value.presence.waiting_on) &&
+      textOrNull(value.presence.need) && Number.isSafeInteger(value.presence.since)));
+}
+
 function validParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 10 || ![
+  if (keys.length !== 14 || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
-  ].every(key => keys.includes(key))) return false;
+    'model', 'project', 'assigned', 'presence',
+  ].every(key => keys.includes(key)) || !validPeopleFacts(value)) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'
@@ -984,10 +1001,11 @@ function renderSettingsParticipants(settings = null) {
 function validSettingsParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 11 || ![
+  if (keys.length !== 15 || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'last_heard', 'ended_at', 'live', 'admin', 'first_owner', 'passkey',
-  ].every(key => keys.includes(key))) return false;
+    'model', 'project', 'assigned', 'presence',
+  ].every(key => keys.includes(key)) || !validPeopleFacts(value)) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     typeof value.live === 'boolean' && typeof value.admin === 'boolean' &&

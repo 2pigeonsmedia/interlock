@@ -266,12 +266,13 @@ function publicMessage(overrides = {}) {
 
 test('join options are closed and preserve only non-secret adapter hints', () => {
   assert.deepEqual(joinOptions([]), {
-    name: null, product: null, url: 'http://localhost:8788',
+    name: null, product: null, url: 'http://localhost:8788', project: null, model: null,
   });
   assert.deepEqual(joinOptions([
     '--product', 'Codex CLI', '--name', 'Marlow', '--url', 'http://localhost:9123',
+    '--project', 'finance', '--model', 'GPT-5 Codex',
   ]), {
-    name: 'Marlow', product: 'Codex CLI', url: 'http://localhost:9123',
+    name: 'Marlow', product: 'Codex CLI', url: 'http://localhost:9123', project: 'finance', model: 'GPT-5 Codex',
   });
   for (const args of [
     ['--token', 'secret'], ['--name'], ['--name', 'One', '--name', 'Two'], ['Marlow'],
@@ -2815,4 +2816,38 @@ test('say prints one line when the room runs a newer Interlock, and never for th
   assert.equal(newer.stderr,
     `interlock: the room runs Interlock 99.0.0; this CLI is ${version}. Update the CLI to match.\n`);
   assert.equal((await sayWith('99.0.0')).stderr, '', 'once per version per process');
+});
+
+test('join carries a declared project and model on the knock only when they are given', async () => {
+  async function knockBodies(extra) {
+    const connectionDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-join-declared-')), 'profiles');
+    const seen = [];
+    let time = 1_000;
+    const result = await captureJoin(['--product', 'Codex CLI', '--name', 'Marlow', ...extra], {
+      config: { resolveConnectionDir: () => connectionDir },
+      clock: () => ++time,
+      async fetch(url, options) {
+        if (url.endsWith('/api/ai/session')) return fakeResponse(401, { ok: false, error: 'invalid-connection' });
+        if (url.endsWith('/api/ai/head')) return fakeResponse(200, { ok: true, head: 12, connection_session: null });
+        const body = JSON.parse(options.body);
+        seen.push(body);
+        return fakeResponse(200, {
+          ok: true, state: 'allowed', request_id: body.request_id, name: body.name, product: body.product,
+          product_provenance: body.product_provenance, expires_at: 50_000,
+          enrollment: { subject_id: 'seat-1', name: body.name, product: body.product,
+            product_provenance: body.product_provenance, expires_at: 50_000 },
+        });
+      },
+      ask: async () => { throw new Error('valid adapter hints must not prompt'); },
+    });
+    assert.equal(result.code, EXIT_OK, result.stderr);
+    return seen;
+  }
+  const plain = await knockBodies([]);
+  assert.ok(plain.length >= 1, 'ARRANGEMENT: the join knocked');
+  assert.deepEqual(Object.keys(plain[0]).sort(),
+    ['digest', 'name', 'product', 'product_provenance', 'request_id', 'selector'],
+    'a knock that declares nothing is the same knock an older room expects');
+  const declared = await knockBodies(['--project', 'finance', '--model', 'GPT-5 Codex']);
+  assert.deepEqual([declared[0].project, declared[0].model], ['finance', 'GPT-5 Codex']);
 });

@@ -37,7 +37,7 @@ const HOLDER_KINDS = Object.freeze(['person', 'seat']);
 const MAX_NAME_BYTES = 256;
 const MAX_SUBJECT_BYTES = 64;
 const LIMITS = Object.freeze({
-  scope: 300, reason: 300, middle: 120, waiting_on: 120, need: 300, line: 120,
+  scope: 300, reason: 300, middle: 120, waiting_on: 120, need: 300, line: 120, model: 40,
 });
 
 const BASE_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'by_subject_id', 'by_name']);
@@ -49,6 +49,8 @@ const KEYS = Object.freeze({
   revoke: Object.freeze(BASE_KEYS.concat(['grant_id', 'reason'])),
   presence: Object.freeze(BASE_KEYS.concat(['subject_id', 'middle', 'waiting_on', 'need'])),
   profile: Object.freeze(BASE_KEYS.concat(['person_name', 'line'])),
+  // The model a seat's client reported when it joined; written by the server.
+  model: Object.freeze(BASE_KEYS.concat(['seat_name', 'model'])),
 });
 const KINDS = Object.freeze(Object.keys(KEYS));
 
@@ -138,6 +140,9 @@ function parseRow(value, expectedSeq) {
       break;
     case 'profile':
       ok = boundedString(row.person_name, MAX_NAME_BYTES) && lineOrNull(row.line, LIMITS.line);
+      break;
+    case 'model':
+      ok = boundedString(row.seat_name, MAX_NAME_BYTES) && lineOrNull(row.model, LIMITS.model);
       break;
     default:
       ok = false;

@@ -237,3 +237,13 @@ test('a checked grant or revoke runs every rule and writes nothing', () => {
   assert.deepEqual(fs.readFileSync(file), before, 'a check writes nothing');
   assert.equal(people.activeGrants(NOW).length, 1);
 });
+
+test('a seat\'s reported model is written by the server only, keyed by seat name, and survives a restart', () => {
+  const { dir, people } = open();
+  assert.equal(people.setModel(SERVER, { seat_name: 'Scout', model: 'Opus 5.5' }).model, 'Opus 5.5');
+  assert.equal(people.modelOf('Scout'), 'Opus 5.5');
+  assert.throws(() => people.setModel(SCOUT, { seat_name: 'Scout', model: 'GPT' }), { code: 'not-authorized' });
+  assert.throws(() => people.setModel(SERVER, { seat_name: 'Scout', model: 'x'.repeat(41) }), { code: 'invalid-request' });
+  assert.equal(open(dir).people.modelOf('Scout'), 'Opus 5.5');
+  assert.equal(people.modelOf('Wren'), null);
+});
