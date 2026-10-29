@@ -589,8 +589,9 @@ function renderedMessages(messages, notes = null) {
     const when = formatMessageTime(message.ts);
     output += `[${message.id}] ${terminalSafe(message.byline)}${suffix}:${when ? ` ${when}` : ''}\n`;
     // A body line cannot pass for an annotation: only the room's own notes
-    // begin with the arrow.
-    output += `${terminalSafe(message.text, true).replace(/^(\s*)↳/gmu, '$1\uFFFD')}\n`;
+    // carry the arrow. Every arrow in a body is replaced, wherever it sits,
+    // so no blank-looking letter in front of it can hide one.
+    output += `${terminalSafe(message.text, true).replace(/↳/gu, '\uFFFD')}\n`;
     for (const note of (notes && notes.get(message.id)) || []) output += `  ↳ ${note}\n`;
   }
   return output;
@@ -598,6 +599,7 @@ function renderedMessages(messages, notes = null) {
 
 const ANNOTATION_PAGE_LIMIT = 100;
 const ANNOTATION_PAGES = 50;
+const ANNOTATION_SEEK_STEPS = 48;
 
 function validAskFields(value) {
   const ask = exactObject(value, ['of', 'of_kind', 'means', 'deliver']);
@@ -608,8 +610,11 @@ function validAskFields(value) {
 }
 
 function validAnswerEntry(value) {
-  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by']);
+  // `closes` arrived after the first asks release; an entry may carry it or not.
+  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by']) ||
+    exactObject(value, ['ask_id', 'choice', 'crossed_by', 'closes']);
   return !!answer && Number.isSafeInteger(answer.ask_id) && answer.ask_id > 0 &&
+    (answer.closes === undefined || typeof answer.closes === 'boolean') &&
     (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
     (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0));
 }
@@ -646,27 +651,58 @@ function postNotes(row) {
 
 /* The annotations of the messages about to be printed, read from the side-car.
  * A room without asks (an older release) or a malformed page prints the
- * messages without them: an annotation never stops a read. */
+ * messages without them: an annotation never stops a read.
+ *
+ * Post rows are written in message order, so the first row that can matter is
+ * found by halving the side-car (`after` is a row position; a read past the end
+ * reports the end), then read forward until the rows pass the last message
+ * printed. A long era costs a few requests, never a walk from the start. */
+async function annotationPage(fetcher, profile, after, limit) {
+  const page = await localRequest(fetcher, profile,
+    `/api/ai/annotations?after=${after}&limit=${limit}`, { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
+  if (!exactObject(page, ['ok', 'rows', 'cursor', 'first_id']) || !Array.isArray(page.rows) ||
+      !Number.isSafeInteger(page.cursor) || page.cursor < 0) throw incompatibleResponse();
+  for (const row of page.rows) {
+    if (row && row.kind === 'post' && !validPostRow(row)) throw incompatibleResponse();
+  }
+  return page;
+}
+
+function firstPostId(page) {
+  const post = page.rows.find(row => row && row.kind === 'post');
+  return post ? post.message_id : null;
+}
+
 async function annotationNotes(fetcher, profile, messages) {
   const notes = new Map();
   if (messages.length === 0) return notes;
   const wanted = new Set(messages.map(message => message.id));
-  let after = 0;
+  const lowest = Math.min(...wanted);
+  const highest = Math.max(...wanted);
   try {
+    const end = (await annotationPage(fetcher, profile, Number.MAX_SAFE_INTEGER, 1)).cursor;
+    // The last position whose first post row is still below the lowest
+    // message printed; reading starts just after it.
+    let low = 0;
+    let high = end;
+    for (let step = 0; step < ANNOTATION_SEEK_STEPS && high - low > ANNOTATION_PAGE_LIMIT; step += 1) {
+      const middle = Math.floor((low + high) / 2);
+      const first = firstPostId(await annotationPage(fetcher, profile, middle, ANNOTATION_PAGE_LIMIT));
+      if (first !== null && first < lowest) low = middle;
+      else high = middle;
+    }
+    let after = low;
     for (let index = 0; index < ANNOTATION_PAGES; index += 1) {
-      const page = await localRequest(fetcher, profile,
-        `/api/ai/annotations?after=${after}&limit=${ANNOTATION_PAGE_LIMIT}`,
-        { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
-      if (!exactObject(page, ['ok', 'rows', 'cursor', 'first_id']) || !Array.isArray(page.rows) ||
-          !Number.isSafeInteger(page.cursor) || page.cursor < after) return new Map();
+      const page = await annotationPage(fetcher, profile, after, ANNOTATION_PAGE_LIMIT);
+      let past = false;
       for (const row of page.rows) {
         if (!row || row.kind !== 'post') continue;
-        if (!validPostRow(row)) return new Map();
+        if (row.message_id > highest) { past = true; break; }
         if (!wanted.has(row.message_id)) continue;
         const rowNotes = postNotes(row);
         if (rowNotes.length > 0) notes.set(row.message_id, rowNotes);
       }
-      if (page.cursor === after) break;
+      if (past || page.cursor <= after) break;
       after = page.cursor;
     }
   } catch (_) {
