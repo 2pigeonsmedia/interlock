@@ -124,21 +124,32 @@ async function waitForPending(runtime, session, requestId) {
   assert.fail('the loopback knock did not become visibly connected');
 }
 
-test('Work reads do not keep an idle session alive; the idle limit still ends it', async () => {
+test('Work reads are not activity and Work writes are: the idle limit ends only the reader', async () => {
   const port = await reservePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-server-work-idle-'));
   const runtime = await startInterlockServer({ port, dataDir });
   const realNow = Date.now;
   try {
     const setup = await bootstrap(runtime);
-    const owner = await login(runtime, setup.password);
+    const reader = await login(runtime, setup.password);
+    const writer = await login(runtime, setup.password);
     const start = realNow();
     Date.now = () => start + 20 * 60 * 1000;
-    const early = await get(runtime, '/api/work/brief', owner);
-    assert.equal(early.status, 200, `ARRANGEMENT: the session is alive at 20 minutes: ${early.text}`);
+    const read = await get(runtime, '/api/work/brief', reader);
+    assert.equal(read.status, 200, `ARRANGEMENT: the reader is alive at 20 minutes: ${read.text}`);
+    const wrote = await post(runtime, '/api/work/items/create',
+      { operation_id: crypto.randomUUID(), kind: 'work', project: 'ops', title: 'Keep me signed in', body: 'A write is activity.' }, writer);
+    assert.equal(wrote.status, 201, `ARRANGEMENT: the writer's write succeeds at 20 minutes: ${wrote.text}`);
+
     Date.now = () => start + 40 * 60 * 1000;
-    const late = await get(runtime, '/api/messages?after=0&limit=10&wait=0', owner);
-    assert.equal(late.status, 401, 'a session whose only traffic was Work reads idles out at 30 minutes');
+    const readerLate = await get(runtime, '/api/messages?after=0&limit=10&wait=0', reader);
+    assert.equal(readerLate.status, 401, 'a session whose only traffic was Work reads idles out at 30 minutes');
+    const writerLate = await get(runtime, '/api/messages?after=0&limit=10&wait=0', writer);
+    assert.equal(writerLate.status, 200, 'a Work write at 20 minutes moved the idle clock');
+
+    Date.now = () => start + 55 * 60 * 1000;
+    const writerExpired = await get(runtime, '/api/messages?after=0&limit=10&wait=0', writer);
+    assert.equal(writerExpired.status, 401, 'and the writer still idles out 30 minutes after its last activity');
   } finally {
     Date.now = realNow;
     await runtime.close();
