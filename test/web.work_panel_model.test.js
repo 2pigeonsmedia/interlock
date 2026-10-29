@@ -849,7 +849,7 @@ test('the kill slot reads in words on the decision and its Needs you row; an old
 test('an ask that a decision cites as its message is drawn once, as the decision', () => {
   const decision = BRIEF.needs_me.find(row => row.kind === 'decision');
   const brief = Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row === decision
-    ? Object.assign({}, row, { source_message_id: 41 }) : row) });
+    ? Object.assign({}, row, { ask_message_id: 41 }) : row) });
   const ask = id => ({ ask_id: id, asked_at: NOW - HOUR, by: 'Lead', of: 'Ana', of_kind: 'person', means: 'I pick it',
     deliver: 'now', state: 'open', kept_open: false, carried_from: null, answers: [] });
   const result = needsYou(brief, NOW, [ask(41), ask(42)]);
@@ -857,7 +857,7 @@ test('an ask that a decision cites as its message is drawn once, as the decision
     'the cited ask is the decision row; the uncited ask keeps its own');
   assert.equal(result.count, 3);
   const viaDecisions = needsYou(Object.assign({}, BRIEF, { decisions: [{ kind: 'decision', id: 'D-9',
-    source_message_id: 42 }] }), NOW, [ask(42)]);
+    ask_message_id: 42 }] }), NOW, [ask(42)]);
   assert.equal(viaDecisions.rows.some(row => row.id === 'ask-42'), false,
     'a decision in the brief\'s decision list also claims its ask');
   assert.equal(needsYou(BRIEF, NOW, [ask(41)]).rows.some(row => row.id === 'ask-41'), true,
@@ -867,7 +867,7 @@ test('an ask that a decision cites as its message is drawn once, as the decision
 test('an awaiting decision whose ask the person asked answered in the room says so, until the record has it', () => {
   const decision = BRIEF.needs_me.find(row => row.kind === 'decision');
   assert.equal(decision.state, 'awaiting', 'ARRANGEMENT: the fixture decision is awaiting');
-  const cites = Object.assign({}, decision, { source_message_id: 41 });
+  const cites = Object.assign({}, decision, { ask_message_id: 41 });
   const brief = Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row === decision ? cites : row) });
   const row = id => needsYou(brief, NOW, [], new Set(id)).rows.find(r => r.id === decision.id);
   assert.equal(row([41]).note, 'Answered in the room, not recorded here');
@@ -875,10 +875,16 @@ test('an awaiting decision whose ask the person asked answered in the room says 
   assert.equal(Object.hasOwn(row([]), 'note'), false);
   assert.equal(Object.hasOwn(needsYou(BRIEF, NOW, [], new Set([41])).rows.find(r => r.id === decision.id), 'note'), false,
     'a decision that cites no message says nothing');
+  const citesOnly = Object.assign({}, decision, { source_message_id: 41, ask_message_id: null });
+  assert.equal(Object.hasOwn(needsYou(Object.assign({}, BRIEF, { needs_me: BRIEF.needs_me.map(row => row === decision ? citesOnly : row) }),
+    NOW, [], new Set([41])).rows.find(r => r.id === decision.id), 'note'), false,
+  'a decision that only cites a message, with no ask bound to it, says nothing');
   const item = { kind: 'decision', state: 'awaiting', asked_of: { name: 'Ana' }, asked_by: { name: 'Lead' },
-    answer: null, source_message: { message_id: 41, byline: 'Lead', session: null, quote: 'Decision: Pick' } };
+    answer: null, ask_message_id: 41, source_message: { message_id: 41, byline: 'Lead', session: null, quote: 'Decision: Pick' } };
   assert.ok(drawerLines(item, [], new Set([41])).includes('Answered in the room, not recorded here (message #41).'));
   assert.ok(!drawerLines(Object.assign({}, item, { state: 'answered' }), [], new Set([41]))
     .some(line => line.startsWith('Answered in the room')), 'once recorded, the line goes');
   assert.ok(!drawerLines(item, []).some(line => line.startsWith('Answered in the room')));
+  assert.ok(!drawerLines(Object.assign({}, item, { ask_message_id: null }), [], new Set([41]))
+    .some(line => line.startsWith('Answered in the room')), 'citing alone binds nothing');
 });

@@ -230,6 +230,15 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     assert.equal(survived.json.item.kill_state, 'survived');
     assert.equal(survived.json.item.kill.reply.words, 'Ran it: 0 marked rows summed.');
 
+    // A decision that only cites someone else's ask is never answered by it.
+    const citing = await aiPost(runtime, '/api/ai/work/items/create', {
+      operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Delete the archive', body: 'b',
+      asked_of: 'Ana', source_message: { message_id: asked.json.message.id, quote: 'Decision: Merge the candidate' },
+    }, scout.token);
+    assert.equal(citing.status, 201, citing.text);
+    assert.equal((await aiPost(runtime, '/api/ai/work/bind', { id: citing.json.item.id }, scout.token)).status, 404,
+      'binding is not a route');
+
     // A bystander's room answer records nothing; the addressee's is her answer.
     const bystander = await aiPost(runtime, '/api/ai/annotated-messages', {
       text: 'yes from me', client_message_id: uuid(),
@@ -247,6 +256,8 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     assert.equal(answered.answer.kind, 'direct');
     assert.equal(answered.answer.by.name, 'Ana');
     assert.equal(answered.answer.source, `answered in the room #${yes.json.message.id}`);
+    assert.equal((await item(runtime, owner, citing.json.item.id)).state, 'awaiting',
+      'her yes went to the decision she was asked, not to one that cited the same message');
 
     // An admin who is not the addressee records nothing either.
     const ofScout = await askOf(runtime, lead.token, {

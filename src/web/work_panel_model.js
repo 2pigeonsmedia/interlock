@@ -97,19 +97,19 @@
   // person asked: the room has the answer, the record does not (yet).
   const ROOM_NOT_RECORDED = 'Answered in the room, not recorded here';
 
+  // Only an ask the server bound to the decision ("Ask a decision") counts;
+  // a decision merely citing a message has no ask of its own.
   function answeredInRoom(decision, answered) {
-    const cited = decision.source_message_id !== undefined ? decision.source_message_id
-      : decision.source_message ? decision.source_message.message_id : null;
-    return decision.state === 'awaiting' && Number.isSafeInteger(cited) && answered.has(cited);
+    return decision.state === 'awaiting' && Number.isSafeInteger(decision.ask_message_id) &&
+      answered.has(decision.ask_message_id);
   }
 
   function needsYou(brief, now, asks = [], answered = new Set()) {
     const names = projectNames(brief);
-    // An ask that a decision cites as its message is that decision's row,
-    // never a second one.
+    // An ask bound to a decision is that decision's row, never a second one.
     const cited = new Set(brief.needs_me.concat(brief.decisions || [])
-      .filter(row => row.kind === 'decision' && Number.isSafeInteger(row.source_message_id))
-      .map(row => row.source_message_id));
+      .filter(row => row.kind === 'decision' && Number.isSafeInteger(row.ask_message_id))
+      .map(row => row.ask_message_id));
     const workRows = brief.needs_me.map(row => {
       const decision = row.kind === 'decision';
       const kill = decision ? killWord(row) : null;
@@ -380,7 +380,7 @@
     if (item.kind === 'decision') {
       const answer = item.answer;
       return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by)]
-        .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.source_message.message_id + ').'] : [])
+        .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.ask_message_id + ').'] : [])
         .concat(answerLines(item, history))
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])
         .concat(item.rationale ? ['Rationale: ' + item.rationale] : [])

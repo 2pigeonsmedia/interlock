@@ -610,13 +610,11 @@ function validAskFields(value) {
 }
 
 function validAnswerEntry(value) {
-  // `closes` arrived after the first asks release; an entry may carry it or not.
-  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by']) ||
-    exactObject(value, ['ask_id', 'choice', 'crossed_by', 'closes']);
+  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
   return !!answer && Number.isSafeInteger(answer.ask_id) && answer.ask_id > 0 &&
-    (answer.closes === undefined || typeof answer.closes === 'boolean') &&
     (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
-    (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0));
+    (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0)) &&
+    typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean';
 }
 
 function validPostRow(value) {

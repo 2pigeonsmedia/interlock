@@ -609,14 +609,15 @@ function openStore(opts) {
       fail('invalid-annotation');
     }
     const answeredIds = new Set(annotation.answers.map(answer => answer.ask_id));
+    const who = { subject_id: actor.subject_id, name: actor.name };
     const answers = annotation.answers.map(answer => {
       const refusal = asks.checkAnswer(answer.ask_id);
       if (refusal) fail(refusal);
-      return Object.freeze({
+      return Object.freeze(Object.assign({
         ask_id: answer.ask_id,
         choice: answer.choice,
-        crossed_by: asks.crossingFor(answer.ask_id, actor.subject_id, answeredIds),
-      });
+        crossed_by: asks.crossingFor(answer.ask_id, who, answeredIds),
+      }, asks.answerFacts(answer.ask_id, who)));
     });
     if (annotation.status !== null) {
       const unread = [];
@@ -624,7 +625,7 @@ function openStore(opts) {
       for (const message of messages) {
         if (message.id <= annotation.read_through || message.subject_id === actor.subject_id) continue;
         if (message.recipients.some(recipient => recipient.subject_id === actor.subject_id) ||
-            asks.isOpenAskOf(message.id, actor.subject_id)) {
+            asks.isOpenAskOf(message.id, who)) {
           count += 1;
           if (unread.length < Annotations.MAX_UNREAD_IDS) unread.push(message.id);
         }
@@ -965,14 +966,14 @@ function openStore(opts) {
     });
   }
 
-  function openAsks(subjectId) {
+  function openAsks(subjectId, name) {
     return exclusive(() => {
       requireOpen();
-      if (!boundedString(subjectId, 64)) fail('invalid-read');
+      if (!boundedString(subjectId, 64) || !boundedString(name, MAX_BYLINE_BYTES)) fail('invalid-read');
       assertLiveLog();
       assertLiveReceipts();
       assertLiveActivity();
-      return asks.openAsksFor(subjectId);
+      return asks.openAsksFor({ subject_id: subjectId, name });
     });
   }
 

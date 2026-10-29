@@ -408,7 +408,7 @@ function sideCarWorld(count, messages) {
   const urls = [];
   const rows = Array.from({ length: count }, (_, i) => ({
     seq: i + 1, ts: 1, kind: 'post', by: 'Lead', message_id: i + 1, ask: null,
-    answers: [{ ask_id: 1, choice: 'yes', crossed_by: null, closes: true }], status: 'done', read_through: 0,
+    answers: [{ ask_id: 1, choice: 'yes', crossed_by: null, by_addressee: true, closes: true }], status: 'done', read_through: 0,
   }));
   const profile = Object.freeze({
     schema: 2, name: 'Lead', product: 'Codex CLI', product_provenance: 'client-reported',

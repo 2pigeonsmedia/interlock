@@ -352,7 +352,9 @@ function createWorkService(options) {
         id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: decisionState(item),
         asked_of: clone(item.asked_of), asked_by: clone(item.asked_by), proposal: item.proposal,
         kill_state: killState(item),
+        source_message: item.source_message ? clone(item.source_message) : null,
         source_message_id: item.source_message ? item.source_message.message_id : null,
+        ask_message_id: item.ask_message_id ?? null,
         answer_summary: item.answer ? {
           kind: item.answer.kind, by: clone(item.answer.by),
           attributed_to: clone(item.answer.attributed_to), at: item.answer.at,
@@ -469,6 +471,7 @@ function createWorkService(options) {
           withdrawn: false,
           answer: null,
           kill: null,
+          ask_message_id: null,
         });
       } else {
         Object.assign(item, {
@@ -833,11 +836,34 @@ function createWorkService(options) {
       });
   }
 
+  /* Bind a decision to the ask the host just posted for it, in the room, as
+   * this actor. Never a route: only "Ask a decision" calls it, with a message
+   * it wrote itself. A citation alone never binds, so nobody can attach a
+   * decision of their own to someone else's ask. One ask, one decision. */
+  function bindAsk(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['id', 'ask_message_id']);
+    if (!body || !Number.isSafeInteger(body.ask_message_id) || body.ask_message_id < 1) fail('invalid-input');
+    return store.commit(draft => {
+      const item = findDecision(draft, body.id);
+      if (item.ask_message_id === body.ask_message_id) return { ok: true, item: publicItem(item), replayed: true };
+      if (item.ask_message_id !== null && item.ask_message_id !== undefined) fail('invalid-state');
+      if (item.created_by.subject_id !== actor.subject_id || !item.source_message ||
+          item.source_message.message_id !== body.ask_message_id) fail('not-authorized');
+      if (draft.items.some(row => row.kind === 'decision' && row.ask_message_id === body.ask_message_id)) {
+        fail('invalid-state');
+      }
+      item.ask_message_id = body.ask_message_id;
+      return { ok: true, item: publicItem(item) };
+    });
+  }
+
   /* The room answer is the decision's answer. When the person a decision is
-   * asked of answers, in the room, the ask the decision cites as its source,
-   * that answer is recorded here as theirs, directly. Keyed by the room
-   * message, so a retry records nothing twice. Anyone else's room answer,
-   * the owner's included, records nothing here. */
+   * asked of answers, in the room, the ask that decision was asked with, the
+   * answer is recorded here as theirs, directly. Keyed by the room message,
+   * so a retry records nothing twice. Anyone else's room answer, the owner's
+   * included, records nothing here, and an ask a decision merely cites
+   * records nothing at all. */
   function answerFromRoom(actor, rawInput) {
     requireActor(actor);
     const body = closedObject(rawInput, ['ask_id', 'message_id', 'text']);
@@ -846,8 +872,7 @@ function createWorkService(options) {
     const text = requiredText(body.text, BODY_BYTES, 'text');
     const source = 'answered in the room #' + body.message_id;
     return store.commit(draft => {
-      const item = draft.items.find(row => row.kind === 'decision' && row.source_message &&
-        row.source_message.message_id === body.ask_id);
+      const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
       if (!item) return { ok: true, recorded: null };
       if (actor.subject_id !== item.asked_of.subject_id || item.withdrawn) {
         return { ok: true, recorded: null };
@@ -1113,7 +1138,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom,
+    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });

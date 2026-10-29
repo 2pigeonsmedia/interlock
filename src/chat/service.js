@@ -171,7 +171,8 @@ function createChatService(options) {
         // A retry is answered by its first post, not by today's roster.
         const prior = actor.client_message_id === null ? null
           : await store.priorAsk(actor.subject_id, actor.client_message_id);
-        askTarget = prior && prior.name === askIn.of ? prior : resolveAskTarget(askIn.of, everyone);
+        askTarget = prior && typeof askIn.of === 'string' &&
+          prior.name.toLowerCase() === askIn.of.toLowerCase() ? prior : resolveAskTarget(askIn.of, everyone);
         if (!askTarget) throw fail('ask-target-unknown');
         if (askTarget.subject_id === actor.subject_id) throw fail('ask-of-self');
         deliver = askIn.deliver === undefined ? 'now' : askIn.deliver;
@@ -587,9 +588,9 @@ function createChatService(options) {
     return await store.readAnnotationRows(query);
   }
 
-  async function openAsks(subjectId) {
+  async function openAsks(subjectId, name) {
     requireOpen();
-    return await store.openAsks(subjectId);
+    return await store.openAsks(subjectId, name);
   }
 
   return Object.freeze({

@@ -1943,7 +1943,14 @@ function createFirstOwnerHandler(options) {
     delete create.about_message;
     // A refused record still names its message: the ask stands in the room.
     const result = await work.mutate('items/create', workActor, create, workActor.now);
-    sendJson(request, response, result.status, Object.assign({}, result.body, { message: saved }));
+    if (result.status >= 400) {
+      sendJson(request, response, result.status, Object.assign({}, result.body, { message: saved }));
+      return;
+    }
+    // Only now is the record the ask's decision: the room answer binds to it.
+    const bound = work.bindAsk(workActor, { id: result.body.item.id, ask_message_id: saved.id });
+    const reply = bound.status === 200 ? Object.assign({}, result.body, { item: bound.body.item }) : result.body;
+    sendJson(request, response, result.status, Object.assign({}, reply, { message: saved }));
   }
 
   /* After a room answer is saved: each ask it answers that a decision cites
@@ -2154,7 +2161,7 @@ function createFirstOwnerHandler(options) {
     }
     try {
       await chat.touchParticipant(authorized.subject_id, Date.now());
-      const asks = await chat.openAsks(authorized.subject_id);
+      const asks = await chat.openAsks(authorized.subject_id, authorized.subject_name);
       sendJson(request, response, 200, { ok: true, addressed: asks.addressed, asked: asks.asked });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });

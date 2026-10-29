@@ -15,7 +15,7 @@
     'seq', 'ts', 'kind', 'by', 'ask_id', 'archive_id', 'asked_at', 'ask', 'kept_open',
   ]);
   const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver']);
-  const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by']);
+  const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
   // With exactly one open ask, does a sent message bind to it without a tap?
   // Off: binding is always a tap, so ordinary talk never closes an ask.
   const BIND_SINGLE_WITHOUT_TAP = false;
@@ -57,7 +57,8 @@
         Array.isArray(row.answers) && row.answers.every(answer => exact(answer, ANSWER_KEYS) &&
           positive(answer.ask_id) &&
           (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
-          (answer.crossed_by === null || positive(answer.crossed_by))) &&
+          (answer.crossed_by === null || positive(answer.crossed_by)) &&
+          typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean') &&
         (row.status === null || ['done', 'ready', 'stop'].includes(row.status)) &&
         (row.read_through === null || Number.isSafeInteger(row.read_through));
     }
@@ -122,8 +123,11 @@
           for (const answer of row.answers) {
             const ask = asks.get(answer.ask_id);
             if (!ask) continue;
-            ask.answers.push({ message_id: row.message_id, by: row.by, choice: answer.choice });
-            if (row.by === ask.of && !ask.kept_open) ask.state = 'answered';
+            // The server decided what this answer did, once; it is read, never re-derived.
+            ask.answers.push({
+              message_id: row.message_id, by: row.by, choice: answer.choice, by_addressee: answer.by_addressee,
+            });
+            if (answer.closes) ask.state = 'answered';
           }
           if (row.ask) addAsk(row.message_id, row.by, row.ask, row.ts, null);
         } else if (row.kind === 'carry') {
@@ -170,7 +174,7 @@
   function askLine(ask, now) {
     const to = ask.deliver === 'later' ? `Hold for ${ask.of}` : `Ask of ${ask.of}`;
     if (ask.state === 'withdrawn') return `${to} · withdrawn`;
-    const last = ask.answers.filter(answer => answer.by === ask.of).slice(-1)[0];
+    const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
     if (ask.state === 'answered' && last) {
       return `${to} · answered ${last.choice === null ? '' : `"${last.choice}" `}· ${last.by} · #${last.message_id}`;
     }
@@ -189,7 +193,7 @@
 
   /* The choice the addressee last gave, held pressed for every viewer. */
   function chosen(ask) {
-    const last = ask.answers.filter(answer => answer.by === ask.of).slice(-1)[0];
+    const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
     return last ? last.choice : null;
   }
 
