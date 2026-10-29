@@ -260,3 +260,124 @@ test('work get shows the conditions a decision was asked with', async () => {
   assert.match(got.stdout, /proposal: Do not guess\./, 'ARRANGEMENT: the decision block rendered');
   assert.match(got.stdout, /^ {2}asked with conditions: Only under 500$/m);
 });
+
+// ── the kill slot and "Ask a decision" ─────────────────────────────────────
+
+function decisionItem(overrides = {}) {
+  return Object.assign({
+    id: 'D-7', kind: 'decision', project: 'finance', title: 'Pick the bank', body: '', state: 'awaiting', revision: 4,
+    asked_of: { name: 'Ana', kind: 'person', session: null }, asked_by: { name: 'Lead', kind: 'seat', session: null },
+    proposal: 'Use the credit union.', scope: 'I open the account and nothing else', conditions: '', answer: null,
+    kill_state: 'unattacked', kill: null,
+  }, overrides);
+}
+
+function textFile(text) {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-kill-')), 'words.txt');
+  fs.writeFileSync(file, text);
+  return file;
+}
+
+test('work kill reads the question from a file, the revision from the record, and posts the kill verb', async () => {
+  const asked = decisionItem({ revision: 5, kill_state: 'attacked',
+    kill: { question: 'Would the bank refuse a new account?', by: { name: 'Marlow', kind: 'seat', session: null }, at: 120, reply: null } });
+  const { calls, dependencies } = world(({ url, method }) => {
+    if (method === 'GET') return { json: { ok: true, item: decisionItem(), evidence: [], history: [] } };
+    return { json: { ok: true, item: asked, event: { seq: 9, item: 'D-7' } } };
+  });
+  const result = await captureCommand(['work', 'kill', 'D-7', '--connection', 'Marlow',
+    '--file', textFile('Would the bank refuse a new account?\n')], dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.deepEqual(calls.map(call => [call.method, call.url]), [
+    ['GET', 'http://localhost:8788/api/ai/work/items/D-7'],
+    ['POST', 'http://localhost:8788/api/ai/work/decisions/kill'],
+  ]);
+  const body = calls[1].body;
+  assert.match(body.operation_id, UUID);
+  assert.deepEqual(Object.assign({}, body, { operation_id: 'x' }),
+    { operation_id: 'x', id: 'D-7', expected_revision: 4, question: 'Would the bank refuse a new account?' },
+    'the trailing newline is not part of the question');
+  assert.match(result.stdout, /against D-7 revision 4/);
+  assert.match(result.stdout, /Asked the kill question on D-7 \(attacked\)\./);
+});
+
+test('work kill-reply takes --outcome and its words from stdin', async () => {
+  const replied = decisionItem({ revision: 6, kill_state: 'killed', kill: {
+    question: 'q', by: { name: 'Marlow', kind: 'seat', session: null }, at: 120,
+    reply: { words: 'It would; I concede.', outcome: 'killed', by: { name: 'Lead', kind: 'seat', session: null }, at: 130 } } });
+  const { calls, dependencies } = world(({ method }) => method === 'GET'
+    ? { json: { ok: true, item: decisionItem({ revision: 5 }), evidence: [], history: [] } }
+    : { json: { ok: true, item: replied, event: { seq: 10, item: 'D-7' } } });
+  dependencies.readStdin = async () => 'It would; I concede.\n';
+  const result = await captureCommand(['work', 'kill-reply', 'D-7', '--outcome', 'killed', '--stdin',
+    '--connection', 'Marlow'], dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.equal(calls[1].url, 'http://localhost:8788/api/ai/work/decisions/kill-reply');
+  assert.deepEqual(Object.assign({}, calls[1].body, { operation_id: 'x' }),
+    { operation_id: 'x', id: 'D-7', expected_revision: 5, words: 'It would; I concede.', outcome: 'killed' });
+  assert.match(result.stdout, /Replied to the kill question on D-7 \(killed\)\./);
+});
+
+test('the kill verbs refuse words in argv, a missing or doubled source, and a missing outcome before any request', async () => {
+  for (const [argv, pattern] of [
+    [['work', 'kill', 'D-7', '--connection', 'Marlow', 'Would', 'it', 'fail?'], /refusing extra arguments/],
+    [['work', 'kill', 'D-7', '--connection', 'Marlow'], /--file PATH or --stdin, one of them/],
+    [['work', 'kill', 'D-7', '--connection', 'Marlow', '--file', 'q.txt', '--stdin'], /--file PATH or --stdin, one of them/],
+    [['work', 'kill-reply', 'D-7', '--connection', 'Marlow', '--stdin'], /needs --outcome survived\|killed/],
+    [['work', 'kill-reply', 'D-7', '--connection', 'Marlow', '--stdin', '--outcome', 'won'], /--outcome is survived or killed/],
+    [['work', 'kill', 'D-7', '--connection', 'Marlow', '--stdin', '--outcome', 'killed'], /kill takes no --outcome/],
+    [['work', 'create', '--connection', 'Marlow', '--stdin'], /create takes no --stdin/],
+    [['work', 'kill', 'W-3x', '--connection', 'Marlow', '--stdin'], /a record id like W-12 or D-7/],
+  ]) {
+    const { calls, dependencies } = world(() => { throw new Error('no request expected'); });
+    const result = await captureCommand(argv, dependencies);
+    assert.equal(result.code, EXIT_USAGE, argv.join(' '));
+    assert.match(result.stderr, pattern, argv.join(' '));
+    assert.equal(calls.length, 0, argv.join(' '));
+  }
+});
+
+test('a refused kill names the refusal and posts nothing more', async () => {
+  const { calls, dependencies } = world(({ method }) => method === 'GET'
+    ? { json: { ok: true, item: decisionItem({ kill_state: 'attacked' }), evidence: [], history: [] } }
+    : { status: 409, json: { ok: false, error: 'kill-slot-filled' } });
+  const result = await captureCommand(['work', 'kill', 'D-7', '--connection', 'Marlow', '--file', textFile('again?')], dependencies);
+  assert.equal(result.code, EXIT_RUNTIME);
+  assert.match(result.stderr, /refused the command: kill-slot-filled/);
+  assert.equal(calls.length, 2);
+});
+
+test('work ask posts the decision body to the ask route and reports the message that carries the ask', async () => {
+  const { calls, dependencies } = world(() => ({ status: 201, json: {
+    ok: true, item: decisionItem({ revision: 1 }),
+    message: { id: 31, ts: 1, byline: 'Marlow', kind: 'seat', session: null, text: 'Decision D-7: Pick the bank',
+      product: 'Codex CLI', product_provenance: 'client-reported', delivery: [] },
+  } }));
+  const file = tempJson({ project: 'finance', title: 'Pick the bank', asked_of: 'Ana', proposal: 'Use the credit union.',
+    scope: 'I open the account and nothing else', about_message: 12 });
+  const result = await captureCommand(['work', 'ask', '--connection', 'Marlow', '--file', file], dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.equal(calls[0].url, 'http://localhost:8788/api/ai/work/decisions/ask');
+  assert.equal(calls[0].body.about_message, 12);
+  assert.match(calls[0].body.operation_id, UUID);
+  assert.match(result.stdout, /Asked D-7 · Pick the bank of Ana as message #31; a yes in the room answers it\./);
+});
+
+test('work get, list and brief show the kill slot in words; a record from before it shows none', async () => {
+  const item = decisionItem({ kill_state: 'survived', kill: {
+    question: 'Would the bank refuse?', by: { name: 'Marlow', kind: 'seat', session: null }, at: 120,
+    reply: { words: 'No: they pre-approved us.', outcome: 'survived', by: { name: 'Lead', kind: 'seat', session: null }, at: 130 } } });
+  const got = world(() => ({ json: { ok: true, item, evidence: [], history: [] } }));
+  const shown = await captureCommand(['work', 'get', 'D-7', '--connection', 'Marlow'], got.dependencies);
+  assert.equal(shown.code, EXIT_OK, shown.stderr);
+  assert.match(shown.stdout, /  kill slot: attacked, survived · asked by Marlow: Would the bank refuse\?\n/);
+  assert.match(shown.stdout, /  kill reply \(survived\) by Lead: No: they pre-approved us\.\n/);
+  const old = decisionItem();
+  delete old.kill_state;
+  delete old.kill;
+  const listed = world(() => ({ json: { ok: true, items: [item, old], total: 2, next: null } }));
+  const rows = await captureCommand(['work', 'list', '--connection', 'Marlow'], listed.dependencies);
+  assert.equal(rows.code, EXIT_OK, rows.stderr);
+  assert.match(rows.stdout, /^D-7 · awaiting · attacked, survived · asked of Ana by Lead · Pick the bank$/m);
+  assert.match(rows.stdout, /^D-7 · awaiting · asked of Ana by Lead · Pick the bank$/m, 'no kill word for an older record');
+});
