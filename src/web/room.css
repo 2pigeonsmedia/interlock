@@ -4,7 +4,8 @@
  * instrument tiles, and colored light wherever — and only where — a color has
  * a job. One hue, one meaning:
  *   teal   = the signal path (running lamp, the addressed rail, focus)
- *   amber  = exactly one fact: a ring not yet picked up
+ *   amber  = waiting, either way: a seat waiting on someone, or a ring
+ *            not yet picked up
  *   blue   = AI identity (names in the AI face, @mentions included)
  *   violet = the owner
  *   white  = human names, and the two action buttons
@@ -68,7 +69,7 @@
   --signal-wash: rgb(44 229 203 / 0.05);
   --signal-border: #1F3B37;
 
-  /* amber — one fact: a ring not yet picked up */
+  /* amber — waiting: on someone, or a ring not yet picked up */
   --wait: #F5A83C;
   --wait-text: #E8B984;
 
@@ -164,7 +165,8 @@ body {
 
 button, input, textarea { font: inherit; color: inherit; }
 
-button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible {
+button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible,
+select:focus-visible, summary:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
@@ -414,6 +416,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }
 .pending-ai-card strong { font-family: var(--font-ai); font-weight: 600; color: var(--ai); }
 .pending-ai-card p { margin-top: 2px; color: var(--ink-3); }
+.pending-ai-card .pending-ai-project { color: var(--ink-2); overflow-wrap: anywhere; }
 .pending-ai-card .pending-ai-code { font-family: var(--font-ai); font-weight: 600; letter-spacing: 0.08em; color: var(--ink); }
 .pending-ai-card small { display: block; margin-top: 3px; color: var(--ink-4); }
 .pending-ai-actions { display: flex; gap: 8px; }
@@ -425,7 +428,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 .settings-dialog > section { display: grid; gap: 12px; }
 .settings-form { display: grid; gap: 7px; }
 .settings-form label { font-size: 0.8rem; font-weight: 600; color: var(--ink-3); }
-.settings-form input {
+.settings-form input, .settings-form select {
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--tile-edge);
@@ -462,10 +465,12 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 }
 .settings-participant small { display: block; color: var(--ink-4); }
 .settings-participant .remove { color: var(--ember); border-color: var(--ember-line); }
+.settings-grants { display: grid; gap: 10px; margin-top: 8px; }
+.settings-grants h4 { font-size: 0.85rem; font-weight: 600; color: var(--ink-2); }
 .settings-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .settings-row-actions a { display: inline-flex; align-items: center; text-decoration: none; }
 .settings-row-actions .danger { color: var(--ember); border-color: var(--ember-line); }
-.settings-note { font-size: 0.85rem; color: var(--ink-3); }
+.settings-note, .settings-hint { font-size: 0.85rem; color: var(--ink-3); }
 .settings-reuse {
   display: flex;
   align-items: center;
@@ -523,8 +528,49 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 .person-card .participant-session { font-variant-numeric: tabular-nums; }
 .person-card .outstanding { color: var(--wait-text); }
 
-/* The presence lamp repeats roster facts as light; the words above carry the
- * meaning, so the lamp itself is aria-hidden. */
+/* People groups: a header per group, folded unless it needs the viewer. */
+.people-group + .people-group { margin-top: 6px; }
+.people-group > summary {
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.people-group > summary:hover { color: var(--ink-2); }
+/* The row is a button: name, plate, state word, age. Its detail opens below. */
+.person-row {
+  grid-column: 2;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.person-row .participant-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Inside the row and its detail, everything sits in one column. */
+.person-card .person-row > strong, .person-card .person-row > span,
+.person-card .person-detail > span { grid-column: 1; }
+.person-card .person-detail { grid-column: 2; display: grid; gap: 2px; padding-top: 4px; }
+.person-card .person-detail[hidden] { display: none; }
+.person-assign { display: grid; gap: 4px; margin-top: 4px; font-size: 0.76rem; color: var(--ink-3); }
+.person-assign select {
+  padding: 5px 8px;
+  border: 1px solid var(--tile-edge);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+/* The presence lamp repeats the row's state word as light (teal working,
+ * amber waiting, grey quiet); the words carry the meaning, so the lamp itself
+ * is aria-hidden. */
 .presence-lamp {
   grid-column: 1;
   grid-row: 1;
@@ -534,10 +580,9 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   border-radius: 50%;
   background: var(--ink-5);
 }
-.presence-lamp[data-state="heard"] { background: var(--signal-bright); box-shadow: 0 0 7px rgb(44 229 203 / 0.8); }
+.presence-lamp[data-state="working"] { background: var(--signal-bright); box-shadow: 0 0 7px rgb(44 229 203 / 0.8); }
 .presence-lamp[data-state="waiting"] { background: var(--wait); box-shadow: 0 0 7px rgb(245 168 60 / 0.8); }
-.presence-lamp[data-state="owner"] { background: var(--owner); box-shadow: 0 0 7px rgb(169 154 245 / 0.8); }
-.presence-lamp[data-state="person"] { background: var(--ink-3); }
+.presence-lamp[data-state="quiet"] { background: var(--ink-5); }
 
 /* ---------- identity by typeface ----------
  * Humans: bold in the body face, plain bright ink. AIs: the mono face in the

@@ -179,6 +179,29 @@
       <form method="dialog"><button class="quiet-action" type="submit" aria-label="Close">Close</button></form>
     </header>
 
+    <section aria-labelledby="settings-status-heading">
+      <h3 id="settings-status-heading">Your status</h3>
+      <p class="settings-hint">One line each, shown on your row in People. Sending a message clears it.</p>
+      <form id="presence-form" class="settings-form">
+        <label for="presence-middle">In the middle of</label>
+        <input id="presence-middle" maxlength="120" autocomplete="off">
+        <label for="presence-waiting-on">Waiting on</label>
+        <input id="presence-waiting-on" maxlength="120" autocomplete="off">
+        <label for="presence-need">You'll need</label>
+        <input id="presence-need" maxlength="300" autocomplete="off">
+        <div class="settings-row-actions">
+          <button id="presence-save-button" class="quiet-action" type="submit">Save status</button>
+          <button id="presence-clear-button" class="quiet-action" type="button">Clear</button>
+        </div>
+      </form>
+      <form id="profile-form" class="settings-form">
+        <label for="profile-line">Profile</label>
+        <input id="profile-line" maxlength="120" autocomplete="off" placeholder="One line about you">
+        <button id="profile-save-button" class="quiet-action" type="submit">Save profile</button>
+      </form>
+      <p id="settings-your-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
     <section aria-labelledby="settings-people-heading">
       <h3 id="settings-people-heading">People and AIs</h3>
       <label class="settings-reuse">
@@ -198,6 +221,23 @@
       </div>
       <div id="settings-participant-list" class="settings-participant-list"></div>
       <p id="settings-people-status" class="status" role="status" aria-live="polite"></p>
+      <div id="settings-grants" class="settings-grants" role="group" aria-labelledby="settings-grants-heading">
+        <h4 id="settings-grants-heading">Grants</h4>
+        <p class="settings-hint">A grant clears someone to act on a project. Its holder leads that project and may assign AIs to it.</p>
+        <div id="settings-grant-list" class="settings-participant-list"></div>
+        <form id="grant-create-form" class="settings-form" aria-label="Make a grant">
+          <label for="grant-holder">Holder</label>
+          <select id="grant-holder" required></select>
+          <label for="grant-project">Project</label>
+          <select id="grant-project"></select>
+          <label for="grant-scope">Scope</label>
+          <input id="grant-scope" maxlength="300" autocomplete="off" required>
+          <label for="grant-until">Until (optional)</label>
+          <input id="grant-until" type="date">
+          <button id="grant-create-button" class="quiet-action" type="submit">Make a grant</button>
+        </form>
+        <p id="settings-grants-status" class="status" role="status" aria-live="polite"></p>
+      </div>
     </section>
 
     <section aria-labelledby="settings-projects-heading">
@@ -327,6 +367,7 @@
   <script src="/attention.js" defer></script>
   <script src="/work_panel_model.js" defer></script>
   <script src="/work_panel.js" defer></script>
+  <script src="/people_model.js" defer></script>
   <script src="/room.js" defer></script>
 </body>
 </html>

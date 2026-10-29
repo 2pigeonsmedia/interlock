@@ -77,8 +77,10 @@ test('dynamic decisions have specific names and narrow layouts wrap', () => {
 test('stale browser code receives reload guidance without disguising outages', () => {
   const guidance = 'Interlock may have been updated since this page loaded. Reload this page.';
   assert.ok(ROOM_JS.includes(`const HARD_REFRESH_GUIDANCE = '${guidance}'`));
-  assert.equal((ROOM_JS.match(/\$\{HARD_REFRESH_GUIDANCE\}/g) || []).length, 4,
-    'waiting AIs, People, delivery, and messages must share the stale-page remedy');
+  assert.equal((ROOM_JS.match(/\$\{HARD_REFRESH_GUIDANCE\}/g) || []).length, 5,
+    'waiting AIs, People, grants, delivery, and messages must share the stale-page remedy');
+  assert.match(ROOM_JS, /const GRANTS_MALFORMED = `Interlock returned a grants response[^`]*\$\{HARD_REFRESH_GUIDANCE\}`/);
+  assert.match(ROOM_JS, /error\.code === 'malformed-response'\) setRoomNotice\(GRANTS_MALFORMED\)/);
   for (const temporaryFailure of [
     'Interlock could not refresh the waiting list. It will try again.',
     'The participant roster is temporarily unavailable. Messages will keep trying.',
@@ -359,4 +361,42 @@ test('the item dialog renders every line the model gives it, keeping line breaks
   assert.match(WORK_PANEL_JS, /for \(const line of model\(\)\.drawerLines\(item, result\.history\)\) section\.append\(make\('p', 'work-drawer-line', line\)\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /'Responsible: '|'Blocked: '|'Asked of '/);
   assert.match(ROOM_CSS, /\.work-drawer-line \{[^}]*white-space: pre-wrap/);
+});
+
+test('Settings carries your status with labelled inputs, and an owner-only Grants section with labelled controls', () => {
+  for (const [id, label] of [
+    ['presence-middle', 'In the middle of'], ['presence-waiting-on', 'Waiting on'], ['presence-need', 'You\'ll need'],
+    ['profile-line', 'Profile'], ['grant-holder', 'Holder'], ['grant-project', 'Project'], ['grant-scope', 'Scope'],
+    ['grant-until', 'Until (optional)'],
+  ]) {
+    assert.match(ROOM, new RegExp(`id="${id}"`), `ARRANGEMENT: ${id} exists`);
+    assert.match(ROOM, new RegExp(`<label for="${id}">${label.replace(/[()]/g, '\\$&')}</label>`), `${id} has a visible label`);
+  }
+  assert.match(ROOM, /<h3 id="settings-status-heading">Your status<\/h3>/);
+  assert.match(ROOM, /id="presence-clear-button"[^>]*type="button">Clear</);
+  assert.match(ROOM, /id="settings-grants"[^>]*role="group"[^>]*aria-labelledby="settings-grants-heading"/);
+  assert.match(ROOM, /<h4 id="settings-grants-heading">Grants<\/h4>/);
+  assert.match(ROOM, /id="grant-create-button"[^>]*>Make a grant</);
+  assert.match(ROOM, /id="grant-until" type="date"/);
+  for (const id of ['settings-your-status', 'settings-grants-status']) {
+    assert.match(ROOM, new RegExp(`id="${id}" class="status" role="status" aria-live="polite"`));
+  }
+  assert.match(ROOM_JS, /settingsGrants\.hidden = !viewerIsAdmin\(\)/, 'Grants are shown to an owner or admin only');
+  assert.match(ROOM_JS, /freshAdminMutation\('\/api\/grants\/create'/, 'a grant is made through the step-up flow');
+  assert.match(ROOM_JS, /freshAdminMutation\('\/api\/grants\/revoke'/, 'and revoked through it');
+  assert.match(ROOM_JS, /'first-owner-grant': 'Only the first owner can revoke a grant they made\.'/);
+  assert.match(ROOM_JS, /`Revoke grant \$\{grant\.grant_id\} held by \$\{grant\.holder_name\}`/, 'each Revoke names its grant');
+});
+
+test('People groups are details with a summary, rows are buttons that say whether they are open, and the light only repeats words', () => {
+  assert.match(ROOM_JS, /document\.createElement\('details'\)[\s\S]*?document\.createElement\('summary'\)/);
+  assert.match(ROOM_JS, /toggle\.setAttribute\('aria-expanded', expanded \? 'true' : 'false'\)/);
+  assert.match(ROOM_JS, /lamp\.setAttribute\('aria-hidden', 'true'\)/);
+  assert.match(ROOM_JS, /select\.setAttribute\('aria-label', `Project for \$\{participant\.name\}`\)/);
+  assert.match(ROOM_JS, /`Project: \$\{row\.declared_project\} \(as typed by the AI\)`/, 'the Allow card line');
+  assert.match(ROOM_CSS, /\.presence-lamp\[data-state="working"\] \{ background: var\(--signal-bright\)/);
+  assert.match(ROOM_CSS, /\.presence-lamp\[data-state="waiting"\] \{ background: var\(--wait\)/);
+  assert.match(ROOM_CSS, /\.presence-lamp\[data-state="quiet"\] \{ background: var\(--ink-5\)/);
+  assert.match(ROOM_CSS, /select:focus-visible, summary:focus-visible \{\s*outline: 3px solid var\(--focus\)/);
+  assert.match(ROOM, /work_panel\.js"[\s\S]*people_model\.js"[\s\S]*room\.js"/, 'the model loads before the room');
 });

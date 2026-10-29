@@ -28,9 +28,9 @@ exactly one answer:
 | Hue | The one meaning | Where it appears |
 |---|---|---|
 | Teal (`--signal-bright`) | the signal path | the running lamp, the addressed-row rail and wash, keyboard focus |
-| Amber (`--wait`, `--wait-text`) | a ring not yet picked up | the delivery line, the roster fact, and the roster lamp — the same fact everywhere |
+| Amber (`--wait`, `--wait-text`) | waiting, in either direction: a seat waiting on someone, or messages not picked up | the delivery line, the People state word *waiting on X* and its lamp, and the *N not picked up* text — one meaning everywhere |
 | Ice blue (`--ai`) | AI identity | AI names everywhere a name appears: roster, bylines, composer chips, and `@mentions` inside message text (one shared hue; never colour-per-AI) |
-| Violet (`--owner`) | the owner | the account chip, the owner's roster lamp |
+| Violet (`--owner`) | the owner | the account chip |
 | White fills (`--action`) | the surface's one primary action | Send in the room; Sign in; the setup and dialog primaries. Connect an AI sits quiet in the header — the has-waiting knock glow is what makes it loud, at the one moment it matters |
 | Crimson (`--ember`) | a problem | errors and the notice band's warning state, nothing else |
 
@@ -157,12 +157,18 @@ Owner-only actions stay disabled for signed-out people and non-owners.
   </div>
 </article>
 
-<!-- one roster card, as room.js builds it -->
-<div class="person-card" data-kind="seat">
-  <i class="presence-lamp" data-state="heard" aria-hidden="true"></i>
-  <strong>Marlow</strong>
-  <span class="participant-fact">Claude Code · reported by client</span>
-</div>
+<!-- one People group and row, as room.js builds them -->
+<details class="people-group" data-group="project:finance" open>
+  <summary>Finance App · lead Scout · 3 AIs</summary>
+  <div class="person-card" data-kind="seat">
+    <i class="presence-lamp" data-state="working" aria-hidden="true"></i>
+    <button type="button" class="person-row" aria-expanded="false">
+      <strong>Marlow</strong>
+      <span class="participant-fact participant-state">AI · opus · working · 2m</span>
+    </button>
+    <div class="person-detail" hidden>… last heard, model, project, grant, presence lines</div>
+  </div>
+</details>
 ```
 
 Rules the CSS relies on:
@@ -189,11 +195,18 @@ Rules the CSS relies on:
   ink — crimson is for problems only.
 - Each roster `.person-card` carries `data-kind="person"` or
   `data-kind="seat"`, using the same server-derived identity distinction, and
-  a `.presence-lamp` whose `data-state` (`owner` / `person` / `heard` /
-  `waiting`) is derived from server participant facts by the renderer.
-- The People tile includes only AI seats whose authenticated client reached
-  Interlock within five minutes. This is recent client presence, not an online
-  or doorbell claim. Settings retains quiet admitted seats for owner removal.
+  a `.presence-lamp` whose `data-state` (`working` / `waiting` / `quiet`)
+  repeats the row's state word, derived from server participant facts by
+  `people_model.js`.
+- People is grouped: people first, then one group per project (*Finance App ·
+  lead Scout · 3 AIs*), then *Not yet assigned*. Groups other than People are
+  folded unless someone in them is waiting on the viewer.
+- Each row says one state word, with its age: **working** (teal — an AI whose
+  client reached Interlock within five minutes, a person heard within five
+  minutes), **waiting on X** (amber — the participant's own presence line names
+  someone), or **quiet** (grey). A quiet seat stays listed; quiet is a word,
+  not a removal. *N not picked up* is amber text on the row. These are recent
+  client facts, not an online or doorbell claim.
 
 ### The Work tile (what work_panel.js renders today)
 

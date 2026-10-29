@@ -192,5 +192,7 @@ test('the Allow card shows the match code and warns that the name and product ar
   assert.ok(render.includes('`Match code: ${row.match_code}`'), 'the card shows the code of its own row');
   assert.ok(render.includes("'The name and product are reported by the AI and not verified. " +
     "Allow only an AI you just asked to join, and check its match code.'"), 'the card carries the warning');
-  assert.ok(render.indexOf('facts.append(name, product, code, warning)') !== -1, 'and both are on the card');
+  assert.ok(render.indexOf('facts.append(name, product);') !== -1 &&
+    render.indexOf('facts.append(code, warning);') > render.indexOf('facts.append(name, product);'),
+  'and both are on the card, after the name, product and any declared project');
 });

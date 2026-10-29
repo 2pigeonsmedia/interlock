@@ -202,6 +202,7 @@ function loadBrowserAssets(hosted) {
       '/page_header.js': ['page_header.js', 'text/javascript; charset=utf-8'],
       '/work_panel_model.js': ['work_panel_model.js', 'text/javascript; charset=utf-8'],
       '/work_panel.js': ['work_panel.js', 'text/javascript; charset=utf-8'],
+      '/people_model.js': ['people_model.js', 'text/javascript; charset=utf-8'],
       '/room.js': ['room.js', 'text/javascript; charset=utf-8'],
       '/docs/screenshots/connect-an-ai.png': ['../../docs/screenshots/connect-an-ai.png', 'image/png'],
       '/BACKUP.md': ['../../BACKUP.md', 'text/plain; charset=utf-8'],

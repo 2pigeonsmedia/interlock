@@ -6,6 +6,8 @@ const CONNECTION_CHECK_TIMEOUT_MS = 3_000;
 const MESSAGE_PAGE_LIMIT = 100;
 const MESSAGE_RETRY_MS = 1_000;
 const ROOM_FACT_INTERVAL_MS = 2_000;
+// Project names change rarely; People re-reads them every fifth room-fact tick.
+const PEOPLE_PROJECTS_EVERY = 5;
 const HARD_REFRESH_GUIDANCE = 'Interlock may have been updated since this page loaded. Reload this page.';
 const UPDATED_GUIDANCE = 'Interlock was updated. Reload this page.';
 const loginView = document.querySelector('#login-view');
@@ -67,6 +69,22 @@ const messageBody = document.querySelector('#message-body');
 const sendButton = document.querySelector('#send-button');
 const mentionSuggestions = document.querySelector('#mention-suggestions');
 const mentionPreview = document.querySelector('#mention-preview');
+const presenceForm = document.querySelector('#presence-form');
+const presenceMiddle = document.querySelector('#presence-middle');
+const presenceWaitingOn = document.querySelector('#presence-waiting-on');
+const presenceNeed = document.querySelector('#presence-need');
+const presenceClearButton = document.querySelector('#presence-clear-button');
+const profileForm = document.querySelector('#profile-form');
+const profileLine = document.querySelector('#profile-line');
+const settingsYourStatus = document.querySelector('#settings-your-status');
+const settingsGrants = document.querySelector('#settings-grants');
+const settingsGrantList = document.querySelector('#settings-grant-list');
+const grantCreateForm = document.querySelector('#grant-create-form');
+const grantHolder = document.querySelector('#grant-holder');
+const grantProject = document.querySelector('#grant-project');
+const grantScope = document.querySelector('#grant-scope');
+const grantUntil = document.querySelector('#grant-until');
+const settingsGrantsStatus = document.querySelector('#settings-grants-status');
 let csrfToken = null;
 let connectionCheckRunning = false;
 let messageCursor = 0;
@@ -81,6 +99,15 @@ let rosterParticipants = [];
 let rosterSeats = [];
 let rosterKnown = false;
 let rosterLoading = false;
+// People facts beside the roster: the room's grants and its live projects.
+let rosterGrants = [];
+let rosterProjects = [];
+let grantsLoading = false;
+let projectsLoading = false;
+let roomFactTicks = 0;
+// What the viewer opened or folded in People survives each refresh.
+const rosterGroupChoice = new Map();
+const rosterExpanded = new Set();
 let roomFactTimer = null;
 let deliveryLoading = false;
 let deliveryCursor = 0;
@@ -294,6 +321,10 @@ function showLogin(message = '') {
   rosterParticipants = [];
   rosterSeats = [];
   rosterKnown = false;
+  rosterGrants = [];
+  rosterProjects = [];
+  rosterGroupChoice.clear();
+  rosterExpanded.clear();
   rosterList.replaceChildren();
   roomView.hidden = true;
   loginView.hidden = false;
@@ -311,7 +342,8 @@ function showRoom(user) {
   currentUser = user;
   renderRoster([{
     name: user.name, kind: 'person', session: null, product: null, product_provenance: null,
-    expires_at: null, last_heard: null, outstanding: 0, fetched_without_post_at: null,
+    expires_at: null, last_heard: null, present: true, outstanding: 0, fetched_without_post_at: null,
+    model: null, project: null, assigned: null, presence: null,
   }]);
   connectAiButton.disabled = !owner;
   connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
@@ -326,10 +358,16 @@ function showRoom(user) {
   if (owner) loadPendingAis();
   else renderPendingAis([]);
   stopRoomFacts();
+  roomFactTicks = 0;
+  loadGrants();
+  loadPeopleProjects();
   roomFactTimer = setInterval(() => {
     loadRoster();
+    loadGrants();
     loadDeliveryChanges();
     if (owner) loadPendingAis();
+    roomFactTicks += 1;
+    if (roomFactTicks % PEOPLE_PROJECTS_EVERY === 0) loadPeopleProjects();
   }, ROOM_FACT_INTERVAL_MS);
   openRequestedPanel();
   InterlockWorkPanel.start(user, {
@@ -558,7 +596,14 @@ function renderPendingAis(rows) {
     connection.textContent = row.connected
       ? 'Waiting now · expires in a few minutes'
       : 'The waiting connection is gone; Allow is unavailable.';
-    facts.append(name, product, code, warning);
+    facts.append(name, product);
+    if (row.declared_project !== null) {
+      const declared = document.createElement('p');
+      declared.className = 'pending-ai-project';
+      declared.textContent = `Project: ${row.declared_project} (as typed by the AI)`;
+      facts.append(declared);
+    }
+    facts.append(code, warning);
     if (row.reuse === 'held' || row.reuse === 'ended') {
       facts.append(priorUse);
     }
@@ -856,77 +901,213 @@ function participantFact(text, className = '') {
   return fact;
 }
 
-/* The presence lamp repeats roster facts as light. The words in the
- * roster carry the meaning, so both are aria-hidden; the states come only
- * from server-authored participant facts, never from message text. */
-function presenceLampState(participant) {
-  if (participant.kind === 'person') {
-    const owner = currentUser && participant.name === currentUser.name &&
-      Array.isArray(currentUser.roles) && currentUser.roles.includes('owner');
-    return owner ? 'owner' : 'person';
-  }
-  return participant.outstanding > 0 ? 'waiting' : 'heard';
-}
+/* The presence lamp repeats the row's state word as light: teal working,
+ * amber waiting, grey quiet. The words in the row carry the meaning, so the
+ * lamp is aria-hidden; the state comes only from server-authored participant
+ * facts, never from message text. */
+const LAMP_STATES = Object.freeze({ teal: 'working', amber: 'waiting', grey: 'quiet' });
 
-function presenceLamp(state) {
+function presenceLamp(light) {
   const lamp = document.createElement('i');
   lamp.className = 'presence-lamp';
-  lamp.dataset.state = state;
+  lamp.dataset.state = LAMP_STATES[light] || 'quiet';
   lamp.setAttribute('aria-hidden', 'true');
   return lamp;
 }
 
+function viewerIsAdmin() {
+  return Boolean(currentUser && Array.isArray(currentUser.roles) && currentUser.roles.includes('owner'));
+}
+
+function rosterKey(row) {
+  return row.kind + ':' + row.name;
+}
+
+function projectName(id) {
+  const project = rosterProjects.find(row => row.id === id);
+  return project ? project.display_name : id;
+}
+
 function renderRoster(participants) {
-  rosterList.replaceChildren();
   rosterParticipants = participants.slice();
   rosterSeats = participants.filter(row => row.kind === 'seat' && row.present);
   rosterKnown = true;
-  for (const participant of participants.filter(row => row.kind === 'person' || row.present)) {
-    const card = document.createElement('div');
-    card.className = 'person-card';
-    card.dataset.kind = participant.kind;
-    card.append(presenceLamp(presenceLampState(participant)));
-    const name = document.createElement('strong');
-    name.textContent = participant.name;
-    card.append(name);
-    if (participant.kind === 'person') {
-      const owner = currentUser && participant.name === currentUser.name &&
-        Array.isArray(currentUser.roles) && currentUser.roles.includes('owner');
-      card.append(participantFact(owner ? 'Owner · Person' : 'Person'));
-    } else {
-      const provenance = participant.product_provenance === 'adapter-reported'
-        ? 'reported by adapter' : 'reported by client';
-      if (participant.session !== null) {
-        card.append(participantFact(sessionLabel(participant), 'participant-session'));
-      }
-      card.append(participantFact(`${participant.product} · ${provenance}`));
-      if (participant.last_heard === null) {
-        card.append(participantFact('Not heard yet'));
-      } else {
-        const time = formatFullTime(participant.last_heard);
-        card.append(participantFact(time ? `Last heard ${time}` : 'Last heard unavailable'));
-      }
-      const expires = formatFullTime(participant.expires_at);
-      if (expires) card.append(participantFact(`Expires ${expires}`));
-      if (participant.outstanding > 0) {
-        card.append(participantFact(
-          `${participant.outstanding} ${participant.outstanding === 1 ? 'message' : 'messages'} not picked up`,
-          'outstanding',
-        ));
-      }
-      if (participant.fetched_without_post_at !== null) {
-        const elapsed = elapsedWords(participant.fetched_without_post_at, Date.now());
-        card.append(participantFact(
-          elapsed === null ? 'Fetched · time unavailable · no post since' :
-            `Fetched ${elapsed} · no post since`,
-        ));
-      }
-    }
-    rosterList.append(card);
-  }
+  drawRoster();
   renderMentionSuggestions();
   updateMentionPreview();
   refreshPendingDeliveryPresence();
+}
+
+// People, grouped: people first, one group per project, Not yet assigned
+// last. A quiet AI stays listed with its state word. A refresh keeps what
+// the viewer opened and where keyboard focus was, and never replaces a
+// project list the viewer is choosing from.
+function drawRoster() {
+  const active = document.activeElement;
+  const inRoster = Boolean(active && typeof rosterList.contains === 'function' && rosterList.contains(active));
+  if (inRoster && active.tagName === 'SELECT') return;
+  const focusKey = inRoster && active.dataset ? active.dataset.focusKey : undefined;
+  const now = Date.now();
+  const focusable = new Map();
+  const groups = InterlockPeopleModel.groups(rosterParticipants, {
+    projects: rosterProjects,
+    leads: InterlockPeopleModel.leads(rosterGrants, now),
+    viewerName: currentUser ? currentUser.name : null,
+  });
+  rosterList.replaceChildren(...groups.map(group => {
+    const details = document.createElement('details');
+    details.className = 'people-group';
+    details.dataset.group = group.key;
+    details.open = rosterGroupChoice.has(group.key) ? rosterGroupChoice.get(group.key) : group.open;
+    const summary = document.createElement('summary');
+    summary.textContent = group.heading;
+    summary.dataset.focusKey = 'group:' + group.key;
+    focusable.set(summary.dataset.focusKey, summary);
+    // The click runs before the browser flips `open`, so the choice is the flip.
+    summary.addEventListener('click', () => rosterGroupChoice.set(group.key, !details.open));
+    details.append(summary);
+    for (const participant of group.rows) details.append(rosterCard(participant, now, focusable));
+    return details;
+  }));
+  if (focusKey && focusable.has(focusKey)) focusable.get(focusKey).focus();
+}
+
+function rosterCard(participant, now, focusable) {
+  const state = InterlockPeopleModel.stateOf(participant, now);
+  const key = rosterKey(participant);
+  const card = document.createElement('div');
+  card.className = 'person-card';
+  card.dataset.kind = participant.kind;
+  card.append(presenceLamp(state.light));
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'person-row';
+  toggle.dataset.focusKey = 'row:' + key;
+  focusable.set(toggle.dataset.focusKey, toggle);
+  const expanded = rosterExpanded.has(key);
+  toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  const name = document.createElement('strong');
+  name.textContent = participant.name;
+  const age = InterlockPeopleModel.age(state.age_since, now);
+  toggle.append(name, participantFact(
+    [InterlockPeopleModel.plate(participant), state.word].concat(age ? [age] : []).join(' · '),
+    'participant-state',
+  ));
+  card.append(toggle);
+  if (state.notPickedUp) card.append(participantFact(state.notPickedUp, 'outstanding'));
+  const detail = rosterDetail(participant, now, toggle);
+  detail.hidden = !expanded;
+  toggle.addEventListener('click', () => {
+    const open = !rosterExpanded.has(key);
+    if (open) rosterExpanded.add(key);
+    else rosterExpanded.delete(key);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    detail.hidden = !open;
+  });
+  card.append(detail);
+  return card;
+}
+
+function rosterDetail(participant, now, toggle) {
+  const detail = document.createElement('div');
+  detail.className = 'person-detail';
+  if (currentUser && participant.kind === 'person' && participant.name === currentUser.name) {
+    detail.append(participantFact(viewerIsAdmin()
+      ? (currentUser.first_owner === true ? 'You · Owner' : 'You · Admin') : 'You'));
+  }
+  if (participant.last_heard === null) {
+    detail.append(participantFact('Not heard yet'));
+  } else {
+    const time = formatFullTime(participant.last_heard);
+    detail.append(participantFact(time ? `Last heard ${time}` : 'Last heard unavailable'));
+  }
+  if (participant.kind === 'seat') {
+    const provenance = participant.product_provenance === 'adapter-reported'
+      ? 'reported by adapter' : 'reported by client';
+    if (participant.session !== null) {
+      detail.append(participantFact(sessionLabel(participant), 'participant-session'));
+    }
+    detail.append(participantFact(`${participant.product} · ${provenance}`));
+    if (participant.model) detail.append(participantFact(`${participant.model} · model reported by client`));
+    const assigned = InterlockPeopleModel.assignedLine(participant);
+    if (participant.project !== null) {
+      detail.append(participantFact(`Project: ${projectName(participant.project)}` + (assigned ? ` · ${assigned}` : '')));
+    } else {
+      detail.append(participantFact('Not yet assigned' + (assigned ? ` · ${assigned}` : '')));
+    }
+    const expires = formatFullTime(participant.expires_at);
+    if (expires) detail.append(participantFact(`Expires ${expires}`));
+    if (participant.fetched_without_post_at !== null) {
+      const elapsed = elapsedWords(participant.fetched_without_post_at, now);
+      detail.append(participantFact(
+        elapsed === null ? 'Fetched · time unavailable · no post since' :
+          `Fetched ${elapsed} · no post since`,
+      ));
+    }
+  }
+  for (const grant of InterlockPeopleModel.heldGrants(rosterGrants, participant, now)) {
+    detail.append(participantFact(InterlockPeopleModel.grantLine(grant, projectName(grant.project))));
+  }
+  const presence = participant.presence;
+  if (presence) {
+    if (presence.middle) detail.append(participantFact(`In the middle of: ${presence.middle}`));
+    if (presence.waiting_on) detail.append(participantFact(`Waiting on: ${presence.waiting_on}`));
+    if (presence.need) detail.append(participantFact(`Will need: ${presence.need}`));
+  }
+  if (participant.kind === 'seat' && viewerIsAdmin()) detail.append(assignControl(participant, toggle));
+  return detail;
+}
+
+function assignControl(participant, toggle) {
+  const label = document.createElement('label');
+  label.className = 'person-assign';
+  label.textContent = 'Project';
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', `Project for ${participant.name}`);
+  const choices = [{ value: '', text: 'Not yet assigned' }]
+    .concat(rosterProjects.map(project => ({ value: project.id, text: project.display_name })));
+  if (participant.project !== null && !rosterProjects.some(project => project.id === participant.project)) {
+    choices.push({ value: participant.project, text: participant.project });
+  }
+  for (const choice of choices) {
+    const option = document.createElement('option');
+    option.value = choice.value;
+    option.textContent = choice.text;
+    select.append(option);
+  }
+  select.value = participant.project === null ? '' : participant.project;
+  select.addEventListener('change', () =>
+    assignSeatProject(participant, select.value === '' ? null : select.value, select, toggle));
+  label.append(select);
+  return label;
+}
+
+const ASSIGN_REFUSALS = Object.freeze({
+  'unknown-project': 'That project is not live any more. Choose another.',
+  'not-authorized': 'Only the owner, an admin, or that project\'s lead can assign an AI there.',
+  'invalid-request': 'Interlock could not accept that project change.',
+});
+
+async function assignSeatProject(participant, project, select, toggle) {
+  select.disabled = true;
+  try {
+    await ownerMutation('/api/people/assign', { seat_name: participant.name, project });
+    setRoomNotice(project === null
+      ? `${participant.name} is not yet assigned.`
+      : `${participant.name} is assigned to ${projectName(project)}.`, 'success');
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    setRoomNotice(ASSIGN_REFUSALS[error.code] || 'Interlock did not change that project. Try again.', 'error');
+  } finally {
+    select.disabled = false;
+  }
+  // Focus returns to the row, so the refresh can rebuild it in place.
+  toggle.focus();
+  await loadRoster();
 }
 
 function renderSettingsParticipants(settings = null) {
@@ -1243,6 +1424,315 @@ async function loadRoster() {
       : 'The participant roster is temporarily unavailable. Messages will keep trying.');
   } finally {
     rosterLoading = false;
+  }
+}
+
+const GRANTS_MALFORMED = `Interlock returned a grants response this page could not safely use. ${HARD_REFRESH_GUIDANCE}`;
+
+// A grant as `GET /api/grants` lists it: closed keys, every value typed.
+function validGrant(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 12 || ![
+    'grant_id', 'holder_name', 'holder_kind', 'project', 'scope', 'until',
+    'by_name', 'at', 'state', 'revoked_at', 'revoked_by', 'reason',
+  ].every(key => keys.includes(key))) return false;
+  const textOrNull = item => item === null || typeof item === 'string';
+  return typeof value.grant_id === 'string' && /^G-[1-9][0-9]*$/.test(value.grant_id) &&
+    typeof value.holder_name === 'string' && value.holder_name.length > 0 &&
+    (value.holder_kind === 'person' || value.holder_kind === 'seat') &&
+    textOrNull(value.project) && typeof value.scope === 'string' &&
+    (value.until === null || Number.isSafeInteger(value.until)) &&
+    typeof value.by_name === 'string' && Number.isSafeInteger(value.at) &&
+    ['active', 'revoked', 'expired'].includes(value.state) &&
+    (value.revoked_at === null || Number.isSafeInteger(value.revoked_at)) &&
+    textOrNull(value.revoked_by) && textOrNull(value.reason) &&
+    (value.state === 'revoked') === (value.revoked_at !== null);
+}
+
+async function fetchGrants() {
+  const response = await fetch('/api/grants', { cache: 'no-store', credentials: 'same-origin' });
+  const result = await readJson(response);
+  if (!response.ok) throw Object.assign(new Error('grants-unavailable'), { code: 'grants-unavailable' });
+  if (!result || result.ok !== true || Object.keys(result).length !== 2 ||
+      !Array.isArray(result.grants) || result.grants.some(row => !validGrant(row))) {
+    throw Object.assign(new Error('malformed-response'), { code: 'malformed-response' });
+  }
+  return result.grants.slice();
+}
+
+// Grants refresh beside the roster. A room whose People store is unavailable
+// lists none; the roster read is the one that reports a session that ended.
+async function loadGrants() {
+  if (grantsLoading || roomView.hidden) return;
+  grantsLoading = true;
+  const requestGeneration = roomRequestGeneration.capture();
+  try {
+    const grants = await fetchGrants();
+    if (!roomRequestGeneration.isCurrent(requestGeneration)) return;
+    rosterGrants = grants;
+    if (rosterKnown) drawRoster();
+  } catch (error) {
+    if (!roomRequestGeneration.isCurrent(requestGeneration)) return;
+    if (error.code === 'malformed-response') setRoomNotice(GRANTS_MALFORMED);
+  } finally {
+    grantsLoading = false;
+  }
+}
+
+// Project names come from the same brief the Work panel reads; People needs
+// only each live project's id and display name.
+async function loadPeopleProjects() {
+  if (projectsLoading || roomView.hidden) return;
+  projectsLoading = true;
+  const requestGeneration = roomRequestGeneration.capture();
+  try {
+    const response = await fetch('/api/work/brief', { cache: 'no-store', credentials: 'same-origin' });
+    const result = await readJson(response);
+    if (!roomRequestGeneration.isCurrent(requestGeneration) || !response.ok) return;
+    if (!result || result.ok !== true || !Array.isArray(result.projects) ||
+        result.projects.some(row => !row || typeof row.id !== 'string' || typeof row.display_name !== 'string')) return;
+    rosterProjects = result.projects.map(row => ({ id: row.id, display_name: row.display_name }));
+    if (rosterKnown) drawRoster();
+  } catch (_) {
+    // The Work panel reports the brief's own failures; People keeps the last names.
+  } finally {
+    projectsLoading = false;
+  }
+}
+
+// ── Settings: your status, your profile, and grants ──────────────────────
+
+function lineOrNull(input) {
+  const text = String(input.value || '').trim();
+  return text.length > 0 ? text : null;
+}
+
+function ownRosterRow() {
+  return currentUser
+    ? rosterParticipants.find(row => row.kind === 'person' && row.name === currentUser.name) || null
+    : null;
+}
+
+function fillYourStatus() {
+  const presence = ownRosterRow() ? ownRosterRow().presence : null;
+  presenceMiddle.value = presence && presence.middle ? presence.middle : '';
+  presenceWaitingOn.value = presence && presence.waiting_on ? presence.waiting_on : '';
+  presenceNeed.value = presence && presence.need ? presence.need : '';
+}
+
+const STATUS_REFUSALS = Object.freeze({
+  'invalid-request': 'Interlock could not accept that. Each line is one line of text: up to 120 characters, 300 for what you will need.',
+  'not-authorized': 'Only you can set your own status.',
+});
+
+async function saveYourStatus(body, done) {
+  setSettingsStatus(settingsYourStatus, 'Saving…');
+  try {
+    await ownerMutation('/api/presence', body);
+    setSettingsStatus(settingsYourStatus, done, 'success');
+    await loadRoster();
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    setSettingsStatus(settingsYourStatus,
+      STATUS_REFUSALS[error.code] || 'Interlock did not save your status. Try again.', 'error');
+  }
+}
+
+presenceForm.addEventListener('submit', event => {
+  event.preventDefault();
+  saveYourStatus({
+    middle: lineOrNull(presenceMiddle),
+    waiting_on: lineOrNull(presenceWaitingOn),
+    need: lineOrNull(presenceNeed),
+  }, 'Your status is saved.');
+});
+
+presenceClearButton.addEventListener('click', () => {
+  presenceMiddle.value = '';
+  presenceWaitingOn.value = '';
+  presenceNeed.value = '';
+  saveYourStatus({ middle: null, waiting_on: null, need: null }, 'Your status is cleared.');
+});
+
+profileForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const line = lineOrNull(profileLine);
+  setSettingsStatus(settingsYourStatus, 'Saving…');
+  try {
+    await ownerMutation('/api/profile', { line });
+    setSettingsStatus(settingsYourStatus,
+      line === null ? 'Your profile line is cleared.' : 'Your profile line is saved.', 'success');
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    setSettingsStatus(settingsYourStatus, error.code === 'invalid-request'
+      ? 'Interlock could not accept that. The profile is one line of up to 120 characters.'
+      : 'Interlock did not save your profile line. Try again.', 'error');
+  }
+});
+
+// The server's grant refusals, as sentences.
+const GRANT_REFUSALS = Object.freeze({
+  'invalid-holder': 'That holder is not in the room any more. Choose someone who is.',
+  'unknown-project': 'That project is not live any more. Choose another.',
+  'invalid-request': 'Interlock could not accept that grant. The scope is one line of up to 300 characters, and the date must be in the future.',
+  'first-owner-grant': 'Only the first owner can revoke a grant they made.',
+  'not-authorized': 'Only the owner or an admin can make or revoke a grant.',
+  'grant-not-active': 'That grant is no longer active. The list is refreshed.',
+});
+
+function grantState(grant, now) {
+  return grant.state === 'active' && grant.until !== null && grant.until <= now ? 'expired' : grant.state;
+}
+
+function fillGrantForm() {
+  const holders = rosterParticipants.slice()
+    .sort((left, right) => (left.kind === right.kind ? 0 : (left.kind === 'person' ? -1 : 1)) ||
+      left.name.localeCompare(right.name));
+  grantHolder.replaceChildren(...holders.map(row => {
+    const option = document.createElement('option');
+    option.value = JSON.stringify([row.kind, row.name]);
+    option.textContent = `${row.name} · ${row.kind === 'person' ? 'Human' : 'AI'}`;
+    return option;
+  }));
+  const whole = document.createElement('option');
+  whole.value = '';
+  whole.textContent = 'Whole room';
+  grantProject.replaceChildren(whole, ...rosterProjects.map(project => {
+    const option = document.createElement('option');
+    option.value = project.id;
+    option.textContent = project.display_name;
+    return option;
+  }));
+}
+
+function renderSettingsGrants() {
+  const now = Date.now();
+  const grants = rosterGrants.slice().sort((left, right) =>
+    Number(right.grant_id.slice(2)) - Number(left.grant_id.slice(2)));
+  if (grants.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-hint';
+    empty.textContent = 'No grants yet.';
+    settingsGrantList.replaceChildren(empty);
+    return;
+  }
+  settingsGrantList.replaceChildren(...grants.map(grant => {
+    const state = grantState(grant, now);
+    const row = document.createElement('div');
+    row.className = 'settings-participant';
+    const facts = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = `${grant.grant_id} · ${grant.holder_name}`;
+    const where = document.createElement('small');
+    where.textContent = `${grant.project === null ? 'Whole room' : projectName(grant.project)} · ${state}`;
+    const scope = document.createElement('small');
+    scope.textContent = grant.scope;
+    const made = document.createElement('small');
+    const until = grant.until === null ? 'until revoked' : `until ${formatFullTime(grant.until) || 'the stated time'}`;
+    made.textContent = `by ${grant.by_name} · ${formatFullTime(grant.at) || 'time unavailable'} · ${until}`;
+    facts.append(name, where, scope, made);
+    if (state === 'revoked') {
+      const revoked = document.createElement('small');
+      revoked.textContent = `revoked by ${grant.revoked_by || 'unknown'}` + (grant.reason ? ` · ${grant.reason}` : '');
+      facts.append(revoked);
+    }
+    row.append(facts);
+    if (state === 'active') {
+      const revoke = document.createElement('button');
+      revoke.type = 'button';
+      revoke.className = 'quiet-action remove';
+      revoke.textContent = 'Revoke';
+      revoke.setAttribute('aria-label', `Revoke grant ${grant.grant_id} held by ${grant.holder_name}`);
+      revoke.addEventListener('click', () => revokeGrant(grant, revoke));
+      row.append(revoke);
+    }
+    return row;
+  }));
+}
+
+async function refreshSettingsGrants() {
+  try {
+    rosterGrants = await fetchGrants();
+    if (rosterKnown) drawRoster();
+  } catch (error) {
+    setSettingsStatus(settingsGrantsStatus, error.code === 'malformed-response'
+      ? GRANTS_MALFORMED : 'Interlock could not load grants.', 'error');
+  }
+  renderSettingsGrants();
+}
+
+function grantFailure(error, cancelled, fallback) {
+  if (error.code === 'not-authenticated') {
+    forgetCsrf();
+    showLogin('Your session ended. Sign in again to continue.');
+    return;
+  }
+  setSettingsStatus(settingsGrantsStatus,
+    (error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
+      ? cancelled : (GRANT_REFUSALS[error.code] || fallback), 'error');
+}
+
+grantCreateForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  let holder;
+  try { holder = JSON.parse(grantHolder.value); } catch (_) { holder = null; }
+  if (!Array.isArray(holder) || holder.length !== 2) {
+    setSettingsStatus(settingsGrantsStatus, 'Choose who holds the grant.', 'error');
+    return;
+  }
+  const scope = String(grantScope.value || '').trim();
+  if (scope.length === 0) {
+    setSettingsStatus(settingsGrantsStatus, 'Write the scope in one line.', 'error');
+    return;
+  }
+  // A date means through the end of that day, on this computer's clock.
+  const until = grantUntil.value ? new Date(`${grantUntil.value}T23:59:59.999`).getTime() : null;
+  if (until !== null && (!Number.isSafeInteger(until) || until <= Date.now())) {
+    setSettingsStatus(settingsGrantsStatus, 'Choose today or a later date, or leave the date empty.', 'error');
+    return;
+  }
+  const submit = grantCreateForm.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  setSettingsStatus(settingsGrantsStatus, 'Confirm this grant with your passkey…');
+  try {
+    const result = await freshAdminMutation('/api/grants/create', {
+      holder_name: holder[1], holder_kind: holder[0],
+      project: grantProject.value === '' ? null : grantProject.value, scope, until,
+    });
+    if (!validGrant(result.grant)) throw Object.assign(new Error('malformed-response'), { code: 'malformed-response' });
+    grantScope.value = '';
+    grantUntil.value = '';
+    await refreshSettingsGrants();
+    setSettingsStatus(settingsGrantsStatus, `${result.grant.grant_id} made for ${result.grant.holder_name}.`, 'success');
+  } catch (error) {
+    grantFailure(error, 'Passkey confirmation was cancelled. No grant was made.',
+      'Interlock did not make that grant. Refresh and try again.');
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+async function revokeGrant(grant, button) {
+  button.disabled = true;
+  setSettingsStatus(settingsGrantsStatus, `Confirm revoking ${grant.grant_id} with your passkey…`);
+  try {
+    await freshAdminMutation('/api/grants/revoke', { grant_id: grant.grant_id, reason: null });
+    await refreshSettingsGrants();
+    setSettingsStatus(settingsGrantsStatus, `${grant.grant_id} was revoked.`, 'success');
+  } catch (error) {
+    grantFailure(error, 'Passkey confirmation was cancelled. Nothing was revoked.',
+      'Interlock did not revoke that grant. Refresh and try again.');
+    if (error.code === 'grant-not-active') await refreshSettingsGrants();
+    else button.disabled = false;
   }
 }
 
@@ -1859,7 +2349,13 @@ settingsButton.addEventListener('click', async () => {
   ownerNotificationsStatus.textContent = notificationPermission === 'unsupported'
     ? 'This browser does not offer local notifications.' : '';
   setSettingsStatus(settingsTranscriptStatus, '');
+  setSettingsStatus(settingsYourStatus, '');
+  setSettingsStatus(settingsGrantsStatus, '');
+  fillYourStatus();
+  fillGrantForm();
+  settingsGrants.hidden = !viewerIsAdmin();
   settingsDialog.showModal();
+  refreshSettingsGrants();
   try { await loadSettingsParticipants(); }
   catch (_) {
     setSettingsStatus(settingsPeopleStatus, 'Interlock could not load Settings people.', 'error');

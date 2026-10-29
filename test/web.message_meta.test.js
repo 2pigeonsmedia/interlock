@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const room = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.js'), 'utf8');
 const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.css'), 'utf8');
+const peopleModel = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'people_model.js'), 'utf8');
 const design = fs.readFileSync(path.join(__dirname, '..', 'docs', 'DESIGN.md'), 'utf8');
 const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
 
@@ -56,9 +57,10 @@ test('delivery state is written as DOM text on first render and live client deli
     'the browser must not claim that a transport receipt reached a model');
   assert.doesNotMatch(css, /\.delivery \.ack::before|\.delivery \.pending::before/,
     'decorative generated glyphs must not add ambiguous spoken content');
-  assert.match(room,
-    /participant\.outstanding === 1 \? 'message' : 'messages'\} not picked up/,
+  assert.match(peopleModel,
+    /row\.outstanding \+ ' not picked up'/,
     'the roster must use the same honest state as each addressed message');
+  assert.match(room, /if \(state\.notPickedUp\) card\.append\(participantFact\(state\.notPickedUp, 'outstanding'\)\)/);
   assert.doesNotMatch(room, /unconfirmed.*deliver/,
     'browser wording must not restore the retired delivery label elsewhere');
   assert.match(design, /Codex — Delivered/);
@@ -69,7 +71,7 @@ test('delivery state is written as DOM text on first render and live client deli
     'the visual contract must not restore claims stronger than client delivery');
 });
 
-test('People excludes quiet AI clients without deleting their managed connection', () => {
+test('People keeps quiet AI clients listed as quiet, without deleting their managed connection', () => {
   assert.match(room,
     /'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at'/,
     'the browser must require the server-authored presence fact');
@@ -82,8 +84,10 @@ test('People excludes quiet AI clients without deleting their managed connection
     /rosterSeats = participants\.filter\(row => row\.kind === 'seat' && row\.present\)/,
     'only present seats may be offered as new mention recipients');
   assert.match(room,
-    /participants\.filter\(row => row\.kind === 'person' \|\| row\.present\)/,
-    'quiet AI seats must leave the live People tile');
+    /InterlockPeopleModel\.groups\(rosterParticipants,/,
+    'People lists every live seat; a quiet one is grouped, not dropped');
+  assert.match(peopleModel, /return \{ word: 'quiet', light: 'grey'/,
+    'a seat outside the five-minute window says quiet in words');
   assert.match(room,
     /endedDay \? ` · ended \$\{endedDay\}` : ` · \$\{quietWords\(participant\.last_heard, now\)\}`/,
     'Settings must say ended dates and quiet durations in words');
