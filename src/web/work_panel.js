@@ -139,7 +139,7 @@
 
   function renderNeedsYou(brief) {
     const state = session;
-    const needs = model().needsYou(brief, Date.now(), state ? state.asks : [], state ? state.answered : new Set());
+    const needs = model().needsYou(brief, Date.now(), state ? state.asks : [], state ? state.answers.settled() : new Set());
     element('needs-you-count').textContent = String(needs.count);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
     element('needs-you-list').replaceChildren(...needs.rows.map(row => {
@@ -348,8 +348,10 @@
 
   async function loadBrief() {
     const state = session;
+    const started = state.answers.beginRead();
     const brief = await workGet('/api/work/brief');
     if (!current(state)) return;
+    state.answers.settle(started);
     state.brief = brief;
     renderNeedsYou(brief);
     renderReported(brief);
@@ -367,7 +369,13 @@
 
   async function refresh() {
     const state = session;
-    if (!state || state.refreshing) return;
+    if (!state) return;
+    // A refresh asked for during a read runs once more after it, so an answer
+    // that arrived mid-read is settled by a read that began after it.
+    if (state.refreshing) {
+      state.refreshAgain = true;
+      return;
+    }
     state.refreshing = true;
     try {
       await loadBrief();
@@ -377,6 +385,10 @@
       if (current(state)) setStatus([state.notice, model().errorWords(error.code)].filter(Boolean).join(' '));
     } finally {
       state.refreshing = false;
+    }
+    if (state.refreshAgain && current(state)) {
+      state.refreshAgain = false;
+      refresh();
     }
   }
 
@@ -442,7 +454,7 @@
     const item = result.item;
     const section = element('work-drawer-state');
     section.append(make('p', 'work-state', model().stateLabel(item)));
-    for (const line of model().drawerLines(item, result.history, state.answered)) section.append(make('p', 'work-drawer-line', line));
+    for (const line of model().drawerLines(item, result.history, state.answers.settled())) section.append(make('p', 'work-drawer-line', line));
     if (item.kind !== 'decision' && item.state === 'done') {
       section.append(make('p', 'work-drawer-line',
         model().doneLine(item, result.evidence, childrenOf(state, item), closerOf(result.history))));
@@ -1263,7 +1275,8 @@
       typeof ask.by === 'string' && Number.isSafeInteger(ask.asked_at) &&
       (ask.means === null || typeof ask.means === 'string'));
     const answered = event && event.detail && Array.isArray(event.detail.answered) ? event.detail.answered : [];
-    state.answered = new Set(answered.filter(id => Number.isSafeInteger(id) && id > 0));
+    // A new room answer waits for a brief read that began after it.
+    if (state.answers.observe(answered)) refresh();
     if (state.brief) renderNeedsYou(state.brief);
   }
 
@@ -1287,7 +1300,7 @@
   function start(user, deps) {
     stop();
     const state = {
-      user, deps, brief: null, projectViews: new Map(), asks: [], answered: new Set(),
+      user, deps, brief: null, projectViews: new Map(), asks: [], answers: model().createAnswerTracker(), refreshAgain: false,
       refreshing: false, drawerRequest: 0, drawerItem: null, opener: null, focusTimer: null, timer: null, listeners: new AbortController(),
       share: null, notice: '', createMessage: null,
       createOperation: { id: crypto.randomUUID() }, projectOperation: { id: crypto.randomUUID() },

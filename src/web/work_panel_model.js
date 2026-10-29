@@ -104,6 +104,36 @@
       answered.has(decision.ask_message_id);
   }
 
+  // Which room answers the work record has been read since. The asks event
+  // reports an answer the moment it is saved; the brief that says whether
+  // the decision recorded it comes later. An answer is settled only by a
+  // brief read that began after it arrived, so "not recorded here" is never
+  // drawn from a brief older than the answer.
+  function createAnswerTracker() {
+    let answered = new Set();
+    const unconfirmed = new Set();
+    return Object.freeze({
+      // The room's current answered ids; true when any is new.
+      observe(ids) {
+        const next = new Set(ids.filter(id => Number.isSafeInteger(id) && id > 0));
+        const fresh = [...next].filter(id => !answered.has(id));
+        for (const id of fresh) unconfirmed.add(id);
+        answered = next;
+        return fresh.length > 0;
+      },
+      // Call as a brief read starts; pass the result to settle when it lands.
+      beginRead() {
+        return new Set(unconfirmed);
+      },
+      settle(started) {
+        for (const id of started) unconfirmed.delete(id);
+      },
+      settled() {
+        return new Set([...answered].filter(id => !unconfirmed.has(id)));
+      },
+    });
+  }
+
   function needsYou(brief, now, asks = [], answered = new Set()) {
     const names = projectNames(brief);
     // An ask bound to a decision is that decision's row, never a second one.
@@ -582,7 +612,7 @@
   }
 
   const contract = Object.freeze({
-    who, waitingLabel, stateLabel, killWord, killLines, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
+    who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, needsYou, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });

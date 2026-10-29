@@ -6,7 +6,7 @@ const test = require('node:test');
 const model = require('../src/web/work_panel_model.js');
 
 const {
-  who, waitingLabel, stateLabel, killWord, killLines, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
+  who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, needsYou, reportedToYou, projectSummaries, projectTree, doneLine,
   reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
   errorWords, sourceLine, evidenceSourceLine, answerLines, projectRowLine, actionsByPerson, projectSections, drawerLines,
 } = model;
@@ -819,7 +819,7 @@ test('an answer reads who gave it, and an owner answering for someone names both
 
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'answerLines', 'createAnswerTracker', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
     'needsYou', 'notifyText', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'waitingLabel', 'who']);
 });
@@ -887,4 +887,22 @@ test('an awaiting decision whose ask the person asked answered in the room says 
   assert.ok(!drawerLines(item, []).some(line => line.startsWith('Answered in the room')));
   assert.ok(!drawerLines(Object.assign({}, item, { ask_message_id: null }), [], new Set([41]))
     .some(line => line.startsWith('Answered in the room')), 'citing alone binds nothing');
+});
+
+test('a room answer is settled only by a brief read that began after it arrived', () => {
+  const answers = createAnswerTracker();
+  assert.equal(answers.observe([5]), true, 'a first answer is new');
+  assert.deepEqual([...answers.settled()], [], 'unsettled until a brief is read');
+  // The answer that arrives while a read is in flight is not settled by it.
+  const inFlight = answers.beginRead();
+  assert.equal(answers.observe([5, 7]), true);
+  answers.settle(inFlight);
+  assert.deepEqual([...answers.settled()], [5], 'the read settles 5, which it began after; 7 arrived mid-read');
+  const next = answers.beginRead();
+  answers.settle(next);
+  assert.deepEqual([...answers.settled()].sort(), [5, 7]);
+  assert.equal(answers.observe([5, 7]), false, 'the same ids again are nothing new');
+  assert.equal(answers.observe([7]), false, 'an id leaving (era reset) is not new');
+  assert.deepEqual([...answers.settled()], [7]);
+  assert.equal(answers.observe([7, 0, -1, 1.5, '9']), false, 'malformed ids are ignored');
 });
