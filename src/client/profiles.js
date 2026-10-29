@@ -229,6 +229,7 @@ function openProfiles(options) {
     fs.mkdirSync(lockDirectory, { recursive: true, mode: 0o700 });
     if (process.platform !== 'win32') fs.chmodSync(lockDirectory, 0o700);
     let corruptError = null;
+    let busyError = null;
     for (let attempt = 0; attempt < PROFILE_LOCK_ATTEMPTS; attempt += 1) {
       try {
         return acquireInstanceLock({ dataDir: lockDirectory });
@@ -240,10 +241,15 @@ function openProfiles(options) {
         // an established reader must refuse immediately.
         if (!error || (error.code !== 'corrupt-lock' && error.code !== 'lock-busy')) throw error;
         if (error.code === 'corrupt-lock') corruptError = error;
+        else busyError = error;
         Atomics.wait(PROFILE_LOCK_SLEEP, 0, 0, PROFILE_LOCK_WAIT_MS);
       }
     }
-    throw corruptError || failure('reader-busy');
+    if (corruptError) throw corruptError;
+    // A sharing violation that outlasts the wait keeps its OS error as the cause.
+    const busy = failure('reader-busy');
+    if (busyError) busy.cause = busyError.cause;
+    throw busy;
   }
 
   function exists(name) {
