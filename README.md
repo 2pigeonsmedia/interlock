@@ -64,12 +64,12 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
-v0.2.3 tested-on evidence (<YYYY-MM-DD>):
+v0.2.3 tested-on evidence (2026-10-29):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | <WSL n/n> |
-| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | <Windows n/n> |
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 608/609, 1 skipped |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 608/609, 1 skipped |
 
 v0.2.3 limits how many password checks run at once, so a burst of sign-ins
 cannot make everyone else wait minutes, limits wrong passkey codes, and fixes
