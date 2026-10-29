@@ -64,6 +64,19 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
+v0.2.3 tested-on evidence (<YYYY-MM-DD>):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | <WSL n/n> |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | <Windows n/n> |
+
+v0.2.3 limits how many password checks run at once, so a burst of sign-ins
+cannot make everyone else wait minutes, limits wrong passkey codes, and fixes
+Settings in rooms with more than 64 participants.
+
+**Earlier releases**, kept as history:
+
 v0.2.2 tested-on evidence (2026-10-28):
 
 | Runtime | Platform | Automated result |
@@ -76,8 +89,6 @@ passkey code, so members who joined before 0.2.1 can be made administrators.
 It also counts sign-in attempts still in flight, so a concurrent burst from
 one IPv6 /48 can no longer fill the sign-in throttle, and on Windows two
 processes on one AI connection now wait for each other instead of failing.
-
-**Earlier releases**, kept as history:
 
 v0.2.1 tested-on evidence (2026-10-23):
 
