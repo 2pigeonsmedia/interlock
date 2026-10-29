@@ -2004,6 +2004,7 @@ test('history --drain repeats exact one-message transactions inside one reader l
   const getUrls = [];
   const receiptBodies = [];
   world.dependencies.fetch = async (url, options) => {
+    if (String(url).includes('/api/ai/annotations')) return fakeResponse(404, { ok: false, error: 'not-found' });
     if (url.includes('/api/ai/receipts')) {
       receiptBodies.push(JSON.parse(options.body));
       return fakeResponse(200, { ok: true, acknowledged: 1, added: 1 });
@@ -2047,6 +2048,7 @@ test('history --drain leaves the first message outside its byte budget untouched
   const firstText = `FIRST ${'x'.repeat(Math.ceil(HISTORY_DRAIN_BYTES * 0.6))}`;
   const secondText = `SECOND ${'y'.repeat(Math.ceil(HISTORY_DRAIN_BYTES * 0.6))}`;
   world.dependencies.fetch = async (url, options) => {
+    if (String(url).includes('/api/ai/annotations')) return fakeResponse(404, { ok: false, error: 'not-found' });
     if (url.includes('/api/ai/receipts')) {
       receiptBodies.push(JSON.parse(options.body));
       return fakeResponse(200, { ok: true, acknowledged: 1, added: 1 });
@@ -2088,6 +2090,7 @@ test('history --drain preserves one legal message atomically above the batch bud
   const text = `LARGE ${'z'.repeat(HISTORY_DRAIN_BYTES + 1_000)}`;
   let getCalls = 0;
   world.dependencies.fetch = async (url, options) => {
+    if (String(url).includes('/api/ai/annotations')) return fakeResponse(404, { ok: false, error: 'not-found' });
     if (url.includes('/api/ai/receipts')) {
       assert.deepEqual(JSON.parse(options.body), { message_ids: [1] });
       return fakeResponse(200, { ok: true, acknowledged: 1, added: 1 });
@@ -2219,6 +2222,7 @@ test('history --before peeks without moving the live cursor', async () => {
   const world = admittedConnection({ cursor: 40 });
   const urls = [];
   world.dependencies.fetch = async (url, options) => {
+    if (String(url).includes('/api/ai/annotations')) return fakeResponse(404, { ok: false, error: 'not-found' });
     urls.push({ url, method: options && options.method, body: options && options.body });
     return fakeResponse(200, peekEnvelope());
   };
@@ -2343,6 +2347,7 @@ test('history --drain has an independent message-count ceiling', async () => {
   const world = admittedConnection();
   let getCalls = 0;
   world.dependencies.fetch = async url => {
+    if (String(url).includes('/api/ai/annotations')) return fakeResponse(404, { ok: false, error: 'not-found' });
     getCalls += 1;
     const after = Number(new URL(url).searchParams.get('after'));
     return fakeResponse(200, {

@@ -46,6 +46,10 @@ Usage:
   interlock history --connection NAME [--drain | --skip-to-current | --before N | --find TEXT] [--json]
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
+      [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]]
+      [--answers N[,N...] [--choice yes|no]] [--status done|ready|stop]
+  interlock asks --connection NAME [--json]
+  interlock ask withdraw|keep-open N --connection NAME [--json]
   interlock listen --connection NAME [--json]
   interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
   interlock leave --connection NAME [--json]
@@ -80,10 +84,19 @@ function refuseSay(stderr) {
   return EXIT_USAGE;
 }
 
+const ANSWER_LIST = /^[1-9][0-9]*(?:,[1-9][0-9]*)*$/;
+const MAX_ANSWER_IDS = 8;
+
+function sayValue(args, index) {
+  const value = args[index + 1];
+  return typeof value === 'string' && value.length > 0 && !value.startsWith('-') ? value : null;
+}
+
 function commandOptions(command, args) {
   const options = {
     connection: null, drain: false, skipToCurrent: false, before: null, find: null,
     after: null, json: false, source: null,
+    asksOf: null, means: null, deliver: null, answers: null, choice: null, status: null,
   };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
@@ -161,9 +174,67 @@ function commandOptions(command, args) {
       index += 1;
       continue;
     }
+    if (command === 'say' && flag === '--asks-of') {
+      if (seen.has(flag) || sayValue(args, index) === null) return null;
+      seen.add(flag);
+      options.asksOf = args[index + 1];
+      index += 1;
+      continue;
+    }
+    // The scope line is text, so like the message it never comes from argv.
+    if (command === 'say' && flag === '--means-stdin') {
+      if (seen.has('--means')) return null;
+      seen.add('--means');
+      options.means = { kind: 'stdin' };
+      continue;
+    }
+    if (command === 'say' && flag === '--means-file') {
+      if (seen.has('--means') || sayValue(args, index) === null) return null;
+      seen.add('--means');
+      options.means = { kind: 'file', path: args[index + 1] };
+      index += 1;
+      continue;
+    }
+    if (command === 'say' && flag === '--deliver') {
+      if (seen.has(flag) || (args[index + 1] !== 'later' && args[index + 1] !== 'now')) return null;
+      seen.add(flag);
+      options.deliver = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (command === 'say' && flag === '--answers') {
+      const value = sayValue(args, index);
+      if (seen.has(flag) || value === null || !ANSWER_LIST.test(value)) return null;
+      const ids = value.split(',').map(Number);
+      if (ids.length > MAX_ANSWER_IDS || !ids.every(Number.isSafeInteger) ||
+          new Set(ids).size !== ids.length) return null;
+      seen.add(flag);
+      options.answers = Object.freeze(ids);
+      index += 1;
+      continue;
+    }
+    if (command === 'say' && flag === '--choice') {
+      if (seen.has(flag) || (args[index + 1] !== 'yes' && args[index + 1] !== 'no')) return null;
+      seen.add(flag);
+      options.choice = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (command === 'say' && flag === '--status') {
+      if (seen.has(flag) || !['done', 'ready', 'stop'].includes(args[index + 1])) return null;
+      seen.add(flag);
+      options.status = args[index + 1];
+      index += 1;
+      continue;
+    }
     return null;
   }
   if (options.connection === null || (command === 'say') !== (options.source !== null)) return null;
+  if ((options.means !== null || options.deliver !== null) && options.asksOf === null) return null;
+  if (options.choice !== null && options.answers === null) return null;
+  if (options.means !== null && options.means.kind === 'stdin' && options.source.kind === 'stdin') {
+    return null;
+  }
   return Object.freeze(options);
 }
 
@@ -374,6 +445,11 @@ function responseError(result, status) {
   error.code = result && typeof result.error === 'string' ? result.error : 'unavailable';
   error.status = status;
   error.retry_after = result && result.retry_after;
+  if (result && result.error === 'unread-addressed' && Number.isSafeInteger(result.unread_count) &&
+      Array.isArray(result.unread_ids) && result.unread_ids.every(Number.isSafeInteger)) {
+    error.unread_count = result.unread_count;
+    error.unread_ids = result.unread_ids;
+  }
   error.exact = exactObject(result, ['ok', 'error']) !== null && result.ok === false;
   return error;
 }
@@ -487,8 +563,8 @@ function validRingPage(result, after) {
   return true;
 }
 
-function renderMessages(stdout, messages) {
-  stdout.write(renderedMessages(messages));
+function renderMessages(stdout, messages, notes = null) {
+  stdout.write(renderedMessages(messages, notes));
 }
 
 function formatMessageTime(ts) {
@@ -498,7 +574,7 @@ function formatMessageTime(ts) {
   return iso.slice(0, 19).replace('T', ' ') + ' UTC';
 }
 
-function renderedMessages(messages) {
+function renderedMessages(messages, notes = null) {
   let output = '';
   for (const message of messages) {
     const metadata = [];
@@ -510,8 +586,92 @@ function renderedMessages(messages) {
     const when = formatMessageTime(message.ts);
     output += `[${message.id}] ${terminalSafe(message.byline)}${suffix}:${when ? ` ${when}` : ''}\n`;
     output += `${terminalSafe(message.text, true)}\n`;
+    for (const note of (notes && notes.get(message.id)) || []) output += `  ↳ ${note}\n`;
   }
   return output;
+}
+
+const ANNOTATION_PAGE_LIMIT = 100;
+const ANNOTATION_PAGES = 50;
+
+function validAskFields(value) {
+  const ask = exactObject(value, ['of', 'of_kind', 'means', 'deliver']);
+  return !!ask && typeof ask.of === 'string' && ask.of.length > 0 &&
+    (ask.of_kind === 'person' || ask.of_kind === 'seat') &&
+    (ask.means === null || typeof ask.means === 'string') &&
+    (ask.deliver === 'now' || ask.deliver === 'later');
+}
+
+function validAnswerEntry(value) {
+  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by']);
+  return !!answer && Number.isSafeInteger(answer.ask_id) && answer.ask_id > 0 &&
+    (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
+    (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0));
+}
+
+function validPostRow(value) {
+  const row = exactObject(value, [
+    'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through',
+  ]);
+  return !!row && row.kind === 'post' && Number.isSafeInteger(row.message_id) && row.message_id > 0 &&
+    (row.ask === null || validAskFields(row.ask)) &&
+    Array.isArray(row.answers) && row.answers.every(validAnswerEntry) &&
+    (row.status === null || row.status === 'done' || row.status === 'ready' || row.status === 'stop');
+}
+
+function askLine(ask) {
+  const later = ask.deliver === 'later' ? ' (held for later)' : '';
+  return ask.means === null
+    ? `asks ${terminalSafe(ask.of)}${later}`
+    : `asks ${terminalSafe(ask.of)}${later} — a yes means: ${terminalSafe(ask.means)}`;
+}
+
+function postNotes(row) {
+  const notes = [];
+  if (row.ask !== null) notes.push(`${askLine(row.ask)} [ask ${row.message_id}]`);
+  for (const answer of row.answers) {
+    const choice = answer.choice === null ? '' : `: ${answer.choice}`;
+    const crossed = answer.crossed_by === null ? ''
+      : ` (crossed: ask ${answer.crossed_by} to the same person is newer)`;
+    notes.push(`answers ask ${answer.ask_id}${choice}${crossed}`);
+  }
+  if (row.status !== null) notes.push(`status: ${row.status}`);
+  return notes;
+}
+
+/* The annotations of the messages about to be printed, read from the side-car.
+ * A room without asks (an older release) or a malformed page prints the
+ * messages without them: an annotation never stops a read. */
+async function annotationNotes(fetcher, profile, messages) {
+  const notes = new Map();
+  if (messages.length === 0) return notes;
+  const wanted = new Set(messages.map(message => message.id));
+  let after = 0;
+  try {
+    for (let index = 0; index < ANNOTATION_PAGES; index += 1) {
+      const page = await localRequest(fetcher, profile,
+        `/api/ai/annotations?after=${after}&limit=${ANNOTATION_PAGE_LIMIT}`,
+        { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
+      if (!exactObject(page, ['ok', 'rows', 'cursor', 'first_id']) || !Array.isArray(page.rows) ||
+          !Number.isSafeInteger(page.cursor) || page.cursor < after) return new Map();
+      for (const row of page.rows) {
+        if (!row || row.kind !== 'post') continue;
+        if (!validPostRow(row)) return new Map();
+        if (!wanted.has(row.message_id)) continue;
+        const rowNotes = postNotes(row);
+        if (rowNotes.length > 0) notes.set(row.message_id, rowNotes);
+      }
+      if (page.cursor === after) break;
+      after = page.cursor;
+    }
+  } catch (_) {
+    return new Map();
+  }
+  return notes;
+}
+
+async function renderAnnotated(stdout, fetcher, profile, messages) {
+  renderMessages(stdout, messages, await annotationNotes(fetcher, profile, messages));
 }
 
 function validHead(result) {
@@ -678,7 +838,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
       }
     } catch (_) {
       if (parsed.json) line(io.stdout, JSON.stringify(page));
-      else renderMessages(io.stdout, page.messages);
+      else await renderAnnotated(io.stdout, fetcher, profile, page.messages);
       line(io.stderr, 'interlock: messages were received, but delivery could not be confirmed; run the command again.');
       return EXIT_RUNTIME;
     }
@@ -687,7 +847,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
     profiles.updateCursor(profile.name, profile.request_id, page.cursor);
   } catch (_) {
     if (parsed.json) line(io.stdout, JSON.stringify(page));
-    else renderMessages(io.stdout, page.messages);
+    else await renderAnnotated(io.stdout, fetcher, profile, page.messages);
     line(io.stderr, 'interlock: messages were received, but the local cursor could not be saved; run the command again.');
     return EXIT_RUNTIME;
   }
@@ -695,7 +855,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
   if (parsed.json) {
     line(io.stdout, JSON.stringify(page));
   } else if (page.messages.length > 0) {
-    renderMessages(io.stdout, page.messages);
+    await renderAnnotated(io.stdout, fetcher, profile, page.messages);
   } else if (wait) {
     line(io.stdout, `Nothing yet — run \`interlock listen --connection ${profile.name}\` again.`);
   } else {
@@ -720,8 +880,9 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
     });
   }
 
-  function output(page) {
-    writeReadOutput(io.stdout, parsed, page);
+  async function output(page) {
+    if (parsed.json) writeReadOutput(io.stdout, parsed, page);
+    else await renderAnnotated(io.stdout, fetcher, profile, page.messages);
   }
 
   for (let index = 0; index < HISTORY_DRAIN_MESSAGES; index += 1) {
@@ -734,7 +895,7 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
           (connectionSession !== undefined &&
             page.connection_session !== connectionSession)) throw incompatibleResponse();
     } catch (error) {
-      if (messages.length > 0) output(batch());
+      if (messages.length > 0) await output(batch());
       reportRequestError(io.stderr, error, profile);
       return EXIT_RUNTIME;
     }
@@ -745,14 +906,14 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
           profiles.updateCursor(profile.name, profile.request_id, page.cursor);
           cursor = page.cursor;
         } catch (_) {
-          if (messages.length > 0) output(batch());
+          if (messages.length > 0) await output(batch());
           line(io.stderr, 'interlock: messages were received, but the local cursor could not be saved; run the command again.');
           return EXIT_RUNTIME;
         }
       }
       const completed = batch([], cursor,
         connectionSession === undefined ? page.connection_session : connectionSession);
-      if (completed.messages.length > 0 || parsed.json) output(completed);
+      if (completed.messages.length > 0 || parsed.json) await output(completed);
       else line(io.stdout, 'No new messages.');
       return EXIT_OK;
     }
@@ -760,7 +921,7 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
     const candidate = batch(page.messages, page.cursor, page.connection_session);
     const candidateBytes = Buffer.byteLength(readOutput(parsed, candidate), 'utf8');
     if (messages.length > 0 && candidateBytes > HISTORY_DRAIN_BYTES) {
-      output(batch());
+      await output(batch());
       return EXIT_OK;
     }
 
@@ -777,7 +938,7 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
           throw new Error('malformed receipt');
         }
       } catch (_) {
-        output(candidate);
+        await output(candidate);
         line(io.stderr, 'interlock: messages were received, but delivery could not be confirmed; run the command again.');
         return EXIT_RUNTIME;
       }
@@ -785,7 +946,7 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
     try {
       profiles.updateCursor(profile.name, profile.request_id, page.cursor);
     } catch (_) {
-      output(candidate);
+      await output(candidate);
       line(io.stderr, 'interlock: messages were received, but the local cursor could not be saved; run the command again.');
       return EXIT_RUNTIME;
     }
@@ -794,12 +955,12 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
     cursor = page.cursor;
     connectionSession = page.connection_session;
     if (candidateBytes >= HISTORY_DRAIN_BYTES) {
-      output(batch());
+      await output(batch());
       return EXIT_OK;
     }
   }
 
-  output(batch());
+  await output(batch());
   return EXIT_OK;
 }
 
@@ -906,7 +1067,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
       }
     } catch (_) {
       if (parsed.json) line(io.stdout, JSON.stringify(page));
-      else renderMessages(io.stdout, page.messages);
+      else await renderAnnotated(io.stdout, fetcher, profile, page.messages);
       line(io.stderr, 'interlock: messages were received, but delivery could not be confirmed; run the command again.');
       return EXIT_RUNTIME;
     }
@@ -916,7 +1077,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
     line(io.stdout, JSON.stringify(page));
     return EXIT_OK;
   }
-  if (page.messages.length > 0) renderMessages(io.stdout, page.messages);
+  if (page.messages.length > 0) await renderAnnotated(io.stdout, fetcher, profile, page.messages);
   const range = `Searched #${page.searched_from}–#${page.searched_to}.`;
   if (page.complete) line(io.stdout, `${range} Complete.`);
   else line(io.stdout, `${range} Continue with --before ${page.next_before}.`);
@@ -1024,9 +1185,76 @@ async function runDoorbell(args, io, dependencies = {}) {
   return EXIT_OK;
 }
 
+const ANNOTATION_ERRORS = Object.freeze({
+  'ask-target-unknown': 'the --asks-of name is not anyone in the room.',
+  'ask-of-self': 'you cannot ask yourself.',
+  'means-required': 'an ask of a person needs a one-line scope; pass --means-file PATH or --means-stdin.',
+  'ask-not-found': 'there is no such ask in this room; run "interlock asks" for the open ones.',
+  'not-asker': 'only the person or AI that made an ask can withdraw it or keep it open.',
+  'ask-not-open': 'that ask is no longer open.',
+  'ask-not-answered': 'that ask has not been answered yet, so there is nothing to keep open.',
+  'invalid-annotation': 'the room refused the ask, answer or status as malformed (the scope line is one line of at most 300 characters).',
+});
+
+function reportAnnotationError(stderr, error, profile, connection) {
+  const code = error && error.code;
+  if (code === 'unread-addressed' && Array.isArray(error.unread_ids)) {
+    const more = error.unread_count > error.unread_ids.length
+      ? ` (and ${error.unread_count - error.unread_ids.length} more)` : '';
+    line(stderr, `interlock: not posted. ${error.unread_count} message(s) addressed to you arrived after what you have read: ${error.unread_ids.join(', ')}${more}.`);
+    line(stderr, `interlock: read them with "interlock history --connection ${terminalSafe(connection)}", then post the status again.`);
+    return;
+  }
+  if (error && error.status === 404 && code !== 'ask-not-found') {
+    line(stderr, `interlock: ${roomLabel(profile)} does not support asks, answers or status yet; nothing was posted. Use the same Interlock release as the running room.`);
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(ANNOTATION_ERRORS, code)) {
+    line(stderr, `interlock: ${ANNOTATION_ERRORS[code]}`);
+    return;
+  }
+  reportRequestError(stderr, error, profile);
+}
+
+function readScopeLine(raw) {
+  return raw.replace(/\r?\n$/, '');
+}
+
+function sayAnnotation(parsed, means, cursor) {
+  const annotation = {};
+  if (parsed.asksOf !== null) {
+    annotation.ask = { of: parsed.asksOf };
+    if (means !== null) annotation.ask.means = means;
+    if (parsed.deliver !== null) annotation.ask.deliver = parsed.deliver;
+  }
+  if (parsed.answers !== null) {
+    annotation.answers = parsed.answers.map(askId => ({ ask_id: askId, choice: parsed.choice }));
+  }
+  if (parsed.status !== null) {
+    annotation.status = parsed.status;
+    annotation.read_through = cursor;
+  }
+  return Object.keys(annotation).length > 0 ? annotation : null;
+}
+
 async function runSay(args, io, dependencies = {}) {
+  if (args.some(arg => arg === '--means' || arg.startsWith('--means='))) {
+    line(io.stderr, 'interlock: refusing an ask\'s scope line in command arguments; use --means-file PATH or --means-stdin.');
+    return EXIT_USAGE;
+  }
+  if (args.includes('--means-stdin') && args.includes('--stdin')) {
+    line(io.stderr, 'interlock: --means-stdin and --stdin cannot both read standard input; put one of them in a file.');
+    return EXIT_USAGE;
+  }
   const parsed = commandOptions('say', args);
-  if (!parsed) return refuseSay(io.stderr);
+  if (!parsed) {
+    if (args.some(arg => ['--asks-of', '--means-file', '--means-stdin', '--deliver', '--answers',
+      '--choice', '--status'].includes(arg))) {
+      line(io.stderr, 'interlock: usage: interlock say --connection NAME --file PATH|--stdin [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]] [--answers N[,N...] [--choice yes|no]] [--status done|ready|stop] [--json]');
+      return EXIT_USAGE;
+    }
+    return refuseSay(io.stderr);
+  }
   let selected;
   try { selected = selectedConnection(parsed.connection, dependencies); }
   catch (error) {
@@ -1048,18 +1276,33 @@ async function runSay(args, io, dependencies = {}) {
     line(io.stderr, `interlock: could not read the ${parsed.source.kind === 'file' ? 'message file' : 'piped message'} safely.`);
     return EXIT_RUNTIME;
   }
+  let means = null;
+  if (parsed.means !== null) {
+    try {
+      means = readScopeLine(parsed.means.kind === 'file'
+        ? (dependencies.readFile || fs.readFileSync)(parsed.means.path, 'utf8')
+        : await (dependencies.readStdin || readStdin)(io.stdin || process.stdin));
+    } catch (_) {
+      line(io.stderr, `interlock: could not read the ${parsed.means.kind === 'file' ? 'scope file' : 'piped scope line'} safely.`);
+      return EXIT_RUNTIME;
+    }
+  }
+  const annotation = sayAnnotation(parsed, means, profile.cursor);
   const fetcher = dependencies.fetch || globalThis.fetch;
   const body = { text, client_message_id: crypto.randomUUID() };
+  if (annotation !== null) body.annotation = annotation;
+  const route = annotation === null ? '/api/ai/messages' : '/api/ai/annotated-messages';
   let result;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      result = await localRequest(fetcher, profile, '/api/ai/messages', {
+      result = await localRequest(fetcher, profile, route, {
         method: 'POST', body, timeoutMs: COMMAND_FETCH_TIMEOUT_MS,
       });
       break;
     } catch (error) {
       if (attempt === 0 && !Number.isSafeInteger(error && error.status)) continue;
-      reportRequestError(io.stderr, error, profile);
+      if (annotation === null) reportRequestError(io.stderr, error, profile);
+      else reportAnnotationError(io.stderr, error, profile, parsed.connection);
       return EXIT_RUNTIME;
     }
   }
@@ -1069,6 +1312,128 @@ async function runSay(args, io, dependencies = {}) {
   }
   if (parsed.json) line(io.stdout, JSON.stringify(result));
   else line(io.stdout, `Sent as ${profile.name} (message ${result.message.id}).`);
+  return EXIT_OK;
+}
+
+function askOptions(args) {
+  const options = { connection: null, json: false };
+  const seen = new Set();
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag === '--json' && !seen.has(flag)) {
+      seen.add(flag);
+      options.json = true;
+      continue;
+    }
+    if (flag === '--connection' && !seen.has(flag) && sayValue(args, index) !== null) {
+      seen.add(flag);
+      options.connection = args[index + 1];
+      index += 1;
+      continue;
+    }
+    return null;
+  }
+  return options.connection === null ? null : options;
+}
+
+function validPublicAsk(value) {
+  const ask = exactObject(value, [
+    'ask_id', 'asked_at', 'by', 'of', 'of_kind', 'means', 'deliver', 'state', 'kept_open',
+    'carried_from', 'answers',
+  ]);
+  return !!ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
+    typeof ask.by === 'string' && validAskFields({
+      of: ask.of, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver,
+    }) && typeof ask.state === 'string' && Array.isArray(ask.answers);
+}
+
+function renderAsk(ask, mine) {
+  const who = mine ? `of ${terminalSafe(ask.of)}` : `by ${terminalSafe(ask.by)}`;
+  const later = ask.deliver === 'later' ? ' · held for later' : '';
+  const carried = ask.carried_from ? ' · from an archived era' : '';
+  const kept = ask.kept_open ? ' · kept open' : '';
+  const means = ask.means === null ? '' : ` — a yes means: ${terminalSafe(ask.means)}`;
+  return `  ask ${ask.ask_id} ${who}${later}${carried}${kept}${means}`;
+}
+
+async function connectedProfile(parsed, io, dependencies) {
+  let selected;
+  try { selected = selectedConnection(parsed.connection, dependencies); }
+  catch (error) {
+    reportConnectionError(io.stderr, error, parsed.connection);
+    return { code: error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME };
+  }
+  const clock = dependencies.clock || Date.now;
+  if (selected.profile.expires_at <= clock()) {
+    line(io.stderr, `interlock: connection ${terminalSafe(selected.profile.name)} has expired; run "interlock join" for a new session.`);
+    return { code: EXIT_RUNTIME };
+  }
+  return { profile: selected.profile };
+}
+
+async function runAsks(args, io, dependencies = {}) {
+  const parsed = askOptions(args);
+  if (!parsed) {
+    line(io.stderr, 'interlock: usage: interlock asks --connection NAME [--json]');
+    return EXIT_USAGE;
+  }
+  const { profile, code } = await connectedProfile(parsed, io, dependencies);
+  if (!profile) return code;
+  let result;
+  try {
+    result = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/asks');
+    if (!exactObject(result, ['ok', 'addressed', 'asked']) || !Array.isArray(result.addressed) ||
+        !Array.isArray(result.asked) || !result.addressed.every(validPublicAsk) ||
+        !result.asked.every(validPublicAsk)) throw incompatibleResponse();
+  } catch (error) {
+    reportAnnotationError(io.stderr, error, profile, parsed.connection);
+    return EXIT_RUNTIME;
+  }
+  if (parsed.json) {
+    line(io.stdout, JSON.stringify(result));
+    return EXIT_OK;
+  }
+  if (result.addressed.length === 0 && result.asked.length === 0) {
+    line(io.stdout, 'No open asks.');
+    return EXIT_OK;
+  }
+  if (result.addressed.length > 0) {
+    line(io.stdout, 'Asked of you:');
+    for (const ask of result.addressed) line(io.stdout, renderAsk(ask, false));
+  }
+  if (result.asked.length > 0) {
+    line(io.stdout, 'You asked:');
+    for (const ask of result.asked) line(io.stdout, renderAsk(ask, true));
+  }
+  return EXIT_OK;
+}
+
+const ASK_VERBS = Object.freeze({ withdraw: 'withdraw', 'keep-open': 'keep_open' });
+
+async function runAsk(args, io, dependencies = {}) {
+  const verb = args[0];
+  const id = args[1];
+  const parsed = Object.prototype.hasOwnProperty.call(ASK_VERBS, verb) &&
+    typeof id === 'string' && /^[1-9][0-9]*$/.test(id) && Number.isSafeInteger(Number(id))
+    ? askOptions(args.slice(2)) : null;
+  if (!parsed) {
+    line(io.stderr, 'interlock: usage: interlock ask withdraw|keep-open N --connection NAME [--json]');
+    return EXIT_USAGE;
+  }
+  const { profile, code } = await connectedProfile(parsed, io, dependencies);
+  if (!profile) return code;
+  let result;
+  try {
+    result = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/annotations', {
+      method: 'POST', body: { kind: ASK_VERBS[verb], ask_id: Number(id) },
+    });
+    if (!exactObject(result, ['ok', 'row'])) throw incompatibleResponse();
+  } catch (error) {
+    reportAnnotationError(io.stderr, error, profile, parsed.connection);
+    return EXIT_RUNTIME;
+  }
+  if (parsed.json) line(io.stdout, JSON.stringify(result));
+  else line(io.stdout, verb === 'withdraw' ? `Withdrew ask ${id}.` : `Ask ${id} is open again.`);
   return EXIT_OK;
 }
 
@@ -2424,6 +2789,10 @@ function run(argv, io, dependencies = {}) {
 
   if (argv[0] === 'say') return runSay(argv.slice(1), io, dependencies);
 
+  if (argv[0] === 'asks') return runAsks(argv.slice(1), io, dependencies);
+
+  if (argv[0] === 'ask') return runAsk(argv.slice(1), io, dependencies);
+
   if (argv[0] === 'leave') return runLeave(argv.slice(1), io, dependencies);
 
   if (argv[0] === 'codex-policy') return runCodexPolicy(argv.slice(1), io, dependencies);
@@ -2449,6 +2818,8 @@ module.exports = {
   runReadCommand,
   runRecover,
   runSay,
+  runAsks,
+  runAsk,
   runStart,
   runRestore,
   runCodexPolicy,
