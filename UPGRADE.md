@@ -14,7 +14,7 @@ special. Use the stopped-server procedure below as for any release.
 **Sign-in under load.** At most 16 password checks run or wait at once for one
 IPv6 /48, and at most 32 run at once in total. Past the total, a sign-in waits
 its turn for up to ten seconds instead of being refused. A hosted room prints
-`interlock: sign-in refused, every password check busy (N so far)` while
+`interlock: sign-in refused, too many sign-ins at once (N so far)` while
 sign-ins are refused for capacity; see [`HOSTING.md`](HOSTING.md).
 
 **Passkey codes.** After five refused codes, no code is checked for that member

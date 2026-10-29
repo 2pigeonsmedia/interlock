@@ -195,3 +195,34 @@ test('the line is bounded in length and in time, and a waiting sign-in still cou
     room.restore();
   }
 });
+
+test('a sign-in that waits out the line leaves nothing counted behind', async () => {
+  const { createLoginThrottle } = F.load('login.js');
+  const throttle = createLoginThrottle({ queueWaitMs: 50 });
+  const now = Date.now();
+  const holders = [];
+  for (let i = 0; i < MAX_INFLIGHT; i += 1) {
+    const args = { source: ownBlock(i), account: `holder-${i}`, now };
+    assert.equal(throttle.check(args).allowed, true, 'ARRANGEMENT: a holder takes a check');
+    holders.push(throttle.begin(args));
+  }
+  const before = throttle.health();
+  const waits = [];
+  for (let i = 0; i < BLOCK_INFLIGHT; i += 1) {
+    const args = { source: inBlock(i), account: `waiter-${i}`, now };
+    assert.equal(throttle.check(args).wait, true, 'ARRANGEMENT: every check is taken, so it waits');
+    waits.push(throttle.wait(args));
+  }
+  assert.equal(throttle.check({ source: inBlock(99), account: 'next', now }).capacity, true,
+    'ARRANGEMENT: the block is at its cap while its sign-ins wait');
+  assert.deepEqual(await Promise.all(waits), Array(BLOCK_INFLIGHT).fill(null), 'every waiter timed out');
+  const after = throttle.health();
+  assert.equal(after.waiting, 0, 'the line is empty');
+  assert.equal(after.inflight_source_entries, before.inflight_source_entries, 'no address is left counted');
+  assert.equal(after.inflight_account_entries, before.inflight_account_entries, 'no name is left counted');
+  const again = throttle.check({ source: inBlock(99), account: 'next', now });
+  assert.equal(again.capacity, false, 'the block is no longer at its cap');
+  assert.equal(again.wait, true, 'and may wait again');
+  for (const release of holders) release();
+  assert.equal(throttle.health().inflight_total, 0, 'every check was released');
+});

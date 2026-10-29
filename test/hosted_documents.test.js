@@ -130,7 +130,7 @@ test('HOSTING.md says what throttled sign-in looks like and what clears it', () 
     'IPv6 is counted per /48 block as well, so failures arriving over time take several hundred separate /48 blocks.');
   assertSentence(HOSTING,
     'At most 32 run at once in total; past that, a sign-in waits its turn for up to ten seconds.');
-  assert.match(HOSTING, /interlock: sign-in refused, every password check busy \(N so far\)/);
+  assert.match(HOSTING, /interlock: sign-in refused, too many sign-ins at once \(N so far\)/);
   assert.doesNotMatch(HOSTING, /works on retry/);
   assert.doesNotMatch(HOSTING, /later release will count attempts in flight/);
   assertSentence(HOSTING,

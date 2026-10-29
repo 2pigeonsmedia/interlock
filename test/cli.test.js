@@ -1527,7 +1527,7 @@ test('hosted start folds busy sign-ins into one line per window, separate from w
   assert.equal(timers.armed.length, 1, 'two reports inside one window share one timer');
   assert.equal(io.stderrText(), '', 'nothing is printed until the window closes');
   timers.armed[0].callback();
-  assert.equal(io.stderrText(), 'interlock: sign-in refused, every password check busy (12 so far)\n');
+  assert.equal(io.stderrText(), 'interlock: sign-in refused, too many sign-ins at once (12 so far)\n');
   release('SIGINT');
   assert.equal(await finished, EXIT_OK);
 });

@@ -282,7 +282,7 @@ password checks run or wait at once for one /48, and a sign-in past that is
 refused at once. At most 32 run at once in total; past that, a sign-in waits its
 turn for up to ten seconds. A flood from many blocks can still fill that line,
 and then most sign-ins are refused while it lasts; the console then shows
-`interlock: sign-in refused, every password check busy (N so far)`. When the
+`interlock: sign-in refused, too many sign-ins at once (N so far)`. When the
 tables do fill, the throttle fails closed: nearly every sign-in waits 30 seconds and is refused. Sessions already
 signed in keep working. It clears once fifteen minutes pass with no attempt, or
 when you restart the service. To keep a guessing crowd from reaching Interlock
