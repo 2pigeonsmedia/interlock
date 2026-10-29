@@ -222,3 +222,18 @@ test('a damaged store: reads null, writes refused', () => {
   assert.equal(broken.grants(NOW), null);
   assert.throws(() => broken.profile(OWNER, { line: 'again' }), { code: 'store-damaged' });
 });
+
+test('a checked grant or revoke runs every rule and writes nothing', () => {
+  const { dir, people } = open();
+  const file = path.join(dir, 'room', 'people.jsonl');
+  const made = people.grant(OWNER, { holder_name: 'Scout', holder_kind: 'seat', project: 'finance', scope: 'leads the map' },
+    { now: NOW });
+  const before = fs.readFileSync(file);
+  assert.equal(people.grant(OWNER, { holder_name: 'Wren', holder_kind: 'seat', project: 'finance', scope: 'x' },
+    { now: NOW, check: true }), null);
+  assert.throws(() => people.grant(OWNER, { holder_name: 'Wren', holder_kind: 'seat', project: 'finance', scope: '' },
+    { now: NOW, check: true }), { code: 'invalid-request' });
+  assert.equal(people.revoke(OWNER, { grant_id: made.grant_id }, { firstOwnerSubjectId: OWNER.subject_id, check: true }), null);
+  assert.deepEqual(fs.readFileSync(file), before, 'a check writes nothing');
+  assert.equal(people.activeGrants(NOW).length, 1);
+});

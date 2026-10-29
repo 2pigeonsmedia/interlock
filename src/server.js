@@ -15,6 +15,8 @@ const { openStore } = require('./chat/store.js');
 const { createFirstOwnerHandler } = require('./first_owner.js');
 const { openWorkStore } = require('./work/store.js');
 const { createWorkService } = require('./work/service.js');
+const { openPeopleStore } = require('./room/people_store.js');
+const { createPeopleService } = require('./room/people.js');
 const { createWorkRoutes } = require('./work/routes.js');
 const { releaseIdleSeats } = require('./idle.js');
 const { readRoomSettings } = require('./room_settings.js');
@@ -437,8 +439,18 @@ async function startInterlockServer(options) {
     archive = createArchiveService({ dataDir, store: chatStore });
     // The Work record shares the process, the identity house and the data
     // directory; it has its own store file and survives a transcript clear.
+    const workStore = openWorkStore({ dataDir });
+    // The people record: assignments, grants, presence and profiles. A grant
+    // may name only a live Work project.
+    const people = Object.freeze({
+      service: createPeopleService({ store: openPeopleStore({ dataDir }) }),
+      liveProjects: () => {
+        const document = workStore.read();
+        return document ? document.projects.filter(row => row.retired_at === null).map(row => row.id) : [];
+      },
+    });
     const work = createWorkRoutes({
-      work: createWorkService({ store: openWorkStore({ dataDir }) }),
+      work: createWorkService({ store: workStore }),
       participants: meta => house.listParticipants(meta),
       // A cited room message, looked up by id; null when it is not in the
       // room (never posted, or archived by a transcript clear).
@@ -492,7 +504,7 @@ async function startInterlockServer(options) {
       },
     }) : null;
     const handler = createFirstOwnerHandler({
-      house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler, work,
+      house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler, work, people,
     });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));

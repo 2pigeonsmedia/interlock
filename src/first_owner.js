@@ -342,7 +342,7 @@ function deliveryQuery(target) {
 }
 
 function createFirstOwnerHandler(options) {
-  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work } = options || {};
+  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people } = options || {};
   const hostedMode = hosted ? hosted : null;
   if (!house || !house.firstOwner || !house.authenticators || !house.sessions || !house.login ||
       typeof house.authorizeRead !== 'function' || typeof house.authorizeWrite !== 'function' ||
@@ -370,6 +370,14 @@ function createFirstOwnerHandler(options) {
       typeof work.ownerStepUpRequired !== 'function' || !Array.isArray(work.MUTATION_OPS) ||
       typeof house.confirmWorkProjectAct !== 'function')) {
     throw new TypeError('first owner transport: a complete work service is required');
+  }
+  // The people record is optional like the Work record: without it the grant
+  // routes answer not-found.
+  if (people !== undefined && (!people || !people.service ||
+      typeof people.service.grant !== 'function' || typeof people.service.revoke !== 'function' ||
+      typeof people.service.grants !== 'function' || typeof people.liveProjects !== 'function' ||
+      typeof house.confirmGrantAct !== 'function')) {
+    throw new TypeError('first owner transport: a complete people record is required');
   }
   let parsedOrigin;
   try { parsedOrigin = new URL(origin); } catch (_) { parsedOrigin = null; }
@@ -2063,6 +2071,122 @@ function createFirstOwnerHandler(options) {
 
   /* The asks an AI cannot derive without keeping the whole side-car: the open
    * asks addressed to it, and the open asks it made. */
+  // ── grants ───────────────────────────────────────────────────────────────
+  // A grant is made or revoked by the first owner or an administrator, in the
+  // browser only, on one fresh step-up per act. Every rule is checked before
+  // the step-up is spent, so a refused grant costs no passkey tap.
+
+  const GRANT_ERRORS = Object.freeze({
+    'invalid-request': 400, 'unknown-project': 400, 'invalid-holder': 400,
+    'not-authorized': 403, 'first-owner-grant': 403, 'grant-not-active': 409, 'store-damaged': 503,
+  });
+
+  function sendGrantError(request, response, error) {
+    const code = error && typeof error.code === 'string' && GRANT_ERRORS[error.code] ? error.code : null;
+    sendJson(request, response, code ? GRANT_ERRORS[code] : 503, { ok: false, error: code || 'unavailable' });
+  }
+
+  async function grantActor(request, response) {
+    const owner = ownerSession(request, response, true);
+    if (!owner) return null;
+    const now = Date.now();
+    const live = await chat.listParticipants();
+    const self = live.find(row => row.subject_id === owner.subject_id && row.kind === 'person');
+    if (!self) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return null;
+    }
+    return { actor: Object.freeze({ subject_id: self.subject_id, name: self.name, kind: 'person', owner: true, now }), live, now };
+  }
+
+  async function createGrant(request, response, body) {
+    if (!people) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!closedObject(body, ['holder_name', 'holder_kind', 'project', 'scope', 'until'])) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    const who = await grantActor(request, response);
+    if (!who) return undefined;
+    const input = { holder_name: body.holder_name, holder_kind: body.holder_kind, project: body.project,
+      scope: body.scope, until: body.until };
+    try {
+      if (!who.live.some(row => row.name === body.holder_name && row.kind === body.holder_kind)) {
+        throw Object.assign(new Error('invalid-holder'), { code: 'invalid-holder' });
+      }
+      if (body.project !== null && !people.liveProjects().includes(body.project)) {
+        throw Object.assign(new Error('unknown-project'), { code: 'unknown-project' });
+      }
+      people.service.grant(who.actor, input, { now: who.now, check: true });
+    } catch (error) {
+      return sendGrantError(request, response, error);
+    }
+    const confirmed = house.confirmGrantAct(requestMeta(request, who.now), 'grant.create');
+    if (!confirmed || confirmed.ok !== true) {
+      return sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
+    }
+    try {
+      const row = people.service.grant(who.actor, input, { now: who.now });
+      const made = people.service.grants(who.now).find(item => item.grant_id === row.grant_id);
+      return sendJson(request, response, 201, { ok: true, grant: made });
+    } catch (error) {
+      return sendGrantError(request, response, error);
+    }
+  }
+
+  async function revokeGrant(request, response, body) {
+    if (!people) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!closedObject(body, ['grant_id', 'reason'])) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    const who = await grantActor(request, response);
+    if (!who) return undefined;
+    const roster = house.administrators(requestMeta(request, who.now));
+    const firstName = roster && roster.ok === true
+      ? (roster.people.find(row => row.first_owner === true) || {}).name : null;
+    const first = who.live.find(row => row.kind === 'person' && row.name === firstName);
+    if (!first) return sendJson(request, response, 503, { ok: false, error: 'unavailable' });
+    const input = { grant_id: body.grant_id, reason: body.reason };
+    const context = { firstOwnerSubjectId: first.subject_id };
+    try {
+      people.service.revoke(who.actor, input, Object.assign({ check: true }, context));
+    } catch (error) {
+      return sendGrantError(request, response, error);
+    }
+    const confirmed = house.confirmGrantAct(requestMeta(request, who.now), 'grant.revoke');
+    if (!confirmed || confirmed.ok !== true) {
+      return sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
+    }
+    try {
+      people.service.revoke(who.actor, input, context);
+      const revoked = people.service.grants(who.now).find(item => item.grant_id === body.grant_id);
+      return sendJson(request, response, 200, { ok: true, grant: revoked });
+    } catch (error) {
+      return sendGrantError(request, response, error);
+    }
+  }
+
+  function sendGrants(request, response) {
+    const grants = people.service.grants(Date.now());
+    if (grants === null) return sendJson(request, response, 503, { ok: false, error: 'store-damaged' });
+    return sendJson(request, response, 200, { ok: true, grants });
+  }
+
+  function listGrants(request, response) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!roomReader(request, response, Date.now())) return undefined;
+    return sendGrants(request, response);
+  }
+
+  function listAiGrants(request, response) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      return sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+    }
+    return sendGrants(request, response);
+  }
+
   async function readAiAsks(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -2304,6 +2428,8 @@ function createFirstOwnerHandler(options) {
     ['/api/messages', appendMessage],
     ['/api/annotated-messages', appendAnnotatedMessage],
     ['/api/annotations', annotateAsPerson],
+    ['/api/grants/create', createGrant],
+    ['/api/grants/revoke', revokeGrant],
   ]);
 
   return async function firstOwnerHandler(request, response) {
@@ -2449,6 +2575,17 @@ function createFirstOwnerHandler(options) {
           return;
         }
         await listSettingsParticipants(request, response);
+        return;
+      }
+      if (people && (pathname === '/api/grants' || pathname === '/api/ai/grants')) {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-request',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        if (pathname === '/api/grants') listGrants(request, response);
+        else listAiGrants(request, response);
         return;
       }
       if (pathname === '/api/participants') {

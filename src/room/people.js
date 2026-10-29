@@ -201,7 +201,9 @@ function createPeopleService(options) {
   }
 
   /* Holder checks that need identity (`invalid-holder`: an ended seat, an
-   * unknown name, a non-member) are the caller's; this checks shape. */
+   * unknown name, a non-member) are the caller's; this checks shape.
+   * `context.check` runs every rule and writes nothing, so a caller can
+   * refuse before it spends a step-up on the act. */
   function grant(actor, input, context) {
     requireActor(actor);
     const body = request(input, ['holder_name', 'holder_kind', 'project', 'scope'], ['until']);
@@ -213,6 +215,7 @@ function createPeopleService(options) {
     }
     if (actor.kind !== 'person' || actor.owner !== true) fail('not-authorized');
     if (damaged()) fail('store-damaged');
+    if (context.check === true) return null;
     return write(Object.assign(base(actor, 'grant'), {
       grant_id: store.nextGrantId(),
       holder_name: body.holder_name,
@@ -240,6 +243,8 @@ function createPeopleService(options) {
     if (!entry || stateOf(entry, now) !== 'active') fail('grant-not-active');
     if (entry.row.by_subject_id === context.firstOwnerSubjectId &&
         actor.subject_id !== context.firstOwnerSubjectId) fail('first-owner-grant');
+    if (damaged()) fail('store-damaged');
+    if (context.check === true) return null;
     return write(Object.assign(base(actor, 'revoke'), {
       grant_id: body.grant_id, reason: body.reason,
     }));
