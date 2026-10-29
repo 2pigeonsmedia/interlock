@@ -935,3 +935,26 @@ test('an export names a block reason only while the item is blocked', () => {
   assert.match(itemLine(), / · done: Imported\./);
   code(() => work.updateWork(lead, { operation_id: uuid(), id: item.id, expected_revision: 3, title: 'x' }), 'invalid-note');
 });
+
+test('a room answer to the ask a decision cites is the addressee\'s direct answer, once, and nobody else\'s', () => {
+  const { work } = fresh();
+  const decision = work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Merge?', body: 'b',
+    asked_of: ref(owner), source_message: { message_id: 41, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Merge?' },
+  }).item;
+  const asOwnerAdmin = Object.assign({}, reviewer, { session: null });
+  assert.equal(work.answerFromRoom(asOwnerAdmin, { ask_id: 41, message_id: 50, text: 'yes' }).recorded, null,
+    'a bystander records nothing');
+  assert.equal(work.answerFromRoom(Object.assign({}, owner, { session: null }),
+    { ask_id: 99, message_id: 51, text: 'yes' }).recorded, null, 'an ask no decision cites records nothing');
+  const first = work.answerFromRoom(Object.assign({}, owner, { session: null }), { ask_id: 41, message_id: 52, text: 'yes' });
+  assert.equal(first.recorded, decision.id);
+  const retry = work.answerFromRoom(Object.assign({}, owner, { session: null }), { ask_id: 41, message_id: 52, text: 'yes' });
+  assert.equal(retry.replayed, true);
+  const after = work.get(owner, { id: decision.id });
+  assert.equal(after.item.state, 'answered');
+  assert.equal(after.item.answer.source, 'answered in the room #52');
+  assert.equal(after.history.filter(event => event.kind === 'answered').length, 1, 'recorded once');
+  assert.equal(work.answerFromRoom(Object.assign({}, owner, { session: null }),
+    { ask_id: 41, message_id: 60, text: 'no' }).recorded, null, 'a later room answer does not replace a direct one');
+});

@@ -169,6 +169,14 @@ function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
+/* The kill slot: the one question that would sink a pick, asked by anyone
+ * but its asker, and the asker's reply. A word, never a verdict. */
+function killState(item) {
+  if (!item.kill) return 'unattacked';
+  if (!item.kill.reply) return 'attacked';
+  return item.kill.reply.outcome === 'killed' ? 'killed' : 'survived';
+}
+
 function decisionState(item) {
   if (item.withdrawn) return 'withdrawn';
   if (!item.answer) return 'awaiting';
@@ -318,7 +326,11 @@ function createWorkService(options) {
 
   function publicItem(item) {
     const copy = clone(item);
-    if (copy.kind === 'decision') copy.state = decisionState(item);
+    if (copy.kind === 'decision') {
+      copy.state = decisionState(item);
+      copy.kill = item.kill ? clone(item.kill) : null;
+      copy.kill_state = killState(item);
+    }
     return copy;
   }
 
@@ -339,6 +351,8 @@ function createWorkService(options) {
       return {
         id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: decisionState(item),
         asked_of: clone(item.asked_of), asked_by: clone(item.asked_by), proposal: item.proposal,
+        kill_state: killState(item),
+        source_message_id: item.source_message ? item.source_message.message_id : null,
         answer_summary: item.answer ? {
           kind: item.answer.kind, by: clone(item.answer.by),
           attributed_to: clone(item.answer.attributed_to), at: item.answer.at,
@@ -454,6 +468,7 @@ function createWorkService(options) {
           conditions: optionalText(body.conditions, SHORT_BYTES, 'conditions') ?? '',
           withdrawn: false,
           answer: null,
+          kill: null,
         });
       } else {
         Object.assign(item, {
@@ -780,6 +795,83 @@ function createWorkService(options) {
       });
   }
 
+  function killAsk(actor, rawInput) {
+    return operation(actor, 'decisions.kill', rawInput, ['id', 'expected_revision', 'question'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        if (actor.subject_id === item.asked_by.subject_id) fail('kill-own-pick');
+        checkRevision(item, body.expected_revision);
+        if (item.withdrawn) fail('invalid-state');
+        if (item.kill) fail('kill-slot-filled');
+        const question = requiredText(body.question, SHORT_BYTES, 'question');
+        item.kill = { question, by: refOf(actor), at: now, reply: null };
+        touch(item, now);
+        appendEvent(draft, now, actor, {
+          item: item.id, project: item.project, kind: 'kill-asked', before: null, after: clone(item.kill),
+        });
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
+  function killReply(actor, rawInput) {
+    return operation(actor, 'decisions.kill-reply', rawInput, ['id', 'expected_revision', 'words', 'outcome'],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        if (actor.subject_id !== item.asked_by.subject_id) fail('not-asker');
+        checkRevision(item, body.expected_revision);
+        if (!item.kill) fail('kill-slot-empty');
+        if (item.kill.reply) fail('kill-slot-replied');
+        if (body.outcome !== 'survived' && body.outcome !== 'killed') fail('invalid-outcome');
+        const words = requiredText(body.words, SHORT_BYTES, 'words');
+        const before = clone(item.kill);
+        item.kill.reply = { words, outcome: body.outcome, by: refOf(actor), at: now };
+        touch(item, now);
+        appendEvent(draft, now, actor, {
+          item: item.id, project: item.project, kind: 'kill-replied', before, after: clone(item.kill),
+        });
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
+  /* The room answer is the decision's answer. When the person a decision is
+   * asked of answers, in the room, the ask the decision cites as its source,
+   * that answer is recorded here as theirs, directly. Keyed by the room
+   * message, so a retry records nothing twice. Anyone else's room answer,
+   * the owner's included, records nothing here. */
+  function answerFromRoom(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['ask_id', 'message_id', 'text']);
+    if (!body || !Number.isSafeInteger(body.ask_id) || body.ask_id < 1 ||
+        !Number.isSafeInteger(body.message_id) || body.message_id < 1) fail('invalid-input');
+    const text = requiredText(body.text, BODY_BYTES, 'text');
+    const source = 'answered in the room #' + body.message_id;
+    return store.commit(draft => {
+      const item = draft.items.find(row => row.kind === 'decision' && row.source_message &&
+        row.source_message.message_id === body.ask_id);
+      if (!item) return { ok: true, recorded: null };
+      if (actor.subject_id !== item.asked_of.subject_id || item.withdrawn) {
+        return { ok: true, recorded: null };
+      }
+      if (item.answer && item.answer.source === source) {
+        return { ok: true, recorded: item.id, replayed: true };
+      }
+      if (item.answer && item.answer.kind === 'direct') return { ok: true, recorded: null };
+      const now = clock();
+      const previous = item.answer;
+      item.answer = {
+        kind: 'direct', text, conditions: '', source,
+        by: refOf(actor), attributed_to: refOf(actor), at: now, reason: '',
+      };
+      touch(item, now);
+      appendEvent(draft, now, actor, previous
+        ? { item: item.id, project: item.project, kind: 'answer-replaced', text, conditions: '',
+          reason: source, previous: clone(previous) }
+        : { item: item.id, project: item.project, kind: 'answered', text, conditions: '', reason: '',
+          on_behalf: false, asked_of: clone(item.asked_of), source });
+      return { ok: true, recorded: item.id };
+    });
+  }
+
   function withdraw(actor, rawInput) {
     return operation(actor, 'decisions.withdraw', rawInput, ['id', 'expected_revision', 'reason'],
       (draft, body, now) => {
@@ -1021,7 +1113,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw,
+    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });
