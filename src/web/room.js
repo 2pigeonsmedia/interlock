@@ -1981,7 +1981,7 @@ function refreshAsks() {
   for (const id of [...pickedAsks]) {
     if (!open.addressed.some(ask => ask.ask_id === id)) pickedAsks.delete(id);
   }
-  InterlockAsks.noteShown(shownRevisions, open.addressed, messageBody.value.trim() !== '');
+  InterlockAsks.noteShown(shownRevisions, open.addressed, messageBody.value.trim() !== '', pickedAsks);
   renderBindChips(open.addressed);
   const withQuestion = ask => Object.freeze(Object.assign({}, ask, { question: askQuestion(ask.ask_id) }));
   document.dispatchEvent(new CustomEvent('interlock:asks', {

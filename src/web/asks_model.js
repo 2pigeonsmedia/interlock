@@ -331,12 +331,14 @@
   /* Which revision of each open ask the person has been shown. While the
    * composer is empty it follows the asks; once she is writing, an ask she
    * has already seen keeps the revision she saw, so her yes is sent against
-   * that scope and the room refuses it if the scope changed. */
-  function noteShown(shown, openAddressed, writing) {
+   * that scope and the room refuses it if the scope changed. An ask she has
+   * tapped (`picked`) keeps the revision its chip showed, writing or not. */
+  function noteShown(shown, openAddressed, writing, picked = new Set()) {
     const open = new Set(openAddressed.map(ask => ask.ask_id));
     for (const id of [...shown.keys()]) if (!open.has(id)) shown.delete(id);
     for (const ask of openAddressed) {
-      if (!writing || !shown.has(ask.ask_id)) shown.set(ask.ask_id, revisionNow(ask));
+      const held = (writing || picked.has(ask.ask_id)) && shown.has(ask.ask_id);
+      if (!held) shown.set(ask.ask_id, revisionNow(ask));
     }
     return shown;
   }

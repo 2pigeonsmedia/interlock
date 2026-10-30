@@ -293,7 +293,7 @@ test('a typed or bound answer is sent against the revision shown when she began 
 
 test('the room page sends the shown revision from the composer and words the refusal', () => {
   assert.ok(ROOM_JS.includes('messageBody.value, null, shownRevisions)'), 'the composer binds with the shown revisions');
-  assert.match(ROOM_JS, /noteShown\(shownRevisions, open\.addressed, messageBody\.value\.trim\(\) !== ''\)/,
+  assert.match(ROOM_JS, /noteShown\(shownRevisions, open\.addressed, messageBody\.value\.trim\(\) !== '', pickedAsks\)/,
     'they stop following the asks once she is writing');
   assert.match(ROOM_JS, /'ask-revised': 'This ask changed while you were writing\./);
 });
@@ -303,4 +303,22 @@ test('the page words an answer that is not a yes, and a revise the decision reco
   assert.equal(turnWords({ phase: 'answered', waiting_on: null, acting: null }, 'Ana'), 'answered, not a yes');
   assert.match(ROOM_JS, /if \(result && result\.decision === 'stale'\) setRoomNotice\(STALE_DECISION_NOTICE\)/);
   assert.match(ROOM_JS, /the decision record did not follow/);
+});
+
+test('a tapped chip keeps the revision it showed, even with the composer empty', () => {
+  const state = Asks.createAsksState();
+  state.apply([post(1, 3, 'Lead', { ask: ask('Ana', 'scope one') })]);
+  const shown = new Map();
+  const picked = new Set();
+  Asks.noteShown(shown, state.openFor('Ana').addressed, false, picked);
+  picked.add(3);
+  shown.set(3, 1);
+  state.apply([{ seq: 2, ts: 2_000, kind: 'revise', by: 'Lead', ask_id: 3, means: 'scope two' }]);
+  Asks.noteShown(shown, state.openFor('Ana').addressed, false, picked);
+  assert.equal(state.ask(3).revision, 2, 'the arrangement: revised after the tap, composer empty');
+  assert.deepEqual(Asks.bindAnswers(state.openFor('Ana').addressed, picked, 'yes', null, shown),
+    [{ ask_id: 3, choice: 'yes', revision: 1 }], 'sent against the tapped scope, so the room refuses it');
+  picked.delete(3);
+  Asks.noteShown(shown, state.openFor('Ana').addressed, false, picked);
+  assert.equal(shown.get(3), 2, 'the control: untapped, it follows the ask again');
 });
