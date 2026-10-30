@@ -2077,7 +2077,7 @@ function decorateMessage(article, messageId) {
     const mine = viewer !== null && ask.of === viewer && ask.state === 'open';
     const chosen = InterlockAsks.chosen(ask);
     for (const choice of ['yes', 'no']) {
-      const button = askButton(choice === 'yes' ? 'Yes' : 'No', () => answerAsk(ask.ask_id, choice));
+      const button = askButton(choice === 'yes' ? 'Yes' : 'No', () => answerAsk(ask.ask_id, choice, ask.revision));
       button.setAttribute('aria-pressed', chosen === choice ? 'true' : 'false');
       button.disabled = !mine;
       button.setAttribute('aria-label', `${choice === 'yes' ? 'Yes' : 'No'} to ask #${ask.ask_id}`);
@@ -2200,10 +2200,18 @@ const ASK_REFUSALS = Object.freeze({
   'invalid-annotation': 'Interlock refused the ask. Check the scope line: one line, at most 300 characters.',
 });
 
-async function answerAsk(askId, choice) {
+// An answer carries the revision it was given against. One shown for a
+// revision that is no longer current is not sent: the scope changed.
+async function answerAsk(askId, choice, revision) {
+  const current = asksState.ask(askId);
+  if (!current || !Number.isSafeInteger(revision) || current.revision !== revision) {
+    setRoomNotice('This ask changed since it was shown. Read the new "a yes means" line, then answer.');
+    refreshAsks();
+    return;
+  }
   try {
     await ownerMutation('/api/annotated-messages', {
-      text: choice, annotation: { answers: [{ ask_id: askId, choice }] },
+      text: choice, annotation: { answers: [{ ask_id: askId, choice, revision }] },
     });
     pickedAsks.delete(askId);
     setRoomNotice(`Answered "${choice}" to #${askId}.`, 'success');
@@ -2695,7 +2703,7 @@ document.addEventListener('interlock:reply-ask', event => {
 document.addEventListener('interlock:answer-ask', event => {
   const detail = event.detail || {};
   if (Number.isSafeInteger(detail.ask_id) && (detail.choice === 'yes' || detail.choice === 'no')) {
-    answerAsk(detail.ask_id, detail.choice);
+    answerAsk(detail.ask_id, detail.choice, detail.revision);
   }
 });
 askToggle.addEventListener('click', () => setAskMode(askFields.hidden));

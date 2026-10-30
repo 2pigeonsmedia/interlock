@@ -151,8 +151,10 @@
 
   // The room answers an ask; the panel only asks it to, so an answer from
   // a card is the same room message a chip's Yes or No would post.
-  function answerAsk(askId, choice) {
-    document.dispatchEvent(new CustomEvent('interlock:answer-ask', { detail: { ask_id: askId, choice } }));
+  // The revision on the card goes with the answer, so the room can refuse
+  // one given against a scope that has since changed.
+  function answerAsk(askId, choice, revision) {
+    document.dispatchEvent(new CustomEvent('interlock:answer-ask', { detail: { ask_id: askId, choice, revision } }));
   }
 
   function replyAsk(askId) {
@@ -194,8 +196,8 @@
       const actions = make('div', 'work-card-actions');
       if (card.askId !== null) {
         actions.append(
-          cardButton('Yes', 'Yes to ' + card.question, () => answerAsk(card.askId, 'yes')),
-          cardButton('No', 'No to ' + card.question, () => answerAsk(card.askId, 'no')),
+          cardButton('Yes', 'Yes to ' + card.question, () => answerAsk(card.askId, 'yes', card.revision)),
+          cardButton('No', 'No to ' + card.question, () => answerAsk(card.askId, 'no', card.revision)),
           cardButton('Reply', 'Reply to ' + card.question, () => replyAsk(card.askId)),
         );
       }

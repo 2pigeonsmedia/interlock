@@ -310,6 +310,7 @@
         detail: decision ? (row.proposal ? 'Proposal: ' + row.proposal : null) : (row.next_action || null),
         project: project(row.project),
         askId: bound ? bound.ask_id : null,
+        revision: bound && Number.isSafeInteger(bound.revision) ? bound.revision : null,
       };
       if (bound) Object.assign(card, storyFields(bound, viewer));
       if (decision && killWord(row)) card.kill = killWord(row);
@@ -324,6 +325,7 @@
         means: ask.means, detail: ask.carried_from ? 'Asked before the transcript was cleared' : null,
         project: project(ask.project),
         askId: ask.ask_id,
+        revision: Number.isSafeInteger(ask.revision) ? ask.revision : null,
         ...storyFields(ask, viewer),
       });
     }

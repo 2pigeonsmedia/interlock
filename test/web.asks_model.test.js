@@ -69,17 +69,17 @@ test('a bare yes, no or go answers the one open ask with no tap; anything else t
   const one = [{ ask_id: 7 }];
   assert.equal(Asks.bindAnswers(one, new Set(), 'sounds good, will do'), null, 'ordinary talk never closes an ask');
   assert.equal(Asks.bindAnswers(one, new Set(), 'yes, but'), null, 'only the exact word');
-  assert.deepEqual(Asks.bindAnswers(one, new Set(), ' YES '), [{ ask_id: 7, choice: 'yes' }]);
-  assert.deepEqual(Asks.bindAnswers(one, new Set(), 'Go'), [{ ask_id: 7, choice: 'yes' }]);
-  assert.deepEqual(Asks.bindAnswers(one, new Set(), 'no'), [{ ask_id: 7, choice: 'no' }]);
+  assert.deepEqual(Asks.bindAnswers(one, new Set(), ' YES '), [{ ask_id: 7, choice: 'yes', revision: 1 }]);
+  assert.deepEqual(Asks.bindAnswers(one, new Set(), 'Go'), [{ ask_id: 7, choice: 'yes', revision: 1 }]);
+  assert.deepEqual(Asks.bindAnswers(one, new Set(), 'no'), [{ ask_id: 7, choice: 'no', revision: 1 }]);
   assert.equal(Asks.bindAnswers([{ ask_id: 7 }, { ask_id: 9 }], new Set(), 'yes'), null,
     'two open asks: a bare yes takes a tap');
-  assert.deepEqual(Asks.bindAnswers(one, new Set([7]), 'merge it'), [{ ask_id: 7, choice: null }]);
-  assert.deepEqual(Asks.bindAnswers(one, new Set([7]), 'no'), [{ ask_id: 7, choice: 'no' }],
+  assert.deepEqual(Asks.bindAnswers(one, new Set([7]), 'merge it'), [{ ask_id: 7, choice: null, revision: 1 }]);
+  assert.deepEqual(Asks.bindAnswers(one, new Set([7]), 'no'), [{ ask_id: 7, choice: 'no', revision: 1 }],
     'a tapped bare word keeps its choice');
   const two = [{ ask_id: 7 }, { ask_id: 9 }];
   assert.deepEqual(Asks.bindAnswers(two, new Set([9, 7, 99])),
-    [{ ask_id: 7, choice: null }, { ask_id: 9, choice: null }], 'a stale pick is ignored');
+    [{ ask_id: 7, choice: null, revision: 1 }, { ask_id: 9, choice: null, revision: 1 }], 'a stale pick is ignored');
 });
 
 test('the ask line is words: open with an age, answered with the choice, withdrawn, hold', () => {
@@ -161,7 +161,7 @@ test('a reply to an ask hides the answer chips and binds nothing; the panel answ
   const compose = ROOM_JS.slice(ROOM_JS.indexOf('function composerAnnotation'), ROOM_JS.indexOf('const ASK_REFUSALS'));
   assert.match(compose, /composingDiscussion\(\) \? null/, 'a discussion reply carries no answers');
   assert.match(ROOM_JS, /askBind\.hidden = addressed\.length === 0 \|\| composingDiscussion\(\)/);
-  assert.match(ROOM_JS, /addEventListener\('interlock:answer-ask'[\s\S]*answerAsk\(detail\.ask_id, detail\.choice\)/);
+  assert.match(ROOM_JS, /addEventListener\('interlock:answer-ask'[\s\S]*answerAsk\(detail\.ask_id, detail\.choice, detail\.revision\)/);
   assert.match(ROOM_JS, /question: askQuestion\(ask\.ask_id\)/);
 });
 
@@ -217,4 +217,16 @@ test('the page replays the printer story in both directions and reads the same t
   assert.equal(reverse.ask(3).done, null, 'the asker cannot post the receipt for a request the AI carries out');
   reverse.apply([reply(5, 7, 'Scout', 3, 'addressee', 'done')]);
   assert.equal(reverse.ask(3).turn.phase, 'done');
+});
+
+test('an answer names the revision it was given against; a stale one is refused on the page', () => {
+  const Asks = require('../src/web/asks_model.js');
+  assert.deepEqual(Asks.bindAnswers([{ ask_id: 7, revision: 3 }], new Set(), 'yes'), [{ ask_id: 7, choice: 'yes', revision: 3 }],
+    'the composer binds the revision on screen');
+  assert.deepEqual(Asks.bindAnswers([{ ask_id: 7, revision: 2 }, { ask_id: 9, revision: 1 }], new Set([7, 9]), 'no'),
+    [{ ask_id: 7, choice: 'no', revision: 2 }, { ask_id: 9, choice: 'no', revision: 1 }]);
+  assert.match(ROOM_JS, /answerAsk\(ask\.ask_id, choice, ask\.revision\)/, 'the chip sends the revision it shows');
+  assert.match(ROOM_JS, /current\.revision !== revision\) \{\s*setRoomNotice\('This ask changed since it was shown/,
+    'an answer given against a scope that changed is not sent');
+  assert.match(ROOM_JS, /annotation: \{ answers: \[\{ ask_id: askId, choice, revision \}\] \}/);
 });

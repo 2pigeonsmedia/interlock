@@ -280,14 +280,17 @@
   /* Which asks a message from the viewer answers. `picked` is the set of
    * ask ids the viewer tapped. With nothing tapped, a bare yes, no or go
    * answers the one open ask. Returns null when nothing binds. */
+  // Each answer names the revision of the ask it was given against: the one
+  // on screen. A yes never lands on a scope the person did not see.
   function bindAnswers(openAddressed, picked, text = '', choice = null) {
+    const revisionOf = new Map(openAddressed.map(ask => [ask.ask_id, Number.isSafeInteger(ask.revision) ? ask.revision : 1]));
     const ids = openAddressed.map(ask => ask.ask_id);
     const chosenIds = ids.filter(id => picked.has(id));
     if (chosenIds.length === 0) {
       const bare = bareAnswer(text);
-      return bare !== null && ids.length === 1 ? [{ ask_id: ids[0], choice: bare }] : null;
+      return bare !== null && ids.length === 1 ? [{ ask_id: ids[0], choice: bare, revision: revisionOf.get(ids[0]) }] : null;
     }
-    return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice: choice ?? bareAnswer(text) }));
+    return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice: choice ?? bareAnswer(text), revision: revisionOf.get(id) }));
   }
 
   const contract = Object.freeze({

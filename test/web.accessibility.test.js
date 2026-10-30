@@ -474,6 +474,6 @@ test('the Work tile hides what is empty and shows ages, not raw timestamps', () 
   assert.match(WORK_PANEL_JS, /view\.doneToggle\.hidden = closedCount\(section\) === 0;/);
   assert.match(WORK_PANEL_JS, /model\(\)\.ageText\(ms, Date\.now\(\)\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /toISOString\(\)\)?;\s*\n\s*\}\s*\n\s*\/\/ A relative/, 'the tile never prints a raw ISO stamp');
-  assert.match(WORK_PANEL_JS, /new CustomEvent\('interlock:answer-ask', \{ detail: \{ ask_id: askId, choice \} \}\)/,
+  assert.match(WORK_PANEL_JS, /new CustomEvent\('interlock:answer-ask', \{ detail: \{ ask_id: askId, choice, revision \} \}\)/,
     'a card answers through the room, never the work record');
 });
