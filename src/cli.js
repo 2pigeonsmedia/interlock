@@ -67,6 +67,7 @@ Usage:
   interlock work create --connection NAME --file PATH [--json]
   interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
   interlock work ask --connection NAME --file PATH [--json]
+  interlock work ask-approval --connection NAME --file PATH [--json]
   interlock work kill ID --connection NAME --file PATH|--stdin [--json]
   interlock work kill-reply ID --outcome survived|killed --connection NAME --file PATH|--stdin [--json]
   interlock work export --connection NAME --format json|md
@@ -2762,6 +2763,8 @@ const WORK_VERBS = Object.freeze({
   reopen: Object.freeze({ path: '/api/ai/work/decisions/reopen', method: 'POST', id: true }),
   withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', method: 'POST', id: true }),
   ask: Object.freeze({ path: '/api/ai/work/decisions/ask', method: 'POST', id: false }),
+  // A request for approval: {project, title, scope, body?}; routed by the room.
+  'ask-approval': Object.freeze({ path: '/api/ai/work/approvals/ask', method: 'POST', id: false }),
   // The kill slot's words are text, not a JSON body: from a file or stdin,
   // never argv. The CLI reads the decision's current revision itself.
   kill: Object.freeze({ path: '/api/ai/work/decisions/kill', method: 'POST', id: true, words: 'question' }),
@@ -3009,6 +3012,10 @@ function renderWrite(stdout, verb, result, connection) {
   else if (verb === 'ask') {
     const message = result.message && Number.isSafeInteger(result.message.id) ? ` as message #${result.message.id}` : '';
     line(stdout, `Asked ${item.id} · ${terminalSafe(item.title)} of ${who(item.asked_of)}${message}; a yes in the room answers it.`);
+  } else if (verb === 'ask-approval') {
+    const message = result.message && Number.isSafeInteger(result.message.id) ? ` as message #${result.message.id}` : '';
+    const approver = item.approval && item.approval.approver ? who(item.approval.approver) : 'the owner';
+    line(stdout, `Asked ${approver} to approve ${item.id} · ${terminalSafe(item.title)}${message}; their Approve puts it in progress, yours to do, and your done receipt closes it.`);
   } else if (verb === 'kill') line(stdout, `Asked the kill question on ${item.id} (${killWord(item)}).`);
   else if (verb === 'kill-reply') line(stdout, `Replied to the kill question on ${item.id} (${killWord(item)}).`);
   if (result.replayed === true) line(stdout, 'This operation id was already applied; the original result is shown.');

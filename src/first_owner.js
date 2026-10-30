@@ -34,6 +34,9 @@ const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a
 const WORK_ROUTE = /^\/api\/(ai\/)?work\/([a-z]+(?:\/[a-z][a-z-]*)?)$/;
 // "Ask a decision": a room post and the record that cites it, in that order.
 const ASK_DECISION_OP = 'decisions/ask';
+// "Ask for approval": a room ask routed to its approver, and its work item.
+const ASK_APPROVAL_OP = 'approvals/ask';
+const ASK_APPROVAL_KEYS = Object.freeze(['operation_id', 'project', 'title', 'body', 'scope']);
 const ASK_DECISION_KEYS = Object.freeze([
   'operation_id', 'project', 'title', 'body', 'asked_of', 'proposal', 'rationale', 'scope',
   'conditions', 'links', 'parent', 'about_message',
@@ -1749,6 +1752,10 @@ function createFirstOwnerHandler(options) {
       await askDecision(request, response, body, actor, ai);
       return;
     }
+    if (op === ASK_APPROVAL_OP) {
+      await askApproval(request, response, body, actor, ai);
+      return;
+    }
     const result = await work.mutate(op, actor, body, actor.now);
     if (op === 'decisions/answer' && result.status < 400) await echoAnswerToRoom(request, actor, result.body.item, ai);
     sendWorkResult(request, response, result);
@@ -2179,6 +2186,94 @@ function createFirstOwnerHandler(options) {
     sendJson(request, response, result.status, Object.assign({}, result.body, { item: bound.body.item, message: saved }));
   }
 
+  /* Who approves a request in this project: its lead (the holder of its
+   * active grant), else the first owner. A lead never approves their own
+   * request, and an AI lead's approval waits on a grant that says it may
+   * approve, so until then it goes to the first owner too. Null when the
+   * first owner cannot be resolved. */
+  function approverFor(project, asker, live, now) {
+    // Server-internal: the first owner's subject is used here to route, and
+    // never leaves the host.
+    const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
+    const owner = first ? live.find(row => row.kind === 'person' && row.subject_id === first.subject_id) || null : null;
+    const lead = people ? people.service.leadOf(project, now, new Set(live.map(row => row.subject_id))) : null;
+    const leadRow = lead && lead.kind === 'person'
+      ? live.find(row => row.kind === 'person' && row.name === lead.name) : null;
+    if (leadRow && leadRow.subject_id !== asker.subject_id) return { approver: leadRow, owner, why: 'lead' };
+    return { approver: owner, owner, why: lead ? 'lead-is-asker-or-ai' : 'no-lead' };
+  }
+
+  async function askApproval(request, response, body, workActor, ai) {
+    if (!(closedObject(body, ASK_APPROVAL_KEYS) || closedObject(body, ASK_APPROVAL_KEYS.filter(key => key !== 'body'))) ||
+        typeof body.operation_id !== 'string' ||
+        typeof body.project !== 'string' || typeof body.title !== 'string' || body.title.trim() === '' ||
+        typeof body.scope !== 'string' || body.scope.trim() === '' ||
+        (body.body !== undefined && typeof body.body !== 'string')) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), body.operation_id.toLowerCase());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return;
+    }
+    const prior = work.priorResult(workActor, body.operation_id);
+    if (prior) {
+      sendJson(request, response, 200, prior.body);
+      return;
+    }
+    const live = await chat.listParticipants();
+    const route = approverFor(body.project, chatActor, live, workActor.now);
+    if (!route.approver) {
+      sendJson(request, response, 503, { ok: false, error: 'approver-unavailable' });
+      return;
+    }
+    // The first owner's own work needs no approval.
+    if (route.owner && route.owner.subject_id === chatActor.subject_id) {
+      sendJson(request, response, 403, { ok: false, error: 'owner-does-not-ask' });
+      return;
+    }
+    const text = `Approval: ${body.title.trim()}`;
+    let saved;
+    try {
+      saved = publicMessage(await chat.appendAnnotated({ text }, chatActor,
+        { ask: { of: route.approver.name, means: body.scope.trim(), project: body.project } }, true));
+      if (!saved) throw new Error('invalid chat result');
+    } catch (error) {
+      if (error && error.code === 'already-posted') {
+        sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
+        return;
+      }
+      annotationRefusal(request, response, error);
+      return;
+    }
+    try {
+      await chat.annotate(chatActor, 'approval', saved.id);
+    } catch (_) {
+      // Answered before it could be marked: it is a plain question, and no
+      // work item is filed for it.
+      sendJson(request, response, 409, { ok: false, error: 'ask-answered-first', message: saved });
+      return;
+    }
+    const facts = await chat.postFacts(saved.id);
+    if (!facts || !facts.ask) {
+      sendJson(request, response, 503, { ok: false, error: 'work-unavailable', message: saved });
+      return;
+    }
+    const filed = work.createApproval(workActor, {
+      operation_id: body.operation_id, project: body.project, title: body.title, scope: body.scope.trim(),
+      approver: { subject_id: facts.ask.subject_id, name: facts.ask.name, kind: facts.ask.kind },
+      ask_message_id: saved.id, ...(body.body === undefined ? {} : { body: body.body }),
+    });
+    sendJson(request, response, filed.status, Object.assign({}, filed.body, { message: saved, routed: route.why }));
+  }
+
   /* After a room answer is saved: each answer the room stored as coming from
    * its ask's addressee goes to the decision bound to that ask, if any. The
    * room's facts decide, not the request. The post's response never changes. */
@@ -2197,6 +2292,10 @@ function createFirstOwnerHandler(options) {
         ask_id: answer.ask_id, message_id: saved.id, text: saved.text, choice: answer.choice,
         by_addressee: answer.by_addressee, of: answer.of, revision: answer.revision,
       });
+    }
+    // A done receipt on a request for approval closes its work item.
+    if (Number.isSafeInteger(facts.done_of)) {
+      work.closeApproval(actor, { ask_id: facts.done_of, message_id: saved.id, text: saved.text });
     }
   }
 
@@ -3242,7 +3341,8 @@ function createFirstOwnerHandler(options) {
 
     if (work && (pathname.startsWith('/api/work/') || pathname.startsWith('/api/ai/work/'))) {
       const workRoute = WORK_ROUTE.exec(pathname);
-      const op = workRoute && (work.MUTATION_OPS.includes(workRoute[2]) || workRoute[2] === ASK_DECISION_OP)
+      const op = workRoute && (work.MUTATION_OPS.includes(workRoute[2]) || workRoute[2] === ASK_DECISION_OP ||
+        workRoute[2] === ASK_APPROVAL_OP)
         ? workRoute[2] : null;
       if (request.method !== 'POST') {
         sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' }, { allow: 'POST' });

@@ -1140,3 +1140,32 @@ test('a decision follows the room ask by revision number, and takes a room answe
   assert.equal(say(135, 1).recorded, decision.id);
   assert.throws(() => say(136, undefined), error => error.code === 'invalid-input', 'an answer names its revision');
 });
+
+test('a request for approval: only its approver\'s explicit answer at the current revision counts; a revise reopens; only its asker closes it', () => {
+  const { work } = fresh();
+  const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const asLead = Object.assign({}, lead, { session: null });
+  const asOwner = Object.assign({}, owner, { session: null });
+  const filed = work.createApproval(asLead, { operation_id: uuid(), project: 'ops', title: 'Order rollers',
+    scope: 'two rollers, up to $40', approver: ANA_OF, ask_message_id: 140 }).item;
+  assert.deepEqual([filed.state, filed.approval.state, filed.next_to.name], ['open', 'awaiting', 'Ana']);
+  const say = (who, message_id, choice, revision = 1, byAddressee = true) => work.answerFromRoom(who, {
+    ask_id: 140, message_id, text: String(choice), choice, by_addressee: byAddressee, of: ANA_OF, revision });
+  assert.equal(say(Object.assign({}, builder, { session: null }), 141, 'yes', 1, false).recorded, null, 'a bystander\'s yes');
+  assert.equal(say(asOwner, 142, null).recorded, null, 'her words alone');
+  assert.equal(say(asOwner, 143, 'yes', 2).recorded, null, 'a yes to a revision the record is not at');
+  assert.equal(work.get(owner, { id: filed.id }).item.approval.state, 'awaiting');
+  assert.equal(say(asOwner, 144, 'yes').recorded, filed.id);
+  let now = work.get(owner, { id: filed.id }).item;
+  assert.deepEqual([now.state, now.approval.state, now.responsible.name], ['active', 'approved', 'Lead']);
+  // Revised after the approval: back to awaiting, the approval struck on the trail.
+  assert.equal(work.reviseScope(asLead, { ask_id: 140, means: 'two rollers, up to $42', revision: 2 }).revised, filed.id);
+  now = work.get(owner, { id: filed.id });
+  assert.deepEqual([now.item.state, now.item.approval.state, now.item.responsible], ['open', 'awaiting', null]);
+  assert.ok(now.history.some(event => event.kind === 'scope-revised' && event.approval_superseded), 'the old approval stays on the trail');
+  assert.equal(work.closeApproval(asLead, { ask_id: 140, message_id: 145, text: 'done' }).closed, null, 'not approved: nothing to close');
+  assert.equal(say(asOwner, 146, 'yes', 2).recorded, filed.id);
+  assert.equal(work.closeApproval(asOwner, { ask_id: 140, message_id: 147, text: 'done' }).closed, null, 'only its asker closes it');
+  assert.equal(work.closeApproval(asLead, { ask_id: 140, message_id: 148, text: 'Ordered, arriving Friday' }).closed, filed.id);
+  assert.equal(work.get(owner, { id: filed.id }).item.state, 'done');
+});

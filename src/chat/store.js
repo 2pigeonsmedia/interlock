@@ -983,7 +983,10 @@ function openStore(opts) {
       requireOpen();
       const row = asks.posts.get(messageId);
       if (!row) return null;
+      // The ask this post closed as its done receipt, if it did.
+      const discussed = row.discusses ? asks.asks.get(row.discusses.ask_id) : null;
       return Object.freeze({
+        done_of: discussed && discussed.done && discussed.done.message_id === messageId ? discussed.ask_id : null,
         ask: row.ask ? addresseeOf(row.ask) : null,
         answers: Object.freeze(row.answers.map(answer => {
           const ask = asks.asks.get(answer.ask_id);

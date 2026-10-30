@@ -276,8 +276,26 @@ function createWorkRoutes(options) {
     }
   }
 
+  // "Ask for approval" only: the request's work item, filed with its room ask.
+  function createApproval(actor, body) {
+    try {
+      return Object.freeze({ status: 201, body: stripIds(work.createApproval(actor, body)) });
+    } catch (error) {
+      return errorResponse(error);
+    }
+  }
+
+  // The asker's done receipt in the room. Never a refusal the room sees.
+  function closeApproval(actor, body) {
+    try {
+      return work.closeApproval(actor, body);
+    } catch (_) {
+      return Object.freeze({ ok: false, closed: null });
+    }
+  }
+
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope, createApproval, closeApproval,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

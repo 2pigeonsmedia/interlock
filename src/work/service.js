@@ -372,6 +372,12 @@ function createWorkService(options) {
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),
       awaiting: awaitingDecision(draft, item),
       source_message_id: item.source_message ? item.source_message.message_id : null,
+      // A request for approval: its state, approver and scope, and the room
+      // ask it is answered through, so the panel shows it once.
+      ask_message_id: item.approval ? item.ask_message_id : null,
+      approval: item.approval ? {
+        state: item.approval.state, approver: clone(item.approval.approver), by: clone(item.approval.by), scope: item.approval.scope,
+      } : null,
     };
   }
 
@@ -931,6 +937,8 @@ function createWorkService(options) {
     const text = requiredText(body.text, BODY_BYTES, 'text');
     const source = 'answered in the room #' + body.message_id;
     return store.commit(draft => {
+      const request = draft.items.find(row => row.kind === 'work' && row.approval && row.ask_message_id === body.ask_id);
+      if (request) return approvalAnswer(draft, request, actor, body);
       const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
       // The room's facts, and the exact identity the decision is asked of: on
       // the record, a name is never enough. A seat that rejoined under the
@@ -969,6 +977,125 @@ function createWorkService(options) {
     });
   }
 
+  // ── requests for approval ─────────────────────────────────────────────────
+  // A work item that waits on one person's Approve before its asker does it.
+  // The host files it with the room ask it was asked with, already bound, so
+  // the room and the record hear the same answer. Approved, it is the asker's
+  // to do; their done receipt closes it. Declined, it closes declined.
+  function createApproval(actor, rawInput) {
+    return operation(actor, 'approvals.create', rawInput, ['project', 'title', 'body', 'scope', 'approver', 'ask_message_id'],
+      (draft, body, now) => {
+        const project = findProject(draft, body.project);
+        if (project.retired_at !== null) fail('project-retired');
+        if (!validRef(body.approver)) fail('invalid-asked-of');
+        if (!Number.isSafeInteger(body.ask_message_id) || body.ask_message_id < 1 ||
+            draft.items.some(row => row.ask_message_id === body.ask_message_id)) fail('invalid-state');
+        const id = store.nextId(draft, 'W');
+        const item = {
+          id, kind: 'work', project: project.id,
+          title: requiredText(body.title, TITLE_BYTES, 'title'),
+          body: optionalText(body.body, BODY_BYTES, 'body') ?? '',
+          source: 'room message #' + body.ask_message_id, source_message: null, links: [], parent: null,
+          revision: 1, created_at: now, created_by: refOf(actor), updated_at: now,
+          state: 'open', responsible: null, next_to: refOf(body.approver), next_action: 'approve or decline',
+          target: '', block_reason: '', done_account: '', done_evidence: null, done_without_evidence: false,
+          consequence: '', severity: null,
+          approval: { state: 'awaiting', approver: refOf(body.approver), by: refOf(actor), scope: requiredText(body.scope, SHORT_BYTES, 'scope') },
+          ask_message_id: body.ask_message_id, ask_revision: 1, bridged_message_ids: [],
+        };
+        draft.items.push(item);
+        appendEvent(draft, now, actor, {
+          item: id, project: project.id, kind: 'approval-asked', title: item.title, scope: item.approval.scope,
+          approver: clone(item.approval.approver), ask_message_id: body.ask_message_id,
+        });
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
+  // The approver's room answer, at the revision the item's scope is. Only an
+  // explicit Yes approves and only a No declines; words alone change nothing.
+  function approvalAnswer(draft, item, actor, body) {
+    const approval = item.approval;
+    if (body.by_addressee !== true || actor.subject_id !== approval.approver.subject_id ||
+        actor.kind !== approval.approver.kind || body.revision !== askRevision(item) ||
+        approval.state !== 'awaiting' || (body.choice !== 'yes' && body.choice !== 'no')) {
+      return { ok: true, recorded: null };
+    }
+    const bridged = Array.isArray(item.bridged_message_ids) ? item.bridged_message_ids : [];
+    if (bridged.includes(body.message_id)) return { ok: true, recorded: item.id, replayed: true };
+    const now = clock();
+    item.bridged_message_ids = bridged.concat([body.message_id]);
+    if (body.choice === 'yes') {
+      approval.state = 'approved';
+      item.state = 'active';
+      item.responsible = clone(approval.by);
+      item.next_to = clone(approval.by);
+      item.next_action = approval.scope;
+    } else {
+      approval.state = 'declined';
+      item.state = 'done';
+      item.next_to = null;
+      item.next_action = '';
+      item.done_account = 'declined by ' + approval.approver.name + ' in the room #' + body.message_id;
+    }
+    approval.answered = { by: refOf(actor), message_id: body.message_id, revision: body.revision, at: now };
+    touch(item, now);
+    appendEvent(draft, now, actor, {
+      item: item.id, project: item.project, kind: body.choice === 'yes' ? 'approved' : 'declined',
+      revision: body.revision, source: 'answered in the room #' + body.message_id,
+    });
+    return { ok: true, recorded: item.id };
+  }
+
+  // The asker revised the scope: it follows by revision number, and an
+  // approval given to the old scope no longer stands.
+  function approvalRevised(draft, item, actor, body) {
+    const approval = item.approval;
+    if (approval.by.subject_id !== actor.subject_id || approval.state === 'declined' || item.state === 'done' ||
+        body.revision <= askRevision(item)) return { ok: true, revised: null };
+    const now = clock();
+    const before = approval.scope;
+    const superseded = approval.state === 'approved' ? clone(approval.answered) : null;
+    approval.scope = body.means === null ? before : body.means;
+    item.ask_revision = body.revision;
+    if (approval.state === 'approved') {
+      approval.state = 'awaiting';
+      approval.answered = null;
+      item.state = 'open';
+      item.responsible = null;
+      item.next_to = clone(approval.approver);
+      item.next_action = 'approve or decline';
+    }
+    touch(item, now);
+    appendEvent(draft, now, actor, Object.assign({
+      item: item.id, project: item.project, kind: 'scope-revised', before, after: approval.scope,
+    }, superseded ? { approval_superseded: superseded } : {}));
+    return { ok: true, revised: item.id };
+  }
+
+  // The asker's done receipt in the room closes an approved item.
+  function closeApproval(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['ask_id', 'message_id', 'text']);
+    if (!body || !Number.isSafeInteger(body.ask_id) || !Number.isSafeInteger(body.message_id)) fail('invalid-input');
+    const text = requiredText(body.text, BODY_BYTES, 'text');
+    return store.commit(draft => {
+      const item = draft.items.find(row => row.kind === 'work' && row.approval && row.ask_message_id === body.ask_id);
+      if (!item || item.approval.state !== 'approved' || item.state === 'done' ||
+          item.approval.by.subject_id !== actor.subject_id) return { ok: true, closed: null };
+      const now = clock();
+      item.state = 'done';
+      item.next_to = null;
+      item.next_action = '';
+      item.done_account = 'done receipt in the room #' + body.message_id + ': ' + text.split('\n')[0].slice(0, 200);
+      touch(item, now);
+      appendEvent(draft, now, actor, {
+        item: item.id, project: item.project, kind: 'done', account: item.done_account, source: 'room message #' + body.message_id,
+      });
+      return { ok: true, closed: item.id };
+    });
+  }
+
   // A decision bound before asks could be revised follows the first revision.
   function askRevision(item) {
     return Number.isSafeInteger(item.ask_revision) ? item.ask_revision : 1;
@@ -986,6 +1113,8 @@ function createWorkService(options) {
       fail('invalid-input');
     }
     return store.commit(draft => {
+      const request = draft.items.find(row => row.kind === 'work' && row.approval && row.ask_message_id === body.ask_id);
+      if (request) return approvalRevised(draft, request, actor, body);
       const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
       if (!item || item.asked_by.subject_id !== actor.subject_id) return { ok: true, revised: null };
       // The scope follows the room's numbered revisions: an older one that
@@ -1259,6 +1388,7 @@ function createWorkService(options) {
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, priorResult, reviseScope,
+    createApproval, closeApproval,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });

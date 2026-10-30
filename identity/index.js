@@ -934,6 +934,23 @@ function create(config) {
 
   // Who is an administrator, who has a passkey, and whether the caller may
   // grant or remove administrator rights.
+  // The first owner, for the host's own routing only (a request for approval
+  // with no person lead goes to her). In-process and read-only: no session is
+  // needed because nothing is authorised by it, and the host never sends it
+  // to a client or serves it on a route. Null while she is not resolvable
+  // (before setup, or if her subject is not an active person).
+  function firstOwnerSubject() {
+    try {
+      const state = repo.read();
+      const id = repo.firstOwnerIdIn(state, tenant);
+      const person = state.subjects.find(s => s.id === id && s.tenant === tenant && s.kind === 'person' &&
+        s.status === 'active');
+      return person ? Object.freeze({ subject_id: person.id, name: person.name }) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function administrators(meta) {
     if (meta === null || typeof meta !== 'object') {
       reject('administrators(meta) requires the trusted metadata object');
@@ -1156,6 +1173,7 @@ function create(config) {
     endOwnSeat,
     revokeParticipant,
     administrators,
+    firstOwnerSubject,
     grantAdministrator,
     revokeAdministrator,
     issuePasskeyCode,

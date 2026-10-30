@@ -381,3 +381,21 @@ test('work get, list and brief show the kill slot in words; a record from before
   assert.match(rows.stdout, /^D-7 · awaiting · attacked, survived · asked of Ana by Lead · Pick the bank$/m);
   assert.match(rows.stdout, /^D-7 · awaiting · asked of Ana by Lead · Pick the bank$/m, 'no kill word for an older record');
 });
+
+test('work ask-approval posts a request for approval and says who approves it', async () => {
+  const { calls, dependencies } = world(() => ({ status: 201, json: {
+    ok: true, routed: 'no-lead',
+    item: { id: 'W-32', kind: 'work', project: 'ops', title: 'Order printer rollers', state: 'open', revision: 1,
+      approval: { state: 'awaiting', approver: { name: 'Ana', kind: 'person', session: null },
+        by: { name: 'Marlow', kind: 'seat', session: null }, scope: 'I order two rollers, up to $40' },
+      ask_message_id: 31, ask_revision: 1 },
+    message: { id: 31, ts: 1, byline: 'Marlow', kind: 'seat', session: null, text: 'Approval: Order printer rollers',
+      product: 'Codex CLI', product_provenance: 'client-reported', delivery: [] },
+  } }));
+  const file = tempJson({ project: 'ops', title: 'Order printer rollers', scope: 'I order two rollers, up to $40' });
+  const result = await captureCommand(['work', 'ask-approval', '--connection', 'Marlow', '--file', file], dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.equal(calls[0].url, 'http://localhost:8788/api/ai/work/approvals/ask');
+  assert.match(calls[0].body.operation_id, UUID);
+  assert.match(result.stdout, /Asked Ana to approve W-32 · Order printer rollers as message #31;/);
+});
