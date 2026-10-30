@@ -1458,7 +1458,10 @@ function renderAsk(ask, mine, viewer = null) {
   const turn = ask.turn ? ` [${terminalSafe(turnWords(ask.turn, viewer))}]` : '';
   const latest = ask.latest ? `\n      latest: ${terminalSafe(ask.latest.by)} · ${terminalSafe(LATEST_WORDS[ask.latest.kind] || ask.latest.kind)}${
     ask.latest.message_id ? ` #${ask.latest.message_id}` : ''}` : '';
-  return `  ask ${ask.ask_id} ${who}${turn}${later}${carried}${kept}${means}${latest}`;
+  // A revised ask shows its revision as `--answers` takes it: an answer that
+  // names none was given to the first, and the room refuses it.
+  const id = Number.isSafeInteger(ask.revision) && ask.revision > 1 ? `${ask.ask_id}@${ask.revision}` : `${ask.ask_id}`;
+  return `  ask ${id} ${who}${turn}${later}${carried}${kept}${means}${latest}`;
 }
 
 async function connectedProfile(parsed, io, dependencies) {

@@ -561,3 +561,26 @@ test('interlock asks shows whose turn it is and the latest exchange; an older ro
   const odd = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [Object.assign({}, base, { surprise: 1 })] } }));
   assert.equal((await storyRun(odd, ['asks', '--connection', 'Scout'])).code, EXIT_RUNTIME, 'an unknown field is still refused');
 });
+
+test('an answer names the revision it was given against: interlock asks shows it, --answers N@REV sends it', async () => {
+  const revised = { ask_id: 6, asked_at: 1, by: 'Ana', of: 'Scout', of_kind: 'seat', means: 'rerun at the release head',
+    deliver: 'now', project: 'ops', state: 'open', kept_open: false, carried_from: null, answers: [],
+    revision: 2, revisions: [{ means: 'rerun at main', revision: 1 }], done: false,
+    turn: { phase: 'waiting', waiting_on: 'Scout', acting: null },
+    latest: { message_id: null, kind: 'revise', party: 'asker', by: 'Ana', at: 2 } };
+  const first = Object.assign({}, revised, { ask_id: 7, revision: 1, revisions: [] });
+  const listing = storyWorld(() => ({ json: { ok: true, addressed: [revised, first], asked: [] } }));
+  const listed = await storyRun(listing, ['asks', '--connection', 'Scout']);
+  assert.equal(listed.code, EXIT_OK, listed.stderr);
+  assert.match(listed.stdout, /ask 6@2 by Ana/);
+  assert.match(listed.stdout, /ask 7 by Ana/, 'a first-scope ask reads as before');
+  const world = storyWorld(() => ({ status: 201, json: SAVED }));
+  const said = await storyRun(world, ['say', '--connection', 'Scout', '--file', 'm.md', '--answers', '6@2,7', '--choice', 'yes']);
+  assert.equal(said.code, EXIT_OK, said.stderr);
+  assert.deepEqual(world.calls[0].body.annotation.answers,
+    [{ ask_id: 6, choice: 'yes', revision: 2 }, { ask_id: 7, choice: 'yes', revision: 1 }]);
+  for (const bad of ['6@0', '6@', '6@2@3', '6@2,6@3']) {
+    assert.equal((await storyRun(world, ['say', '--connection', 'Scout', '--file', 'm.md', '--answers', bad])).code, EXIT_USAGE, bad);
+  }
+  assert.equal(world.calls.length, 1);
+});

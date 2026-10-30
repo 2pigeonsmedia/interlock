@@ -386,7 +386,7 @@ function createAskIndex(eraFirstId) {
   function checkCarryState(row) {
     const ask = asks.get(row.ask_id);
     if (!ask || ask.carried_from === null || ask.asker_subject_id !== row.subject_id || ask.state !== 'open' ||
-        ask.revision !== 1 || ask.answers.length > 0 || ask.kept_open) return 'ask-not-found';
+        ask.revision !== 1 || ask.answers.length > 0) return 'ask-not-found';
     return null;
   }
 

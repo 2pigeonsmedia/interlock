@@ -417,3 +417,19 @@ test('a carried story binds once, and only to an ask carried into this era', asy
   assert.equal(index.replay(state(5), undefined), false, 'once');
   assert.equal(index.asks.get(3).revision, 2);
 });
+
+test('a kept-open ask that was revised keeps its revision across a clear too', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-clear-'));
+  const room = open(dir);
+  const ask = await room.chat.appendAnnotated({ text: 'Rollers?' }, marlow(), { ask: { of: 'Ana', means: 'scope one' } });
+  await room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  await room.chat.annotate(MARLOW_ACTOR, 'keep_open', ask.id);
+  await room.chat.annotate(MARLOW_ACTOR, 'revise', ask.id, 'scope two');
+  const before = (await room.chat.openAsks(ANA, 'Ana')).addressed[0];
+  assert.deepEqual([before.kept_open, before.revision], [true, 2], 'the arrangement: kept open, at revision 2');
+  await room.archive.clearTranscript();
+  const carried = (await room.chat.openAsks(ANA, 'Ana')).addressed[0];
+  assert.deepEqual([carried.kept_open, carried.revision, carried.revisions.map(entry => entry.means)], [true, 2, ['scope one']]);
+  await assert.rejects(room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 1 }] }),
+    error => code(error) === 'ask-revised', 'a yes to the first scope is refused after the clear');
+});
