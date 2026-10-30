@@ -1071,3 +1071,11 @@ test('the first owner\'s Approvals list: every request awaiting approval, one li
     'W-2 TW-2 · Operations · approver Bea · asked by Scout · sW-2',
   ], 'awaiting only, oldest first; hers is a pointer, not a second card');
 });
+
+test('a request for approval\'s card reads Approve even before its work item is read', () => {
+  const brief = { projects: [{ id: 'ops', display_name: 'Operations' }], needs_me: [], open: [], decisions: [] };
+  const { cards } = needsCards(brief, NOW, [{ ask_id: 9, asked_at: NOW, by: 'Scout', means: 'I order toner', project: 'ops', approval: true }]);
+  assert.equal(cards[0].approval, true);
+  const plain = needsCards(brief, NOW, [{ ask_id: 9, asked_at: NOW, by: 'Scout', means: 'I order toner', project: 'ops' }]);
+  assert.equal(plain.cards[0].approval, false, 'the control: a plain ask reads Yes and No');
+});

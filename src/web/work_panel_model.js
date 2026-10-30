@@ -339,6 +339,9 @@
         project: project(ask.project),
         askId: ask.ask_id,
         revision: Number.isSafeInteger(ask.revision) ? ask.revision : null,
+        // Before its work item is read, a request for approval still reads
+        // Approve and Decline.
+        approval: ask.approval === true,
         ...storyFields(ask, viewer),
       });
     }
