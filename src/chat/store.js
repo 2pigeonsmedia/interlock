@@ -1027,6 +1027,20 @@ function openStore(opts) {
     });
   }
 
+  /* For the host only, never a route: who asked each of these asks, so an
+   * answer or a reply to an ask can ring its asker. Unknown ids are left out. */
+  function askersOf(askIds) {
+    return exclusive(() => {
+      requireOpen();
+      const found = [];
+      for (const askId of askIds) {
+        const ask = asks.asks.get(askId);
+        if (ask) found.push(Object.freeze({ ask_id: askId, subject_id: ask.asker_subject_id, name: ask.asker_name }));
+      }
+      return Object.freeze(found);
+    });
+  }
+
   /* The ask a seat's earlier post with this client id carried, so a retry
    * can be answered by the idempotency rule even if the addressee has since
    * left the roster. */
@@ -1359,7 +1373,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf,
+    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf,
   });
 }
 

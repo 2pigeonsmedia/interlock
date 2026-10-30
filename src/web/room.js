@@ -2224,7 +2224,7 @@ async function answerAsk(askId, choice, revision) {
   }
   try {
     await ownerMutation('/api/annotated-messages', {
-      text: choice, annotation: { answers: [{ ask_id: askId, choice, revision }] },
+      text: InterlockAsks.answerText(current, choice), annotation: { answers: [{ ask_id: askId, choice, revision }] },
     });
     pickedAsks.delete(askId);
     setRoomNotice(`Answered "${choice}" to #${askId}.`, 'success');

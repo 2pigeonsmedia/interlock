@@ -213,3 +213,40 @@ test('the page lists exactly what the server lists, for every party, by the one 
   }
   assert.ok(declined && typed, 'declined and answered asks are on nobody\'s list, on either side');
 });
+
+test('an answer or a reply to an ask rings the AI that asked it, @ or not', async () => {
+  const chat = room();
+  const rung = message => message.recipients.map(recipient => recipient.name);
+  const ofAna = await chat.appendAnnotated({ text: 'Order rollers?' }, scout(), { ask: { of: 'Ana', means: 'I order them' } });
+  const reply = await chat.appendAnnotated({ text: 'which ones?' }, ANA_ACTOR, { discusses: ofAna.id });
+  assert.deepEqual(rung(reply), ['Scout'], 'her reply passes the turn to Scout, and rings him');
+  const yes = await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ofAna.id, choice: 'yes' }] });
+  assert.deepEqual(rung(yes), ['Scout'], 'her yes, with no @, rings the AI who is now on it');
+  const bystander = await chat.appendAnnotated({ text: 'I would wait' }, BEA_ACTOR, { discusses: ofAna.id });
+  assert.deepEqual(rung(bystander), ['Scout'], 'anyone\'s reply on his ask reaches him');
+  const plain = await chat.append({ text: 'nice weather' }, ANA_ACTOR);
+  assert.deepEqual(rung(plain), [], 'the control: a plain message rings nobody');
+  // The other way: a person asks an AI. People are not rung; the AI's answer
+  // turns her Needs-you card instead, and rings nobody.
+  const ofScout = await chat.appendAnnotated({ text: 'Rerun?' }, ANA_ACTOR, { ask: { of: 'Scout' } });
+  const back = await chat.appendAnnotated({ text: 'which head?' }, scout(), { discusses: ofScout.id });
+  assert.deepEqual(rung(back), [], 'a person who asked is told by her list, not rung');
+  assert.equal((await story(chat, ofScout.id, ANA_ACTOR)).waiting_on, 'Ana', 'her turn, on her list');
+  const his = await chat.appendAnnotated({ text: 'yes' }, scout(), { answers: [{ ask_id: ofScout.id, choice: 'yes' }] });
+  assert.deepEqual(rung(his), []);
+});
+
+test('an AI\'s answer rings the AI that asked it', async () => {
+  const LEAD = '44444444-4444-4444-8444-444444444444';
+  const roster = ROSTER.concat([{ subject_id: LEAD, name: 'Lead', kind: 'seat', created_at: Date.now() }]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-ask-turn-'));
+  const chat = createChatService({ store: openStore({ dataDir: dir }), participants: () => roster });
+  const lead = { subject_id: LEAD, name: 'Lead', kind: 'seat', product: 'Codex CLI', product_provenance: 'client-reported',
+    client_message_id: 'eeeeeeee-eeee-4eee-8eee-000000000001' };
+  const ask = await chat.appendAnnotated({ text: 'Rerun the suite?' }, lead, { ask: { of: 'Scout' } });
+  const yes = await chat.appendAnnotated({ text: 'yes, running' }, scout(), { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  assert.deepEqual(yes.recipients.map(recipient => recipient.name), ['Lead']);
+  const own = await chat.appendAnnotated({ text: 're: also the docs' },
+    Object.assign({}, lead, { client_message_id: 'eeeeeeee-eeee-4eee-8eee-000000000002' }), { discusses: ask.id });
+  assert.equal(own.recipients.some(recipient => recipient.name === 'Lead'), false, 'an asker\'s own reply never rings itself');
+});

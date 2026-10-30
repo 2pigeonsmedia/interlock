@@ -322,3 +322,9 @@ test('a tapped chip keeps the revision it showed, even with the composer empty',
   Asks.noteShown(shown, state.openFor('Ana').addressed, false, picked);
   assert.equal(shown.get(3), 2, 'the control: untapped, it follows the ask again');
 });
+
+test('a tapped Yes or No posts words addressed to the one who asked, with the scope it answers', () => {
+  assert.equal(Asks.answerText({ by: 'Piha', means: 'I post one note' }, 'yes'), '@Piha — yes\nA yes means: I post one note');
+  assert.equal(Asks.answerText({ by: 'Ana', means: null }, 'no'), '@Ana — no');
+  assert.ok(ROOM_JS.includes('text: InterlockAsks.answerText(current, choice)'), 'the chip and the card post it');
+});

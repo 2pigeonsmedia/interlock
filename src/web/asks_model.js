@@ -324,6 +324,13 @@
     return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice: choice ?? bareAnswer(text), revision: revisionOf.get(id) }));
   }
 
+  /* The words a tapped Yes or No posts: addressed to the one who asked, with
+   * the scope it answers, so the transcript reads as the answer it is. */
+  function answerText(ask, choice) {
+    const word = choice === 'yes' ? 'yes' : 'no';
+    return `@${ask.by} — ${word}` + (ask.means === null ? '' : `\nA yes means: ${ask.means}`);
+  }
+
   function revisionNow(ask) {
     return Number.isSafeInteger(ask.revision) ? ask.revision : 1;
   }
@@ -344,7 +351,7 @@
   }
 
   const contract = Object.freeze({
-    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers, noteShown,
+    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers, noteShown, answerText,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {

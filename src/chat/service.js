@@ -62,13 +62,21 @@ function resolveAskTarget(name, roster) {
 /* Who a message rings. `@` names resolve among present seats, as always. An
  * ask of an AI rings it with or without an `@`; a hold (deliver later) never
  * rings its addressee, even when the text names it. Others named still ring. */
-function ringRecipients(text, presentRoster, senderId, askTarget, deliver) {
+function ringRecipients(text, presentRoster, senderId, askTarget, deliver, askers = []) {
   let recipients = resolveRecipients(text, presentRoster, senderId).slice();
   if (askTarget && deliver === 'later') {
     recipients = recipients.filter(recipient => recipient.subject_id !== askTarget.subject_id);
   } else if (askTarget && askTarget.kind === 'seat' &&
       !recipients.some(recipient => recipient.subject_id === askTarget.subject_id)) {
     recipients.push(Object.freeze({ subject_id: askTarget.subject_id, name: askTarget.name }));
+  }
+  // An answer to an ask, or a reply that discusses it, rings the AI that
+  // asked it, with or without an `@`, as an ask rings the AI it asks.
+  for (const asker of askers) {
+    if (asker.kind === 'seat' && asker.subject_id !== senderId &&
+        !recipients.some(recipient => recipient.subject_id === asker.subject_id)) {
+      recipients.push(Object.freeze({ subject_id: asker.subject_id, name: asker.name }));
+    }
   }
   return Object.freeze(recipients);
 }
@@ -208,8 +216,21 @@ function createChatService(options) {
         discusses: annotationIn.discusses,
       };
     }
+    // The askers of the asks this post answers or discusses, by the room's
+    // stored ask, never by text; an asker who is an AI is rung.
+    let askers = [];
+    if (annotationIn !== null) {
+      const ids = annotationIn.answers.map(answer => answer && answer.ask_id)
+        .concat(annotationIn.discusses === null ? [] : [annotationIn.discusses])
+        .filter(id => Number.isSafeInteger(id) && id > 0);
+      if (ids.length > 0) {
+        const kindOf = new Map(everyone.map(row => [row.subject_id, row.kind]));
+        askers = (await store.askersOf([...new Set(ids)]))
+          .map(asker => Object.assign({}, asker, { kind: kindOf.get(asker.subject_id) || null }));
+      }
+    }
     const recipients = ringRecipients(
-      body && body.text, roster, actor && actor.subject_id, askTarget, deliver,
+      body && body.text, roster, actor && actor.subject_id, askTarget, deliver, askers,
     );
     const saved = await store.append(body, Object.assign({}, actor, { recipients }), annotation, requireNew);
     // Store append resolves only after its durable commit. A waiter can never
