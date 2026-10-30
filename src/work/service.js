@@ -357,6 +357,7 @@ function createWorkService(options) {
         source_message: item.source_message ? clone(item.source_message) : null,
         source_message_id: item.source_message ? item.source_message.message_id : null,
         ask_message_id: item.ask_message_id ?? null,
+        ask_revision: item.ask_message_id ? (Number.isSafeInteger(item.ask_revision) ? item.ask_revision : 1) : null,
         answer_summary: item.answer ? {
           kind: item.answer.kind, source: item.answer.source ?? '', by: clone(item.answer.by),
           attributed_to: clone(item.answer.attributed_to), at: item.answer.at,

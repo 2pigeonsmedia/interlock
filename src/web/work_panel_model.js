@@ -104,6 +104,14 @@
   // A decision still awaiting whose own ask was answered in the room by the
   // person asked: the room has the answer, the record does not (yet).
   const ROOM_NOT_RECORDED = 'Answered in the room, not recorded here';
+  // The room ask was revised and the record could not follow: its scope is
+  // still the earlier one, and it will not take an answer to the new one.
+  const RECORD_BEHIND = 'This ask changed; the record did not follow, so an answer here is not recorded';
+
+  function recordBehind(row, bound) {
+    return !!bound && Number.isSafeInteger(row.ask_revision) && Number.isSafeInteger(bound.revision) &&
+      bound.revision > row.ask_revision;
+  }
 
   // Only an ask the server bound to the decision ("Ask a decision") counts;
   // a decision merely citing a message has no ask of its own.
@@ -315,6 +323,7 @@
       if (bound) Object.assign(card, storyFields(bound, viewer));
       if (decision && killWord(row)) card.kill = killWord(row);
       if (decision && answeredInRoom(row, answered)) card.note = ROOM_NOT_RECORDED;
+      else if (decision && recordBehind(row, bound)) card.note = RECORD_BEHIND;
       cards.push(card);
     }
     for (const ask of askById.values()) {

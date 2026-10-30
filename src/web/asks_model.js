@@ -18,8 +18,9 @@
   const CARRY_KEYS = Object.freeze([
     'seq', 'ts', 'kind', 'by', 'ask_id', 'archive_id', 'asked_at', 'ask', 'kept_open',
   ]);
-  const CARRY_STATE_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id', 'revision', 'revisions', 'agreed']);
   const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver', 'project']);
+  // A carry, in place of the carry row, for an ask with a story to keep.
+  const CARRY_STATE_KEYS = Object.freeze([...CARRY_KEYS, 'revision', 'revisions', 'agreed']);
   const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes', 'revision']);
   // A message that is exactly one of these words, in any case, answers the
   // sender's one open ask with no tap (Patti, 2026-10-29). Anything else, or
@@ -78,7 +79,8 @@
     }
     if (row.kind === 'carry_state') {
       return exact(row, CARRY_STATE_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id) &&
-        positive(row.revision) && Array.isArray(row.revisions) && row.revisions.length === row.revision - 1 &&
+        typeof row.archive_id === 'string' && Number.isSafeInteger(row.asked_at) && validAsk(row.ask) &&
+        typeof row.kept_open === 'boolean' && positive(row.revision) && Array.isArray(row.revisions) && row.revisions.length === row.revision - 1 &&
         row.revisions.every((entry, i) => exact(entry, ['means', 'revision']) && entry.revision === i + 1 &&
           (entry.means === null || name(entry.means))) &&
         (row.agreed === null || (exact(row.agreed, ['message_id', 'by', 'revision', 'at']) &&
@@ -190,23 +192,23 @@
             }
           }
           if (row.ask) addAsk(row.message_id, row.by, row.ask, row.ts, null);
-        } else if (row.kind === 'carry') {
+        } else if (row.kind === 'carry' || row.kind === 'carry_state') {
           addAsk(row.ask_id, row.by, row.ask, row.asked_at, row.archive_id);
-          asks.get(row.ask_id).kept_open = row.kept_open;
-        } else if (row.kind === 'carry_state') {
+          const carried = asks.get(row.ask_id);
+          carried.kept_open = row.kept_open;
           // A carried ask's story: its revision, its earlier scopes, and a
           // yes not yet done. Mirrors the server's applyCarryState.
-          const carried = asks.get(row.ask_id);
-          if (!carried) continue;
-          carried.revision = row.revision;
-          carried.revisions = row.revisions.map(entry => ({ means: entry.means, revision: entry.revision }));
-          if (row.agreed) {
-            carried.answers.push({
-              message_id: row.agreed.message_id, by: row.agreed.by, choice: 'yes', by_addressee: true,
-              revision: row.agreed.revision,
-            });
-            carried.latest = { message_id: row.agreed.message_id, kind: 'answer', party: 'addressee', by: row.agreed.by, at: row.agreed.at };
-            carried.state = 'answered';
+          if (row.kind === 'carry_state') {
+            carried.revision = row.revision;
+            carried.revisions = row.revisions.map(entry => ({ means: entry.means, revision: entry.revision }));
+            if (row.agreed) {
+              carried.answers.push({
+                message_id: row.agreed.message_id, by: row.agreed.by, choice: 'yes', by_addressee: true,
+                revision: row.agreed.revision,
+              });
+              carried.latest = { message_id: row.agreed.message_id, kind: 'answer', party: 'addressee', by: row.agreed.by, at: row.agreed.at };
+              carried.state = 'answered';
+            }
           }
         } else {
           const ask = asks.get(row.ask_id);
@@ -308,8 +310,11 @@
    * answers the one open ask. Returns null when nothing binds. */
   // Each answer names the revision of the ask it was given against: the one
   // on screen. A yes never lands on a scope the person did not see.
-  function bindAnswers(openAddressed, picked, text = '', choice = null) {
-    const revisionOf = new Map(openAddressed.map(ask => [ask.ask_id, Number.isSafeInteger(ask.revision) ? ask.revision : 1]));
+  // `shown`, when given, is the revision each ask showed when the person began
+  // writing (noteShown); a revision that landed while she wrote is not hers.
+  function bindAnswers(openAddressed, picked, text = '', choice = null, shown = null) {
+    const revisionOf = new Map(openAddressed.map(ask => [ask.ask_id,
+      shown && shown.has(ask.ask_id) ? shown.get(ask.ask_id) : revisionNow(ask)]));
     const ids = openAddressed.map(ask => ask.ask_id);
     const chosenIds = ids.filter(id => picked.has(id));
     if (chosenIds.length === 0) {
@@ -319,8 +324,25 @@
     return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice: choice ?? bareAnswer(text), revision: revisionOf.get(id) }));
   }
 
+  function revisionNow(ask) {
+    return Number.isSafeInteger(ask.revision) ? ask.revision : 1;
+  }
+
+  /* Which revision of each open ask the person has been shown. While the
+   * composer is empty it follows the asks; once she is writing, an ask she
+   * has already seen keeps the revision she saw, so her yes is sent against
+   * that scope and the room refuses it if the scope changed. */
+  function noteShown(shown, openAddressed, writing) {
+    const open = new Set(openAddressed.map(ask => ask.ask_id));
+    for (const id of [...shown.keys()]) if (!open.has(id)) shown.delete(id);
+    for (const ask of openAddressed) {
+      if (!writing || !shown.has(ask.ask_id)) shown.set(ask.ask_id, revisionNow(ask));
+    }
+    return shown;
+  }
+
   const contract = Object.freeze({
-    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers,
+    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers, noteShown,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {

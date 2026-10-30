@@ -237,22 +237,21 @@ test('a carried ask\'s story replays: its revision, its earlier scopes, and a ye
     seq, ts: 5_000, kind: 'carry', by: 'Lead', ask_id: askId, archive_id: 'transcript-x', asked_at: 1_000,
     ask: ask('Ana', means), kept_open: false,
   });
+  const story = (seq, askId, means, extra) => Object.assign(carry(seq, askId, means), { kind: 'carry_state' }, extra);
   const rows = [
-    carry(1, 10, 'two drums'),
-    carry(2, 11, 'mealworms'),
-    { seq: 3, ts: 5_000, kind: 'carry_state', by: 'Lead', ask_id: 10, revision: 2,
-      revisions: [{ means: 'one drum', revision: 1 }], agreed: null },
-    { seq: 4, ts: 5_000, kind: 'carry_state', by: 'Lead', ask_id: 11, revision: 1, revisions: [],
-      agreed: { message_id: 7, by: 'Ana', revision: 1, at: 2_000 } },
+    story(1, 10, 'two drums', { revision: 2, revisions: [{ means: 'one drum', revision: 1 }], agreed: null }),
+    story(2, 11, 'mealworms', { revision: 1, revisions: [], agreed: { message_id: 7, by: 'Ana', revision: 1, at: 2_000 } }),
+    carry(3, 12, 'grit'),
   ];
-  assert.equal(Asks.validPage({ ok: true, rows, cursor: 4, first_id: 20 }), true);
-  assert.equal(Asks.validPage({ ok: true, rows: [Object.assign({}, rows[2], { revisions: [] })], cursor: 1, first_id: 20 }), false,
+  assert.equal(Asks.validPage({ ok: true, rows, cursor: 3, first_id: 20 }), true);
+  assert.equal(Asks.validPage({ ok: true, rows: [Object.assign({}, rows[0], { revisions: [] })], cursor: 1, first_id: 20 }), false,
     'revision n has n-1 earlier scopes');
   state.apply(rows);
   assert.deepEqual([state.ask(10).revision, state.ask(10).revisions, state.ask(10).turn.phase],
     [2, [{ means: 'one drum', revision: 1 }], 'waiting']);
   assert.deepEqual([state.ask(11).state, state.ask(11).turn.phase, state.ask(11).turn.acting], ['answered', 'agreed', 'Lead']);
-  assert.deepEqual(state.openFor('Lead').asked.map(row => row.ask_id), [10, 11], 'both still on his list');
+  assert.deepEqual(state.openFor('Lead').asked.map(row => row.ask_id), [10, 11, 12], 'all still on his list');
+  assert.deepEqual([state.ask(12).revision, state.ask(12).turn.phase], [1, 'waiting'], 'a plain carry reads as before');
 });
 
 test('on the page too, a done receipt lands only on an agreed ask', () => {
@@ -268,4 +267,33 @@ test('on the page too, a done receipt lands only on an agreed ask', () => {
   ]);
   assert.deepEqual([state.ask(10).done, state.ask(10).turn.phase], [null, 'declined']);
   assert.deepEqual([state.ask(13).done, state.ask(13).turn.phase], [null, 'answered']);
+});
+
+test('a typed or bound answer is sent against the revision shown when she began writing, never one that landed after', () => {
+  const state = Asks.createAsksState();
+  state.apply([post(1, 3, 'Lead', { ask: ask('Ana', 'scope one') })]);
+  const shown = new Map();
+  Asks.noteShown(shown, state.openFor('Ana').addressed, false);
+  assert.equal(shown.get(3), 1, 'the arrangement: shown at revision 1, composer empty');
+  // She types "yes"; the revise lands and the page redraws while she writes.
+  state.apply([{ seq: 2, ts: 2_000, kind: 'revise', by: 'Lead', ask_id: 3, means: 'scope two' }]);
+  Asks.noteShown(shown, state.openFor('Ana').addressed, true);
+  assert.equal(state.ask(3).revision, 2, 'the arrangement: the model is at revision 2');
+  assert.deepEqual(Asks.bindAnswers(state.openFor('Ana').addressed, new Set(), 'yes', null, shown),
+    [{ ask_id: 3, choice: 'yes', revision: 1 }], 'sent against what she saw, so the room refuses it');
+  // With the composer empty again, the page follows the ask.
+  Asks.noteShown(shown, state.openFor('Ana').addressed, false);
+  assert.deepEqual(Asks.bindAnswers(state.openFor('Ana').addressed, new Set(), 'yes', null, shown),
+    [{ ask_id: 3, choice: 'yes', revision: 2 }]);
+  // An ask that leaves the list leaves the map.
+  state.apply([{ seq: 3, ts: 3_000, kind: 'withdraw', by: 'Lead', ask_id: 3 }]);
+  Asks.noteShown(shown, state.openFor('Ana').addressed, true);
+  assert.equal(shown.has(3), false);
+});
+
+test('the room page sends the shown revision from the composer and words the refusal', () => {
+  assert.ok(ROOM_JS.includes('messageBody.value, null, shownRevisions)'), 'the composer binds with the shown revisions');
+  assert.match(ROOM_JS, /noteShown\(shownRevisions, open\.addressed, messageBody\.value\.trim\(\) !== ''\)/,
+    'they stop following the asks once she is writing');
+  assert.match(ROOM_JS, /'ask-revised': 'This ask changed while you were writing\./);
 });

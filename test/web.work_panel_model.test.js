@@ -1026,3 +1026,14 @@ test('Needs you follows the turn: a reply moves an ask off the replier, the aske
   assert.equal(needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [older] }).count, 0,
     'without a turn, an ask the viewer made never waits on them');
 });
+
+test('a decision card says when its ask changed and the record did not follow', () => {
+  const decision = (askRevision) => ({ projects: [{ id: 'ops', display_name: 'Operations' }], open: [], decisions: [],
+    needs_me: [{ id: 'D-1', kind: 'decision', project: 'ops', title: 'Rollers', proposal: '', asked_by: { name: 'Lark' },
+      ask_message_id: 2, ask_revision: askRevision, state: 'awaiting', updated_at: NOW - HOUR, kill_state: 'unattacked' }] });
+  const asks = [{ ask_id: 2, asked_at: NOW - HOUR, by: 'Lark', means: 'I order two drums', project: 'ops', revision: 2 }];
+  assert.equal(needsCards(decision(1), NOW, asks).cards[0].note,
+    'This ask changed; the record did not follow, so an answer here is not recorded');
+  assert.equal(needsCards(decision(2), NOW, asks).cards[0].note, undefined, 'the control: a record that followed says nothing');
+  assert.equal(needsCards(decision(undefined), NOW, asks).cards[0].note, undefined, 'an older record shape says nothing');
+});

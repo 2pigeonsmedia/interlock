@@ -382,7 +382,7 @@ test('a carried ask keeps its revision and its earlier scopes; a yes to an earli
   assert.deepEqual([carried.means, carried.revision, carried.revisions],
     ['scope two', 2, [{ means: 'scope one', revision: 1 }]]);
   const rows = (await room.chat.readAnnotations({ after: 0, limit: 10 })).rows;
-  assert.deepEqual(rows.map(row => row.kind), ['carry', 'carry_state']);
+  assert.deepEqual(rows.map(row => row.kind), ['carry_state'], 'one row carries the ask and its story');
   await assert.rejects(room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 1 }] }),
     error => code(error) === 'ask-revised');
   await room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 2 }] });
@@ -392,30 +392,43 @@ test('a carried ask keeps its revision and its earlier scopes; a yes to an earli
     'after a restart: her yes is to revision 2');
 });
 
-test('a carried story binds once, and only to an ask carried into this era', async () => {
+test('a carried story is one row: it binds once, only in its era, and only when its story is whole', async () => {
   const { createAskIndex, parseRow } = require('../src/chat/annotations.js');
   const index = createAskIndex(10);
-  const carry = parseRow({
-    v: 1, seq: 1, ts: 5, kind: 'carry', subject_id: MARLOW, name: 'Marlow', ask_id: 3,
+  const state = (seq, extra = {}) => parseRow(Object.assign({
+    v: 1, seq, ts: 5, kind: 'carry_state', subject_id: MARLOW, name: 'Marlow', ask_id: 3,
     archive_id: 'transcript-20261030T000000000Z-11111111-1111-4111-8111-111111111111', asked_at: 1,
     ask: { of_subject_id: ANA, of_name: 'Ana', of_kind: 'person', means: 'two', deliver: 'now', project: 'ops' },
-    era_first_id: 10, kept_open: false,
-  }, 1);
-  const state = (seq, extra = {}) => parseRow(Object.assign({
-    v: 1, seq, ts: 5, kind: 'carry_state', subject_id: MARLOW, name: 'Marlow', ask_id: 3, revision: 2,
-    revisions: [{ means: 'one', revision: 1 }], agreed: null,
+    era_first_id: 10, kept_open: false, revision: 2, revisions: [{ means: 'one', revision: 1 }], agreed: null,
   }, extra), seq);
-  assert.ok(carry && state(2), 'the arrangement: both rows parse');
-  assert.equal(state(2, { revisions: [] }), null, 'revision n carries n-1 earlier scopes');
-  assert.equal(state(2, { revision: 1, revisions: [] }), null, 'a first-scope open ask carries no story');
-  assert.equal(state(2, { agreed: { message_id: 2, subject_id: ANA, name: 'Ana', revision: 1, at: 4 } }), null,
+  assert.ok(state(1), 'the arrangement: the row parses');
+  assert.equal(state(1, { revisions: [] }), null, 'revision n carries n-1 earlier scopes');
+  assert.equal(state(1, { revision: 1, revisions: [] }), null, 'a first-scope open ask is a plain carry');
+  assert.equal(state(1, { agreed: { message_id: 2, subject_id: ANA, name: 'Ana', revision: 1, at: 4 } }), null,
     'a carried yes is to the current revision');
-  assert.equal(index.replay(state(1), undefined), false, 'no carried ask yet: nothing binds');
-  assert.equal(index.replay(carry, undefined), true);
-  assert.equal(index.replay(state(3, { subject_id: ANA, name: 'Ana' }), undefined), false, 'only the asker\'s story');
-  assert.equal(index.replay(state(4), undefined), true);
-  assert.equal(index.replay(state(5), undefined), false, 'once');
-  assert.equal(index.asks.get(3).revision, 2);
+  assert.equal(state(1, { archive_id: 'nope' }), null, 'it is a carry: the carry fields are checked too');
+  assert.equal(index.replay(state(1, { era_first_id: 9 }), undefined), false, 'only in the era it was carried into');
+  assert.equal(index.replay(state(2), undefined), true);
+  assert.equal(index.replay(state(3), undefined), false, 'once');
+  assert.deepEqual([index.asks.get(3).revision, index.asks.get(3).carried_from !== null], [2, true]);
+});
+
+test('during a rollback an older release never sees an ask carried with its story, so it can take no answer the story overrides', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-clear-'));
+  const room = open(dir);
+  const agreed = await room.chat.appendAnnotated({ text: 'Mealworms?' }, marlow(), { ask: { of: 'Ana', means: 'I buy mealworms' } });
+  await room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: agreed.id, choice: 'yes' }] });
+  const revised = await room.chat.appendAnnotated({ text: 'Rollers?' }, marlow(), { ask: { of: 'Ana', means: 'scope one' } });
+  await room.chat.annotate(MARLOW_ACTOR, 'revise', revised.id, 'scope two');
+  const plain = await room.chat.appendAnnotated({ text: 'Grit?' }, marlow(), { ask: { of: 'Ana', means: 'I buy grit' } });
+  await room.archive.clearTranscript();
+  const rows = (await room.chat.readAnnotations({ after: 0, limit: 10 })).rows;
+  assert.deepEqual(rows.map(row => [row.kind, row.ask_id]),
+    [['carry_state', agreed.id], ['carry_state', revised.id], ['carry', plain.id]], 'the arrangement: all three carried');
+  // What a release that knows no carry_state replays: the kinds it knows.
+  const OLDER_KINDS = ['post', 'withdraw', 'keep_open', 'carry', 'revise'];
+  assert.deepEqual(rows.filter(row => OLDER_KINDS.includes(row.kind)).map(row => row.ask_id), [plain.id],
+    'an older release sees only the plain carry; the agreed and the revised asks are not in its room to answer');
 });
 
 test('a kept-open ask that was revised keeps its revision across a clear too', async () => {

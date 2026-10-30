@@ -122,6 +122,9 @@ let deliveryCursor = 0;
 // The asks side-car: its own cursor and era, replayed into one state.
 const asksState = InterlockAsks.createAsksState();
 const pickedAsks = new Set();
+// The revision each open ask showed when she began writing: her typed or
+// bound answer is sent against that, never against one that landed after.
+const shownRevisions = new Map();
 let annotationCursor = 0;
 let annotationEra = null;
 let annotationsLoading = false;
@@ -1915,6 +1918,7 @@ function renderMessageTextRuns(element, text) {
 function resetAsks() {
   asksState.reset();
   pickedAsks.clear();
+  shownRevisions.clear();
   annotationCursor = 0;
   annotationEra = null;
   renderBindChips([]);
@@ -1945,6 +1949,7 @@ async function loadAnnotations() {
         const restart = annotationEra !== null || annotationCursor !== 0;
         asksState.reset();
         pickedAsks.clear();
+        shownRevisions.clear();
         annotationEra = result.first_id;
         annotationCursor = 0;
         if (restart) continue;
@@ -1976,6 +1981,7 @@ function refreshAsks() {
   for (const id of [...pickedAsks]) {
     if (!open.addressed.some(ask => ask.ask_id === id)) pickedAsks.delete(id);
   }
+  InterlockAsks.noteShown(shownRevisions, open.addressed, messageBody.value.trim() !== '');
   renderBindChips(open.addressed);
   const withQuestion = ask => Object.freeze(Object.assign({}, ask, { question: askQuestion(ask.ask_id) }));
   document.dispatchEvent(new CustomEvent('interlock:asks', {
@@ -2135,7 +2141,11 @@ function renderBindChips(addressed) {
     chip.textContent = `#${ask.ask_id} from ${ask.by}${ask.means === null ? '' : `: ${ask.means}`}`;
     chip.addEventListener('click', () => {
       if (pickedAsks.has(ask.ask_id)) pickedAsks.delete(ask.ask_id);
-      else pickedAsks.add(ask.ask_id);
+      else {
+        pickedAsks.add(ask.ask_id);
+        // Tapped, it answers the scope this chip shows.
+        shownRevisions.set(ask.ask_id, ask.revision);
+      }
       chip.setAttribute('aria-pressed', pickedAsks.has(ask.ask_id) ? 'true' : 'false');
     });
     askBindChips.append(chip);
@@ -2178,7 +2188,7 @@ function setAskMode(on) {
 function composerAnnotation() {
   const annotation = {};
   const answers = composingDiscussion() ? null
-    : InterlockAsks.bindAnswers(asksState.openFor(viewerName()).addressed, pickedAsks, messageBody.value);
+    : InterlockAsks.bindAnswers(asksState.openFor(viewerName()).addressed, pickedAsks, messageBody.value, null, shownRevisions);
   if (answers) annotation.answers = answers;
   // A reply to an ask attaches to it: it passes the turn, answers nothing.
   if (composingDiscussion()) annotation.discusses = InterlockReplyReference.parse(messageBody.value).id;
@@ -2194,6 +2204,7 @@ const ASK_REFUSALS = Object.freeze({
   'ask-target-unknown': 'That participant is not in the room.',
   'ask-of-self': 'You cannot ask yourself.',
   'ask-not-open': 'That ask was already answered or withdrawn.',
+  'ask-revised': 'This ask changed while you were writing. Read the new "a yes means" line, then answer.',
   'ask-not-found': 'That ask is not in this room.',
   'ask-not-answered': 'Only an answered ask can be kept open.',
   'not-asker': 'Only the one who asked can do that.',
@@ -2641,6 +2652,11 @@ messageForm.addEventListener('submit', async event => {
     }
     if (result && Object.prototype.hasOwnProperty.call(ASK_REFUSALS, result.error)) {
       setRoomNotice(ASK_REFUSALS[result.error]);
+      // Told the scope changed, she is now answering the scope on screen.
+      if (result.error === 'ask-revised') {
+        shownRevisions.clear();
+        InterlockAsks.noteShown(shownRevisions, asksState.openFor(viewerName()).addressed, false);
+      }
       failed(response.status, result.error);
       return;
     }
@@ -2666,6 +2682,7 @@ messageForm.addEventListener('submit', async event => {
     updateBindVisibility();
     if (annotation !== null) {
       pickedAsks.clear();
+      shownRevisions.clear();
       askMeans.value = '';
       askLater.checked = false;
       setAskMode(false);

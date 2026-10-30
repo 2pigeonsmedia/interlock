@@ -1095,43 +1095,36 @@ function openStore(opts) {
       // Open asks survive the clear (Patti's ruling, 2026-10-28): each becomes
       // a carry row in the next era, pointing at the archive that holds its
       // message. An ask already carried keeps its first archive.
+      // An ask with a story to keep (a revision, or a yes not yet done) is
+      // carried as one carry_state row instead: its revision, its earlier
+      // scopes and that yes, so the done receipt still lands after the clear.
+      // A release before it passes that row over and never shows the ask, so
+      // nothing can answer it there that the story would later override.
       const carriedAt = Date.now();
-      const carryRows = asks.openAsks().map((ask, i) => Annotations.parseRow({
-        v: Annotations.ROW_VERSION,
-        seq: i + 1,
-        ts: carriedAt,
-        kind: 'carry',
-        subject_id: ask.asker_subject_id,
-        name: ask.asker_name,
-        ask_id: ask.ask_id,
-        archive_id: ask.carried_from || request.archive_id,
-        asked_at: ask.asked_at,
-        era_first_id: meta.next_id,
-        kept_open: ask.kept_open,
-        ask: {
-          of_subject_id: ask.of_subject_id,
-          of_name: ask.of_name,
-          of_kind: ask.of_kind,
-          means: ask.means,
-          deliver: ask.deliver,
-          project: ask.project,
-        },
-      }, i + 1));
-      // A carried ask keeps its story: its revision, its earlier scopes, and
-      // a yes not yet done, so the done receipt still lands after the clear.
-      const carried = asks.openAsks();
-      const stateRows = carried.map(ask => ({ ask, state: asks.carriedState(ask.ask_id) }))
-        .filter(entry => entry.state !== null)
-        .map((entry, i) => Annotations.parseRow(Object.assign({
+      const carryRows = asks.openAsks().map((ask, i) => {
+        const state = asks.carriedState(ask.ask_id);
+        return Annotations.parseRow(Object.assign({
           v: Annotations.ROW_VERSION,
-          seq: carryRows.length + i + 1,
+          seq: i + 1,
           ts: carriedAt,
-          kind: 'carry_state',
-          subject_id: entry.ask.asker_subject_id,
-          name: entry.ask.asker_name,
-          ask_id: entry.ask.ask_id,
-        }, entry.state), carryRows.length + i + 1));
-      carryRows.push(...stateRows);
+          kind: state === null ? 'carry' : 'carry_state',
+          subject_id: ask.asker_subject_id,
+          name: ask.asker_name,
+          ask_id: ask.ask_id,
+          archive_id: ask.carried_from || request.archive_id,
+          asked_at: ask.asked_at,
+          era_first_id: meta.next_id,
+          kept_open: ask.kept_open,
+          ask: {
+            of_subject_id: ask.of_subject_id,
+            of_name: ask.of_name,
+            of_kind: ask.of_kind,
+            means: ask.means,
+            deliver: ask.deliver,
+            project: ask.project,
+          },
+        }, state === null ? {} : state), i + 1);
+      });
       if (carryRows.some(row => row === null)) fail('archive-invalid');
       const staged = Buffer.from(carryRows.map(Annotations.encodeRow).join(''), 'utf8');
       const marker = Object.freeze({
