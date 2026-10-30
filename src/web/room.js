@@ -2083,10 +2083,11 @@ function decorateMessage(article, messageId) {
     const mine = viewer !== null && ask.of === viewer && ask.state === 'open';
     const chosen = InterlockAsks.chosen(ask);
     for (const choice of ['yes', 'no']) {
-      const button = askButton(choice === 'yes' ? 'Yes' : 'No', () => answerAsk(ask.ask_id, choice, ask.revision));
+      const word = ask.approval ? (choice === 'yes' ? 'Approve' : 'Decline') : (choice === 'yes' ? 'Yes' : 'No');
+      const button = askButton(word, () => answerAsk(ask.ask_id, choice, ask.revision));
       button.setAttribute('aria-pressed', chosen === choice ? 'true' : 'false');
       button.disabled = !mine;
-      button.setAttribute('aria-label', `${choice === 'yes' ? 'Yes' : 'No'} to ask #${ask.ask_id}`);
+      button.setAttribute('aria-label', ask.approval ? `${word} request #${ask.ask_id}` : `${word} to ask #${ask.ask_id}`);
       chip.append(button);
     }
     if (viewer !== null && ask.by === viewer && ask.state === 'open') {

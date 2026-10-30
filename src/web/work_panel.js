@@ -196,8 +196,11 @@
       const actions = make('div', 'work-card-actions');
       if (card.askId !== null) {
         actions.append(
-          cardButton('Yes', 'Yes to ' + card.question, () => answerAsk(card.askId, 'yes', card.revision)),
-          cardButton('No', 'No to ' + card.question, () => answerAsk(card.askId, 'no', card.revision)),
+          // A request for approval is approved or declined, never "yes"-ed.
+          cardButton(card.approval ? 'Approve' : 'Yes', (card.approval ? 'Approve ' : 'Yes to ') + card.question,
+            () => answerAsk(card.askId, 'yes', card.revision)),
+          cardButton(card.approval ? 'Decline' : 'No', (card.approval ? 'Decline ' : 'No to ') + card.question,
+            () => answerAsk(card.askId, 'no', card.revision)),
           cardButton('Reply', 'Reply to ' + card.question, () => replyAsk(card.askId)),
         );
       }
@@ -362,7 +365,11 @@
       view.editSummary.setAttribute('aria-label', 'More for ' + section.display_name);
       view.edit.hidden = view.editing;
       renderRowNodes(view.rows, section.rows, null);
-      view.rows.hidden = section.rows.length === 0;
+      // Its items already in Needs you are counted here, never shown twice.
+      if (section.waitingOnYou > 0) {
+        view.rows.prepend(make('p', 'work-tree-facts', section.waitingOnYou + ' waiting on you ↑'));
+      }
+      view.rows.hidden = section.rows.length === 0 && !(section.waitingOnYou > 0);
       view.doneToggle.hidden = closedCount(section) === 0;
       view.doneToggle.textContent = 'done (' + section.doneCount + ')' +
         (section.withdrawnCount ? ' · withdrawn (' + section.withdrawnCount + ')' : '');

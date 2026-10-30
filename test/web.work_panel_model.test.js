@@ -1037,3 +1037,23 @@ test('a decision card says when its ask changed and the record did not follow', 
   assert.equal(needsCards(decision(2), NOW, asks).cards[0].note, undefined, 'the control: a record that followed says nothing');
   assert.equal(needsCards(decision(undefined), NOW, asks).cards[0].note, undefined, 'an older record shape says nothing');
 });
+
+test('a request for approval is one card answered through its ask; its project counts it instead of showing it again', () => {
+  const request = { id: 'W-32', kind: 'work', project: 'ops', title: 'Order printer rollers', state: 'open', parent: null,
+    next_to: { name: 'Ana', kind: 'person', session: null }, next_action: 'approve or decline', responsible: null,
+    created_by: { name: 'Scout', kind: 'seat', session: null }, updated_at: NOW - HOUR, ask_message_id: 9,
+    approval: { state: 'awaiting', approver: { name: 'Ana', kind: 'person', session: null },
+      by: { name: 'Scout', kind: 'seat', session: null }, scope: 'I order two rollers, up to $40' } };
+  const other = Object.assign({}, request, { id: 'W-33', title: 'Rotate the logs', ask_message_id: null, approval: null, next_to: null });
+  const brief = { projects: [{ id: 'ops', display_name: 'Operations', objective: '', today: '', revision: 1,
+    updated_by: { name: 'Ana', kind: 'person', session: null }, updated_at: NOW }],
+    needs_me: [request], open: [request, other], decisions: [] };
+  const asks = [{ ask_id: 9, asked_at: NOW - HOUR, by: 'Scout', means: 'I order two rollers, up to $40', project: 'ops',
+    revision: 1, approval: true }];
+  const { count, cards } = needsCards(brief, NOW, asks);
+  assert.equal(count, 1, 'the request and its room ask are one card');
+  assert.deepEqual([cards[0].id, cards[0].askId, cards[0].means, cards[0].approval], ['W-32', 9, 'I order two rollers, up to $40', true]);
+  const [ops] = projectSections(brief);
+  assert.deepEqual(ops.rows.map(node => node.row.id), ['W-33'], 'W-32 is not shown again under its project');
+  assert.equal(ops.waitingOnYou, 1, 'it is counted there instead');
+});

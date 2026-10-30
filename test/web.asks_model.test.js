@@ -332,3 +332,13 @@ test('a tapped Yes or No posts words addressed to the one who asked, and never c
     'an @ in the scope never rides in her message');
   assert.ok(ROOM_JS.includes('text: InterlockAsks.answerText(current, choice)'), 'the chip and the card post it');
 });
+
+test('a request for approval reads Approve and Decline, and its tapped answer says approved or declined', () => {
+  assert.equal(Asks.answerText({ by: 'Scout', means: 'x', approval: true }, 'yes'), '@Scout — approved');
+  assert.equal(Asks.answerText({ by: 'Scout', means: 'x', approval: true }, 'no'), '@Scout — declined');
+  assert.equal(Asks.answerText({ by: 'Scout', means: 'x', approval: false }, 'yes'), '@Scout — yes', 'a plain ask reads as before');
+  assert.ok(ROOM_JS.includes("ask.approval ? (choice === 'yes' ? 'Approve' : 'Decline')"), 'the chip under the ask');
+  const PANEL_JS = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'web', 'work_panel.js'), 'utf8');
+  assert.ok(PANEL_JS.includes("cardButton(card.approval ? 'Approve' : 'Yes'"), 'the Needs-you card');
+  assert.ok(PANEL_JS.includes("' waiting on you ↑'"), 'the project count line');
+});

@@ -163,7 +163,7 @@
     const names = projectNames(brief);
     // An ask bound to a decision is that decision's row, never a second one.
     const cited = new Set(brief.needs_me.concat(brief.decisions || [])
-      .filter(row => row.kind === 'decision' && Number.isSafeInteger(row.ask_message_id))
+      .filter(row => (row.kind === 'decision' || row.approval) && Number.isSafeInteger(row.ask_message_id))
       .map(row => row.ask_message_id));
     const workRows = brief.needs_me.map(row => {
       const decision = row.kind === 'decision';
@@ -308,13 +308,17 @@
     const cards = [];
     for (const row of brief.needs_me) {
       const decision = row.kind === 'decision';
-      const bound = decision && Number.isSafeInteger(row.ask_message_id) ? askById.get(row.ask_message_id) : null;
+      // A request for approval is answered through its room ask, like a
+      // decision: one card, never the item and its ask twice.
+      const approval = !decision && row.approval ? row.approval : null;
+      const bound = (decision || approval) && Number.isSafeInteger(row.ask_message_id) ? askById.get(row.ask_message_id) : null;
       if (bound) askById.delete(row.ask_message_id);
       const card = {
         key: row.id, kind: row.kind, id: row.id, at: row.updated_at,
         who: decision ? who(row.asked_by) : who(row.created_by),
         question: row.title,
-        means: decision ? (bound && bound.means) || null : null,
+        means: decision ? (bound && bound.means) || null : approval ? approval.scope : null,
+        approval: !!approval || !!(bound && bound.approval),
         detail: decision ? (row.proposal ? 'Proposal: ' + row.proposal : null) : (row.next_action || null),
         project: project(row.project),
         askId: bound ? bound.ask_id : null,
@@ -475,8 +479,11 @@
   // open work and live decisions from the brief, nested one level by parent.
   // A child whose parent is done has no parent among these rows, so it lists
   // at top level.
+  // One full card per item (Patti, 2026-10-30): an item already in the
+  // viewer's Needs you is counted in its project, not shown there again.
   function projectSections(brief) {
-    const rows = brief.open.concat(brief.decisions);
+    const inNeeds = new Set((brief.needs_me || []).map(row => row.id));
+    const rows = brief.open.concat(brief.decisions).filter(row => !inNeeds.has(row.id));
     const tracked = trackedBy(brief);
     // A work item that tracks a decision sits under that decision's row.
     function nest(nodes) {
@@ -499,6 +506,7 @@
       doneCount: Number.isSafeInteger(project.done_count) ? project.done_count : 0,
       withdrawnCount: Number.isSafeInteger(project.withdrawn_count) ? project.withdrawn_count : 0,
       rows: nest(rowNodes(rows.filter(row => row.project === project.id))),
+      waitingOnYou: (brief.needs_me || []).filter(row => row.project === project.id).length,
     }));
   }
 

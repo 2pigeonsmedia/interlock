@@ -331,7 +331,8 @@
    * @ inside it would ring whoever it names. The page shows the scope from
    * the stored ask. */
   function answerText(ask, choice) {
-    return `@${ask.by} — ${choice === 'yes' ? 'yes' : 'no'}`;
+    const word = ask.approval ? (choice === 'yes' ? 'approved' : 'declined') : (choice === 'yes' ? 'yes' : 'no');
+    return `@${ask.by} — ${word}`;
   }
 
   function revisionNow(ask) {
