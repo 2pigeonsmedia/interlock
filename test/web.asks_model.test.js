@@ -342,3 +342,11 @@ test('a request for approval reads Approve and Decline, and its tapped answer sa
   assert.ok(PANEL_JS.includes("cardButton(card.approval ? 'Approve' : 'Yes'"), 'the Needs-you card');
   assert.ok(PANEL_JS.includes("' waiting on you ↑'"), 'the project count line');
 });
+
+test('the composer offers "for approval" to members only, routes it, and sends title, project and scope', () => {
+  assert.ok(ROOM_HTML.includes('id="ask-approval"') && ROOM_HTML.includes('id="ask-project"'));
+  assert.ok(ROOM_JS.includes("askApprovalLabel.hidden = !currentUser || currentUser.first_owner === true;"), 'hidden for the first owner');
+  assert.ok(ROOM_JS.includes("await ownerMutation('/api/work/approvals/ask', request);"), 'sent to the approval route, not as a plain ask');
+  assert.ok(/if \(approvalMode\(\)\) \{\s+sendButton\.disabled = true;\s+try \{\s+await sendApprovalRequest\(\);/.test(ROOM_JS), 'the composer sends it instead of the message');
+  assert.ok(ROOM_JS.includes('askOf.hidden = on;'), 'the room routes it: no one to pick');
+});

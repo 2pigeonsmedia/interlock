@@ -126,6 +126,8 @@
             <label for="ask-means">A yes means</label>
             <input id="ask-means" type="text" maxlength="300" autocomplete="off" placeholder="what a yes allows, in one line">
             <label class="ask-later"><input id="ask-later" type="checkbox"> Hold for later (does not ring)</label>
+            <label id="ask-approval-label" class="ask-later"><input id="ask-approval" type="checkbox"> For approval: files a work item in</label>
+            <select id="ask-project" aria-label="Project for the request" hidden></select>
           </div>
           <div class="ask-tools">
             <button id="ask-toggle" class="quiet-action" type="button" aria-expanded="false" aria-controls="ask-fields">Ask…</button>

@@ -74,6 +74,9 @@ const askFields = document.querySelector('#ask-fields');
 const askOf = document.querySelector('#ask-of');
 const askMeans = document.querySelector('#ask-means');
 const askLater = document.querySelector('#ask-later');
+const askApproval = document.getElementById('ask-approval');
+const askApprovalLabel = document.getElementById('ask-approval-label');
+const askProject = document.getElementById('ask-project');
 const askToggle = document.querySelector('#ask-toggle');
 const mentionSuggestions = document.querySelector('#mention-suggestions');
 const mentionPreview = document.querySelector('#mention-preview');
@@ -2168,6 +2171,31 @@ function renderAskTargets() {
   updateAskMeansRequired();
 }
 
+// "Ask for approval" is for members: the first owner's own work needs no
+// approval. In it the room routes the ask, so there is no one to pick; a
+// project is picked instead, and the scope line is required.
+function approvalMode() {
+  return !askFields.hidden && askApproval.checked && !askApprovalLabel.hidden;
+}
+
+function updateApprovalMode() {
+  askApprovalLabel.hidden = !currentUser || currentUser.first_owner === true;
+  if (askApprovalLabel.hidden) askApproval.checked = false;
+  const on = approvalMode();
+  askOf.hidden = on;
+  askProject.hidden = !on;
+  if (on && askProject.options.length !== rosterProjects.length) {
+    askProject.replaceChildren(...rosterProjects.map(project => {
+      const option = document.createElement('option');
+      option.value = project.id;
+      option.textContent = project.display_name;
+      return option;
+    }));
+  }
+  updateAskMeansRequired();
+  if (on) askMeans.required = true;
+}
+
 function updateAskMeansRequired() {
   const option = askOf.selectedOptions[0];
   const person = !!option && option.dataset.kind === 'person';
@@ -2183,6 +2211,7 @@ function setAskMode(on) {
   askToggle.textContent = on ? 'No ask' : 'Ask…';
   if (on) renderAskTargets();
   updateAskMeansRequired();
+  updateApprovalMode();
 }
 
 /* The annotation the composer will send, or null for a plain message. */
@@ -2198,6 +2227,35 @@ function composerAnnotation() {
     if (askMeans.value.trim() !== '') annotation.ask.means = askMeans.value.trim();
   }
   return Object.keys(annotation).length === 0 ? null : annotation;
+}
+
+// The message's first line is the request's title, the rest its detail;
+// the room routes it to its approver and files its work item.
+async function sendApprovalRequest() {
+  const lines = messageBody.value.trim().split('\n');
+  const request = {
+    operation_id: crypto.randomUUID(), project: askProject.value, title: lines[0].trim(), scope: askMeans.value.trim(),
+  };
+  const detail = lines.slice(1).join('\n').trim();
+  if (detail !== '') request.body = detail;
+  if (request.title === '' || request.scope === '' || !request.project) {
+    setRoomNotice('A request for approval needs a title (the first line), a project and what a yes means.');
+    return;
+  }
+  try {
+    const result = await ownerMutation('/api/work/approvals/ask', request);
+    const approver = result.item && result.item.approval && result.item.approval.approver
+      ? result.item.approval.approver.name : 'the owner';
+    messageBody.value = '';
+    askMeans.value = '';
+    askApproval.checked = false;
+    setAskMode(false);
+    setRoomNotice(`Asked ${approver} to approve ${result.item.id}: ${result.item.title}.`, 'success');
+    loadAnnotations();
+  } catch (error) {
+    setRoomNotice(error && error.code === 'owner-does-not-ask'
+      ? 'Your own work needs no approval.' : 'Interlock could not file the request. Try again.');
+  }
 }
 
 const ASK_REFUSALS = Object.freeze({
@@ -2626,6 +2684,15 @@ messageForm.addEventListener('submit', async event => {
     showLogin('Sign in again before sending a message.');
     return;
   }
+  if (approvalMode()) {
+    sendButton.disabled = true;
+    try {
+      await sendApprovalRequest();
+    } finally {
+      sendButton.disabled = false;
+    }
+    return;
+  }
   sendButton.disabled = true;
   forceFollowAfterSend = true;
   forceFollowMessageId = null;
@@ -2729,6 +2796,7 @@ document.addEventListener('interlock:answer-ask', event => {
   }
 });
 askToggle.addEventListener('click', () => setAskMode(askFields.hidden));
+askApproval.addEventListener('change', updateApprovalMode);
 askOf.addEventListener('change', updateAskMeansRequired);
 
 logoutButton.addEventListener('click', async () => {
