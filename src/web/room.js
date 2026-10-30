@@ -2213,6 +2213,8 @@ const ASK_REFUSALS = Object.freeze({
 
 // An answer carries the revision it was given against. One shown for a
 // revision that is no longer current is not sent: the scope changed.
+const STALE_DECISION_NOTICE = 'Revised in the room, but the decision record did not follow: it keeps the earlier scope and records no answer to the new one.';
+
 async function answerAsk(askId, choice, revision) {
   const current = asksState.ask(askId);
   if (!current || !Number.isSafeInteger(revision) || current.revision !== revision) {
@@ -2234,7 +2236,9 @@ async function answerAsk(askId, choice, revision) {
 
 async function askLifecycle(kind, askId, extra = {}) {
   try {
-    await ownerMutation('/api/annotations', Object.assign({ kind, ask_id: askId }, extra));
+    const result = await ownerMutation('/api/annotations', Object.assign({ kind, ask_id: askId }, extra));
+    // The room took the revision; the decision record behind the ask did not.
+    if (result && result.decision === 'stale') setRoomNotice(STALE_DECISION_NOTICE);
   } catch (error) {
     setRoomNotice(ASK_REFUSALS[error.code] || 'Interlock could not confirm that change. Try again.');
   }

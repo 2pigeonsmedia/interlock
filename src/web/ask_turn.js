@@ -42,12 +42,22 @@
     });
   }
 
+  // Whether an ask is on one party's list ('asker' or 'addressee'): while it
+  // is open, and once agreed only on the list of the party who is on it,
+  // until the done receipt. The server's lists and the page's are this rule.
+  function listed(ask, side) {
+    if (ask.state === 'open') return true;
+    return turnOf(ask).phase === 'agreed' && actingParty(ask) === side;
+  }
+
   // The turn in words, from one viewer's chair, so the chip, the card and the
   // CLI all say the same thing. `viewer` may be null (a bystander's view).
   function turnWords(turn, viewer) {
     if (!turn) return '';
     if (turn.phase === 'waiting') return turn.waiting_on === viewer ? 'your turn' : 'waiting on ' + turn.waiting_on;
     if (turn.phase === 'agreed') return turn.acting === viewer ? 'agreed → you are on it' : 'agreed → ' + turn.acting + ' is on it';
+    // Only an explicit yes is agreement; an answer without one says so.
+    if (turn.phase === 'answered') return 'answered, not a yes';
     return turn.phase;
   }
 
@@ -58,7 +68,7 @@
     return (turn.phase === 'waiting' && turn.waiting_on === viewer) || (turn.phase === 'agreed' && turn.acting === viewer);
   }
 
-  const contract = Object.freeze({ turnOf, actingParty, turnWords, waitsOn });
+  const contract = Object.freeze({ turnOf, actingParty, listed, turnWords, waitsOn });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAskTurn', {
     configurable: false, enumerable: false, writable: false, value: contract,

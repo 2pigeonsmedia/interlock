@@ -195,7 +195,7 @@ test('the page replays the printer story in both directions and reads the same t
   room.apply([answer(4, 9, 'Patti', 6, 'yes', 2)]);
   assert.deepEqual(room.ask(6).turn, { phase: 'agreed', waiting_on: null, acting: 'Scout' });
   assert.deepEqual(room.openFor('Scout').asked.map(row => row.ask_id), [6], 'agreed stays on the acting asker\'s list');
-  assert.deepEqual(room.openFor('Patti').addressed.map(row => row.ask_id), [6], 'and on hers, for the panel to filter by turn');
+  assert.deepEqual(room.openFor('Patti').addressed.map(row => row.ask_id), [], 'and off hers, as on the server');
   room.apply([reply(5, 10, 'Scout', 6, 'asker', 'done')]);
   assert.equal(room.ask(6).done.message_id, 10, 'the acting party\'s done reply is the receipt');
   assert.equal(room.ask(6).turn.phase, 'done');
@@ -296,4 +296,11 @@ test('the room page sends the shown revision from the composer and words the ref
   assert.match(ROOM_JS, /noteShown\(shownRevisions, open\.addressed, messageBody\.value\.trim\(\) !== ''\)/,
     'they stop following the asks once she is writing');
   assert.match(ROOM_JS, /'ask-revised': 'This ask changed while you were writing\./);
+});
+
+test('the page words an answer that is not a yes, and a revise the decision record could not follow', () => {
+  const { turnWords } = require('../src/web/ask_turn.js');
+  assert.equal(turnWords({ phase: 'answered', waiting_on: null, acting: null }, 'Ana'), 'answered, not a yes');
+  assert.match(ROOM_JS, /if \(result && result\.decision === 'stale'\) setRoomNotice\(STALE_DECISION_NOTICE\)/);
+  assert.match(ROOM_JS, /the decision record did not follow/);
 });

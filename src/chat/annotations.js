@@ -31,7 +31,7 @@
 // binds to the ask the client named.
 
 const crypto = require('node:crypto');
-const { turnOf, actingParty } = require('../web/ask_turn.js');
+const { turnOf, actingParty, listed } = require('../web/ask_turn.js');
 
 const ROW_VERSION = 1;
 const KINDS = Object.freeze(['person', 'seat']);
@@ -469,16 +469,9 @@ function createAskIndex(eraFirstId) {
     const addressed = [];
     const asked = [];
     for (const ask of [...asks.values()].sort((a, b) => a.ask_id - b.ask_id)) {
-      // An agreed ask stays on the list of the party who is on it, until its
-      // done receipt.
-      const onIt = askTurn(ask).phase === 'agreed';
-      const acting = actingParty({ addressee_kind: ask.of_kind });
-      if ((ask.state === 'open' || (onIt && acting === 'addressee')) && addressedTo(ask, who)) {
-        addressed.push(publicAsk(ask));
-      }
-      if ((ask.state === 'open' || (onIt && acting === 'asker')) && ask.asker_subject_id === who.subject_id) {
-        asked.push(publicAsk(ask));
-      }
+      // The shared rule (ask_turn.js): open, or agreed and this party's to do.
+      if (listed(turnInput(ask), 'addressee') && addressedTo(ask, who)) addressed.push(publicAsk(ask));
+      if (listed(turnInput(ask), 'asker') && ask.asker_subject_id === who.subject_id) asked.push(publicAsk(ask));
     }
     return Object.freeze({ addressed: Object.freeze(addressed), asked: Object.freeze(asked) });
   }
@@ -520,12 +513,16 @@ function publicAskFields(ask) {
 }
 
 /* The turn, by the one shared rule (ask_turn.js). */
-function askTurn(ask) {
+function turnInput(ask) {
   const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
-  return turnOf({
+  return {
     state: ask.state, done: !!ask.done, asker: ask.asker_name, addressee: ask.of_name, addressee_kind: ask.of_kind,
     last_choice: last ? last.choice : null, latest_party: ask.latest ? ask.latest.party : null,
-  });
+  };
+}
+
+function askTurn(ask) {
+  return turnOf(turnInput(ask));
 }
 
 function publicAsk(ask) {

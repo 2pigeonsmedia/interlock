@@ -255,6 +255,39 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     const drumEcho = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
       .find(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === drum.json.message.id));
     assert.deepEqual(drumEcho.answers.map(entry => entry.revision), [2]);
+
+    // A yes said on the record agrees in the room too; it binds to the scope the record showed her.
+    const lanes = await askOf(runtime, lead.token, {
+      project: 'ops', title: 'Lanes', body: 'b', asked_of: 'Ana', scope: 'I order the lanes by priority',
+    });
+    fresh = await item(runtime, owner, lanes.json.item.id);
+    const maybe = await post(runtime, '/api/work/decisions/answer', {
+      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'sure', choice: 'maybe',
+    }, owner);
+    assert.equal(maybe.status, 400, maybe.text);
+    const recordYes = await post(runtime, '/api/work/decisions/answer', {
+      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'yes, by priority', choice: 'yes',
+    }, owner);
+    assert.equal(recordYes.status, 200, recordYes.text);
+    assert.equal(recordYes.json.item.answer.choice, 'yes');
+    const lanesEcho = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
+      .find(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === lanes.json.message.id));
+    assert.deepEqual(lanesEcho.answers.map(entry => [entry.choice, entry.revision]), [['yes', 1]]);
+    assert.equal((await leadTurn(lanes.json.message.id)).turn.phase, 'agreed', 'her record yes is agreement in the room');
+    // She had the record open at the old scope when Lead revised: her yes is refused, nothing reaches the room.
+    const grit = await askOf(runtime, lead.token, {
+      project: 'ops', title: 'Grit', body: 'b', asked_of: 'Ana', scope: 'I buy one bag of grit',
+    });
+    const seen = await item(runtime, owner, grit.json.item.id);
+    await aiPost(runtime, '/api/ai/annotations', { kind: 'revise', ask_id: grit.json.message.id, means: 'I buy ten bags of grit' }, lead.token);
+    const lateYes = await post(runtime, '/api/work/decisions/answer', {
+      operation_id: uuid(), id: seen.id, expected_revision: seen.revision, text: 'yes', choice: 'yes',
+    }, owner);
+    assert.equal(lateYes.status, 409, lateYes.text);
+    assert.equal((await item(runtime, owner, grit.json.item.id)).answer, null);
+    assert.equal((await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
+      .some(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === grit.json.message.id)), false,
+    'no copy in the room');
   } finally {
     await runtime.close();
   }

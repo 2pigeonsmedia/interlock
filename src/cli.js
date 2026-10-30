@@ -1449,6 +1449,8 @@ function validPublicAsk(value) {
 const { turnWords } = require('./web/ask_turn.js');
 const LATEST_WORDS = Object.freeze({ ask: 'asked', revise: 'revised', discussion: 'replied', answer: 'answered' });
 
+const STALE_DECISION_WORDS = 'interlock: the decision record did not follow this revision; it keeps the earlier scope and records no answer to the new one.';
+
 function renderAsk(ask, mine, viewer = null) {
   const who = mine ? `of ${terminalSafe(ask.of)}` : `by ${terminalSafe(ask.by)}`;
   const later = ask.deliver === 'later' ? ' · held for later' : '';
@@ -1571,13 +1573,16 @@ async function runAsk(args, io, dependencies = {}) {
     result = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/annotations', {
       method: 'POST', body,
     });
-    if (!exactObject(result, ['ok', 'row'])) throw incompatibleResponse();
+    // A revise whose decision record could not follow says so.
+    if (!exactObject(result, ['ok', 'row']) &&
+        !(exactObject(result, ['ok', 'row', 'decision']) && result.decision === 'stale')) throw incompatibleResponse();
   } catch (error) {
     reportAnnotationError(io.stderr, error, profile, parsed.connection);
     return EXIT_RUNTIME;
   }
   if (parsed.json) line(io.stdout, JSON.stringify(result));
   else if (verb === 'revise') line(io.stdout, `Revised ask ${id}: a yes now means: ${terminalSafe(body.means)}. It is their turn again.`);
+  if (!parsed.json && result.decision === 'stale') line(io.stderr, STALE_DECISION_WORDS);
   else line(io.stdout, verb === 'withdraw' ? `Withdrew ask ${id}.` : `Ask ${id} is open again.`);
   return EXIT_OK;
 }

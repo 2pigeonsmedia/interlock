@@ -584,3 +584,16 @@ test('an answer names the revision it was given against: interlock asks shows it
   }
   assert.equal(world.calls.length, 1);
 });
+
+test('a revise whose decision record could not follow still succeeds, and says so', async () => {
+  const world = storyWorld(() => ({ status: 201, json: { ok: true, row: { kind: 'revise', ask_id: 6 }, decision: 'stale' } }));
+  const revised = await storyRun(world, ['ask', 'revise', '6', '--means-file', 's.txt', '--connection', 'Scout']);
+  assert.equal(revised.code, EXIT_OK, revised.stderr);
+  assert.match(revised.stderr, /the decision record did not follow this revision/);
+  const followed = storyWorld(() => ({ status: 201, json: { ok: true, row: { kind: 'revise', ask_id: 6 } } }));
+  assert.equal((await storyRun(followed, ['ask', 'revise', '6', '--means-file', 's.txt', '--connection', 'Scout'])).stderr, '',
+    'the control: a record that followed says nothing');
+  const odd = storyWorld(() => ({ status: 201, json: { ok: true, row: { kind: 'revise', ask_id: 6 }, decision: 'other' } }));
+  assert.equal((await storyRun(odd, ['ask', 'revise', '6', '--means-file', 's.txt', '--connection', 'Scout'])).code, EXIT_RUNTIME,
+    'any other shape is still refused');
+});

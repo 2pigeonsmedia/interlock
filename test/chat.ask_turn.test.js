@@ -183,3 +183,33 @@ test('a done receipt lands only on an agreed ask: after a no, or a typed answer,
   const open = (await chat.openAsks(ANA, 'Ana')).addressed;
   assert.deepEqual(open.map(ask => [ask.ask_id, ask.done, ask.turn.phase]), [[declined.id, null, 'waiting'], [typed.id, null, 'waiting']]);
 });
+
+test('the page lists exactly what the server lists, for every party, by the one shared rule', async () => {
+  const Asks = require('../src/web/asks_model.js');
+  const chat = room();
+  const ofAna = means => chat.appendAnnotated({ text: means }, scout(), { ask: { of: 'Ana', means } });
+  const agreed = await ofAna('I order rollers');
+  await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: agreed.id, choice: 'yes' }] });
+  const declined = await ofAna('I restart the router');
+  await chat.appendAnnotated({ text: 'no' }, ANA_ACTOR, { answers: [{ ask_id: declined.id, choice: 'no' }] });
+  const typed = await ofAna('I wipe the disk');
+  await chat.appendAnnotated({ text: 'hmm' }, ANA_ACTOR, { answers: [{ ask_id: typed.id }] });
+  const waiting = await ofAna('I buy grit');
+  const ofScout = await chat.appendAnnotated({ text: 'Rerun?' }, ANA_ACTOR, { ask: { of: 'Scout' } });
+  await chat.appendAnnotated({ text: 'yes' }, scout(), { answers: [{ ask_id: ofScout.id, choice: 'yes' }] });
+  const page = Asks.createAsksState();
+  page.apply((await chat.readAnnotations({ after: 0, limit: 50 })).rows);
+  const view = list => list.map(ask => [ask.ask_id, ask.turn.phase]);
+  const server = {
+    Ana: await chat.openAsks(ANA, 'Ana'), Scout: await chat.openAsks(SCOUT, 'Scout'), Bea: await chat.openAsks(BEA, 'Bea'),
+  };
+  assert.deepEqual(view(server.Ana.addressed), [[waiting.id, 'waiting']],
+    'the arrangement: her agreed ask is Scout\'s to carry out, not hers');
+  assert.deepEqual(view(server.Scout.asked), [[agreed.id, 'agreed'], [waiting.id, 'waiting']]);
+  assert.deepEqual(view(server.Scout.addressed), [[ofScout.id, 'agreed']], 'an AI asked: the AI is on it');
+  for (const name of ['Ana', 'Scout', 'Bea']) {
+    const mine = page.openFor(name);
+    assert.deepEqual([view(mine.addressed), view(mine.asked)], [view(server[name].addressed), view(server[name].asked)], name);
+  }
+  assert.ok(declined && typed, 'declined and answered asks are on nobody\'s list, on either side');
+});

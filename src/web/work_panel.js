@@ -789,8 +789,17 @@
     }
   }
 
+  // Yes or No is chosen, never defaulted: only an explicit yes is agreement.
+  const ANSWER_CHOICES = Object.freeze([
+    { value: '', text: 'Choose…' }, { value: 'yes', text: 'Yes' }, { value: 'no', text: 'No' },
+    { value: 'words', text: 'Neither: my words are the answer' },
+  ]);
+
   function answerFields(reasonLabel) {
     const fields = [control('textarea', 'text', 'Answer', { required: true })];
+    const yesNo = choice('choice', 'Yes or no', ANSWER_CHOICES, '');
+    yesNo.node.required = true;
+    fields.push(yesNo);
     fields.push(control('input', 'conditions', 'Conditions (optional)'));
     if (reasonLabel) fields.push(control('input', 'reason', reasonLabel, { required: true }));
     return fields;
@@ -800,11 +809,12 @@
   // answering for the person asked, carries a required reason.
   function answerForm(item, reasonLabel, submitText) {
     const fields = answerFields(reasonLabel);
-    const [text, conditions, reason] = fields;
+    const [text, yesNo, conditions, reason] = fields;
     const parts = [];
     parts.push(make('p', 'work-proposal', item.proposal ? 'Proposal: ' + item.proposal : 'No proposal was written.'));
     parts.push(actionForm('work-answer', fields, submitText, async operation => {
       const body = { id: item.id, expected_revision: item.revision, text: text.node.value };
+      if (yesNo.node.value === 'yes' || yesNo.node.value === 'no') body.choice = yesNo.node.value;
       if (optionalValue(conditions.node.value) !== undefined) body.conditions = conditions.node.value;
       if (reason) body.reason = reason.node.value;
       const result = await write('decisions/answer', body, null, operation);

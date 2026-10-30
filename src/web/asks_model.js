@@ -126,13 +126,16 @@
   }
 
   // The same inputs the server gives the shared rule.
-  function turnFor(ask) {
-    if (!askTurn) return null;
+  function turnInput(ask) {
     const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
-    return askTurn.turnOf({
+    return {
       state: ask.state, done: !!ask.done, asker: ask.by, addressee: ask.of, addressee_kind: ask.of_kind,
       last_choice: last ? last.choice : null, latest_party: ask.latest ? ask.latest.party : null,
-    });
+    };
+  }
+
+  function turnFor(ask) {
+    return askTurn ? askTurn.turnOf(turnInput(ask)) : null;
   }
 
   function createAsksState() {
@@ -241,21 +244,18 @@
       return posts.get(messageId) || null;
     }
 
-    // Open asks, and agreed asks not yet done: an agreed ask stays on the
-    // list of whoever carries it out until their done receipt.
-    function live(found) {
-      if (found.state === 'open') return true;
-      const turn = turnFor(found);
-      return !!turn && turn.phase === 'agreed';
+    // The server's rule (ask_turn.js listed): open asks, and an agreed ask
+    // not yet done only on the list of whoever carries it out.
+    function onList(found, side) {
+      return askTurn ? askTurn.listed(turnInput(found), side) : found.state === 'open';
     }
 
     function openFor(viewer) {
       const addressed = [];
       const asked = [];
       for (const found of [...asks.values()].sort((a, b) => a.ask_id - b.ask_id)) {
-        if (!live(found)) continue;
-        if (found.of === viewer) addressed.push(publicAsk(found));
-        if (found.by === viewer) asked.push(publicAsk(found));
+        if (found.of === viewer && onList(found, 'addressee')) addressed.push(publicAsk(found));
+        if (found.by === viewer && onList(found, 'asker')) asked.push(publicAsk(found));
       }
       return Object.freeze({ addressed: Object.freeze(addressed), asked: Object.freeze(asked) });
     }
