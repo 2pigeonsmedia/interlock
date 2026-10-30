@@ -324,11 +324,12 @@
     return chosenIds.slice(0, 8).map(id => ({ ask_id: id, choice: choice ?? bareAnswer(text), revision: revisionOf.get(id) }));
   }
 
-  /* The words a tapped Yes or No posts: addressed to the one who asked, with
-   * the scope it answers, so the transcript reads as the answer it is. */
+  /* The words a tapped Yes or No posts: addressed to the one who asked. The
+   * scope is never copied in: it is the asker's text, and in her message an
+   * @ inside it would ring whoever it names. The page shows the scope from
+   * the stored ask. */
   function answerText(ask, choice) {
-    const word = choice === 'yes' ? 'yes' : 'no';
-    return `@${ask.by} — ${word}` + (ask.means === null ? '' : `\nA yes means: ${ask.means}`);
+    return `@${ask.by} — ${choice === 'yes' ? 'yes' : 'no'}`;
   }
 
   function revisionNow(ask) {
