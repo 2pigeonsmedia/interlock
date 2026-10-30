@@ -238,9 +238,9 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     assert.equal(no.status, 200, no.text);
     const echo = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
       .find(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === wipe.json.message.id));
-    assert.deepEqual(echo.answers.map(entry => [entry.choice, entry.revision, entry.closes]), [[null, 1, true]],
-      'the arrangement: the room took her record answer as closing');
-    assert.deepEqual((await leadTurn(wipe.json.message.id)), undefined, 'not on Lead\'s list as his to carry out');
+    assert.deepEqual(echo.answers.map(entry => [entry.choice, entry.revision, entry.closes]), [[null, 1, false]],
+      'her words reach the room, but words alone never approve');
+    assert.equal((await leadTurn(wipe.json.message.id)).turn.phase, 'waiting', 'not agreed: Lead is not on it');
 
     // Answered on the record after a revision: the copy names the revision the record follows.
     const drum = await askOf(runtime, lead.token, {

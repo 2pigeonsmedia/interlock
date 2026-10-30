@@ -1015,7 +1015,7 @@ test('Needs you follows the turn: a reply moves an ask off the replier, the aske
   assert.equal(needsCards(brief, NOW, [agreed], new Set(), { viewer: 'Patti' }).count, 0, 'agreed is not hers to do');
   const scoutDoes = needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [agreed] });
   assert.equal(scoutDoes.count, 1);
-  assert.equal(scoutDoes.cards[0].turn, 'agreed → you are on it');
+  assert.equal(scoutDoes.cards[0].turn, 'approved → you are on it');
   // (4) done: off every list.
   const done = ask({ phase: 'done', waiting_on: null, acting: null }, { kind: 'answer', party: 'addressee', by: 'Patti' });
   assert.equal(needsCards(brief, NOW, [done], new Set(), { viewer: 'Patti' }).count + needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [done] }).count, 0);

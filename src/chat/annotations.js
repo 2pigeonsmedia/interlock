@@ -26,6 +26,10 @@
 //             the story would later override
 //   revise    the asker's new scope for their own ask; it reopens an answered
 //             ask
+//   approval  the asker's ask is a request for approval: the room writes it
+//             with the ask, before any answer. Only an approval is agreed by a
+//             yes and closed by a done receipt; a plain ask is answered and
+//             done. A release before it passes the row over
 //
 // Nothing here reads message text. Status is what the client set; an answer
 // binds to the ask the client named.
@@ -182,7 +186,7 @@ function parseRequest(value) {
   });
 }
 
-const KNOWN_KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state']);
+const KNOWN_KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval']);
 
 /* A row a later release wrote: a well-formed line in sequence whose `v` or
  * kind this release does not know. It keeps its place in the sequence and is
@@ -200,7 +204,7 @@ function parseRow(value, expectedSeq) {
   const kind = value.kind;
   const earlierPost = kind === 'post' ? closedObject(value, POST_KEYS_BEFORE_DISCUSSES) : null;
   const keys = kind === 'post' ? POST_KEYS
-    : (kind === 'withdraw' || kind === 'keep_open') ? LIFECYCLE_KEYS
+    : (kind === 'withdraw' || kind === 'keep_open' || kind === 'approval') ? LIFECYCLE_KEYS
       : kind === 'carry' ? CARRY_KEYS : kind === 'revise' ? REVISE_KEYS
         : kind === 'carry_state' ? CARRY_STATE_KEYS : null;
   const row = earlierPost ? Object.assign({}, earlierPost, { discusses: null }) : keys && closedObject(value, keys);
@@ -289,6 +293,8 @@ function addressedTo(ask, who) {
 
 function createAskIndex(eraFirstId) {
   const asks = new Map();
+  // True while the era's leading carry rows replay, before any other row.
+  let carrying = true;
   const posts = new Map();
   const rows = [];
 
@@ -307,6 +313,7 @@ function createAskIndex(eraFirstId) {
       carried_from: carriedFrom,
       state: 'open',
       kept_open: false,
+      approval: false,
       answers: [],
       revision: 1,
       revisions: [],
@@ -352,10 +359,15 @@ function createAskIndex(eraFirstId) {
 
   /* What an answer does to its ask, decided once when it is written and then
    * stored: whether its author was the one asked, and whether it closed it. */
-  function answerFacts(askId, who) {
+  // Words alone never approve: an answer to a request for approval closes it
+  // only with a Yes or a No.
+  function answerFacts(askId, who, choice = null) {
     const ask = asks.get(askId);
     const byAddressee = addressedTo(ask, who);
-    return { by_addressee: byAddressee, closes: byAddressee && !ask.kept_open, revision: ask.revision };
+    return {
+      by_addressee: byAddressee, closes: byAddressee && !ask.kept_open && !(ask.approval && choice === null),
+      revision: ask.revision,
+    };
   }
 
   function applyAnswer(askId, messageId, row, answer) {
@@ -370,7 +382,9 @@ function createAskIndex(eraFirstId) {
     if (answer.closes) ask.state = 'answered';
   }
 
-  function checkLifecycle(kind, askId, subjectId) {
+  // `live`: a write being made now, never one replayed from the file; only a
+  // replayed clear's carry block may re-mark an answered request.
+  function checkLifecycle(kind, askId, subjectId, live = false) {
     const ask = asks.get(askId);
     if (!ask) return 'ask-not-found';
     if (ask.asker_subject_id !== subjectId) return 'not-asker';
@@ -379,6 +393,11 @@ function createAskIndex(eraFirstId) {
     // A revision is the asker's, while the ask is still live; after a yes it
     // reopens the ask, and nobody's earlier yes carries over.
     if (kind === 'revise' && (ask.state === 'withdrawn' || ask.done)) return 'ask-not-open';
+    // An ask becomes a request for approval only before anyone has answered
+    // it, so no answer given to a plain question is ever read as an approval;
+    // a carried request is re-marked in the era it was carried into.
+    if (kind === 'approval' && (ask.approval || ask.kept_open ||
+        ((live || !carrying) && (ask.state !== 'open' || ask.answers.length > 0)))) return 'ask-not-open';
     return null;
   }
 
@@ -400,6 +419,8 @@ function createAskIndex(eraFirstId) {
     const ask = asks.get(row.ask_id);
     if (row.kind === 'withdraw') {
       ask.state = 'withdrawn';
+    } else if (row.kind === 'approval') {
+      ask.approval = true;
     } else if (row.kind === 'revise') {
       ask.revisions.push({ means: ask.means, revision: ask.revision });
       ask.means = row.means;
@@ -432,6 +453,7 @@ function createAskIndex(eraFirstId) {
     rows.push({ row, bound: false });
     const entry = rows[rows.length - 1];
     if (row.kind === 'later') return false;
+    if (row.kind !== 'carry' && row.kind !== 'carry_state' && row.kind !== 'approval') carrying = false;
     if (row.kind === 'post') {
       if (!message || message.subject_id !== row.subject_id || message.ts !== row.ts ||
           posts.has(row.message_id) || asks.has(row.message_id)) return false;
@@ -516,7 +538,7 @@ function publicAskFields(ask) {
 function turnInput(ask) {
   const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
   return {
-    state: ask.state, done: !!ask.done, asker: ask.asker_name, addressee: ask.of_name, addressee_kind: ask.of_kind,
+    state: ask.state, done: !!ask.done, approval: ask.approval, asker: ask.asker_name, addressee: ask.of_name, addressee_kind: ask.of_kind,
     last_choice: last ? last.choice : null, latest_party: ask.latest ? ask.latest.party : null,
   };
 }
@@ -537,6 +559,7 @@ function publicAsk(ask) {
     project: ask.project,
     state: ask.state,
     kept_open: ask.kept_open,
+    approval: ask.approval,
     carried_from: ask.carried_from,
     answers: Object.freeze(ask.answers.map(answer => Object.freeze({
       message_id: answer.message_id, by: answer.name, choice: answer.choice,

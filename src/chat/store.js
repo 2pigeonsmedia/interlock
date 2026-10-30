@@ -618,7 +618,7 @@ function openStore(opts) {
         ask_id: answer.ask_id,
         choice: answer.choice,
         crossed_by: asks.crossingFor(answer.ask_id, who, answeredIds),
-      }, asks.answerFacts(answer.ask_id, who)));
+      }, asks.answerFacts(answer.ask_id, who, answer.choice)));
     });
     if (annotation.discusses !== null) {
       const refusal = asks.checkDiscuss(annotation.discusses);
@@ -905,7 +905,7 @@ function openStore(opts) {
       const request = closedObject(input, LIFECYCLE_INPUT_KEYS);
       if (!request || !boundedString(request.subject_id, 64) ||
           !boundedString(request.name, MAX_BYLINE_BYTES) ||
-          !['withdraw', 'keep_open', 'revise'].includes(request.kind) ||
+          !['withdraw', 'keep_open', 'revise', 'approval'].includes(request.kind) ||
           !Number.isSafeInteger(request.ask_id) || request.ask_id < 1 ||
           (request.kind !== 'revise' && request.means !== null) ||
           (request.kind === 'revise' && !(request.means === null || Annotations.validMeans(request.means)))) {
@@ -914,7 +914,7 @@ function openStore(opts) {
       assertLiveLog();
       assertLiveReceipts();
       assertLiveActivity();
-      const refusal = asks.checkLifecycle(request.kind, request.ask_id, request.subject_id);
+      const refusal = asks.checkLifecycle(request.kind, request.ask_id, request.subject_id, true);
       if (refusal) fail(refusal);
       // An ask of a person always says what a yes means, revised or not.
       if (request.kind === 'revise' && request.means === null &&
@@ -1139,6 +1139,14 @@ function openStore(opts) {
           },
         }, state === null ? {} : state), i + 1);
       });
+      // A carried request for approval is re-marked right after the carries.
+      for (const ask of asks.openAsks().filter(entry => entry.approval)) {
+        const seq = carryRows.length + 1;
+        carryRows.push(Annotations.parseRow({
+          v: Annotations.ROW_VERSION, seq, ts: carriedAt, kind: 'approval',
+          subject_id: ask.asker_subject_id, name: ask.asker_name, ask_id: ask.ask_id,
+        }, seq));
+      }
       if (carryRows.some(row => row === null)) fail('archive-invalid');
       const staged = Buffer.from(carryRows.map(Annotations.encodeRow).join(''), 'utf8');
       const marker = Object.freeze({

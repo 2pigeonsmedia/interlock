@@ -352,6 +352,7 @@ test('a clear carries an agreed ask not yet done, so its done receipt still land
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-clear-'));
   const room = open(dir);
   const ask = await room.chat.appendAnnotated({ text: 'Mealworms?' }, marlow(), { ask: { of: 'Ana', means: 'I buy mealworms' } });
+  await room.chat.annotate(MARLOW_ACTOR, 'approval', ask.id);
   const yes = await room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
   const before = (await room.chat.openAsks(MARLOW, 'Marlow')).asked;
   assert.deepEqual(before.map(row => row.turn.phase), ['agreed'], 'the arrangement: agreed, on Marlow\'s list');
@@ -376,13 +377,15 @@ test('a carried ask keeps its revision and its earlier scopes; a yes to an earli
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-clear-'));
   const room = open(dir);
   const ask = await room.chat.appendAnnotated({ text: 'Rollers?' }, marlow(), { ask: { of: 'Ana', means: 'scope one' } });
+  await room.chat.annotate(MARLOW_ACTOR, 'approval', ask.id);
   await room.chat.annotate(MARLOW_ACTOR, 'revise', ask.id, 'scope two');
   await room.archive.clearTranscript();
   const carried = (await room.chat.openAsks(ANA, 'Ana')).addressed[0];
   assert.deepEqual([carried.means, carried.revision, carried.revisions],
     ['scope two', 2, [{ means: 'scope one', revision: 1 }]]);
   const rows = (await room.chat.readAnnotations({ after: 0, limit: 10 })).rows;
-  assert.deepEqual(rows.map(row => row.kind), ['carry_state'], 'one row carries the ask and its story');
+  assert.deepEqual(rows.map(row => row.kind), ['carry_state', 'approval'], 'one row carries the ask and its story; the next re-marks it a request for approval');
+  assert.equal(carried.approval, true);
   await assert.rejects(room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 1 }] }),
     error => code(error) === 'ask-revised');
   await room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 2 }] });
@@ -417,6 +420,7 @@ test('during a rollback an older release never sees an ask carried with its stor
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-clear-'));
   const room = open(dir);
   const agreed = await room.chat.appendAnnotated({ text: 'Mealworms?' }, marlow(), { ask: { of: 'Ana', means: 'I buy mealworms' } });
+  await room.chat.annotate(MARLOW_ACTOR, 'approval', agreed.id);
   await room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: agreed.id, choice: 'yes' }] });
   const revised = await room.chat.appendAnnotated({ text: 'Rollers?' }, marlow(), { ask: { of: 'Ana', means: 'scope one' } });
   await room.chat.annotate(MARLOW_ACTOR, 'revise', revised.id, 'scope two');
@@ -424,7 +428,8 @@ test('during a rollback an older release never sees an ask carried with its stor
   await room.archive.clearTranscript();
   const rows = (await room.chat.readAnnotations({ after: 0, limit: 10 })).rows;
   assert.deepEqual(rows.map(row => [row.kind, row.ask_id]),
-    [['carry_state', agreed.id], ['carry_state', revised.id], ['carry', plain.id]], 'the arrangement: all three carried');
+    [['carry_state', agreed.id], ['carry_state', revised.id], ['carry', plain.id], ['approval', agreed.id]],
+    'the arrangement: all three carried, and the approval re-marked');
   // What a release that knows no carry_state replays: the kinds it knows.
   const OLDER_KINDS = ['post', 'withdraw', 'keep_open', 'carry', 'revise'];
   assert.deepEqual(rows.filter(row => OLDER_KINDS.includes(row.kind)).map(row => row.ask_id), [plain.id],

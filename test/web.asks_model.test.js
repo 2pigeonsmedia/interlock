@@ -59,7 +59,7 @@ test('open asks for the viewer: addressed and asked, carried asks included, in i
   assert.deepEqual(open.addressed.map(row => [row.ask_id, row.by, row.carried_from]),
     [[4, 'Lead', 'transcript-x'], [21, 'Scout', null]]);
   assert.deepEqual(open.asked.map(row => row.ask_id), [20]);
-  assert.deepEqual(Object.keys(open.addressed[0]).sort(), ['answers', 'ask_id', 'asked_at', 'by',
+  assert.deepEqual(Object.keys(open.addressed[0]).sort(), ['answers', 'approval', 'ask_id', 'asked_at', 'by',
     'carried_from', 'deliver', 'done', 'kept_open', 'latest', 'means', 'of', 'of_kind', 'project', 'revision',
     'revisions', 'state', 'turn'],
   'the event carries the same ask shape GET /api/ai/asks returns');
@@ -180,10 +180,11 @@ test('the page replays the printer story in both directions and reads the same t
   const answer = (seq, message_id, by, ask_id, choice, revision) => ({ seq, ts: seq * 1000, kind: 'post', by, message_id, ask: null,
     answers: [{ ask_id, choice, crossed_by: null, by_addressee: true, closes: true, revision }], status: null, read_through: null, discusses: null });
   const revise = (seq, by, ask_id, means) => ({ seq, ts: seq * 1000, kind: 'revise', by, ask_id, means });
+  const approval = (seq, by, ask_id) => ({ seq, ts: seq * 1000, kind: 'approval', by, ask_id });
 
-  // An AI asks a person (permission): the asker acts after a yes.
+  // An AI asks a person for approval: the asker acts after a yes.
   const room = createAsksState();
-  room.apply([ask(1, 6, 'Scout', 'Patti', 'person', 'I order one roller, up to $30')]);
+  room.apply([ask(1, 6, 'Scout', 'Patti', 'person', 'I order one roller, up to $30'), approval(1.5, 'Scout', 6)]);
   assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Patti', acting: null });
   room.apply([reply(2, 8, 'Patti', 6, 'addressee')]);
   assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Scout', acting: null }, 'her reply passes the turn');
@@ -203,20 +204,19 @@ test('the page replays the printer story in both directions and reads the same t
 
   // A revision after a yes reopens: no yes carries over to a scope she did not see.
   const again = createAsksState();
-  again.apply([ask(1, 6, 'Scout', 'Patti', 'person', 'one roller'), answer(2, 7, 'Patti', 6, 'yes', 1), revise(3, 'Scout', 6, 'two rollers')]);
+  again.apply([ask(1, 6, 'Scout', 'Patti', 'person', 'one roller'), approval(1.5, 'Scout', 6), answer(2, 7, 'Patti', 6, 'yes', 1), revise(3, 'Scout', 6, 'two rollers')]);
   assert.deepEqual(again.ask(6).turn, { phase: 'waiting', waiting_on: 'Patti', acting: null });
 
-  // A person asks an AI (request): the addressee acts after a yes; a bystander's reply moves nothing.
+  // A person asks an AI a plain question: a bystander's reply moves nothing,
+  // his yes answers it, and nobody is on anything.
   const reverse = createAsksState();
   reverse.apply([ask(1, 3, 'Patti', 'Scout', 'seat', 'You order one roller')]);
   reverse.apply([reply(2, 4, 'Lark', 3, 'other')]);
   assert.deepEqual(reverse.ask(3).turn, { phase: 'waiting', waiting_on: 'Scout', acting: null }, 'a bystander does not pass the turn');
   reverse.apply([answer(3, 5, 'Scout', 3, 'yes', 1)]);
-  assert.deepEqual(reverse.ask(3).turn, { phase: 'agreed', waiting_on: null, acting: 'Scout' }, 'the asked AI carries it out');
-  reverse.apply([reply(4, 6, 'Patti', 3, 'asker', 'done')]);
-  assert.equal(reverse.ask(3).done, null, 'the asker cannot post the receipt for a request the AI carries out');
-  reverse.apply([reply(5, 7, 'Scout', 3, 'addressee', 'done')]);
-  assert.equal(reverse.ask(3).turn.phase, 'done');
+  assert.deepEqual(reverse.ask(3).turn, { phase: 'answered', waiting_on: null, acting: null }, 'a question is just a question');
+  reverse.apply([reply(4, 6, 'Scout', 3, 'addressee', 'done')]);
+  assert.equal(reverse.ask(3).done, null, 'a plain ask takes no done receipt');
 });
 
 test('an answer names the revision it was given against; a stale one is refused on the page', () => {
@@ -242,6 +242,7 @@ test('a carried ask\'s story replays: its revision, its earlier scopes, and a ye
     story(1, 10, 'two drums', { revision: 2, revisions: [{ means: 'one drum', revision: 1 }], agreed: null }),
     story(2, 11, 'mealworms', { revision: 1, revisions: [], agreed: { message_id: 7, by: 'Ana', revision: 1, at: 2_000 } }),
     carry(3, 12, 'grit'),
+    { seq: 4, ts: 5_000, kind: 'approval', by: 'Lead', ask_id: 11 },
   ];
   assert.equal(Asks.validPage({ ok: true, rows, cursor: 3, first_id: 20 }), true);
   assert.equal(Asks.validPage({ ok: true, rows: [Object.assign({}, rows[0], { revisions: [] })], cursor: 1, first_id: 20 }), false,
@@ -259,6 +260,7 @@ test('on the page too, a done receipt lands only on an agreed ask', () => {
   const done = (seq, id, askId) => post(seq, id, 'Lead', { discusses: { ask_id: askId, party: 'asker' }, status: 'done', read_through: id - 1 });
   state.apply([
     post(1, 10, 'Lead', { ask: ask('Ana', 'I restart the router') }),
+    { seq: 1.5, ts: 1_500, kind: 'approval', by: 'Lead', ask_id: 10 },
     post(2, 11, 'Ana', { answers: [answer(10, 'no', null, true, true)] }),
     done(3, 12, 10),
     post(4, 13, 'Lead', { ask: ask('Ana', 'I wipe the disk') }),
@@ -300,7 +302,7 @@ test('the room page sends the shown revision from the composer and words the ref
 
 test('the page words an answer that is not a yes, and a revise the decision record could not follow', () => {
   const { turnWords } = require('../src/web/ask_turn.js');
-  assert.equal(turnWords({ phase: 'answered', waiting_on: null, acting: null }, 'Ana'), 'answered, not a yes');
+  assert.equal(turnWords({ phase: 'answered', waiting_on: null, acting: null }, 'Ana'), 'answered', 'a plain ask is answered; a request for approval is never closed by words');
   assert.match(ROOM_JS, /if \(result && result\.decision === 'stale'\) setRoomNotice\(STALE_DECISION_NOTICE\)/);
   assert.match(ROOM_JS, /the decision record did not follow/);
 });

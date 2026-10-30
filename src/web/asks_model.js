@@ -6,7 +6,7 @@
 // are open for the viewer, and which asks the composer may bind an answer to.
 // Nothing here reads message text.
 (function exposeAsksModel(root) {
-  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state']);
+  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval']);
   const REVISE_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id', 'means']);
   // Whose turn it is comes from the one shared rule, here and on the server.
   const askTurn = typeof module === 'object' && module && module.exports
@@ -115,6 +115,7 @@
       project: ask.project,
       state: ask.state,
       kept_open: ask.kept_open,
+      approval: !!ask.approval,
       carried_from: ask.carried_from,
       answers: Object.freeze(ask.answers.map(answer => Object.freeze(Object.assign({}, answer)))),
       revision: ask.revision,
@@ -129,7 +130,7 @@
   function turnInput(ask) {
     const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
     return {
-      state: ask.state, done: !!ask.done, asker: ask.by, addressee: ask.of, addressee_kind: ask.of_kind,
+      state: ask.state, done: !!ask.done, approval: !!ask.approval, asker: ask.by, addressee: ask.of, addressee_kind: ask.of_kind,
       last_choice: last ? last.choice : null, latest_party: ask.latest ? ask.latest.party : null,
     };
   }
@@ -217,6 +218,7 @@
           const ask = asks.get(row.ask_id);
           if (!ask) continue;
           if (row.kind === 'withdraw') ask.state = 'withdrawn';
+          else if (row.kind === 'approval') ask.approval = true;
           else if (row.kind === 'revise') {
             // The asker's new scope replaces the old in place; the old stays
             // in revisions, and a revision after a yes reopens the ask.

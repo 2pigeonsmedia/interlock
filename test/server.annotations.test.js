@@ -215,8 +215,8 @@ test('asks, answers and status ride the side-car routes; the message and the pla
       text: 'yes', annotation: { answers: [{ ask_id: asked.json.message.id, choice: 'yes' }] },
     }, owner);
     assert.equal(answered.status, 201, answered.text);
-    assert.deepEqual((await aiGet(runtime, '/api/ai/asks', lead.token)).json.asked.map(ask => ask.turn.phase), ['agreed'],
-      'she said yes to what Lead will do: it stays on his list, agreed, until his done receipt');
+    assert.deepEqual((await aiGet(runtime, '/api/ai/asks', lead.token)).json.asked, [],
+      'a plain ask she answered yes is answered: off his list, nobody is on anything');
 
     const notMine = await post(runtime, '/api/annotations',
       { kind: 'withdraw', ask_id: asked.json.message.id }, owner);

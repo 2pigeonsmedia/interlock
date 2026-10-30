@@ -40,13 +40,15 @@ async function story(chat, askId, viewer) {
 }
 
 test('the shared rule: whose turn, from the facts alone', () => {
-  const base = { state: 'open', done: false, asker: 'Scout', addressee: 'Ana', addressee_kind: 'person', last_choice: null };
+  const base = { state: 'open', done: false, approval: true, asker: 'Scout', addressee: 'Ana', addressee_kind: 'person', last_choice: null };
   assert.deepEqual(turnOf(Object.assign({}, base, { latest_party: 'asker' })), { phase: 'waiting', waiting_on: 'Ana', acting: null });
   assert.deepEqual(turnOf(Object.assign({}, base, { latest_party: 'addressee' })), { phase: 'waiting', waiting_on: 'Scout', acting: null });
   assert.deepEqual(turnOf(Object.assign({}, base, { state: 'answered', last_choice: 'yes', latest_party: 'addressee' })),
-    { phase: 'agreed', waiting_on: null, acting: 'Scout' }, 'a person said yes to what the asker will do');
+    { phase: 'agreed', waiting_on: null, acting: 'Scout' }, 'approved: the asker does the work');
   assert.equal(turnOf(Object.assign({}, base, { addressee: 'Scout', asker: 'Ana', addressee_kind: 'seat', state: 'answered', last_choice: 'yes' })).acting,
-    'Scout', 'an AI said yes to a request: the AI is on it');
+    'Ana', 'approved by an AI: still the asker who does the work');
+  assert.deepEqual(turnOf(Object.assign({}, base, { approval: false, state: 'answered', last_choice: 'yes' })),
+    { phase: 'answered', waiting_on: null, acting: null }, 'a plain ask answered yes is answered: a question is just a question');
   assert.equal(turnOf(Object.assign({}, base, { state: 'answered', last_choice: 'no' })).phase, 'declined');
   assert.equal(turnOf(Object.assign({}, base, { state: 'answered', last_choice: 'yes', done: true })).phase, 'done');
   assert.equal(turnOf(Object.assign({}, base, { state: 'withdrawn' })).phase, 'withdrawn');
@@ -56,6 +58,7 @@ test('the printer story, an AI asking a person: discuss, revise, agree, done', a
   const chat = room();
   const ask = await chat.appendAnnotated({ text: 'Order new printer rollers?' }, scout(),
     { ask: { of: 'Ana', means: 'I order the OEM rollers, $64' } });
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', ask.id);
   assert.equal((await story(chat, ask.id, ANA_ACTOR)).waiting_on, 'Ana');
   // She asks about an alternative instead of answering.
   await chat.appendAnnotated({ text: 're #1 @Scout what about the third-party ones?' }, ANA_ACTOR, { discusses: ask.id });
@@ -90,12 +93,12 @@ test('the same story reversed, a person asking an AI', async () => {
   assert.equal((await story(chat, ask.id, ANA_ACTOR)).waiting_on, 'Ana', 'his question passes the turn back to her');
   await chat.annotate({ subject_id: ANA, name: 'Ana' }, 'revise', ask.id, 'rerun at 5075314');
   assert.equal((await story(chat, ask.id, ANA_ACTOR)).waiting_on, 'Scout');
-  const yes = await chat.appendAnnotated({ text: 'yes, running' }, scout(), { answers: [{ ask_id: ask.id, choice: 'yes', revision: 2 }] });
-  const his = (await chat.openAsks(SCOUT, 'Scout')).addressed;
-  assert.deepEqual(his.map(row => [row.turn.phase, row.turn.acting]), [['agreed', 'Scout']], 'Scout is on it');
-  assert.deepEqual((await chat.openAsks(ANA, 'Ana')).asked, [], 'off her list');
-  await chat.appendAnnotated({ text: 're #1 rerun green' }, scout(), { discusses: ask.id, status: 'done', read_through: yes.id });
-  assert.deepEqual((await chat.openAsks(SCOUT, 'Scout')).addressed, [], 'his receipt closes it');
+  await chat.appendAnnotated({ text: 'yes, running' }, scout(), { answers: [{ ask_id: ask.id, choice: 'yes', revision: 2 }] });
+  // A plain ask: his yes answers it, and it leaves both lists. Nobody is "on it".
+  assert.deepEqual((await chat.openAsks(SCOUT, 'Scout')).addressed, [], 'off his list');
+  assert.deepEqual((await chat.openAsks(ANA, 'Ana')).asked, [], 'off hers');
+  const answered = (await chat.readAnnotations({ after: 0, limit: 20 })).rows.find(row => row.kind === 'post' && row.answers.length);
+  assert.deepEqual(answered.answers.map(answer => [answer.choice, answer.closes]), [['yes', true]]);
 });
 
 test('a bystander\'s reply is in the story but never moves the turn', async () => {
@@ -132,6 +135,7 @@ test('only the asker revises; a person\'s ask keeps its scope line; a reply cann
 test('a yes binds only to the revision its author saw: an answer to an earlier one is refused', async () => {
   const chat = room();
   const ask = await chat.appendAnnotated({ text: 'Order rollers?' }, scout(), { ask: { of: 'Ana', means: 'I order the OEM rollers' } });
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', ask.id);
   await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'revise', ask.id, 'I order the third-party rollers from eBay');
   assert.equal((await chat.openAsks(ANA, 'Ana')).addressed[0].revision, 2, 'the arrangement: revision 2 is current');
   // Her screen still showed revision 1 when she tapped Yes.
@@ -152,6 +156,7 @@ test('a yes binds only to the revision its author saw: an answer to an earlier o
 test('a first-revision ask still takes an answer that names no revision', async () => {
   const chat = room();
   const ask = await chat.appendAnnotated({ text: 'Order rollers?' }, scout(), { ask: { of: 'Ana', means: 'I order them' } });
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', ask.id);
   await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
   assert.equal((await chat.openAsks(SCOUT, 'Scout')).asked[0].turn.phase, 'agreed');
 });
@@ -189,8 +194,10 @@ test('the page lists exactly what the server lists, for every party, by the one 
   const chat = room();
   const ofAna = means => chat.appendAnnotated({ text: means }, scout(), { ask: { of: 'Ana', means } });
   const agreed = await ofAna('I order rollers');
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', agreed.id);
   await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: agreed.id, choice: 'yes' }] });
   const declined = await ofAna('I restart the router');
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', declined.id);
   await chat.appendAnnotated({ text: 'no' }, ANA_ACTOR, { answers: [{ ask_id: declined.id, choice: 'no' }] });
   const typed = await ofAna('I wipe the disk');
   await chat.appendAnnotated({ text: 'hmm' }, ANA_ACTOR, { answers: [{ ask_id: typed.id }] });
@@ -206,7 +213,7 @@ test('the page lists exactly what the server lists, for every party, by the one 
   assert.deepEqual(view(server.Ana.addressed), [[waiting.id, 'waiting']],
     'the arrangement: her agreed ask is Scout\'s to carry out, not hers');
   assert.deepEqual(view(server.Scout.asked), [[agreed.id, 'agreed'], [waiting.id, 'waiting']]);
-  assert.deepEqual(view(server.Scout.addressed), [[ofScout.id, 'agreed']], 'an AI asked: the AI is on it');
+  assert.deepEqual(view(server.Scout.addressed), [], 'a plain ask he answered is off his list');
   for (const name of ['Ana', 'Scout', 'Bea']) {
     const mine = page.openFor(name);
     assert.deepEqual([view(mine.addressed), view(mine.asked)], [view(server[name].addressed), view(server[name].asked)], name);
@@ -249,4 +256,39 @@ test('an AI\'s answer rings the AI that asked it', async () => {
   const own = await chat.appendAnnotated({ text: 're: also the docs' },
     Object.assign({}, lead, { client_message_id: 'eeeeeeee-eeee-4eee-8eee-000000000002' }), { discusses: ask.id });
   assert.equal(own.recipients.some(recipient => recipient.name === 'Lead'), false, 'an asker\'s own reply never rings itself');
+});
+
+test('a request for approval: words never approve, and an ask already answered can never become one', async () => {
+  const chat = room();
+  const ask = await chat.appendAnnotated({ text: 'Order rollers?' }, scout(), { ask: { of: 'Ana', means: 'I order two rollers' } });
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', ask.id);
+  await assert.rejects(chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', ask.id), error => error.code === 'ask-not-open', 'once');
+  await assert.rejects(chat.annotate({ subject_id: ANA, name: 'Ana' }, 'approval', ask.id), error => error.code === 'not-asker');
+  await chat.appendAnnotated({ text: 'sounds fine' }, ANA_ACTOR, { answers: [{ ask_id: ask.id }] });
+  let open = (await chat.openAsks(ANA, 'Ana')).addressed[0];
+  assert.deepEqual([open.state, open.approval, open.turn.phase], ['open', true, 'waiting'], 'her words did not approve it');
+  await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  assert.deepEqual((await chat.openAsks(SCOUT, 'Scout')).asked.map(row => row.turn.phase), ['agreed'], 'her explicit yes did');
+  // A plain question she already answered yes to can never be turned into an approval afterwards.
+  const plain = await chat.appendAnnotated({ text: 'Grit?' }, scout(), { ask: { of: 'Ana', means: 'I buy grit' } });
+  await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: plain.id, choice: 'yes' }] });
+  await assert.rejects(chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', plain.id), error => error.code === 'ask-not-open');
+  open = (await chat.readAnnotations({ after: 0, limit: 50 })).rows.filter(row => row.kind === 'approval');
+  assert.deepEqual(open.map(row => row.ask_id), [ask.id]);
+});
+
+test('right after a clear, a live write cannot re-mark a carried answered ask as an approval', async () => {
+  const { createAskIndex, parseRow } = require('../src/chat/annotations.js');
+  const index = createAskIndex(10);
+  const carried = parseRow({
+    v: 1, seq: 1, ts: 5, kind: 'carry', subject_id: SCOUT, name: 'Scout', ask_id: 3,
+    archive_id: 'transcript-20261030T000000000Z-11111111-1111-4111-8111-111111111111', asked_at: 1,
+    ask: { of_subject_id: ANA, of_name: 'Ana', of_kind: 'person', means: 'm', deliver: 'now', project: 'ops' },
+    era_first_id: 10, kept_open: false,
+  }, 1);
+  assert.equal(index.replay(carried, undefined), true);
+  index.asks.get(3).answers.push({ choice: 'yes', by_addressee: true, revision: 1 });
+  index.asks.get(3).state = 'answered';
+  assert.equal(index.checkLifecycle('approval', 3, SCOUT, false), null, 'the arrangement: a replayed carry block may re-mark it');
+  assert.equal(index.checkLifecycle('approval', 3, SCOUT, true), 'ask-not-open', 'a live write may not');
 });

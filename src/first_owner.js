@@ -2141,6 +2141,14 @@ function createFirstOwnerHandler(options) {
       annotationRefusal(request, response, error);
       return;
     }
+    // A decision asked in the room is a request for approval: marked so before
+    // anyone can answer it. If an answer got there first the mark is refused,
+    // and the ask stays a plain question; no answer is ever read as approval.
+    try {
+      await chat.annotate(chatActor, 'approval', saved.id);
+    } catch (_) {
+      // Answered before it could be marked: it stays a plain ask.
+    }
     // The addressee is resolved once, by the room: the record is asked of the
     // participant the room ask is addressed to, never of a string from the body.
     const facts = await chat.postFacts(saved.id);

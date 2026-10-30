@@ -1423,7 +1423,7 @@ const ASK_BASE_KEYS = Object.freeze([
 ]);
 // Later fields an ask may carry: whose turn it is, its latest exchange, and
 // its earlier scopes. Each is optional, so an older room still reads.
-const ASK_STORY_KEYS = Object.freeze(['revision', 'revisions', 'latest', 'done', 'turn']);
+const ASK_STORY_KEYS = Object.freeze(['revision', 'revisions', 'latest', 'done', 'turn', 'approval']);
 
 function askWithStory(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -1435,6 +1435,7 @@ function askWithStory(value) {
   if (value.latest !== undefined && value.latest !== null &&
       !(typeof value.latest === 'object' && typeof value.latest.by === 'string' && typeof value.latest.kind === 'string')) return null;
   if (value.revisions !== undefined && !Array.isArray(value.revisions)) return null;
+  if (value.approval !== undefined && typeof value.approval !== 'boolean') return null;
   return value;
 }
 

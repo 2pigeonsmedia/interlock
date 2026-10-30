@@ -6,34 +6,35 @@
 //
 //   waiting    open; `waiting_on` is the party who did not write the latest
 //              exchange (a bystander's reply never moves the turn)
-//   agreed     its addressee said yes to the current scope; `acting` is the
-//              party who is on it: the asker when a person was asked (a
-//              permission: "a yes means I do X"), the addressee when an AI was
-//              asked (a request)
-//   declined   its addressee said no
-//   answered   its addressee answered with no yes or no; only an explicit yes
-//              is agreement, so nobody is on it
+//   agreed     a request for approval its addressee approved (yes) at the
+//              current scope; `acting` is its asker, who does the work, until
+//              the done receipt
+//   declined   a request for approval its addressee declined (no)
+//   answered   a plain ask its addressee answered, with any word: a question
+//              is just a question, and nobody is on anything
 //   done       the party who was on it posted its done receipt
 //   withdrawn  the asker withdrew it
 (function exposeAskTurn(root) {
-  /* `ask`: { state: 'open'|'answered'|'withdrawn', done: boolean,
+  /* `ask`: { state: 'open'|'answered'|'withdrawn', done: boolean, approval: boolean,
    *          asker: name, addressee: name, addressee_kind: 'person'|'seat',
    *          last_choice: 'yes'|'no'|null, latest_party: 'asker'|'addressee'|null } */
+  // The asker of a request for approval does the work it asks to do.
   function actingParty(ask) {
-    return ask.addressee_kind === 'person' ? 'asker' : 'addressee';
+    return 'asker';
   }
 
   function turnOf(ask) {
     if (ask.state === 'withdrawn') return Object.freeze({ phase: 'withdrawn', waiting_on: null, acting: null });
     if (ask.done) return Object.freeze({ phase: 'done', waiting_on: null, acting: null });
     if (ask.state === 'answered') {
+      if (!ask.approval) return Object.freeze({ phase: 'answered', waiting_on: null, acting: null });
       if (ask.last_choice === 'yes') {
         return Object.freeze({
           phase: 'agreed', waiting_on: null,
           acting: actingParty(ask) === 'asker' ? ask.asker : ask.addressee,
         });
       }
-      return Object.freeze({ phase: ask.last_choice === 'no' ? 'declined' : 'answered', waiting_on: null, acting: null });
+      return Object.freeze({ phase: 'declined', waiting_on: null, acting: null });
     }
     return Object.freeze({
       phase: 'waiting',
@@ -55,9 +56,7 @@
   function turnWords(turn, viewer) {
     if (!turn) return '';
     if (turn.phase === 'waiting') return turn.waiting_on === viewer ? 'your turn' : 'waiting on ' + turn.waiting_on;
-    if (turn.phase === 'agreed') return turn.acting === viewer ? 'agreed → you are on it' : 'agreed → ' + turn.acting + ' is on it';
-    // Only an explicit yes is agreement; an answer without one says so.
-    if (turn.phase === 'answered') return 'answered, not a yes';
+    if (turn.phase === 'agreed') return turn.acting === viewer ? 'approved → you are on it' : 'approved → ' + turn.acting + ' is on it';
     return turn.phase;
   }
 
