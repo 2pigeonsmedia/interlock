@@ -356,6 +356,24 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     const after = await item(runtime, owner, fresh.id);
     assert.equal(after.answer.source, 'recorded here', 'the record keeps the answer as recorded, not replaced by its echo');
 
+    // The asker revises a decision's ask: the decision's scope follows.
+    const toRevise = await askOf(runtime, lead.token, {
+      project: 'ops', title: 'Rollers', body: 'b', asked_of: 'Ana', scope: 'I order the OEM rollers',
+    });
+    const revised = await aiPost(runtime, '/api/ai/annotations', {
+      kind: 'revise', ask_id: toRevise.json.message.id, means: 'I order the third-party rollers',
+    }, lead.token);
+    assert.equal(revised.status, 201, revised.text);
+    assert.equal((await item(runtime, owner, toRevise.json.item.id)).scope, 'I order the third-party rollers');
+    const hers = await post(runtime, '/api/work/decisions/ask', {
+      operation_id: uuid(), project: 'ops', title: 'Rerun', body: 'b', asked_of: 'Scout', scope: 'rerun at main',
+    }, owner);
+    assert.equal(hers.status, 201, hers.text);
+    const herRevision = await post(runtime, '/api/annotations',
+      { kind: 'revise', ask_id: hers.json.message.id, means: 'rerun at the release head' }, owner);
+    assert.equal(herRevision.status, 201, herRevision.text);
+    assert.equal((await item(runtime, owner, hers.json.item.id)).scope, 'rerun at the release head');
+
     // A record refused after its ask was posted: the ask stands and is answerable.
     const orphan = await askOf(runtime, lead.token, {
       project: 'nowhere', title: 'Ship it', body: 'b', asked_of: 'Ana', scope: 'I ship it',

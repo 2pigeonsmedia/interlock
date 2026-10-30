@@ -2351,9 +2351,21 @@ function createFirstOwnerHandler(options) {
   }
 
   function lifecycleInput(body) {
+    const revise = closedObject(body, ['kind', 'ask_id', 'means']);
+    if (revise && revise.kind === 'revise' && Number.isSafeInteger(revise.ask_id) && revise.ask_id > 0 &&
+        (revise.means === null || typeof revise.means === 'string')) return revise;
     const input = closedObject(body, ['kind', 'ask_id']);
     return input && (input.kind === 'withdraw' || input.kind === 'keep_open') &&
-      Number.isSafeInteger(input.ask_id) && input.ask_id > 0 ? input : null;
+      Number.isSafeInteger(input.ask_id) && input.ask_id > 0 ? Object.assign({}, input, { means: null }) : null;
+  }
+
+  /* A revised ask that backs a decision: the decision's scope follows it, and
+   * an answer given to the old scope no longer stands on the record. */
+  function reviseDecision(actor, row) {
+    if (work && row && row.kind === 'revise') {
+      work.reviseScope({ subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null, owner: false },
+        { ask_id: row.ask_id, means: row.means });
+    }
   }
 
   async function annotateAsAi(request, response, body) {
@@ -2373,7 +2385,8 @@ function createFirstOwnerHandler(options) {
     }
     try {
       const row = await chat.annotate({ subject_id: authorized.subject_id, name: authorized.subject_name },
-        input.kind, input.ask_id);
+        input.kind, input.ask_id, input.means);
+      reviseDecision({ subject_id: authorized.subject_id, name: authorized.subject_name, kind: 'seat' }, row);
       sendJson(request, response, 201, { ok: true, row });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2402,7 +2415,8 @@ function createFirstOwnerHandler(options) {
       return;
     }
     try {
-      const row = await chat.annotate(actor, input.kind, input.ask_id);
+      const row = await chat.annotate(actor, input.kind, input.ask_id, input.means);
+      reviseDecision(actor, row);
       sendJson(request, response, 201, { ok: true, row });
     } catch (error) {
       annotationRefusal(request, response, error);

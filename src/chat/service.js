@@ -134,7 +134,7 @@ function createChatService(options) {
    * recipients are frozen on the row, or it could neither ring nor hold. */
   async function appendAnnotated(body, actor, annotationIn, requireNew = false) {
     // Every key is optional on the wire; absent means none.
-    const input = closedObject(annotationIn, ['ask', 'answers', 'status', 'read_through']);
+    const input = closedObject(annotationIn, ['ask', 'answers', 'status', 'read_through', 'discusses']);
     if (!input) throw fail('invalid-annotation');
     const answers = input.answers === undefined ? [] : input.answers;
     if (!Array.isArray(answers) || answers.length > Annotations.MAX_ANSWERS) {
@@ -150,6 +150,7 @@ function createChatService(options) {
       answers: normalized,
       status: input.status === undefined ? null : input.status,
       read_through: input.read_through === undefined ? null : input.read_through,
+      discusses: input.discusses === undefined ? null : input.discusses,
     });
   }
 
@@ -198,6 +199,7 @@ function createChatService(options) {
         answers: annotationIn.answers,
         status: annotationIn.status,
         read_through: annotationIn.read_through,
+        discusses: annotationIn.discusses,
       };
     }
     const recipients = ringRecipients(
@@ -581,10 +583,10 @@ function createChatService(options) {
     return await store.peekFind(query);
   }
 
-  async function annotate(actor, kind, askId) {
+  async function annotate(actor, kind, askId, means = null) {
     requireOpen();
     return await store.annotate({
-      subject_id: actor.subject_id, name: actor.name, kind, ask_id: askId,
+      subject_id: actor.subject_id, name: actor.name, kind, ask_id: askId, means,
     });
   }
 

@@ -957,6 +957,32 @@ function createWorkService(options) {
     });
   }
 
+  /* The asker revised the room ask a decision is bound to. The decision's
+   * scope follows; an answer given to the old scope stops standing on the
+   * record (it stays on the trail), so the record never shows a scope that
+   * was not agreed. Only the decision's own asker revises it. */
+  function reviseScope(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['ask_id', 'means']);
+    if (!body || !Number.isSafeInteger(body.ask_id) || !(body.means === null || typeof body.means === 'string')) {
+      fail('invalid-input');
+    }
+    return store.commit(draft => {
+      const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
+      if (!item || item.asked_by.subject_id !== actor.subject_id) return { ok: true, revised: null };
+      const now = clock();
+      const before = item.scope;
+      const voided = item.answer;
+      item.scope = body.means === null ? '' : body.means;
+      item.answer = null;
+      touch(item, now);
+      appendEvent(draft, now, actor, Object.assign({
+        item: item.id, project: item.project, kind: 'scope-revised', before, after: item.scope,
+      }, voided ? { answer_superseded: clone(voided) } : {}));
+      return { ok: true, revised: item.id };
+    });
+  }
+
   /* An operation this actor already completed, by its id alone, so a host
    * can answer a retry before doing anything with side effects. */
   function priorResult(actor, operationId) {
@@ -1210,7 +1236,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, priorResult,
+    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, priorResult, reviseScope,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });

@@ -613,16 +613,17 @@ function validAskFields(value) {
 }
 
 function validAnswerEntry(value) {
-  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
+  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes', 'revision']);
   return !!answer && Number.isSafeInteger(answer.ask_id) && answer.ask_id > 0 &&
     (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
     (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0)) &&
-    typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean';
+    typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean' &&
+    Number.isSafeInteger(answer.revision) && answer.revision > 0;
 }
 
 function validPostRow(value) {
   const row = exactObject(value, [
-    'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through',
+    'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through', 'discusses',
   ]);
   return !!row && row.kind === 'post' && Number.isSafeInteger(row.message_id) && row.message_id > 0 &&
     (row.ask === null || validAskFields(row.ask)) &&
@@ -1404,7 +1405,7 @@ function askOptions(args) {
 function validPublicAsk(value) {
   const ask = exactObject(value, [
     'ask_id', 'asked_at', 'by', 'of', 'of_kind', 'means', 'deliver', 'project', 'state', 'kept_open',
-    'carried_from', 'answers',
+    'carried_from', 'answers', 'revision', 'revisions', 'latest', 'done', 'turn',
   ]);
   return !!ask && Number.isSafeInteger(ask.ask_id) && ask.ask_id > 0 &&
     typeof ask.by === 'string' && validAskFields({

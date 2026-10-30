@@ -61,7 +61,7 @@ const CLEAR_KEYS = Object.freeze([
 const ANNOTATIONS_MARKER_KEYS = Object.freeze([
   'schema', 'archive_id', 'source_next_id', 'staged_sha256', 'archive_sha256',
 ]);
-const LIFECYCLE_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'kind', 'ask_id']);
+const LIFECYCLE_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'kind', 'ask_id', 'means']);
 const {
   DIRECTORY_SYNC_SUPPORTED, atomicWriteJson, fsyncDirectory, fsyncFile,
 } = require('../atomic_json.js');
@@ -425,7 +425,8 @@ function sameAnnotation(row, request) {
     ? row.ask === request.ask
     : row.ask.of_subject_id === request.ask.of_subject_id &&
       row.ask.means === request.ask.means && row.ask.deliver === request.ask.deliver;
-  return askSame && row.status === request.status && row.read_through === request.read_through &&
+  const discussesSame = (row.discusses ? row.discusses.ask_id : null) === (request.discusses ?? null);
+  return askSame && discussesSame && row.status === request.status && row.read_through === request.read_through &&
     row.answers.length === request.answers.length &&
     row.answers.every((answer, i) => answer.ask_id === request.answers[i].ask_id &&
       answer.choice === request.answers[i].choice);
@@ -619,6 +620,10 @@ function openStore(opts) {
         crossed_by: asks.crossingFor(answer.ask_id, who, answeredIds),
       }, asks.answerFacts(answer.ask_id, who)));
     });
+    if (annotation.discusses !== null) {
+      const refusal = asks.checkDiscuss(annotation.discusses);
+      if (refusal) fail(refusal);
+    }
     if (annotation.status !== null) {
       const unread = [];
       let count = 0;
@@ -724,6 +729,10 @@ function openStore(opts) {
         answers,
         status: annotation.status,
         read_through: annotation.read_through,
+        discusses: annotation.discusses === null ? null : {
+          ask_id: annotation.discusses,
+          party: asks.partyOf(annotation.discusses, { subject_id: actor.subject_id, name: actor.name }),
+        },
       }, asks.rows.length + 1);
       if (annotation !== null && row === null) fail('invalid-annotation');
       try {
@@ -896,14 +905,21 @@ function openStore(opts) {
       const request = closedObject(input, LIFECYCLE_INPUT_KEYS);
       if (!request || !boundedString(request.subject_id, 64) ||
           !boundedString(request.name, MAX_BYLINE_BYTES) ||
-          (request.kind !== 'withdraw' && request.kind !== 'keep_open') ||
-          !Number.isSafeInteger(request.ask_id) || request.ask_id < 1) fail('invalid-annotation');
+          !['withdraw', 'keep_open', 'revise'].includes(request.kind) ||
+          !Number.isSafeInteger(request.ask_id) || request.ask_id < 1 ||
+          (request.kind !== 'revise' && request.means !== null) ||
+          (request.kind === 'revise' && !(request.means === null || Annotations.validMeans(request.means)))) {
+        fail('invalid-annotation');
+      }
       assertLiveLog();
       assertLiveReceipts();
       assertLiveActivity();
       const refusal = asks.checkLifecycle(request.kind, request.ask_id, request.subject_id);
       if (refusal) fail(refusal);
-      const row = Annotations.parseRow({
+      // An ask of a person always says what a yes means, revised or not.
+      if (request.kind === 'revise' && request.means === null &&
+          asks.asks.get(request.ask_id).of_kind === 'person') fail('means-required');
+      const row = Annotations.parseRow(Object.assign({
         v: Annotations.ROW_VERSION,
         seq: asks.rows.length + 1,
         ts: Date.now(),
@@ -911,7 +927,7 @@ function openStore(opts) {
         subject_id: request.subject_id,
         name: request.name,
         ask_id: request.ask_id,
-      }, asks.rows.length + 1);
+      }, request.kind === 'revise' ? { means: request.means } : {}), asks.rows.length + 1);
       if (!row) fail('invalid-annotation');
       try {
         appendLineExisting(annotationsPath, Annotations.encodeRow(row));

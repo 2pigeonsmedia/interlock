@@ -8,14 +8,14 @@
 (function exposeAsksModel(root) {
   const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry']);
   const POST_KEYS = Object.freeze([
-    'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through',
+    'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through', 'discusses',
   ]);
   const LIFECYCLE_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id']);
   const CARRY_KEYS = Object.freeze([
     'seq', 'ts', 'kind', 'by', 'ask_id', 'archive_id', 'asked_at', 'ask', 'kept_open',
   ]);
   const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver', 'project']);
-  const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
+  const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes', 'revision']);
   // A message that is exactly one of these words, in any case, answers the
   // sender's one open ask with no tap (Patti, 2026-10-29). Anything else, or
   // two open asks, takes a tap: ordinary talk never closes an ask.
@@ -60,7 +60,9 @@
           positive(answer.ask_id) &&
           (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
           (answer.crossed_by === null || positive(answer.crossed_by)) &&
-          typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean') &&
+          typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean' &&
+          positive(answer.revision)) &&
+        (row.discusses === null || (exact(row.discusses, ['ask_id', 'party']) && positive(row.discusses.ask_id))) &&
         (row.status === null || ['done', 'ready', 'stop'].includes(row.status)) &&
         (row.read_through === null || Number.isSafeInteger(row.read_through));
     }
