@@ -168,7 +168,7 @@ test('an answer to an older ask records the newer one it crossed; answering both
     { answers: [{ ask_id: b.id, choice: 'yes' }, { ask_id: c.id, choice: 'yes' }] });
   const rows = (await chat.readAnnotations({ after: 0, limit: 10 })).rows;
   assert.deepEqual(rows[3].answers,
-    [{ ask_id: a.id, choice: 'yes', crossed_by: b.id, by_addressee: true, closes: true }]);
+    [{ ask_id: a.id, choice: 'yes', crossed_by: b.id, by_addressee: true, closes: true, revision: 1 }]);
   assert.deepEqual(rows[4].answers.map(answer => answer.crossed_by), [null, null]);
 });
 
@@ -416,7 +416,7 @@ test('an ask of an AI addresses its name: the seat that rejoins under it is rung
     { answers: [{ ask_id: ask.id, choice: 'yes' }] });
   assert.deepEqual((await chat.openAsks(ANA, 'Ana')).asked, [], 'the server closed it');
   const rows = (await chat.readAnnotations({ after: 0, limit: 10 })).rows;
-  assert.deepEqual(rows[1].answers, [{ ask_id: ask.id, choice: 'yes', crossed_by: null, by_addressee: true, closes: true }],
+  assert.deepEqual(rows[1].answers, [{ ask_id: ask.id, choice: 'yes', crossed_by: null, by_addressee: true, closes: true, revision: 1 }],
     'the answer carries the fact the page reads');
   const Asks = require('../src/web/asks_model.js');
   const page = Asks.createAsksState();

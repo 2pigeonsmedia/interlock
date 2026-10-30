@@ -23,6 +23,7 @@
 // binds to the ask the client named.
 
 const crypto = require('node:crypto');
+const { turnOf, actingParty } = require('../web/ask_turn.js');
 
 const ROW_VERSION = 1;
 const KINDS = Object.freeze(['person', 'seat']);
@@ -35,10 +36,16 @@ const MAX_NAME_BYTES = 256;
 const MAX_UNREAD_IDS = 20;
 const ARCHIVE_ID = /^transcript-[0-9]{8}T[0-9]{9}Z-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-const POST_KEYS = Object.freeze([
+// A post row before discussion replies attached to asks; it reads as
+// `discusses: null`. Every earlier shape keeps a reader (rooms upgrade in place).
+const POST_KEYS_BEFORE_DISCUSSES = Object.freeze([
   'v', 'seq', 'ts', 'kind', 'message_id', 'subject_id', 'name',
   'ask', 'answers', 'status', 'read_through',
 ]);
+const POST_KEYS = Object.freeze([...POST_KEYS_BEFORE_DISCUSSES, 'discusses']);
+const DISCUSSES_KEYS = Object.freeze(['ask_id', 'party']);
+const PARTIES = Object.freeze(['asker', 'addressee', 'other']);
+const REVISE_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id', 'means']);
 const LIFECYCLE_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id']);
 const CARRY_KEYS = Object.freeze([
   'v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id', 'archive_id', 'asked_at', 'ask',
@@ -48,8 +55,10 @@ const ASK_KEYS = Object.freeze(['of_subject_id', 'of_name', 'of_kind', 'means', 
 // A project id, as the Work record names it; whether the project exists and
 // whether one is required is the Work side's rule, not the room's.
 const PROJECT_ID = /^[a-z][a-z0-9-]{1,31}$/;
-const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
-const REQUEST_KEYS = Object.freeze(['ask', 'answers', 'status', 'read_through']);
+// An answer entry before asks could be revised reads as answering revision 1.
+const ANSWER_KEYS_BEFORE_REVISION = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
+const ANSWER_KEYS = Object.freeze([...ANSWER_KEYS_BEFORE_REVISION, 'revision']);
+const REQUEST_KEYS = Object.freeze(['ask', 'answers', 'status', 'read_through', 'discusses']);
 const REQUEST_ANSWER_KEYS = Object.freeze(['ask_id', 'choice']);
 
 function closedObject(value, keys) {
@@ -114,19 +123,21 @@ function parseAnswers(value, withCrossing) {
   const seen = new Set();
   const answers = [];
   for (const candidate of value) {
-    const answer = closedObject(candidate, withCrossing ? ANSWER_KEYS : REQUEST_ANSWER_KEYS);
+    const earlier = withCrossing ? closedObject(candidate, ANSWER_KEYS_BEFORE_REVISION) : null;
+    const answer = earlier ? Object.assign({}, earlier, { revision: 1 })
+      : closedObject(candidate, withCrossing ? ANSWER_KEYS : REQUEST_ANSWER_KEYS);
     if (!answer || !positiveId(answer.ask_id) || seen.has(answer.ask_id) ||
         !(answer.choice === null || CHOICES.includes(answer.choice)) ||
         (withCrossing && (!(answer.crossed_by === null || positiveId(answer.crossed_by)) ||
           typeof answer.by_addressee !== 'boolean' || typeof answer.closes !== 'boolean' ||
-          (answer.closes && !answer.by_addressee)))) {
+          !positiveId(answer.revision) || (answer.closes && !answer.by_addressee)))) {
       return null;
     }
     seen.add(answer.ask_id);
     answers.push(Object.freeze(withCrossing
       ? {
         ask_id: answer.ask_id, choice: answer.choice, crossed_by: answer.crossed_by,
-        by_addressee: answer.by_addressee, closes: answer.closes,
+        by_addressee: answer.by_addressee, closes: answer.closes, revision: answer.revision,
       }
       : { ask_id: answer.ask_id, choice: answer.choice }));
   }
@@ -147,14 +158,17 @@ function parseRequest(value) {
   if (!(request.read_through === null ||
       (Number.isSafeInteger(request.read_through) && request.read_through >= 0))) return null;
   if (request.status !== null && request.read_through === null) return null;
+  if (!(request.discusses === null || positiveId(request.discusses))) return null;
+  // A reply that discusses an ask answers nothing.
+  if (request.discusses !== null && answers.length > 0) return null;
   if (ask === null && answers.length === 0 && request.status === null &&
-      request.read_through === null) return null;
+      request.read_through === null && request.discusses === null) return null;
   return Object.freeze({
-    ask, answers, status: request.status, read_through: request.read_through,
+    ask, answers, status: request.status, read_through: request.read_through, discusses: request.discusses,
   });
 }
 
-const KNOWN_KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry']);
+const KNOWN_KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise']);
 
 /* A row a later release wrote: a well-formed line in sequence whose `v` or
  * kind this release does not know. It keeps its place in the sequence and is
@@ -170,10 +184,11 @@ function laterRow(value, expectedSeq) {
 function parseRow(value, expectedSeq) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const kind = value.kind;
+  const earlierPost = kind === 'post' ? closedObject(value, POST_KEYS_BEFORE_DISCUSSES) : null;
   const keys = kind === 'post' ? POST_KEYS
     : (kind === 'withdraw' || kind === 'keep_open') ? LIFECYCLE_KEYS
-      : kind === 'carry' ? CARRY_KEYS : null;
-  const row = keys && closedObject(value, keys);
+      : kind === 'carry' ? CARRY_KEYS : kind === 'revise' ? REVISE_KEYS : null;
+  const row = earlierPost ? Object.assign({}, earlierPost, { discusses: null }) : keys && closedObject(value, keys);
   if (!row || row.v !== ROW_VERSION || row.seq !== expectedSeq || !validTs(row.ts) ||
       !boundedString(row.subject_id, 64) || !boundedString(row.name, MAX_NAME_BYTES)) return null;
   const base = { v: row.v, seq: row.seq, ts: row.ts, kind, subject_id: row.subject_id, name: row.name };
@@ -184,11 +199,21 @@ function parseRow(value, expectedSeq) {
         !(row.status === null || STATUS.includes(row.status)) ||
         !(row.read_through === null ||
           (Number.isSafeInteger(row.read_through) && row.read_through >= 0))) return null;
+    let discusses = null;
+    if (row.discusses !== null) {
+      const link = closedObject(row.discusses, DISCUSSES_KEYS);
+      if (!link || !positiveId(link.ask_id) || !PARTIES.includes(link.party)) return null;
+      discusses = Object.freeze({ ask_id: link.ask_id, party: link.party });
+    }
     return Object.freeze(Object.assign(base, {
-      message_id: row.message_id, ask, answers, status: row.status, read_through: row.read_through,
+      message_id: row.message_id, ask, answers, status: row.status, read_through: row.read_through, discusses,
     }));
   }
   if (!positiveId(row.ask_id)) return null;
+  if (kind === 'revise') {
+    if (!(row.means === null || validMeans(row.means))) return null;
+    return Object.freeze(Object.assign(base, { ask_id: row.ask_id, means: row.means }));
+  }
   if (kind !== 'carry') return Object.freeze(Object.assign(base, { ask_id: row.ask_id }));
   const ask = parseAsk(row.ask);
   if (!ask || !ARCHIVE_ID.test(row.archive_id) || !validTs(row.asked_at) ||
@@ -240,7 +265,35 @@ function createAskIndex(eraFirstId) {
       state: 'open',
       kept_open: false,
       answers: [],
+      revision: 1,
+      revisions: [],
+      latest: { message_id: carriedFrom ? null : askId, kind: 'ask', party: 'asker', name: row.name, at: askedAt },
+      done: null,
     });
+  }
+
+  /* Which party wrote something about an ask: its asker, its addressee, or
+   * someone else. Decided when written and stored. */
+  function partyOf(askId, who) {
+    const ask = asks.get(askId);
+    if (ask.asker_subject_id === who.subject_id) return 'asker';
+    return addressedTo(ask, who) ? 'addressee' : 'other';
+  }
+
+  function checkDiscuss(askId) {
+    return asks.has(askId) ? null : 'ask-not-found';
+  }
+
+  /* A reply that discusses an ask: only its two parties move its story; the
+   * acting party's reply with status done, after a yes, is the done receipt. */
+  function applyDiscussion(row) {
+    const ask = asks.get(row.discusses.ask_id);
+    if (!ask || row.discusses.party === 'other') return;
+    ask.latest = { message_id: row.message_id, kind: 'discussion', party: row.discusses.party, name: row.name, at: row.ts };
+    if (row.discusses.party === actingParty({ addressee_kind: ask.of_kind }) && row.status === 'done' &&
+        ask.state === 'answered') {
+      ask.done = { message_id: row.message_id, at: row.ts };
+    }
   }
 
   function checkAnswer(askId) {
@@ -255,15 +308,18 @@ function createAskIndex(eraFirstId) {
   function answerFacts(askId, who) {
     const ask = asks.get(askId);
     const byAddressee = addressedTo(ask, who);
-    return { by_addressee: byAddressee, closes: byAddressee && !ask.kept_open };
+    return { by_addressee: byAddressee, closes: byAddressee && !ask.kept_open, revision: ask.revision };
   }
 
   function applyAnswer(askId, messageId, row, answer) {
     const ask = asks.get(askId);
     ask.answers.push({
       message_id: messageId, subject_id: row.subject_id, name: row.name, choice: answer.choice,
-      by_addressee: answer.by_addressee,
+      by_addressee: answer.by_addressee, revision: answer.revision,
     });
+    if (answer.by_addressee) {
+      ask.latest = { message_id: messageId, kind: 'answer', party: 'addressee', name: row.name, at: row.ts };
+    }
     if (answer.closes) ask.state = 'answered';
   }
 
@@ -273,6 +329,9 @@ function createAskIndex(eraFirstId) {
     if (ask.asker_subject_id !== subjectId) return 'not-asker';
     if (kind === 'withdraw' && ask.state !== 'open') return 'ask-not-open';
     if (kind === 'keep_open' && ask.state !== 'answered') return 'ask-not-answered';
+    // A revision is the asker's, while the ask is still live; after a yes it
+    // reopens the ask, and nobody's earlier yes carries over.
+    if (kind === 'revise' && (ask.state === 'withdrawn' || ask.done)) return 'ask-not-open';
     return null;
   }
 
@@ -280,6 +339,12 @@ function createAskIndex(eraFirstId) {
     const ask = asks.get(row.ask_id);
     if (row.kind === 'withdraw') {
       ask.state = 'withdrawn';
+    } else if (row.kind === 'revise') {
+      ask.revisions.push({ means: ask.means, revision: ask.revision });
+      ask.means = row.means;
+      ask.revision += 1;
+      if (ask.state === 'answered') ask.state = 'open';
+      ask.latest = { message_id: null, kind: 'revise', party: 'asker', name: row.name, at: row.ts };
     } else {
       ask.state = 'open';
       ask.kept_open = true;
@@ -316,6 +381,7 @@ function createAskIndex(eraFirstId) {
         }
       }
       if (row.ask) addAsk(row.message_id, row, row.ask, row.ts, null);
+      if (row.discusses) applyDiscussion(row);
     } else if (row.kind === 'carry') {
       if (row.era_first_id !== eraFirstId || asks.has(row.ask_id)) return false;
       addAsk(row.ask_id, row, row.ask, row.asked_at, row.archive_id);
@@ -339,9 +405,16 @@ function createAskIndex(eraFirstId) {
     const addressed = [];
     const asked = [];
     for (const ask of [...asks.values()].sort((a, b) => a.ask_id - b.ask_id)) {
-      if (ask.state !== 'open') continue;
-      if (addressedTo(ask, who)) addressed.push(publicAsk(ask));
-      if (ask.asker_subject_id === who.subject_id) asked.push(publicAsk(ask));
+      // An agreed ask stays on the list of the party who is on it, until its
+      // done receipt.
+      const onIt = askTurn(ask).phase === 'agreed';
+      const acting = actingParty({ addressee_kind: ask.of_kind });
+      if ((ask.state === 'open' || (onIt && acting === 'addressee')) && addressedTo(ask, who)) {
+        addressed.push(publicAsk(ask));
+      }
+      if ((ask.state === 'open' || (onIt && acting === 'asker')) && ask.asker_subject_id === who.subject_id) {
+        asked.push(publicAsk(ask));
+      }
     }
     return Object.freeze({ addressed: Object.freeze(addressed), asked: Object.freeze(asked) });
   }
@@ -352,7 +425,7 @@ function createAskIndex(eraFirstId) {
   }
 
   return {
-    rows, posts, asks, checkAnswer, answerFacts, checkLifecycle, crossingFor, replay,
+    rows, posts, asks, checkAnswer, answerFacts, checkLifecycle, crossingFor, replay, partyOf, checkDiscuss,
     isOpenAskOf, openAsksFor, openAsks,
   };
 }
@@ -360,6 +433,15 @@ function createAskIndex(eraFirstId) {
 function publicAskFields(ask) {
   return Object.freeze({
     of: ask.of_name, of_kind: ask.of_kind, means: ask.means, deliver: ask.deliver, project: ask.project,
+  });
+}
+
+/* The turn, by the one shared rule (ask_turn.js). */
+function askTurn(ask) {
+  const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
+  return turnOf({
+    state: ask.state, done: !!ask.done, asker: ask.asker_name, addressee: ask.of_name, addressee_kind: ask.of_kind,
+    last_choice: last ? last.choice : null, latest_party: ask.latest ? ask.latest.party : null,
   });
 }
 
@@ -378,8 +460,16 @@ function publicAsk(ask) {
     carried_from: ask.carried_from,
     answers: Object.freeze(ask.answers.map(answer => Object.freeze({
       message_id: answer.message_id, by: answer.name, choice: answer.choice,
-      by_addressee: answer.by_addressee,
+      by_addressee: answer.by_addressee, revision: answer.revision,
     }))),
+    revision: ask.revision,
+    revisions: Object.freeze(ask.revisions.map(entry => Object.freeze(Object.assign({}, entry)))),
+    latest: Object.freeze({
+      message_id: ask.latest.message_id, kind: ask.latest.kind, party: ask.latest.party,
+      by: ask.latest.name, at: ask.latest.at,
+    }),
+    done: ask.done ? Object.freeze(Object.assign({}, ask.done)) : null,
+    turn: askTurn(ask),
   });
 }
 
@@ -393,10 +483,11 @@ function publicRow(row) {
       ask: row.ask ? publicAskFields(row.ask) : null,
       answers: Object.freeze(row.answers.map(answer => Object.freeze({
         ask_id: answer.ask_id, choice: answer.choice, crossed_by: answer.crossed_by,
-        by_addressee: answer.by_addressee, closes: answer.closes,
+        by_addressee: answer.by_addressee, closes: answer.closes, revision: answer.revision,
       }))),
       status: row.status,
       read_through: row.read_through,
+      discusses: row.discusses ? Object.freeze({ ask_id: row.discusses.ask_id, party: row.discusses.party }) : null,
     }));
   }
   if (row.kind === 'carry') {
@@ -405,6 +496,7 @@ function publicRow(row) {
       ask: publicAskFields(row.ask), kept_open: row.kept_open,
     }));
   }
+  if (row.kind === 'revise') return Object.freeze(Object.assign(base, { ask_id: row.ask_id, means: row.means }));
   return Object.freeze(Object.assign(base, { ask_id: row.ask_id }));
 }
 

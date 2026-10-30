@@ -247,6 +247,15 @@ function createWorkRoutes(options) {
     }
   }
 
+  // The room revised the ask a decision is bound to. Never a refusal the room sees.
+  function reviseScope(actor, body) {
+    try {
+      return work.reviseScope(actor, body);
+    } catch (_) {
+      return Object.freeze({ ok: false });
+    }
+  }
+
   // "Ask a decision" only: a completed create for this operation id, or null.
   function priorResult(actor, operationId) {
     try {
@@ -267,7 +276,7 @@ function createWorkRoutes(options) {
   }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

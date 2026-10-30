@@ -194,6 +194,7 @@ function loadBrowserAssets(hosted) {
       '/mentions.js': ['mentions.js', 'text/javascript; charset=utf-8'],
       '/reply_reference.js': ['reply_reference.js', 'text/javascript; charset=utf-8'],
       '/asks_model.js': ['asks_model.js', 'text/javascript; charset=utf-8'],
+      '/ask_turn.js': ['ask_turn.js', 'text/javascript; charset=utf-8'],
       '/history': ['history.html', 'text/html; charset=utf-8'],
       '/history.js': ['history.js', 'text/javascript; charset=utf-8'],
       '/message_page.js': ['message_page.js', 'text/javascript; charset=utf-8'],

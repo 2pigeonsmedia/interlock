@@ -260,7 +260,7 @@ test('the CLI asks, answers, withdraws and posts status through the real routes'
 
     const scoutAsks = await cli(scout, ['asks']);
     assert.equal(scoutAsks.code, EXIT_OK, scoutAsks.stderr);
-    assert.match(scoutAsks.stdout, new RegExp(`Asked of you:\\n  ask ${toScout} by Lead · held for later\\n`));
+    assert.match(scoutAsks.stdout, new RegExp(`Asked of you:\\n  ask ${toScout} by Lead \\[your turn\\] · held for later\\n`));
 
     const leadAsks = await cli(lead, ['asks', '--json']);
     assert.equal(leadAsks.code, EXIT_OK, leadAsks.stderr);
@@ -408,7 +408,7 @@ function sideCarWorld(count, messages) {
   const urls = [];
   const rows = Array.from({ length: count }, (_, i) => ({
     seq: i + 1, ts: 1, kind: 'post', by: 'Lead', message_id: i + 1, ask: null,
-    answers: [{ ask_id: 1, choice: 'yes', crossed_by: null, by_addressee: true, closes: true }], status: 'done', read_through: 0,
+    answers: [{ ask_id: 1, choice: 'yes', crossed_by: null, by_addressee: true, closes: true, revision: 1 }], status: 'done', read_through: 0, discusses: null,
   }));
   const profile = Object.freeze({
     schema: 2, name: 'Lead', product: 'Codex CLI', product_provenance: 'client-reported',
@@ -547,15 +547,15 @@ test('interlock asks shows whose turn it is and the latest exchange; an older ro
   const base = { ask_id: 6, asked_at: 1, by: 'Scout', of: 'Patti', of_kind: 'person', means: 'I order one roller', deliver: 'now',
     project: 'ops', state: 'open', kept_open: false, carried_from: null, answers: [] };
   const withStory = Object.assign({}, base, {
-    turn: { state: 'waiting', on: 'Scout', word: 'waiting on Scout' },
-    latest: { by: 'Patti', kind: 'reply', line: 'Can we buy refurbished rollers?', at: 2 },
-    revisions: [],
+    revision: 1, revisions: [], done: false,
+    turn: { phase: 'waiting', waiting_on: 'Scout', acting: null },
+    latest: { message_id: 8, kind: 'discussion', party: 'addressee', by: 'Patti', at: 2 },
   });
   const world = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [withStory] } }));
   const listed = await storyRun(world, ['asks', '--connection', 'Scout']);
   assert.equal(listed.code, EXIT_OK, listed.stderr);
-  assert.match(listed.stdout, /ask 6 of Patti \[waiting on Scout\]/);
-  assert.match(listed.stdout, /latest: Patti: Can we buy refurbished rollers\?/);
+  assert.match(listed.stdout, /ask 6 of Patti \[your turn\]/, 'from Scout\'s chair, waiting on Scout reads "your turn"');
+  assert.match(listed.stdout, /latest: Patti · replied #8/);
   const older = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [base] } }));
   assert.equal((await storyRun(older, ['asks', '--connection', 'Scout'])).code, EXIT_OK, 'an ask without the story fields still lists');
   const odd = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [Object.assign({}, base, { surprise: 1 })] } }));

@@ -1084,3 +1084,24 @@ test('a work row names the room message it was made from', () => {
   assert.equal(rows.find(row => row.id === made.id).source_message_id, 12);
   assert.equal(rows.find(row => row.id === plain.id).source_message_id, null);
 });
+
+test('a revised ask moves its decision\'s scope and voids an answer given to the old scope', () => {
+  const { work } = fresh();
+  const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const decision = work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Rollers?', body: 'b', asked_of: ref(owner), scope: 'OEM',
+    source_message: { message_id: 120, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Rollers?' },
+  }).item;
+  work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 120, of: ANA_OF });
+  work.answerFromRoom(Object.assign({}, owner, { session: null }), {
+    ask_id: 120, message_id: 121, text: 'yes', choice: 'yes', by_addressee: true, of: ANA_OF,
+  });
+  assert.equal(work.reviseScope(Object.assign({}, builder, { session: null }), { ask_id: 120, means: 'third-party' }).revised, null,
+    'only the decision\'s asker');
+  assert.equal(work.reviseScope(Object.assign({}, lead, { session: null }), { ask_id: 120, means: 'third-party' }).revised, decision.id);
+  const after = work.get(owner, { id: decision.id });
+  assert.equal(after.item.scope, 'third-party');
+  assert.equal(after.item.state, 'awaiting', 'her yes to OEM does not stand for third-party');
+  const event = after.history.filter(row => row.kind === 'scope-revised').slice(-1)[0];
+  assert.deepEqual([event.before, event.after, event.answer_superseded.text], ['OEM', 'third-party', 'yes']);
+});

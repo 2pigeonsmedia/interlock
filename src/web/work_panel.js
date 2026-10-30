@@ -185,7 +185,7 @@
       node.append(head, openButton('work-open', card.question, 'Open ' + card.id + ': ' + card.question, open, card.id));
       if (card.means) node.append(make('p', 'work-means', 'A yes means: ' + card.means));
       // The latest exchange, so every place the ask shows tells the same story.
-      if (card.latest) node.append(make('p', 'work-card-detail', 'Latest · ' + card.latest));
+      if (card.latest) node.append(make('p', 'work-card-detail', 'Latest: ' + card.latest));
       if (card.detail) node.append(make('p', 'work-card-detail', card.detail));
       const facts = [card.project, card.kind === 'ask' ? 'message #' + card.askId : card.id];
       if (card.kill) facts.push(card.kill);

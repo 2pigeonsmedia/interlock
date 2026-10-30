@@ -13,7 +13,7 @@ const ROOM_HTML = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room
 function post(seq, messageId, by, extra = {}) {
   return Object.assign({
     seq, ts: 1_000 * seq, kind: 'post', by, message_id: messageId,
-    ask: null, answers: [], status: null, read_through: null,
+    ask: null, answers: [], status: null, read_through: null, discusses: null,
   }, extra);
 }
 
@@ -23,7 +23,7 @@ function ask(of, means = null, deliver = 'now') {
 
 // The server's stored facts: was the answerer the one asked, did it close it.
 function answer(askId, choice = null, crossedBy = null, byAddressee = false, closes = false) {
-  return { ask_id: askId, choice, crossed_by: crossedBy, by_addressee: byAddressee, closes };
+  return { ask_id: askId, choice, crossed_by: crossedBy, by_addressee: byAddressee, closes, revision: 1 };
 }
 
 test('rows replay the way the server does: only the addressee closes; keep-open and withdraw belong to the asker', () => {

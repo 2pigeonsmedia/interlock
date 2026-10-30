@@ -624,16 +624,17 @@ function validAskFields(value) {
 }
 
 function validAnswerEntry(value) {
-  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
+  const answer = exactObject(value, ['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes', 'revision']);
   return !!answer && Number.isSafeInteger(answer.ask_id) && answer.ask_id > 0 &&
     (answer.choice === null || answer.choice === 'yes' || answer.choice === 'no') &&
     (answer.crossed_by === null || (Number.isSafeInteger(answer.crossed_by) && answer.crossed_by > 0)) &&
-    typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean';
+    typeof answer.by_addressee === 'boolean' && typeof answer.closes === 'boolean' &&
+    Number.isSafeInteger(answer.revision) && answer.revision > 0;
 }
 
 function validPostRow(value) {
   const row = exactObject(value, [
-    'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through',
+    'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through', 'discusses',
   ]);
   return !!row && row.kind === 'post' && Number.isSafeInteger(row.message_id) && row.message_id > 0 &&
     (row.ask === null || validAskFields(row.ask)) &&
@@ -1419,7 +1420,7 @@ const ASK_BASE_KEYS = Object.freeze([
 ]);
 // Later fields an ask may carry: whose turn it is, its latest exchange, and
 // its earlier scopes. Each is optional, so an older room still reads.
-const ASK_STORY_KEYS = Object.freeze(['turn', 'latest', 'revisions']);
+const ASK_STORY_KEYS = Object.freeze(['revision', 'revisions', 'latest', 'done', 'turn']);
 
 function askWithStory(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -1427,9 +1428,9 @@ function askWithStory(value) {
   if (!ASK_BASE_KEYS.every(key => keys.includes(key)) ||
       !keys.every(key => ASK_BASE_KEYS.includes(key) || ASK_STORY_KEYS.includes(key))) return null;
   if (value.turn !== undefined && value.turn !== null &&
-      !(typeof value.turn === 'object' && typeof value.turn.word === 'string')) return null;
+      !(typeof value.turn === 'object' && typeof value.turn.phase === 'string')) return null;
   if (value.latest !== undefined && value.latest !== null &&
-      !(typeof value.latest === 'object' && typeof value.latest.by === 'string' && typeof value.latest.line === 'string')) return null;
+      !(typeof value.latest === 'object' && typeof value.latest.by === 'string' && typeof value.latest.kind === 'string')) return null;
   if (value.revisions !== undefined && !Array.isArray(value.revisions)) return null;
   return value;
 }
@@ -1442,14 +1443,18 @@ function validPublicAsk(value) {
     }) && typeof ask.state === 'string' && Array.isArray(ask.answers);
 }
 
-function renderAsk(ask, mine) {
+const { turnWords } = require('./web/ask_turn.js');
+const LATEST_WORDS = Object.freeze({ ask: 'asked', revise: 'revised', discussion: 'replied', answer: 'answered' });
+
+function renderAsk(ask, mine, viewer = null) {
   const who = mine ? `of ${terminalSafe(ask.of)}` : `by ${terminalSafe(ask.by)}`;
   const later = ask.deliver === 'later' ? ' · held for later' : '';
   const carried = ask.carried_from ? ' · from an archived era' : '';
   const kept = ask.kept_open ? ' · kept open' : '';
   const means = ask.means === null ? '' : ` — a yes means: ${terminalSafe(ask.means)}`;
-  const turn = ask.turn ? ` [${terminalSafe(ask.turn.word)}]` : '';
-  const latest = ask.latest ? `\n      latest: ${terminalSafe(ask.latest.by)}: ${terminalSafe(ask.latest.line)}` : '';
+  const turn = ask.turn ? ` [${terminalSafe(turnWords(ask.turn, viewer))}]` : '';
+  const latest = ask.latest ? `\n      latest: ${terminalSafe(ask.latest.by)} · ${terminalSafe(LATEST_WORDS[ask.latest.kind] || ask.latest.kind)}${
+    ask.latest.message_id ? ` #${ask.latest.message_id}` : ''}` : '';
   return `  ask ${ask.ask_id} ${who}${turn}${later}${carried}${kept}${means}${latest}`;
 }
 
@@ -1496,11 +1501,11 @@ async function runAsks(args, io, dependencies = {}) {
   }
   if (result.addressed.length > 0) {
     line(io.stdout, 'Asked of you:');
-    for (const ask of result.addressed) line(io.stdout, renderAsk(ask, false));
+    for (const ask of result.addressed) line(io.stdout, renderAsk(ask, false, profile.name));
   }
   if (result.asked.length > 0) {
     line(io.stdout, 'You asked:');
-    for (const ask of result.asked) line(io.stdout, renderAsk(ask, true));
+    for (const ask of result.asked) line(io.stdout, renderAsk(ask, true, profile.name));
   }
   return EXIT_OK;
 }

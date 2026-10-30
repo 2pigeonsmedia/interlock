@@ -266,18 +266,23 @@
   // Needs you as cards: one per thing waiting on the viewer, oldest first.
   // A decision asked in the room and its ask are one card, answered through
   // the ask (askId), so the room and the record hear the same answer.
-  // Whose turn an ask is on comes from the room (turn.on); the panel never
-  // works it out. With no turn (an older room) an ask addressed to the
-  // viewer waits on them.
+  // Whose turn an ask is on is the room's shared rule (ask_turn.js); the
+  // panel only asks it, so the card says what the chip and the CLI say.
+  const askTurn = typeof module === 'object' && module && module.exports
+    ? require('./ask_turn.js') : root.InterlockAskTurn;
+  const LATEST_WORDS = Object.freeze({ ask: 'asked', revise: 'revised', discussion: 'replied', answer: 'answered' });
+
+  // With no turn (an older room) an ask addressed to the viewer waits on them.
   function onViewer(ask, viewer) {
-    return !ask.turn || !viewer ? true : ask.turn.on === viewer;
+    return !ask.turn || !viewer || !askTurn ? true : askTurn.waitsOn(ask.turn, viewer);
   }
 
-  function storyFields(ask) {
+  function storyFields(ask, viewer) {
     const fields = {};
-    if (ask && ask.turn && typeof ask.turn.word === 'string') fields.turn = ask.turn.word;
-    if (ask && ask.latest && typeof ask.latest.line === 'string') {
-      fields.latest = ask.latest.by + ': ' + firstLine(ask.latest.line);
+    if (ask && ask.turn && askTurn) fields.turn = askTurn.turnWords(ask.turn, viewer);
+    if (ask && ask.latest && typeof ask.latest.by === 'string') {
+      fields.latest = ask.latest.by + ' ' + (LATEST_WORDS[ask.latest.kind] || ask.latest.kind) +
+        (ask.latest.message_id ? ' (#' + ask.latest.message_id + ')' : '');
       fields.latestAt = ask.latest.at;
     }
     return fields;
@@ -289,7 +294,7 @@
     // Asks addressed to the viewer that are their turn, and asks the viewer
     // made that have come back to them (the other side replied).
     const mine = asks.filter(ask => onViewer(ask, viewer))
-      .concat((story.asked || []).filter(ask => ask.turn && viewer && ask.turn.on === viewer));
+      .concat((story.asked || []).filter(ask => ask.turn && viewer && askTurn && askTurn.waitsOn(ask.turn, viewer)));
     const askById = new Map(mine.map(ask => [ask.ask_id, ask]));
     const project = id => id ? (names.get(id) || id) : 'Operations';
     const cards = [];
@@ -306,7 +311,7 @@
         project: project(row.project),
         askId: bound ? bound.ask_id : null,
       };
-      if (bound) Object.assign(card, storyFields(bound));
+      if (bound) Object.assign(card, storyFields(bound, viewer));
       if (decision && killWord(row)) card.kill = killWord(row);
       if (decision && answeredInRoom(row, answered)) card.note = ROOM_NOT_RECORDED;
       cards.push(card);
@@ -319,7 +324,7 @@
         means: ask.means, detail: ask.carried_from ? 'Asked before the transcript was cleared' : null,
         project: project(ask.project),
         askId: ask.ask_id,
-        ...storyFields(ask),
+        ...storyFields(ask, viewer),
       });
     }
     cards.sort((a, b) => a.at - b.at);
