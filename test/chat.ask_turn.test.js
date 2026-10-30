@@ -292,3 +292,16 @@ test('right after a clear, a live write cannot re-mark a carried answered ask as
   assert.equal(index.checkLifecycle('approval', 3, SCOUT, false), null, 'the arrangement: a replayed carry block may re-mark it');
   assert.equal(index.checkLifecycle('approval', 3, SCOUT, true), 'ask-not-open', 'a live write may not');
 });
+
+test('a declined request for approval stays declined: no revise reopens it', async () => {
+  const chat = room();
+  const ask = await chat.appendAnnotated({ text: 'Approve?' }, scout(), { ask: { of: 'Ana', means: 'I wipe the archive' } });
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'approval', ask.id);
+  await chat.appendAnnotated({ text: 'no' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'no' }] });
+  await assert.rejects(chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'revise', ask.id, 'I wipe half the archive'),
+    error => error.code === 'ask-not-open');
+  const plain = await chat.appendAnnotated({ text: 'Which?' }, scout(), { ask: { of: 'Ana', means: 'x' } });
+  await chat.appendAnnotated({ text: 'no' }, ANA_ACTOR, { answers: [{ ask_id: plain.id, choice: 'no' }] });
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'revise', plain.id, 'y');
+  assert.equal((await chat.openAsks(ANA, 'Ana')).addressed[0].ask_id, plain.id, 'the control: a plain ask still reopens on a revise');
+});

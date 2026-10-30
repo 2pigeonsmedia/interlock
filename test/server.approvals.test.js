@@ -188,7 +188,7 @@ test('ask for approval: routed, approved in the room, revised, done; declined; w
     // Operations has no lead: the request goes to the first owner.
     const req = await askFor(scout.token);
     assert.equal(req.status, 201, req.text);
-    assert.equal(req.json.routed, 'no-lead');
+    assert.equal(req.json.routed, undefined, 'the asker is not told grant facts');
     assert.equal(/subject_id/.test(req.text), false, 'no subject id leaves the host, the first owner\'s included');
     const w = req.json.item;
     const askId = req.json.message.id;
@@ -205,6 +205,18 @@ test('ask for approval: routed, approved in the room, revised, done; declined; w
     const own = await post(runtime, '/api/work/approvals/ask', { operation_id: uuid(), project: 'ops', title: 'x', scope: 'y' }, owner);
     assert.equal(own.status, 403, own.text);
     assert.equal(own.json.error, 'owner-does-not-ask');
+
+    // Nothing is posted or rung for a request that cannot be filed.
+    const before = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows.length;
+    const nowhere = await askFor(scout.token, { project: 'nowhere' });
+    assert.equal(nowhere.status, 404, nowhere.text);
+    assert.equal((await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows.length, before, 'no dangling ask');
+
+    // Anyone but the approver (the project's lead, else the first owner) is refused in the room.
+    const bystander = await aiPost(runtime, '/api/ai/annotated-messages', { text: 'approved', client_message_id: uuid(),
+      annotation: { answers: [{ ask_id: askId, choice: 'yes' }] } }, lead.token);
+    assert.equal(bystander.status, 403, bystander.text);
+    assert.equal(bystander.json.error, 'not-approver');
 
     // Words alone never approve.
     await post(runtime, '/api/annotated-messages', { text: 'sounds fine', annotation: { answers: [{ ask_id: askId }] } }, owner);
@@ -251,10 +263,12 @@ test('ask for approval: routed, approved in the room, revised, done; declined; w
     assert.equal(granted.status, 201, 'ARRANGEMENT: Lead leads ops: ' + granted.text);
     const byLead = await askFor(lead.token, { title: 'Rotate the logs' });
     assert.equal(byLead.status, 201, byLead.text);
-    assert.deepEqual([byLead.json.routed, byLead.json.item.approval.approver.name], ['lead-is-asker-or-ai', 'Ana']);
+    assert.equal(byLead.json.item.approval.approver.name, 'Ana');
     const underAiLead = await askFor(scout.token, { title: 'Order toner' });
-    assert.deepEqual([underAiLead.json.routed, underAiLead.json.item.approval.approver.name], ['lead-is-asker-or-ai', 'Ana'],
-      'an AI lead does not approve until a grant says it may');
+    assert.equal(underAiLead.json.item.approval.approver.name, 'Ana', 'an AI lead does not approve until a grant says it may');
+    const leadSays = await aiPost(runtime, '/api/ai/annotated-messages', { text: 'yes', client_message_id: uuid(),
+      annotation: { answers: [{ ask_id: underAiLead.json.message.id, choice: 'yes' }] } }, lead.token);
+    assert.equal(leadSays.status, 403, 'nor can the AI lead approve it in the room');
   } finally {
     await runtime.close();
   }

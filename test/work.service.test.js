@@ -1149,9 +1149,10 @@ test('a request for approval: only its approver\'s explicit answer at the curren
   const filed = work.createApproval(asLead, { operation_id: uuid(), project: 'ops', title: 'Order rollers',
     scope: 'two rollers, up to $40', approver: ANA_OF, ask_message_id: 140 }).item;
   assert.deepEqual([filed.state, filed.approval.state, filed.next_to.name], ['open', 'awaiting', 'Ana']);
-  const say = (who, message_id, choice, revision = 1, byAddressee = true) => work.answerFromRoom(who, {
-    ask_id: 140, message_id, text: String(choice), choice, by_addressee: byAddressee, of: ANA_OF, revision });
-  assert.equal(say(Object.assign({}, builder, { session: null }), 141, 'yes', 1, false).recorded, null, 'a bystander\'s yes');
+  const say = (who, message_id, choice, revision = 1, byAddressee = true, approverOk = true) => work.answerFromRoom(who, {
+    ask_id: 140, message_id, text: String(choice), choice, by_addressee: byAddressee, of: ANA_OF, revision, approver_ok: approverOk });
+  assert.equal(say(Object.assign({}, builder, { session: null }), 141, 'yes', 1, false, false).recorded, null, 'a bystander\'s yes');
+  assert.equal(say(asOwner, 149, 'yes', 1, true, false).recorded, null, 'a yes the host did not find from the current approver');
   assert.equal(say(asOwner, 142, null).recorded, null, 'her words alone');
   assert.equal(say(asOwner, 143, 'yes', 2).recorded, null, 'a yes to a revision the record is not at');
   assert.equal(work.get(owner, { id: filed.id }).item.approval.state, 'awaiting');
@@ -1166,6 +1167,8 @@ test('a request for approval: only its approver\'s explicit answer at the curren
   assert.equal(work.closeApproval(asLead, { ask_id: 140, message_id: 145, text: 'done' }).closed, null, 'not approved: nothing to close');
   assert.equal(say(asOwner, 146, 'yes', 2).recorded, filed.id);
   assert.equal(work.closeApproval(asOwner, { ask_id: 140, message_id: 147, text: 'done' }).closed, null, 'only its asker closes it');
+  assert.throws(() => work.updateWork(asLead, { operation_id: uuid(), id: filed.id, expected_revision: work.get(owner, { id: filed.id }).item.revision,
+    note: 'n', state: 'done' }), error => error.code === 'invalid-kind', 'nobody moves it by update');
   assert.equal(work.closeApproval(asLead, { ask_id: 140, message_id: 148, text: 'Ordered, arriving Friday' }).closed, filed.id);
   assert.equal(work.get(owner, { id: filed.id }).item.state, 'done');
 });

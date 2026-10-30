@@ -196,8 +196,8 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     assert.equal(decision.source_message.message_id, asked.json.message.id, 'the record cites the ask');
     const rows = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows;
     assert.deepEqual(rows.map(row => [row.kind, row.message_id || row.ask_id, row.ask && row.ask.of, row.ask && row.ask.means]),
-      [['post', asked.json.message.id, 'Ana', 'I merge the candidate to main and nothing else'],
-        ['approval', asked.json.message.id, undefined, undefined]], 'a decision asked in the room is a request for approval');
+      [['post', asked.json.message.id, 'Ana', 'I merge the candidate to main and nothing else']],
+      'a decision asked in the room is a plain ask: only Ask for approval routes and marks an approval');
     assert.equal(rows[0].ask.project, 'ops', 'a decision\'s ask carries its project');
 
     const again = await aiPost(runtime, '/api/ai/work/decisions/ask', body, lead.token);
@@ -350,8 +350,7 @@ test('a decision asked in the room: the ask first, the record citing it, the kil
     const echoed = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
       .filter(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === onRecord.json.message.id));
     assert.equal(echoed.length, 1, 'the room carries her answer');
-    assert.deepEqual(echoed[0].answers.map(entry => [entry.by_addressee, entry.closes]), [[true, false]],
-      'her words on the record reach the room, but words alone never approve');
+    assert.deepEqual(echoed[0].answers.map(entry => [entry.by_addressee, entry.closes]), [[true, true]]);
     const roomText = (await get(runtime, '/api/messages?after=0&limit=100&wait=0', owner)).json.messages
       .find(message => message.id === echoed[0].message_id).text;
     assert.equal(roomText, `re #${onRecord.json.message.id} Answered on ${fresh.id}: yes, by priority`);

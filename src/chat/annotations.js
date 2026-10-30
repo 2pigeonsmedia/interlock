@@ -361,9 +361,12 @@ function createAskIndex(eraFirstId) {
    * stored: whether its author was the one asked, and whether it closed it. */
   // Words alone never approve: an answer to a request for approval closes it
   // only with a Yes or a No.
-  function answerFacts(askId, who, choice = null) {
+  // `asApprover`: the host re-derived the request's approver when this answer
+  // was given and it is this author (the current lead, or the first owner),
+  // who answers it as its addressee.
+  function answerFacts(askId, who, choice = null, asApprover = false) {
     const ask = asks.get(askId);
-    const byAddressee = addressedTo(ask, who);
+    const byAddressee = addressedTo(ask, who) || (asApprover === true && ask.approval);
     return {
       by_addressee: byAddressee, closes: byAddressee && !ask.kept_open && !(ask.approval && choice === null),
       revision: ask.revision,
@@ -393,6 +396,8 @@ function createAskIndex(eraFirstId) {
     // A revision is the asker's, while the ask is still live; after a yes it
     // reopens the ask, and nobody's earlier yes carries over.
     if (kind === 'revise' && (ask.state === 'withdrawn' || ask.done)) return 'ask-not-open';
+    // A declined request for approval stays declined: asking again is a new request.
+    if (kind === 'revise' && ask.approval && askTurn(ask).phase === 'declined') return 'ask-not-open';
     // An ask becomes a request for approval only before anyone has answered
     // it, so no answer given to a plain question is ever read as an approval;
     // a carried request is re-marked in the era it was carried into.

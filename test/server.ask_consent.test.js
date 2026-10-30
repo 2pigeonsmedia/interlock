@@ -207,7 +207,7 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     decision = await item(runtime, owner, rollers.json.item.id);
     assert.deepEqual([decision.state, decision.scope, decision.answer.ask_revision],
       ['answered', 'I order the third-party rollers from eBay', 2]);
-    assert.equal((await leadTurn(askId)).turn.phase, 'agreed');
+    assert.equal(await leadTurn(askId), undefined, 'a decision ask is a plain ask: her yes answers it');
 
     // The AI's door: the same rule when a person asks an AI.
     const rerun = await post(runtime, '/api/annotated-messages', {
@@ -238,9 +238,9 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     assert.equal(no.status, 200, no.text);
     const echo = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
       .find(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === wipe.json.message.id));
-    assert.deepEqual(echo.answers.map(entry => [entry.choice, entry.revision, entry.closes]), [[null, 1, false]],
-      'her words reach the room, but words alone never approve');
-    assert.equal((await leadTurn(wipe.json.message.id)).turn.phase, 'waiting', 'not agreed: Lead is not on it');
+    assert.deepEqual(echo.answers.map(entry => [entry.choice, entry.revision, entry.closes]), [[null, 1, true]],
+      'the arrangement: the room took her record answer as closing');
+    assert.equal(await leadTurn(wipe.json.message.id), undefined, 'answered, a plain ask: nobody is on it');
 
     // Answered on the record after a revision: the copy names the revision the record follows.
     const drum = await askOf(runtime, lead.token, {
@@ -273,7 +273,7 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     const lanesEcho = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
       .find(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === lanes.json.message.id));
     assert.deepEqual(lanesEcho.answers.map(entry => [entry.choice, entry.revision]), [['yes', 1]]);
-    assert.equal((await leadTurn(lanes.json.message.id)).turn.phase, 'agreed', 'her record yes is agreement in the room');
+    assert.equal(await leadTurn(lanes.json.message.id), undefined, 'her record yes answers the plain ask');
     // She had the record open at the old scope when Lead revised: her yes is refused, nothing reaches the room.
     const grit = await askOf(runtime, lead.token, {
       project: 'ops', title: 'Grit', body: 'b', asked_of: 'Ana', scope: 'I buy one bag of grit',

@@ -604,7 +604,7 @@ function openStore(opts) {
 
   /* The rules a post annotation must pass against live state. Returns the
    * answers with their crossings, computed now and stored as fact. */
-  function checkPostAnnotation(annotation, actor) {
+  function checkPostAnnotation(annotation, actor, approverOf = null) {
     if (annotation.ask && annotation.ask.of_subject_id === actor.subject_id) fail('ask-of-self');
     if (annotation.read_through !== null && annotation.read_through > highWater()) {
       fail('invalid-annotation');
@@ -618,7 +618,7 @@ function openStore(opts) {
         ask_id: answer.ask_id,
         choice: answer.choice,
         crossed_by: asks.crossingFor(answer.ask_id, who, answeredIds),
-      }, asks.answerFacts(answer.ask_id, who, answer.choice)));
+      }, asks.answerFacts(answer.ask_id, who, answer.choice, approverOf instanceof Set && approverOf.has(answer.ask_id))));
     });
     if (annotation.discusses !== null) {
       const refusal = asks.checkDiscuss(annotation.discusses);
@@ -647,7 +647,9 @@ function openStore(opts) {
   /* `requireNew`: a retry under a client id already used is refused, not
    * replayed, inside this same lock, for a caller that must know its post is
    * the first under that id. */
-  function append(untrusted, trusted, annotationInput = null, requireNew = false) {
+  // `approverOf`: host-only, the requests for approval this author answers as
+  // the approver the host re-derived; never from a request body.
+  function append(untrusted, trusted, annotationInput = null, requireNew = false, approverOf = null) {
     return exclusive(() => {
       requireOpen();
       const body = closedObject(untrusted, UNTRUSTED_KEYS);
@@ -702,7 +704,7 @@ function openStore(opts) {
           return publicMessage(prior, receipts, aiSessionDiscriminator);
         }
       }
-      const answers = annotation ? checkPostAnnotation(annotation, actor) : null;
+      const answers = annotation ? checkPostAnnotation(annotation, actor, approverOf) : null;
       const record = Object.freeze({
         id: meta.next_id,
         ts: Date.now(),

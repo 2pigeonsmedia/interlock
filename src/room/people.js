@@ -350,6 +350,8 @@ function createPeopleService(options) {
     if (!newest) return null;
     return Object.freeze({
       name: newest.row.holder_name, kind: newest.row.holder_kind, grant_id: newest.row.grant_id,
+      // Server-internal: the host matches the lead by subject, never by name.
+      subject_id: newest.row.holder_subject_id,
     });
   }
 

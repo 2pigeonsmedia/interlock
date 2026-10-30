@@ -28,6 +28,7 @@ const ANNOTATION_REFUSALS = Object.freeze({
   'ask-not-open': 409,
   'ask-not-answered': 409,
   'ask-revised': 409,
+  'not-approver': 403,
 });
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(allow|decline)$/;
@@ -2148,14 +2149,6 @@ function createFirstOwnerHandler(options) {
       annotationRefusal(request, response, error);
       return;
     }
-    // A decision asked in the room is a request for approval: marked so before
-    // anyone can answer it. If an answer got there first the mark is refused,
-    // and the ask stays a plain question; no answer is ever read as approval.
-    try {
-      await chat.annotate(chatActor, 'approval', saved.id);
-    } catch (_) {
-      // Answered before it could be marked: it stays a plain ask.
-    }
     // The addressee is resolved once, by the room: the record is asked of the
     // participant the room ask is addressed to, never of a string from the body.
     const facts = await chat.postFacts(saved.id);
@@ -2198,9 +2191,31 @@ function createFirstOwnerHandler(options) {
     const owner = first ? live.find(row => row.kind === 'person' && row.subject_id === first.subject_id) || null : null;
     const lead = people ? people.service.leadOf(project, now, new Set(live.map(row => row.subject_id))) : null;
     const leadRow = lead && lead.kind === 'person'
-      ? live.find(row => row.kind === 'person' && row.name === lead.name) : null;
+      ? live.find(row => row.kind === 'person' && row.subject_id === lead.subject_id) : null;
     if (leadRow && leadRow.subject_id !== asker.subject_id) return { approver: leadRow, owner, why: 'lead' };
     return { approver: owner, owner, why: lead ? 'lead-is-asker-or-ai' : 'no-lead' };
+  }
+
+  /* Re-derived when an answer is given (Q4): which requests for approval this
+   * author answers as their approver, the project's current lead or the
+   * first owner. Anyone else's Yes or No is refused before the room stores
+   * it, so the room never reads "approved" while the record refuses it. */
+  async function approverAnswers(actor, annotation) {
+    const answers = annotation && Array.isArray(annotation.answers) ? annotation.answers : [];
+    const approverOf = new Set();
+    let live = null;
+    for (const answer of answers) {
+      const askId = answer && answer.ask_id;
+      const request = work && Number.isSafeInteger(askId) ? work.approvalOf(askId) : null;
+      if (!request) continue;
+      if (live === null) live = await chat.listParticipants();
+      const route = approverFor(request.project, { subject_id: request.asker_subject_id }, live, Date.now());
+      const allowed = (route.approver && route.approver.subject_id === actor.subject_id) ||
+        (route.owner && route.owner.subject_id === actor.subject_id);
+      if (allowed) approverOf.add(askId);
+      else if (answer.choice === 'yes' || answer.choice === 'no') return { refusal: 'not-approver' };
+    }
+    return { approverOf };
   }
 
   async function askApproval(request, response, body, workActor, ai) {
@@ -2226,6 +2241,11 @@ function createFirstOwnerHandler(options) {
     const prior = work.priorResult(workActor, body.operation_id);
     if (prior) {
       sendJson(request, response, 200, prior.body);
+      return;
+    }
+    // The project first: nothing is posted or rung for a request that cannot be filed.
+    if (!work.projectTakesWork(body.project)) {
+      sendJson(request, response, 404, { ok: false, error: 'unknown-project' });
       return;
     }
     const live = await chat.listParticipants();
@@ -2271,13 +2291,18 @@ function createFirstOwnerHandler(options) {
       approver: { subject_id: facts.ask.subject_id, name: facts.ask.name, kind: facts.ask.kind },
       ask_message_id: saved.id, ...(body.body === undefined ? {} : { body: body.body }),
     });
-    sendJson(request, response, filed.status, Object.assign({}, filed.body, { message: saved, routed: route.why }));
+    // Filing failed after the ask was posted: the ask is withdrawn, so the
+    // room never holds a request for approval with no work item.
+    if (filed.status >= 400) {
+      try { await chat.annotate(chatActor, 'withdraw', saved.id); } catch (_) { /* already closed */ }
+    }
+    sendJson(request, response, filed.status, Object.assign({}, filed.body, { message: saved }));
   }
 
   /* After a room answer is saved: each answer the room stored as coming from
    * its ask's addressee goes to the decision bound to that ask, if any. The
    * room's facts decide, not the request. The post's response never changes. */
-  async function bridgeRoomAnswers(chatActor, saved, request) {
+  async function bridgeRoomAnswers(chatActor, saved, request, approverOf = new Set()) {
     if (!work) return;
     const facts = await chat.postFacts(saved.id);
     if (!facts) return;
@@ -2291,6 +2316,7 @@ function createFirstOwnerHandler(options) {
       work.answerFromRoom(actor, {
         ask_id: answer.ask_id, message_id: saved.id, text: saved.text, choice: answer.choice,
         by_addressee: answer.by_addressee, of: answer.of, revision: answer.revision,
+        approver_ok: approverOf.has(answer.ask_id),
       });
     }
     // A done receipt on a request for approval closes its work item.
@@ -2412,10 +2438,15 @@ function createFirstOwnerHandler(options) {
       return;
     }
     try {
-      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation));
+      const gate = await approverAnswers(actor, asked.annotation);
+      if (gate.refusal) {
+        sendJson(request, response, 403, { ok: false, error: gate.refusal });
+        return;
+      }
+      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf));
       if (!saved) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
-      await bridgeRoomAnswers(actor, saved, request);
+      await bridgeRoomAnswers(actor, saved, request, gate.approverOf);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);
@@ -2454,10 +2485,15 @@ function createFirstOwnerHandler(options) {
       return;
     }
     try {
-      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation));
+      const gate = await approverAnswers(actor, asked.annotation);
+      if (gate.refusal) {
+        sendJson(request, response, 403, { ok: false, error: gate.refusal });
+        return;
+      }
+      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf));
       if (saved === null) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
-      await bridgeRoomAnswers(actor, saved, request);
+      await bridgeRoomAnswers(actor, saved, request, gate.approverOf);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       annotationRefusal(request, response, error);

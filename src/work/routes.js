@@ -285,6 +285,22 @@ function createWorkRoutes(options) {
     }
   }
 
+  function approvalOf(askId) {
+    try {
+      return work.approvalOf(askId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function projectTakesWork(projectId) {
+    try {
+      return work.projectTakesWork(projectId) === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // The asker's done receipt in the room. Never a refusal the room sees.
   function closeApproval(actor, body) {
     try {
@@ -295,7 +311,7 @@ function createWorkRoutes(options) {
   }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope, createApproval, closeApproval,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

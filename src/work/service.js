@@ -514,6 +514,10 @@ function createWorkService(options) {
     return operation(actor, 'items.update', rawInput, UPDATE_KEYS, (draft, body, now) => {
       const item = findItem(draft, body.id);
       if (item.kind === 'decision') fail('invalid-kind');
+      // A request for approval moves only by its approval: Approve, Decline,
+      // a revision, or its asker's done receipt. Nobody updates its state,
+      // holder or next step, and its title and body are what was approved.
+      if (item.approval) fail('invalid-kind');
       checkRevision(item, body.expected_revision);
       const note = requiredText(body.note, SHORT_BYTES, 'note');
       const next = clone(item);
@@ -928,7 +932,9 @@ function createWorkService(options) {
    * message is recorded at most once in a decision's life. */
   function answerFromRoom(actor, rawInput) {
     requireActor(actor);
-    const body = closedObject(rawInput, ['ask_id', 'message_id', 'text', 'choice', 'by_addressee', 'of', 'revision']);
+    const keys = ['ask_id', 'message_id', 'text', 'choice', 'by_addressee', 'of', 'revision'];
+    // `approver_ok`: the host re-derived a request's approver at answer time.
+    const body = closedObject(rawInput, keys.concat(['approver_ok'])) || closedObject(rawInput, keys);
     if (!body || !Number.isSafeInteger(body.ask_id) || body.ask_id < 1 ||
         !Number.isSafeInteger(body.message_id) || body.message_id < 1 ||
         !Number.isSafeInteger(body.revision) || body.revision < 1 ||
@@ -978,6 +984,21 @@ function createWorkService(options) {
   }
 
   // ── requests for approval ─────────────────────────────────────────────────
+  // Whether a request can be filed in this project now: it exists and is not
+  // retired. Checked before its room ask is posted, so no ask is left without
+  // its work item.
+  // The request for approval bound to this room ask: its project and asker,
+  // for the host to re-derive its approver. Null when there is none.
+  function approvalOf(askId) {
+    const item = snapshot().items.find(row => row.kind === 'work' && row.approval && row.ask_message_id === askId);
+    return item ? Object.freeze({ project: item.project, asker_subject_id: item.approval.by.subject_id }) : null;
+  }
+
+  function projectTakesWork(projectId) {
+    const project = snapshot().projects.find(row => row.id === projectId);
+    return !!project && project.retired_at === null;
+  }
+
   // A work item that waits on one person's Approve before its asker does it.
   // The host files it with the room ask it was asked with, already bound, so
   // the room and the record hear the same answer. Approved, it is the asker's
@@ -1016,9 +1037,10 @@ function createWorkService(options) {
   // explicit Yes approves and only a No declines; words alone change nothing.
   function approvalAnswer(draft, item, actor, body) {
     const approval = item.approval;
-    if (body.by_addressee !== true || actor.subject_id !== approval.approver.subject_id ||
-        actor.kind !== approval.approver.kind || body.revision !== askRevision(item) ||
-        approval.state !== 'awaiting' || (body.choice !== 'yes' && body.choice !== 'no')) {
+    // Only the approver the host re-derived when the answer was given (the
+    // project's current lead, or the first owner) approves or declines.
+    if (body.by_addressee !== true || body.approver_ok !== true || body.revision !== askRevision(item) ||
+        approval.state !== 'awaiting' || item.state !== 'open' || (body.choice !== 'yes' && body.choice !== 'no')) {
       return { ok: true, recorded: null };
     }
     const bridged = Array.isArray(item.bridged_message_ids) ? item.bridged_message_ids : [];
@@ -1388,7 +1410,7 @@ function createWorkService(options) {
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, priorResult, reviseScope,
-    createApproval, closeApproval,
+    createApproval, closeApproval, projectTakesWork, approvalOf,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });
