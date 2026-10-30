@@ -169,6 +169,16 @@
     return button;
   }
 
+  // The first owner sees every request awaiting approval: a list, not a ring.
+  function renderApprovals(brief) {
+    const state = session;
+    const owner = !!(state && state.user && state.user.first_owner === true);
+    const rows = owner ? model().approvalsList(brief, state.user.name) : [];
+    element('approvals-section').hidden = !owner;
+    element('approvals-count').textContent = String(rows.length);
+    element('approvals-list').replaceChildren(...rows.map(row => make('p', 'work-row work-tree-facts', row.line)));
+  }
+
   // One card per thing waiting on the viewer: who asked, the question, what
   // a yes means, then its answers, its project and its age.
   function renderNeedsYou(brief) {
@@ -176,6 +186,7 @@
     const needs = model().needsCards(brief, Date.now(), state ? state.asks : [], state ? state.answers.settled() : new Set(),
       { asked: state ? state.asked : [], viewer: state && state.user ? state.user.name : null });
     element('needs-you-count').textContent = String(needs.count);
+    renderApprovals(brief);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
     element('needs-you-list').replaceChildren(...(needs.count ? needs.cards.map(card => {
       const node = make('div', 'work-row work-card');

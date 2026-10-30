@@ -826,7 +826,7 @@ test('an answer reads who gave it, and an owner answering for someone names both
 
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'ageText', 'answerLines', 'changedSince', 'createAnswerTracker', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'firstLine', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'ageText', 'answerLines', 'approvalsList', 'changedSince', 'createAnswerTracker', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'firstLine', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
     'needsCards', 'needsYou', 'notifyText', 'projectLine', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'trackedBy', 'waitingLabel', 'who']);
 });
@@ -1056,4 +1056,18 @@ test('a request for approval is one card answered through its ask; its project c
   const [ops] = projectSections(brief);
   assert.deepEqual(ops.rows.map(node => node.row.id), ['W-33'], 'W-32 is not shown again under its project');
   assert.equal(ops.waitingOnYou, 1, 'it is counted there instead');
+});
+
+test('the first owner\'s Approvals list: every request awaiting approval, one line each; hers point to her Needs you', () => {
+  const req = (id, approver, state = 'awaiting', at = NOW) => ({ id, kind: 'work', project: 'ops', title: 'T' + id, updated_at: at,
+    approval: { state, approver: { name: approver, kind: 'person', session: null }, by: { name: 'Scout', kind: 'seat', session: null }, scope: 's' + id } });
+  const mine = req('W-1', 'Ana', 'awaiting', NOW - 2);
+  const brief = { projects: [{ id: 'ops', display_name: 'Operations' }], needs_me: [mine],
+    open: [mine, req('W-2', 'Bea', 'awaiting', NOW - 1), req('W-3', 'Bea', 'approved'), { id: 'W-4', kind: 'work', project: 'ops', title: 'plain', updated_at: NOW }],
+    decisions: [] };
+  const rows = model.approvalsList(brief, 'Ana');
+  assert.deepEqual(rows.map(row => row.line), [
+    'W-1 TW-1 · waiting on you ↑',
+    'W-2 TW-2 · Operations · approver Bea · asked by Scout · sW-2',
+  ], 'awaiting only, oldest first; hers is a pointer, not a second card');
 });

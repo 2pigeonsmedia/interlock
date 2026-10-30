@@ -479,6 +479,27 @@
   // open work and live decisions from the brief, nested one level by parent.
   // A child whose parent is done has no parent among these rows, so it lists
   // at top level.
+  // Every request awaiting approval in the room, for the first owner: one line
+  // each, oldest first. One of hers is already a card in her Needs you, so its
+  // line points there instead of repeating it.
+  function approvalsList(brief, viewer) {
+    const names = projectNames(brief);
+    const mine = new Set((brief.needs_me || []).map(row => row.id));
+    return (brief.open || []).filter(row => row.approval && row.approval.state === 'awaiting')
+      .sort((a, b) => a.updated_at - b.updated_at)
+      .map(row => {
+        const approver = row.approval.approver ? row.approval.approver.name : 'nobody';
+        const project = names.has(row.project) ? names.get(row.project) : row.project;
+        return Object.freeze({
+          id: row.id, title: row.title, project, at: row.updated_at, approver,
+          line: mine.has(row.id)
+            ? row.id + ' ' + row.title + ' · waiting on you ↑'
+            : row.id + ' ' + row.title + ' · ' + project + ' · approver ' + (approver === viewer ? 'you' : approver) +
+              ' · asked by ' + (row.approval.by ? row.approval.by.name : 'nobody') + ' · ' + row.approval.scope,
+        });
+      });
+  }
+
   // One full card per item (Patti, 2026-10-30): an item already in the
   // viewer's Needs you is counted in its project, not shown there again.
   function projectSections(brief) {
@@ -776,7 +797,7 @@
 
   const contract = Object.freeze({
     who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou,
-    ageText, firstLine, needsCards, trackedBy, projectLine, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine,
+    ageText, firstLine, needsCards, trackedBy, projectLine, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine, approvalsList,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
     errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });
