@@ -6,7 +6,11 @@
 // are open for the viewer, and which asks the composer may bind an answer to.
 // Nothing here reads message text.
 (function exposeAsksModel(root) {
-  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry']);
+  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise']);
+  const REVISE_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id', 'means']);
+  // Whose turn it is comes from the one shared rule, here and on the server.
+  const askTurn = typeof module === 'object' && module && module.exports
+    ? require('./ask_turn.js') : root.InterlockAskTurn;
   const POST_KEYS = Object.freeze([
     'seq', 'ts', 'kind', 'by', 'message_id', 'ask', 'answers', 'status', 'read_through', 'discusses',
   ]);
@@ -71,6 +75,10 @@
         positive(row.ask_id) && typeof row.archive_id === 'string' &&
         Number.isSafeInteger(row.asked_at) && validAsk(row.ask) && typeof row.kept_open === 'boolean';
     }
+    if (row.kind === 'revise') {
+      return exact(row, REVISE_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id) &&
+        (row.means === null || name(row.means));
+    }
     return exact(row, LIFECYCLE_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id);
   }
 
@@ -97,6 +105,21 @@
       kept_open: ask.kept_open,
       carried_from: ask.carried_from,
       answers: Object.freeze(ask.answers.map(answer => Object.freeze(Object.assign({}, answer)))),
+      revision: ask.revision,
+      revisions: Object.freeze(ask.revisions.map(entry => Object.freeze(Object.assign({}, entry)))),
+      latest: Object.freeze(Object.assign({}, ask.latest)),
+      done: ask.done ? Object.freeze(Object.assign({}, ask.done)) : null,
+      turn: turnFor(ask),
+    });
+  }
+
+  // The same inputs the server gives the shared rule.
+  function turnFor(ask) {
+    if (!askTurn) return null;
+    const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
+    return askTurn.turnOf({
+      state: ask.state, done: !!ask.done, asker: ask.by, addressee: ask.of, addressee_kind: ask.of_kind,
+      last_choice: last ? last.choice : null, latest_party: ask.latest ? ask.latest.party : null,
     });
   }
 
@@ -114,7 +137,14 @@
         ask_id: askId, asked_at: askedAt, by, of: ask.of, of_kind: ask.of_kind,
         means: ask.means, deliver: ask.deliver, project: ask.project, state: 'open', kept_open: false,
         carried_from: carriedFrom, answers: [],
+        revision: 1, revisions: [],
+        latest: { message_id: carriedFrom ? null : askId, kind: 'ask', party: 'asker', by, at: askedAt },
+        done: null,
       });
+    }
+
+    function actingParty(ask) {
+      return askTurn ? askTurn.actingParty({ addressee_kind: ask.of_kind }) : 'asker';
     }
 
     /* Rows arrive in seq order and were valid when the server wrote them;
@@ -131,8 +161,22 @@
             // The server decided what this answer did, once; it is read, never re-derived.
             ask.answers.push({
               message_id: row.message_id, by: row.by, choice: answer.choice, by_addressee: answer.by_addressee,
+              revision: answer.revision,
             });
+            if (answer.by_addressee) {
+              ask.latest = { message_id: row.message_id, kind: 'answer', party: 'addressee', by: row.by, at: row.ts };
+            }
             if (answer.closes) ask.state = 'answered';
+          }
+          // A reply that discusses an ask: only its two parties move its story,
+          // and the acting party's reply with status done, after a yes, is the
+          // done receipt. Mirrors the server's applyDiscussion.
+          const discussed = row.discusses ? asks.get(row.discusses.ask_id) : null;
+          if (discussed && row.discusses.party !== 'other') {
+            discussed.latest = { message_id: row.message_id, kind: 'discussion', party: row.discusses.party, by: row.by, at: row.ts };
+            if (row.discusses.party === actingParty(discussed) && row.status === 'done' && discussed.state === 'answered') {
+              discussed.done = { message_id: row.message_id, at: row.ts };
+            }
           }
           if (row.ask) addAsk(row.message_id, row.by, row.ask, row.ts, null);
         } else if (row.kind === 'carry') {
@@ -142,7 +186,15 @@
           const ask = asks.get(row.ask_id);
           if (!ask) continue;
           if (row.kind === 'withdraw') ask.state = 'withdrawn';
-          else {
+          else if (row.kind === 'revise') {
+            // The asker's new scope replaces the old in place; the old stays
+            // in revisions, and a revision after a yes reopens the ask.
+            ask.revisions.push({ means: ask.means, revision: ask.revision });
+            ask.means = row.means;
+            ask.revision += 1;
+            if (ask.state === 'answered') ask.state = 'open';
+            ask.latest = { message_id: null, kind: 'revise', party: 'asker', by: row.by, at: row.ts };
+          } else {
             ask.state = 'open';
             ask.kept_open = true;
           }
@@ -161,11 +213,19 @@
       return posts.get(messageId) || null;
     }
 
+    // Open asks, and agreed asks not yet done: an agreed ask stays on the
+    // list of whoever carries it out until their done receipt.
+    function live(found) {
+      if (found.state === 'open') return true;
+      const turn = turnFor(found);
+      return !!turn && turn.phase === 'agreed';
+    }
+
     function openFor(viewer) {
       const addressed = [];
       const asked = [];
       for (const found of [...asks.values()].sort((a, b) => a.ask_id - b.ask_id)) {
-        if (found.state !== 'open') continue;
+        if (!live(found)) continue;
         if (found.of === viewer) addressed.push(publicAsk(found));
         if (found.by === viewer) asked.push(publicAsk(found));
       }

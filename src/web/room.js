@@ -2044,6 +2044,30 @@ function decorateMessage(article, messageId) {
     line.className = 'ask-line';
     line.textContent = InterlockAsks.askLine(ask, Date.now()) + (ask.project ? ` · ${projectName(ask.project)}` : '');
     chip.append(line);
+    // Whose turn, in the shared words, and the latest exchange: the same
+    // story the Needs-you card and the CLI tell.
+    if (ask.turn && window.InterlockAskTurn) {
+      const turn = document.createElement('span');
+      turn.className = 'ask-turn';
+      turn.textContent = window.InterlockAskTurn.turnWords(ask.turn, viewer);
+      chip.append(turn);
+    }
+    if (ask.latest && ask.latest.kind !== 'ask') {
+      const latest = document.createElement('span');
+      latest.className = 'ask-latest';
+      const words = { revise: 'revised the ask', discussion: 'replied', answer: 'answered' };
+      latest.textContent = `Latest: ${ask.latest.by} ${words[ask.latest.kind] || ask.latest.kind}` +
+        (ask.latest.message_id ? ` (#${ask.latest.message_id})` : '');
+      chip.append(latest);
+    }
+    // Earlier scopes stay visible, struck: nobody's yes carries over to them.
+    for (const earlier of ask.revisions || []) {
+      if (earlier.means === null) continue;
+      const struck = document.createElement('s');
+      struck.className = 'ask-means ask-revised';
+      struck.textContent = `A yes meant: ${earlier.means}`;
+      chip.append(struck);
+    }
     if (ask.means !== null) {
       const means = document.createElement('span');
       means.className = 'ask-means';
@@ -2061,6 +2085,11 @@ function decorateMessage(article, messageId) {
     }
     if (viewer !== null && ask.by === viewer && ask.state === 'open') {
       chip.append(askButton('Withdraw', () => askLifecycle('withdraw', ask.ask_id)));
+    }
+    // The asker revises in place while the ask is live; a revision after a
+    // yes reopens it for the person asked.
+    if (viewer !== null && ask.by === viewer && ask.state !== 'withdrawn' && !ask.done) {
+      chip.append(askButton('Revise', () => openRevise(chip, ask)));
     }
     if (viewer !== null && ask.by === viewer && ask.state === 'answered') {
       chip.append(askButton('Keep open', () => askLifecycle('keep_open', ask.ask_id)));
@@ -2151,6 +2180,8 @@ function composerAnnotation() {
   const answers = composingDiscussion() ? null
     : InterlockAsks.bindAnswers(asksState.openFor(viewerName()).addressed, pickedAsks, messageBody.value);
   if (answers) annotation.answers = answers;
+  // A reply to an ask attaches to it: it passes the turn, answers nothing.
+  if (composingDiscussion()) annotation.discusses = InterlockReplyReference.parse(messageBody.value).id;
   if (!askFields.hidden && askOf.value) {
     annotation.ask = { of: askOf.value, deliver: askLater.checked ? 'later' : 'now' };
     if (askMeans.value.trim() !== '') annotation.ask.means = askMeans.value.trim();
@@ -2182,13 +2213,40 @@ async function answerAsk(askId, choice) {
   loadAnnotations();
 }
 
-async function askLifecycle(kind, askId) {
+async function askLifecycle(kind, askId, extra = {}) {
   try {
-    await ownerMutation('/api/annotations', { kind, ask_id: askId });
+    await ownerMutation('/api/annotations', Object.assign({ kind, ask_id: askId }, extra));
   } catch (error) {
     setRoomNotice(ASK_REFUSALS[error.code] || 'Interlock could not confirm that change. Try again.');
   }
   loadAnnotations();
+}
+
+/* The asker's new "a yes means" line, written in place under the ask. */
+function openRevise(chip, ask) {
+  if (chip.querySelector('.ask-revise')) return;
+  const form = document.createElement('form');
+  form.className = 'ask-revise';
+  const label = document.createElement('label');
+  label.textContent = 'A yes now means';
+  const input = document.createElement('input');
+  input.maxLength = 300;
+  input.required = ask.of_kind === 'person';
+  input.value = ask.means || '';
+  label.append(input);
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'quiet-action';
+  save.textContent = 'Save revision';
+  const cancel = askButton('Cancel', () => form.remove());
+  form.append(label, save, cancel);
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const means = input.value.trim();
+    askLifecycle('revise', ask.ask_id, { means: means === '' ? null : means });
+  });
+  chip.append(form);
+  input.focus();
 }
 
 /* Reply on a message that carries an ask is a discussion, not an answer: it

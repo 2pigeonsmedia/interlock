@@ -60,7 +60,8 @@ test('open asks for the viewer: addressed and asked, carried asks included, in i
     [[4, 'Lead', 'transcript-x'], [21, 'Scout', null]]);
   assert.deepEqual(open.asked.map(row => row.ask_id), [20]);
   assert.deepEqual(Object.keys(open.addressed[0]).sort(), ['answers', 'ask_id', 'asked_at', 'by',
-    'carried_from', 'deliver', 'kept_open', 'means', 'of', 'of_kind', 'project', 'state'],
+    'carried_from', 'deliver', 'done', 'kept_open', 'latest', 'means', 'of', 'of_kind', 'project', 'revision',
+    'revisions', 'state', 'turn'],
   'the event carries the same ask shape GET /api/ai/asks returns');
 });
 
@@ -166,4 +167,54 @@ test('a reply to an ask hides the answer chips and binds nothing; the panel answ
 
 test('the work panel\'s Reply on an ask is the same composer act as the message\'s Reply', () => {
   assert.match(ROOM_JS, /addEventListener\('interlock:reply-ask'[\s\S]*seedReply\(detail\.ask_id\)/);
+});
+
+// The page replays the story the way the server does, so the chip, the card
+// and the CLI read the same turn. Rows are the public side-car rows.
+test('the page replays the printer story in both directions and reads the same turn as the server', () => {
+  const { createAsksState } = require('../src/web/asks_model.js');
+  const ask = (seq, message_id, by, of, of_kind, means) => ({ seq, ts: seq * 1000, kind: 'post', by, message_id,
+    ask: { of, of_kind, means, deliver: 'now', project: 'ops' }, answers: [], status: null, read_through: null, discusses: null });
+  const reply = (seq, message_id, by, ask_id, party, status = null) => ({ seq, ts: seq * 1000, kind: 'post', by, message_id,
+    ask: null, answers: [], status, read_through: status ? 0 : null, discusses: { ask_id, party } });
+  const answer = (seq, message_id, by, ask_id, choice, revision) => ({ seq, ts: seq * 1000, kind: 'post', by, message_id, ask: null,
+    answers: [{ ask_id, choice, crossed_by: null, by_addressee: true, closes: true, revision }], status: null, read_through: null, discusses: null });
+  const revise = (seq, by, ask_id, means) => ({ seq, ts: seq * 1000, kind: 'revise', by, ask_id, means });
+
+  // An AI asks a person (permission): the asker acts after a yes.
+  const room = createAsksState();
+  room.apply([ask(1, 6, 'Scout', 'Patti', 'person', 'I order one roller, up to $30')]);
+  assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Patti', acting: null });
+  room.apply([reply(2, 8, 'Patti', 6, 'addressee')]);
+  assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Scout', acting: null }, 'her reply passes the turn');
+  assert.equal(room.ask(6).latest.kind, 'discussion');
+  room.apply([revise(3, 'Scout', 6, 'I order one refurbished roller, up to $15')]);
+  assert.equal(room.ask(6).means, 'I order one refurbished roller, up to $15');
+  assert.deepEqual(room.ask(6).revisions, [{ means: 'I order one roller, up to $30', revision: 1 }], 'the old scope stays, struck');
+  assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Patti', acting: null }, 'the revision is hers to answer');
+  room.apply([answer(4, 9, 'Patti', 6, 'yes', 2)]);
+  assert.deepEqual(room.ask(6).turn, { phase: 'agreed', waiting_on: null, acting: 'Scout' });
+  assert.deepEqual(room.openFor('Scout').asked.map(row => row.ask_id), [6], 'agreed stays on the acting asker\'s list');
+  assert.deepEqual(room.openFor('Patti').addressed.map(row => row.ask_id), [6], 'and on hers, for the panel to filter by turn');
+  room.apply([reply(5, 10, 'Scout', 6, 'asker', 'done')]);
+  assert.equal(room.ask(6).done.message_id, 10, 'the acting party\'s done reply is the receipt');
+  assert.equal(room.ask(6).turn.phase, 'done');
+  assert.deepEqual(room.openFor('Scout').asked, [], 'done leaves every list');
+
+  // A revision after a yes reopens: no yes carries over to a scope she did not see.
+  const again = createAsksState();
+  again.apply([ask(1, 6, 'Scout', 'Patti', 'person', 'one roller'), answer(2, 7, 'Patti', 6, 'yes', 1), revise(3, 'Scout', 6, 'two rollers')]);
+  assert.deepEqual(again.ask(6).turn, { phase: 'waiting', waiting_on: 'Patti', acting: null });
+
+  // A person asks an AI (request): the addressee acts after a yes; a bystander's reply moves nothing.
+  const reverse = createAsksState();
+  reverse.apply([ask(1, 3, 'Patti', 'Scout', 'seat', 'You order one roller')]);
+  reverse.apply([reply(2, 4, 'Lark', 3, 'other')]);
+  assert.deepEqual(reverse.ask(3).turn, { phase: 'waiting', waiting_on: 'Scout', acting: null }, 'a bystander does not pass the turn');
+  reverse.apply([answer(3, 5, 'Scout', 3, 'yes', 1)]);
+  assert.deepEqual(reverse.ask(3).turn, { phase: 'agreed', waiting_on: null, acting: 'Scout' }, 'the asked AI carries it out');
+  reverse.apply([reply(4, 6, 'Patti', 3, 'asker', 'done')]);
+  assert.equal(reverse.ask(3).done, null, 'the asker cannot post the receipt for a request the AI carries out');
+  reverse.apply([reply(5, 7, 'Scout', 3, 'addressee', 'done')]);
+  assert.equal(reverse.ask(3).turn.phase, 'done');
 });
