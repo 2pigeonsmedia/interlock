@@ -11,6 +11,8 @@
 //              permission: "a yes means I do X"), the addressee when an AI was
 //              asked (a request)
 //   declined   its addressee said no
+//   answered   its addressee answered with no yes or no; only an explicit yes
+//              is agreement, so nobody is on it
 //   done       the party who was on it posted its done receipt
 //   withdrawn  the asker withdrew it
 (function exposeAskTurn(root) {
@@ -25,12 +27,13 @@
     if (ask.state === 'withdrawn') return Object.freeze({ phase: 'withdrawn', waiting_on: null, acting: null });
     if (ask.done) return Object.freeze({ phase: 'done', waiting_on: null, acting: null });
     if (ask.state === 'answered') {
-      return ask.last_choice === 'no'
-        ? Object.freeze({ phase: 'declined', waiting_on: null, acting: null })
-        : Object.freeze({
+      if (ask.last_choice === 'yes') {
+        return Object.freeze({
           phase: 'agreed', waiting_on: null,
           acting: actingParty(ask) === 'asker' ? ask.asker : ask.addressee,
         });
+      }
+      return Object.freeze({ phase: ask.last_choice === 'no' ? 'declined' : 'answered', waiting_on: null, acting: null });
     }
     return Object.freeze({
       phase: 'waiting',

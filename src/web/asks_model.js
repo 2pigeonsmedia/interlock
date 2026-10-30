@@ -6,7 +6,7 @@
 // are open for the viewer, and which asks the composer may bind an answer to.
 // Nothing here reads message text.
 (function exposeAsksModel(root) {
-  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise']);
+  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state']);
   const REVISE_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id', 'means']);
   // Whose turn it is comes from the one shared rule, here and on the server.
   const askTurn = typeof module === 'object' && module && module.exports
@@ -18,6 +18,7 @@
   const CARRY_KEYS = Object.freeze([
     'seq', 'ts', 'kind', 'by', 'ask_id', 'archive_id', 'asked_at', 'ask', 'kept_open',
   ]);
+  const CARRY_STATE_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id', 'revision', 'revisions', 'agreed']);
   const ASK_KEYS = Object.freeze(['of', 'of_kind', 'means', 'deliver', 'project']);
   const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes', 'revision']);
   // A message that is exactly one of these words, in any case, answers the
@@ -74,6 +75,15 @@
       return exact(row, CARRY_KEYS) && positive(row.seq) && name(row.by) &&
         positive(row.ask_id) && typeof row.archive_id === 'string' &&
         Number.isSafeInteger(row.asked_at) && validAsk(row.ask) && typeof row.kept_open === 'boolean';
+    }
+    if (row.kind === 'carry_state') {
+      return exact(row, CARRY_STATE_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id) &&
+        positive(row.revision) && Array.isArray(row.revisions) && row.revisions.length === row.revision - 1 &&
+        row.revisions.every((entry, i) => exact(entry, ['means', 'revision']) && entry.revision === i + 1 &&
+          (entry.means === null || name(entry.means))) &&
+        (row.agreed === null || (exact(row.agreed, ['message_id', 'by', 'revision', 'at']) &&
+          positive(row.agreed.message_id) && name(row.agreed.by) && row.agreed.revision === row.revision &&
+          Number.isSafeInteger(row.agreed.at)));
     }
     if (row.kind === 'revise') {
       return exact(row, REVISE_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id) &&
@@ -174,7 +184,8 @@
           const discussed = row.discusses ? asks.get(row.discusses.ask_id) : null;
           if (discussed && row.discusses.party !== 'other') {
             discussed.latest = { message_id: row.message_id, kind: 'discussion', party: row.discusses.party, by: row.by, at: row.ts };
-            if (row.discusses.party === actingParty(discussed) && row.status === 'done' && discussed.state === 'answered') {
+            const agreed = turnFor(discussed);
+            if (row.discusses.party === actingParty(discussed) && row.status === 'done' && agreed && agreed.phase === 'agreed') {
               discussed.done = { message_id: row.message_id, at: row.ts };
             }
           }
@@ -182,6 +193,21 @@
         } else if (row.kind === 'carry') {
           addAsk(row.ask_id, row.by, row.ask, row.asked_at, row.archive_id);
           asks.get(row.ask_id).kept_open = row.kept_open;
+        } else if (row.kind === 'carry_state') {
+          // A carried ask's story: its revision, its earlier scopes, and a
+          // yes not yet done. Mirrors the server's applyCarryState.
+          const carried = asks.get(row.ask_id);
+          if (!carried) continue;
+          carried.revision = row.revision;
+          carried.revisions = row.revisions.map(entry => ({ means: entry.means, revision: entry.revision }));
+          if (row.agreed) {
+            carried.answers.push({
+              message_id: row.agreed.message_id, by: row.agreed.by, choice: 'yes', by_addressee: true,
+              revision: row.agreed.revision,
+            });
+            carried.latest = { message_id: row.agreed.message_id, kind: 'answer', party: 'addressee', by: row.agreed.by, at: row.agreed.at };
+            carried.state = 'answered';
+          }
         } else {
           const ask = asks.get(row.ask_id);
           if (!ask) continue;

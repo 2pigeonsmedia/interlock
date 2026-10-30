@@ -47,7 +47,7 @@ Usage:
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
       [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]]
-      [--answers N[,N...] [--choice yes|no] | --discusses N] [--status done|ready|stop]
+      [--answers N[@REV][,N[@REV]...] [--choice yes|no] | --discusses N] [--status done|ready|stop]
   interlock asks --connection NAME [--json]
   interlock ask withdraw|keep-open N --connection NAME [--json]
   interlock ask revise N --means-file PATH|--means-stdin --connection NAME [--json]
@@ -91,7 +91,9 @@ function refuseSay(stderr) {
   return EXIT_USAGE;
 }
 
-const ANSWER_LIST = /^[1-9][0-9]*(?:,[1-9][0-9]*)*$/;
+// An ask id, optionally with the revision it is answered against (`12@2`,
+// as `interlock asks` shows it); a bare id answers revision 1.
+const ANSWER_LIST = /^[1-9][0-9]*(?:@[1-9][0-9]*)?(?:,[1-9][0-9]*(?:@[1-9][0-9]*)?)*$/;
 const MAX_ANSWER_IDS = 8;
 
 function sayValue(args, index) {
@@ -212,11 +214,12 @@ function commandOptions(command, args) {
     if (command === 'say' && flag === '--answers') {
       const value = sayValue(args, index);
       if (seen.has(flag) || value === null || !ANSWER_LIST.test(value)) return null;
-      const ids = value.split(',').map(Number);
-      if (ids.length > MAX_ANSWER_IDS || !ids.every(Number.isSafeInteger) ||
+      const entries = value.split(',').map(entry => entry.split('@').map(Number));
+      const ids = entries.map(([id]) => id);
+      if (ids.length > MAX_ANSWER_IDS || !entries.every(entry => entry.every(Number.isSafeInteger)) ||
           new Set(ids).size !== ids.length) return null;
       seen.add(flag);
-      options.answers = Object.freeze(ids);
+      options.answers = Object.freeze(entries.map(([id, revision]) => Object.freeze({ ask_id: id, revision: revision ?? 1 })));
       index += 1;
       continue;
     }
@@ -1305,7 +1308,7 @@ function sayAnnotation(parsed, means, cursor) {
     if (parsed.deliver !== null) annotation.ask.deliver = parsed.deliver;
   }
   if (parsed.answers !== null) {
-    annotation.answers = parsed.answers.map(askId => ({ ask_id: askId, choice: parsed.choice }));
+    annotation.answers = parsed.answers.map(entry => ({ ask_id: entry.ask_id, choice: parsed.choice, revision: entry.revision }));
   }
   if (parsed.discusses !== null) annotation.discusses = parsed.discusses;
   if (parsed.status !== null) {
@@ -1328,7 +1331,7 @@ async function runSay(args, io, dependencies = {}) {
   if (!parsed) {
     if (args.some(arg => ['--asks-of', '--means-file', '--means-stdin', '--deliver', '--answers',
       '--choice', '--status', '--discusses'].includes(arg))) {
-      line(io.stderr, 'interlock: usage: interlock say --connection NAME --file PATH|--stdin [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]] [--answers N[,N...] [--choice yes|no] | --discusses N] [--status done|ready|stop] [--json]');
+      line(io.stderr, 'interlock: usage: interlock say --connection NAME --file PATH|--stdin [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]] [--answers N[@REV][,N[@REV]...] [--choice yes|no] | --discusses N] [--status done|ready|stop] [--json]');
       return EXIT_USAGE;
     }
     return refuseSay(io.stderr);

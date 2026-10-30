@@ -898,6 +898,9 @@ function createWorkService(options) {
       }
       const now = clock();
       item.ask_message_id = body.ask_message_id;
+      // The revision of the room ask this decision's scope is; it moves only
+      // with a revision the room says it made.
+      item.ask_revision = 1;
       touch(item, now);
       appendEvent(draft, now, actor, {
         item: item.id, project: item.project, kind: 'ask-bound', ask_message_id: body.ask_message_id, before: null,
@@ -914,9 +917,10 @@ function createWorkService(options) {
    * message is recorded at most once in a decision's life. */
   function answerFromRoom(actor, rawInput) {
     requireActor(actor);
-    const body = closedObject(rawInput, ['ask_id', 'message_id', 'text', 'choice', 'by_addressee', 'of']);
+    const body = closedObject(rawInput, ['ask_id', 'message_id', 'text', 'choice', 'by_addressee', 'of', 'revision']);
     if (!body || !Number.isSafeInteger(body.ask_id) || body.ask_id < 1 ||
         !Number.isSafeInteger(body.message_id) || body.message_id < 1 ||
+        !Number.isSafeInteger(body.revision) || body.revision < 1 ||
         !(body.choice === null || body.choice === 'yes' || body.choice === 'no') ||
         typeof body.by_addressee !== 'boolean') fail('invalid-input');
     const text = requiredText(body.text, BODY_BYTES, 'text');
@@ -930,6 +934,9 @@ function createWorkService(options) {
           actor.subject_id !== item.asked_of.subject_id || actor.kind !== item.asked_of.kind) {
         return { ok: true, recorded: null };
       }
+      // An answer stands on the record only for the scope it was given to:
+      // the room ask's revision this decision's scope is.
+      if (body.revision !== askRevision(item)) return { ok: true, recorded: null };
       // A room answer never replaces the first owner's recorded answer unless
       // it is hers.
       if (protectedAnswer(item) && actor.first_owner !== true) return { ok: true, recorded: null };
@@ -943,7 +950,7 @@ function createWorkService(options) {
       const previous = item.answer;
       item.answer = {
         kind: 'direct', text, choice: body.choice, conditions: '', source, room_message_id: body.message_id,
-        by: refOf(actor), attributed_to: refOf(actor), at: now, reason: '',
+        ask_revision: body.revision, by: refOf(actor), attributed_to: refOf(actor), at: now, reason: '',
         first_owner_protected: actor.first_owner === true,
       };
       item.bridged_message_ids = bridged.concat([body.message_id]);
@@ -957,20 +964,30 @@ function createWorkService(options) {
     });
   }
 
+  // A decision bound before asks could be revised follows the first revision.
+  function askRevision(item) {
+    return Number.isSafeInteger(item.ask_revision) ? item.ask_revision : 1;
+  }
+
   /* The asker revised the room ask a decision is bound to. The decision's
    * scope follows; an answer given to the old scope stops standing on the
    * record (it stays on the trail), so the record never shows a scope that
    * was not agreed. Only the decision's own asker revises it. */
   function reviseScope(actor, rawInput) {
     requireActor(actor);
-    const body = closedObject(rawInput, ['ask_id', 'means']);
-    if (!body || !Number.isSafeInteger(body.ask_id) || !(body.means === null || typeof body.means === 'string')) {
+    const body = closedObject(rawInput, ['ask_id', 'means', 'revision']);
+    if (!body || !Number.isSafeInteger(body.ask_id) || !(body.means === null || typeof body.means === 'string') ||
+        !Number.isSafeInteger(body.revision) || body.revision < 2) {
       fail('invalid-input');
     }
     return store.commit(draft => {
       const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
       if (!item || item.asked_by.subject_id !== actor.subject_id) return { ok: true, revised: null };
+      // The scope follows the room's numbered revisions: an older one that
+      // arrives late never replaces a newer one.
+      if (body.revision <= askRevision(item)) return { ok: true, revised: null };
       const now = clock();
+      item.ask_revision = body.revision;
       const before = item.scope;
       const voided = item.answer;
       item.scope = body.means === null ? '' : body.means;

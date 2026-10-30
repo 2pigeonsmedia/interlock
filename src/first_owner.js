@@ -27,6 +27,7 @@ const ANNOTATION_REFUSALS = Object.freeze({
   'not-asker': 403,
   'ask-not-open': 409,
   'ask-not-answered': 409,
+  'ask-revised': 409,
 });
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(allow|decline)$/;
@@ -2186,7 +2187,7 @@ function createFirstOwnerHandler(options) {
       if (!answer.by_addressee || !answer.of) continue;
       work.answerFromRoom(actor, {
         ask_id: answer.ask_id, message_id: saved.id, text: saved.text, choice: answer.choice,
-        by_addressee: answer.by_addressee, of: answer.of,
+        by_addressee: answer.by_addressee, of: answer.of, revision: answer.revision,
       });
     }
   }
@@ -2208,9 +2209,15 @@ function createFirstOwnerHandler(options) {
     }
     if (!chatActor || chatActor.subject_id !== workActor.subject_id) return;
     const firstLine = String(item.answer.text).split('\n')[0].slice(0, 200);
+    // The copy carries what the record holds and nothing more: the record's
+    // choice (none, for an answer written on the record, so the room reads it
+    // as answered, never as a yes) and the revision of the ask its scope is,
+    // which the room refuses if the ask has since been revised.
+    const choice = item.answer.choice === 'yes' || item.answer.choice === 'no' ? item.answer.choice : null;
+    const revision = Number.isSafeInteger(item.ask_revision) ? item.ask_revision : 1;
     try {
       await chat.appendAnnotated({ text: `re #${item.ask_message_id} Answered on ${item.id}: ${firstLine}` }, chatActor,
-        { answers: [{ ask_id: item.ask_message_id }] });
+        { answers: [{ ask_id: item.ask_message_id, choice, revision }] });
     } catch (_) {
       // The ask was already answered or withdrawn in the room: nothing to close.
     }
@@ -2229,7 +2236,7 @@ function createFirstOwnerHandler(options) {
       session: null, owner: false, first_owner: latest.author.kind === 'person',
     }, {
       ask_id: askId, message_id: latest.message_id, text: latest.text, choice: latest.choice,
-      by_addressee: true, of: latest.of,
+      by_addressee: true, of: latest.of, revision: latest.revision,
     });
   }
 
@@ -2359,13 +2366,18 @@ function createFirstOwnerHandler(options) {
       Number.isSafeInteger(input.ask_id) && input.ask_id > 0 ? Object.assign({}, input, { means: null }) : null;
   }
 
-  /* A revised ask that backs a decision: the decision's scope follows it, and
-   * an answer given to the old scope no longer stands on the record. */
-  function reviseDecision(actor, row) {
-    if (work && row && row.kind === 'revise') {
-      work.reviseScope({ subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null, owner: false },
-        { ask_id: row.ask_id, means: row.means });
-    }
+  /* A revised ask that backs a decision: the decision's scope follows it, by
+   * the revision number the room made, and an answer given to the old scope
+   * no longer stands on the record. When the record could not follow, the
+   * response says so; the record then takes no room answer until it has
+   * caught up, because each answer names a revision it does not have. */
+  async function reviseDecision(actor, row) {
+    if (!work || !row || row.kind !== 'revise') return null;
+    const revision = await chat.revisionOf(row);
+    const result = revision === null ? { ok: false }
+      : work.reviseScope({ subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null, owner: false },
+        { ask_id: row.ask_id, means: row.means, revision });
+    return result && result.ok === true ? null : 'stale';
   }
 
   async function annotateAsAi(request, response, body) {
@@ -2386,8 +2398,8 @@ function createFirstOwnerHandler(options) {
     try {
       const row = await chat.annotate({ subject_id: authorized.subject_id, name: authorized.subject_name },
         input.kind, input.ask_id, input.means);
-      reviseDecision({ subject_id: authorized.subject_id, name: authorized.subject_name, kind: 'seat' }, row);
-      sendJson(request, response, 201, { ok: true, row });
+      const decision = await reviseDecision({ subject_id: authorized.subject_id, name: authorized.subject_name, kind: 'seat' }, row);
+      sendJson(request, response, 201, decision ? { ok: true, row, decision } : { ok: true, row });
     } catch (error) {
       annotationRefusal(request, response, error);
     }
@@ -2416,8 +2428,8 @@ function createFirstOwnerHandler(options) {
     }
     try {
       const row = await chat.annotate(actor, input.kind, input.ask_id, input.means);
-      reviseDecision(actor, row);
-      sendJson(request, response, 201, { ok: true, row });
+      const decision = await reviseDecision(actor, row);
+      sendJson(request, response, 201, decision ? { ok: true, row, decision } : { ok: true, row });
     } catch (error) {
       annotationRefusal(request, response, error);
     }

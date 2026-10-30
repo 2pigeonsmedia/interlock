@@ -230,3 +230,42 @@ test('an answer names the revision it was given against; a stale one is refused 
     'an answer given against a scope that changed is not sent');
   assert.match(ROOM_JS, /annotation: \{ answers: \[\{ ask_id: askId, choice, revision \}\] \}/);
 });
+
+test('a carried ask\'s story replays: its revision, its earlier scopes, and a yes not yet done', () => {
+  const state = Asks.createAsksState();
+  const carry = (seq, askId, means) => ({
+    seq, ts: 5_000, kind: 'carry', by: 'Lead', ask_id: askId, archive_id: 'transcript-x', asked_at: 1_000,
+    ask: ask('Ana', means), kept_open: false,
+  });
+  const rows = [
+    carry(1, 10, 'two drums'),
+    carry(2, 11, 'mealworms'),
+    { seq: 3, ts: 5_000, kind: 'carry_state', by: 'Lead', ask_id: 10, revision: 2,
+      revisions: [{ means: 'one drum', revision: 1 }], agreed: null },
+    { seq: 4, ts: 5_000, kind: 'carry_state', by: 'Lead', ask_id: 11, revision: 1, revisions: [],
+      agreed: { message_id: 7, by: 'Ana', revision: 1, at: 2_000 } },
+  ];
+  assert.equal(Asks.validPage({ ok: true, rows, cursor: 4, first_id: 20 }), true);
+  assert.equal(Asks.validPage({ ok: true, rows: [Object.assign({}, rows[2], { revisions: [] })], cursor: 1, first_id: 20 }), false,
+    'revision n has n-1 earlier scopes');
+  state.apply(rows);
+  assert.deepEqual([state.ask(10).revision, state.ask(10).revisions, state.ask(10).turn.phase],
+    [2, [{ means: 'one drum', revision: 1 }], 'waiting']);
+  assert.deepEqual([state.ask(11).state, state.ask(11).turn.phase, state.ask(11).turn.acting], ['answered', 'agreed', 'Lead']);
+  assert.deepEqual(state.openFor('Lead').asked.map(row => row.ask_id), [10, 11], 'both still on his list');
+});
+
+test('on the page too, a done receipt lands only on an agreed ask', () => {
+  const state = Asks.createAsksState();
+  const done = (seq, id, askId) => post(seq, id, 'Lead', { discusses: { ask_id: askId, party: 'asker' }, status: 'done', read_through: id - 1 });
+  state.apply([
+    post(1, 10, 'Lead', { ask: ask('Ana', 'I restart the router') }),
+    post(2, 11, 'Ana', { answers: [answer(10, 'no', null, true, true)] }),
+    done(3, 12, 10),
+    post(4, 13, 'Lead', { ask: ask('Ana', 'I wipe the disk') }),
+    post(5, 14, 'Ana', { answers: [answer(13, null, null, true, true)] }),
+    done(6, 15, 13),
+  ]);
+  assert.deepEqual([state.ask(10).done, state.ask(10).turn.phase], [null, 'declined']);
+  assert.deepEqual([state.ask(13).done, state.ask(13).turn.phase], [null, 'answered']);
+});

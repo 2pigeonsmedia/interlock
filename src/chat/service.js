@@ -140,10 +140,16 @@ function createChatService(options) {
     if (!Array.isArray(answers) || answers.length > Annotations.MAX_ANSWERS) {
       throw fail('invalid-annotation');
     }
+    // An answer names the revision it was given against. One that names none
+    // was given against the first: a client from before revisions, which the
+    // room refuses once the ask has been revised.
     const normalized = answers.map(answer => {
-      const entry = closedObject(answer, ['ask_id', 'choice']);
+      const entry = closedObject(answer, ['ask_id', 'choice', 'revision']);
       if (!entry) throw fail('invalid-annotation');
-      return { ask_id: entry.ask_id, choice: entry.choice === undefined ? null : entry.choice };
+      return {
+        ask_id: entry.ask_id, choice: entry.choice === undefined ? null : entry.choice,
+        revision: entry.revision === undefined ? 1 : entry.revision,
+      };
     });
     return await appendWith(body, actor, requireNew === true, {
       ask: input.ask === undefined ? null : input.ask,
@@ -605,13 +611,18 @@ function createChatService(options) {
     return await store.addresseeAnswers(askId);
   }
 
+  async function revisionOf(row) {
+    requireOpen();
+    return await store.revisionOf(row);
+  }
+
   async function openAsks(subjectId, name) {
     requireOpen();
     return await store.openAsks(subjectId, name);
   }
 
   return Object.freeze({
-    append, appendAnnotated, annotate, readAnnotations, openAsks, postFacts, addresseeAnswers,
+    append, appendAnnotated, annotate, readAnnotations, openAsks, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,

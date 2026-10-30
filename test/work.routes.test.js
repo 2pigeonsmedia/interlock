@@ -372,3 +372,12 @@ test('evidence may cite a room message through the same verification as a create
   assert.equal(smuggled.body.error, 'invalid-request');
   assert.equal(calls.length, 1, 'the service is not called for a refusal');
 });
+
+test('a revise the record could not follow is reported to the host, never passed off as done', () => {
+  const failing = { reviseScope() { const error = new Error('x'); error.code = 'store-fatal'; throw error; } };
+  const routes = createWorkRoutes({ work: failing, participants: roster });
+  assert.deepEqual(routes.reviseScope(actor, { ask_id: 1, means: 'm', revision: 2 }), { ok: false, error: 'store-fatal' });
+  const following = { reviseScope: () => ({ ok: true, revised: 'D-1' }) };
+  assert.deepEqual(createWorkRoutes({ work: following, participants: roster }).reviseScope(actor, {}), { ok: true, revised: 'D-1' },
+    'the control: a revise that lands passes through');
+});

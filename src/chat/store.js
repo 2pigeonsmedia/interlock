@@ -76,7 +76,7 @@ const OWN_CODES = Object.freeze([
   'invalid-clear', 'archive-invalid', 'archive-stale',
   'invalid-session-discriminator',
   'corrupt-annotations', 'invalid-annotation', 'ask-of-self', 'ask-not-found', 'ask-not-open',
-  'ask-not-answered', 'not-asker', 'unread-addressed', 'already-posted',
+  'ask-not-answered', 'not-asker', 'unread-addressed', 'already-posted', 'ask-revised',
 ]);
 
 function fail(code) {
@@ -612,7 +612,7 @@ function openStore(opts) {
     const answeredIds = new Set(annotation.answers.map(answer => answer.ask_id));
     const who = { subject_id: actor.subject_id, name: actor.name };
     const answers = annotation.answers.map(answer => {
-      const refusal = asks.checkAnswer(answer.ask_id);
+      const refusal = asks.checkAnswer(answer.ask_id, answer.revision);
       if (refusal) fail(refusal);
       return Object.freeze(Object.assign({
         ask_id: answer.ask_id,
@@ -989,7 +989,7 @@ function openStore(opts) {
           const ask = asks.asks.get(answer.ask_id);
           return Object.freeze({
             ask_id: answer.ask_id, choice: answer.choice, by_addressee: answer.by_addressee,
-            of: ask ? addresseeOf(ask) : null,
+            revision: answer.revision, of: ask ? addresseeOf(ask) : null,
           });
         })),
       });
@@ -1006,11 +1006,24 @@ function openStore(opts) {
       return Object.freeze(ask.answers.filter(answer => answer.by_addressee).map(answer => {
         const message = messages.find(candidate => candidate.id === answer.message_id);
         return message ? Object.freeze({
-          message_id: answer.message_id, choice: answer.choice, text: message.text,
+          message_id: answer.message_id, choice: answer.choice, revision: answer.revision, text: message.text,
           author: Object.freeze({ subject_id: message.subject_id, name: message.byline, kind: message.kind }),
           of: addresseeOf(ask),
         }) : null;
       }).filter(Boolean));
+    });
+  }
+
+  /* For the host only, never a route: the revision a revise row this store
+   * just wrote made, so the Work record follows it by number, not by the
+   * order requests happen to arrive in. Null when that row is not this era's. */
+  function revisionOf(row) {
+    return exclusive(() => {
+      requireOpen();
+      const entry = row && Number.isSafeInteger(row.seq) ? asks.rows[row.seq - 1] : undefined;
+      if (!entry || !entry.bound || entry.row.kind !== 'revise' || entry.row.ask_id !== row.ask_id ||
+          entry.row.ts !== row.ts || !Number.isSafeInteger(entry.revision)) return null;
+      return entry.revision;
     });
   }
 
@@ -1104,6 +1117,21 @@ function openStore(opts) {
           project: ask.project,
         },
       }, i + 1));
+      // A carried ask keeps its story: its revision, its earlier scopes, and
+      // a yes not yet done, so the done receipt still lands after the clear.
+      const carried = asks.openAsks();
+      const stateRows = carried.map(ask => ({ ask, state: asks.carriedState(ask.ask_id) }))
+        .filter(entry => entry.state !== null)
+        .map((entry, i) => Annotations.parseRow(Object.assign({
+          v: Annotations.ROW_VERSION,
+          seq: carryRows.length + i + 1,
+          ts: carriedAt,
+          kind: 'carry_state',
+          subject_id: entry.ask.asker_subject_id,
+          name: entry.ask.asker_name,
+          ask_id: entry.ask.ask_id,
+        }, entry.state), carryRows.length + i + 1));
+      carryRows.push(...stateRows);
       if (carryRows.some(row => row === null)) fail('archive-invalid');
       const staged = Buffer.from(carryRows.map(Annotations.encodeRow).join(''), 'utf8');
       const marker = Object.freeze({
@@ -1338,7 +1366,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers,
+    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf,
   });
 }
 

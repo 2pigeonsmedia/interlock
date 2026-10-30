@@ -954,7 +954,7 @@ test('a room answer reaches only the decision bound to its ask, from its address
   }).item;
   const asOwner = Object.assign({}, owner, { session: null });
   const say = (message_id, choice, extra = {}) => work.answerFromRoom(asOwner, Object.assign({
-    ask_id: 41, message_id, text: choice || 'ok', choice, by_addressee: true, of: ANA_OF,
+    ask_id: 41, revision: 1, message_id, text: choice || 'ok', choice, by_addressee: true, of: ANA_OF,
   }, extra));
   assert.equal(say(49, 'yes').recorded, null, 'before the bind, nothing records');
   assert.throws(() => work.bindAsk(Object.assign({}, lead, { session: null }), {
@@ -985,7 +985,7 @@ test('a room answer reaches only the decision bound to its ask, from its address
   assert.equal(after.item.ask_message_id, null);
   assert.equal(after.history.filter(event => event.kind === 'reopened').slice(-1)[0].unbound_ask, 41);
   assert.equal(work.answerFromRoom(Object.assign({}, builder, { session: null }), {
-    ask_id: 41, message_id: 60, text: 'yes', choice: 'yes', by_addressee: false,
+    ask_id: 41, revision: 1, message_id: 60, text: 'yes', choice: 'yes', by_addressee: false,
     of: ANA_OF,
   }).recorded, null);
   assert.equal(say(61, 'yes').recorded, null, 'her answer to the ask put to her no longer reaches it either');
@@ -1001,10 +1001,10 @@ test('on the record, a room answer from a seat that only shares the asked seat\'
   work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 70, of: BUILDER_OF });
   // The room counts a rejoined Builder as the addressee (by name); the record does not.
   assert.equal(work.answerFromRoom(Object.assign({}, sameName, { session: null }), {
-    ask_id: 70, message_id: 71, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
+    ask_id: 70, revision: 1, message_id: 71, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
   }).recorded, null);
   assert.equal(work.answerFromRoom(Object.assign({}, builder, { session: null }), {
-    ask_id: 70, message_id: 72, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
+    ask_id: 70, revision: 1, message_id: 72, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
   }).recorded, decision.id);
 });
 
@@ -1018,7 +1018,7 @@ test('the latest room answer is the one latest in the room, not the one that arr
   work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 90, of: ANA_OF });
   const asOwner = Object.assign({}, owner, { session: null });
   const say = (message_id, choice) => work.answerFromRoom(asOwner, {
-    ask_id: 90, message_id, text: choice, choice, by_addressee: true, of: ANA_OF,
+    ask_id: 90, revision: 1, message_id, text: choice, choice, by_addressee: true, of: ANA_OF,
   });
   assert.equal(say(95, 'no').recorded, decision.id);
   assert.equal(say(93, 'yes').recorded, null, 'an older message arriving later does not replace her newer answer');
@@ -1050,7 +1050,7 @@ test('the first owner\'s recorded answer stands: no admin replaces or reopens it
   const bound = work.bindAsk(Object.assign({}, lead, { session: null }), { id: ofSeat.id, ask_message_id: 110, of: BUILDER_OF }).item;
   work.answer(first, { operation_id: uuid(), id: ofSeat.id, expected_revision: bound.revision, text: 'no', reason: 'on its behalf' });
   assert.equal(work.answerFromRoom(Object.assign({}, builder, { session: null, first_owner: false }), {
-    ask_id: 110, message_id: 111, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
+    ask_id: 110, revision: 1, message_id: 111, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
   }).recorded, null);
   assert.equal(work.get(owner, { id: ofSeat.id }).item.answer.text, 'no');
   // An admin's own recorded answer is not protected from another admin.
@@ -1094,14 +1094,49 @@ test('a revised ask moves its decision\'s scope and voids an answer given to the
   }).item;
   work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 120, of: ANA_OF });
   work.answerFromRoom(Object.assign({}, owner, { session: null }), {
-    ask_id: 120, message_id: 121, text: 'yes', choice: 'yes', by_addressee: true, of: ANA_OF,
+    ask_id: 120, revision: 1, message_id: 121, text: 'yes', choice: 'yes', by_addressee: true, of: ANA_OF,
   });
-  assert.equal(work.reviseScope(Object.assign({}, builder, { session: null }), { ask_id: 120, means: 'third-party' }).revised, null,
+  assert.equal(work.reviseScope(Object.assign({}, builder, { session: null }), { ask_id: 120, means: 'third-party', revision: 2 }).revised, null,
     'only the decision\'s asker');
-  assert.equal(work.reviseScope(Object.assign({}, lead, { session: null }), { ask_id: 120, means: 'third-party' }).revised, decision.id);
+  assert.equal(work.reviseScope(Object.assign({}, lead, { session: null }), { ask_id: 120, means: 'third-party', revision: 2 }).revised, decision.id);
   const after = work.get(owner, { id: decision.id });
   assert.equal(after.item.scope, 'third-party');
   assert.equal(after.item.state, 'awaiting', 'her yes to OEM does not stand for third-party');
   const event = after.history.filter(row => row.kind === 'scope-revised').slice(-1)[0];
   assert.deepEqual([event.before, event.after, event.answer_superseded.text], ['OEM', 'third-party', 'yes']);
+});
+
+test('a decision follows the room ask by revision number, and takes a room answer only for the revision its scope is', () => {
+  const { work, store } = fresh();
+  const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const decision = work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Rollers?', body: 'b', asked_of: ref(owner), scope: 'OEM',
+    source_message: { message_id: 130, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Rollers?' },
+  }).item;
+  const asLead = Object.assign({}, lead, { session: null });
+  const asOwner = Object.assign({}, owner, { session: null });
+  const bound = work.bindAsk(asLead, { id: decision.id, ask_message_id: 130, of: ANA_OF }).item;
+  assert.equal(bound.ask_revision, 1, 'bound at the first revision');
+  const say = (message_id, revision) => work.answerFromRoom(asOwner, {
+    ask_id: 130, message_id, text: 'yes', choice: 'yes', by_addressee: true, of: ANA_OF, revision,
+  });
+  assert.equal(work.reviseScope(asLead, { ask_id: 130, means: 'third-party', revision: 2 }).revised, decision.id);
+  assert.equal(say(131, 1).recorded, null, 'her yes to revision 1 never stands for revision 2');
+  assert.equal(work.get(owner, { id: decision.id }).item.answer, null);
+  assert.equal(work.reviseScope(asLead, { ask_id: 130, means: 'eBay', revision: 3 }).revised, decision.id);
+  assert.equal(work.reviseScope(asLead, { ask_id: 130, means: 'third-party', revision: 2 }).revised, null,
+    'an older revision arriving late never replaces a newer one');
+  let after = work.get(owner, { id: decision.id }).item;
+  assert.deepEqual([after.scope, after.ask_revision], ['eBay', 3]);
+  assert.equal(say(132, 2).recorded, null);
+  assert.equal(say(133, 3).recorded, decision.id);
+  after = work.get(owner, { id: decision.id }).item;
+  assert.deepEqual([after.state, after.answer.ask_revision], ['answered', 3], 'the answer names the revision it is to');
+  // The record could not follow revision 4: it takes no room answer until it has.
+  assert.equal(say(134, 4).recorded, null);
+  // A decision bound before revisions were counted reads as the first.
+  store.commit(draft => { delete draft.items.find(row => row.id === decision.id).ask_revision; });
+  assert.equal(work.get(owner, { id: decision.id }).item.ask_revision, undefined, 'the arrangement: the older shape');
+  assert.equal(say(135, 1).recorded, decision.id);
+  assert.throws(() => say(136, undefined), error => error.code === 'invalid-input', 'an answer names its revision');
 });

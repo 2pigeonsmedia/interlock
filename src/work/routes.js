@@ -247,12 +247,13 @@ function createWorkRoutes(options) {
     }
   }
 
-  // The room revised the ask a decision is bound to. Never a refusal the room sees.
+  // The room revised the ask a decision is bound to. Never a refusal the room
+  // sees, but a failure is reported to the host, never passed off as done.
   function reviseScope(actor, body) {
     try {
       return work.reviseScope(actor, body);
-    } catch (_) {
-      return Object.freeze({ ok: false });
+    } catch (error) {
+      return Object.freeze({ ok: false, error: error && typeof error.code === 'string' ? error.code : 'work-unavailable' });
     }
   }
 

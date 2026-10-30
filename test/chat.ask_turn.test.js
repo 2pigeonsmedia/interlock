@@ -69,7 +69,7 @@ test('the printer story, an AI asking a person: discuss, revise, agree, done', a
   assert.equal(open[0].means, 'I order the third-party rollers, $21');
   assert.deepEqual(open[0].revisions, [{ means: 'I order the OEM rollers, $64', revision: 1 }], 'the old scope, kept to show struck');
   // Her yes, then his done receipt.
-  const yes = await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  const yes = await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 2 }] });
   let mine = (await chat.openAsks(SCOUT, 'Scout')).asked;
   assert.deepEqual(mine.map(row => [row.ask_id, row.turn.phase, row.turn.acting]), [[ask.id, 'agreed', 'Scout']],
     'agreed: Scout is on it, and it stays on his list');
@@ -90,7 +90,7 @@ test('the same story reversed, a person asking an AI', async () => {
   assert.equal((await story(chat, ask.id, ANA_ACTOR)).waiting_on, 'Ana', 'his question passes the turn back to her');
   await chat.annotate({ subject_id: ANA, name: 'Ana' }, 'revise', ask.id, 'rerun at 5075314');
   assert.equal((await story(chat, ask.id, ANA_ACTOR)).waiting_on, 'Scout');
-  const yes = await chat.appendAnnotated({ text: 'yes, running' }, scout(), { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  const yes = await chat.appendAnnotated({ text: 'yes, running' }, scout(), { answers: [{ ask_id: ask.id, choice: 'yes', revision: 2 }] });
   const his = (await chat.openAsks(SCOUT, 'Scout')).addressed;
   assert.deepEqual(his.map(row => [row.turn.phase, row.turn.acting]), [['agreed', 'Scout']], 'Scout is on it');
   assert.deepEqual((await chat.openAsks(ANA, 'Ana')).asked, [], 'off her list');
@@ -127,4 +127,59 @@ test('only the asker revises; a person\'s ask keeps its scope line; a reply cann
   await assert.rejects(chat.appendAnnotated({ text: 'yes but' }, ANA_ACTOR,
     { discusses: ask.id, answers: [{ ask_id: ask.id }] }), error => error.code === 'invalid-annotation');
   await assert.rejects(chat.appendAnnotated({ text: 're #9' }, ANA_ACTOR, { discusses: 99 }), error => error.code === 'ask-not-found');
+});
+
+test('a yes binds only to the revision its author saw: an answer to an earlier one is refused', async () => {
+  const chat = room();
+  const ask = await chat.appendAnnotated({ text: 'Order rollers?' }, scout(), { ask: { of: 'Ana', means: 'I order the OEM rollers' } });
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'revise', ask.id, 'I order the third-party rollers from eBay');
+  assert.equal((await chat.openAsks(ANA, 'Ana')).addressed[0].revision, 2, 'the arrangement: revision 2 is current');
+  // Her screen still showed revision 1 when she tapped Yes.
+  await assert.rejects(chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 1 }] }),
+    error => error.code === 'ask-revised');
+  // A client that names no revision answers the first, so it is refused too.
+  await assert.rejects(chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes' }] }),
+    error => error.code === 'ask-revised');
+  await assert.rejects(chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 3 }] }),
+    error => error.code === 'ask-revised', 'nor a revision that does not exist yet');
+  const open = (await chat.openAsks(ANA, 'Ana')).addressed[0];
+  assert.deepEqual([open.state, open.answers.length, open.turn.phase], ['open', 0, 'waiting'], 'nothing was recorded');
+  await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 2 }] });
+  const agreed = (await chat.openAsks(SCOUT, 'Scout')).asked[0];
+  assert.deepEqual([agreed.turn.phase, agreed.answers[0].revision], ['agreed', 2]);
+});
+
+test('a first-revision ask still takes an answer that names no revision', async () => {
+  const chat = room();
+  const ask = await chat.appendAnnotated({ text: 'Order rollers?' }, scout(), { ask: { of: 'Ana', means: 'I order them' } });
+  await chat.appendAnnotated({ text: 'yes' }, ANA_ACTOR, { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  assert.equal((await chat.openAsks(SCOUT, 'Scout')).asked[0].turn.phase, 'agreed');
+});
+
+test('only an explicit yes is agreement: a typed answer with no choice is answered, nobody is on it', async () => {
+  const base = { state: 'answered', done: false, asker: 'Scout', addressee: 'Ana', addressee_kind: 'person', latest_party: 'addressee' };
+  assert.deepEqual(turnOf(Object.assign({}, base, { last_choice: null })), { phase: 'answered', waiting_on: null, acting: null });
+  assert.deepEqual(turnOf(Object.assign({}, base, { addressee_kind: 'seat', last_choice: null })),
+    { phase: 'answered', waiting_on: null, acting: null }, 'the same when an AI was asked');
+  const chat = room();
+  const ask = await chat.appendAnnotated({ text: 'Delete the staging bucket?' }, scout(), { ask: { of: 'Ana', means: 'I delete the staging bucket' } });
+  await chat.appendAnnotated({ text: 'No. Absolutely not.' }, ANA_ACTOR, { answers: [{ ask_id: ask.id }] });
+  assert.deepEqual((await chat.openAsks(SCOUT, 'Scout')).asked, [], 'not on Scout\'s list as his to carry out');
+  const row = (await chat.readAnnotations({ after: 0, limit: 10 })).rows.find(entry => entry.answers && entry.answers.length);
+  assert.equal(row.answers[0].choice, null, 'the arrangement: the answer carried no choice');
+});
+
+test('a done receipt lands only on an agreed ask: after a no, or a typed answer, it is a reply', async () => {
+  const chat = room();
+  const declined = await chat.appendAnnotated({ text: 'Restart the router?' }, scout(), { ask: { of: 'Ana', means: 'I restart the router' } });
+  const no = await chat.appendAnnotated({ text: 'no' }, ANA_ACTOR, { answers: [{ ask_id: declined.id, choice: 'no' }] });
+  await chat.appendAnnotated({ text: 're #1 Router restarted' }, scout(), { discusses: declined.id, status: 'done', read_through: no.id });
+  const typed = await chat.appendAnnotated({ text: 'Wipe the disk?' }, scout(), { ask: { of: 'Ana', means: 'I wipe the disk' } });
+  const words = await chat.appendAnnotated({ text: 'hmm, not sure' }, ANA_ACTOR, { answers: [{ ask_id: typed.id }] });
+  await chat.appendAnnotated({ text: 're #4 Wiped' }, scout(), { discusses: typed.id, status: 'done', read_through: words.id });
+  // A revise is refused only once an ask is done; here both still take one.
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'revise', declined.id, 'I restart the router tonight');
+  await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'revise', typed.id, 'I wipe the old disk only');
+  const open = (await chat.openAsks(ANA, 'Ana')).addressed;
+  assert.deepEqual(open.map(ask => [ask.ask_id, ask.done, ask.turn.phase]), [[declined.id, null, 'waiting'], [typed.id, null, 'waiting']]);
 });
