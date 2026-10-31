@@ -260,7 +260,7 @@ test('a write with no error code reads as unavailable, and an open form keeps on
   assert.match(WORK_PANEL_JS, /if \(operation\) operation\.id = crypto\.randomUUID\(\);/);
   const forms = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+'/g);
   const wired = WORK_PANEL_JS.match(/actionForm\('work-[a-z]+', [^\n]*async operation => \{/g);
-  assert.equal(forms.length, 11, 'nine forms, plus the kill question and its reply');
+  assert.equal(forms.length, 12, 'ten forms (with Move to project), plus the kill question and its reply');
   assert.equal(wired.length, forms.length, 'every form hands its operation to its write');
   // Every drawer form reports in the drawer; the project notes form reports beside its project.
   assert.equal((WORK_PANEL_JS.match(/, null, operation\)/g) || []).length, forms.length - 1);

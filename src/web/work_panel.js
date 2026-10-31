@@ -1052,6 +1052,18 @@
     })];
   }
 
+  // The first owner moves a record to another live project; the room keeps
+  // the move as a bylined event.
+  function moveForm(item) {
+    const others = (session.brief ? session.brief.projects : []).filter(row => row.id !== item.project);
+    if (others.length === 0) return [make('p', 'work-row', 'There is no other project to move it to.')];
+    const target = choice('project', 'Move to project', others.map(row => ({ value: row.id, text: row.display_name })), others[0].id);
+    return [actionForm('work-move', [target], 'Move', async operation => {
+      const result = await write('items/move', { id: item.id, expected_revision: item.revision, project: target.node.value }, null, operation);
+      if (result) await openItem(item.id);
+    })];
+  }
+
   function renderWorkActions(buttons, slot, item, evidence) {
     actionButton(buttons, slot, 'Update', item, () => updateForm(item, evidence));
     actionButton(buttons, slot, 'Attach evidence', item, () => evidenceForm(item));
@@ -1067,6 +1079,7 @@
     if (item.kind === 'decision') renderDecisionActions(buttons, slot, item);
     else renderWorkActions(buttons, slot, item, result.evidence);
     if (item.kind === 'decision') actionButton(buttons, slot, 'Add note', item, () => noteForm(item));
+    if (session.user.first_owner === true) actionButton(buttons, slot, 'Move to project', item, () => moveForm(item));
     const recipient = item.kind === 'decision' ? (item.state === 'awaiting' ? item.asked_of : null) : item.next_to;
     if (recipient && !isMe(recipient)) {
       const notify = make('button', 'quiet-action', 'Notify');
