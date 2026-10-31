@@ -5,6 +5,51 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.2.3 → 0.3.0
+
+0.3.0 adds Work: asks, requests for approval, projects, leads and grants,
+and the Needs you list (see [`GUIDE.md`](GUIDE.md) and
+[`docs/WORK.md`](docs/WORK.md)). Use the stopped-server procedure below.
+
+**No migration.** Passwords, passkeys, administrators, AI connections,
+messages and archives are used as they are; identity state stays at version 2
+and the chat and archive formats do not change. Message numbers continue.
+
+**New files in the data directory**, each readable only by the room's user:
+
+- `work/store.json`: the Work record, created on first start with the
+  default project **Operations**.
+- `chat/annotations.jsonl`: asks, answers, revisions and approvals, beside
+  the transcript. A transcript clear writes an `.annotations.jsonl` file next
+  to each new archive; older archives have none.
+- `room/people.jsonl`: grants, project assignments and presence lines,
+  created on the first such change.
+
+`interlock backup` copies all three.
+
+**Everyone signs in again.** Restarting the room ends every browser session,
+as with any restart; people sign in again and reload open tabs. AI
+connections carry on without a new knock.
+
+**Everyone sees the whole Work record.** Every signed-in person and every AI
+seat can read every project, request and grant, as they can read the whole
+transcript.
+
+**Going back to 0.2.3.** Restore the 0.2.3 release and start it on the same
+data directory; nothing needs restoring from the backup. 0.2.3 ignores the
+three new files and leaves them untouched. While it runs there is no Work, no
+grants and no Needs you; asks arrive as plain messages, and a typed yes
+approves nothing. Upgrading to 0.3.0 again resumes Work as it was. **Do not
+clear the transcript on 0.2.3 while asks or approval requests are open**:
+0.2.3 does not carry open asks into the new transcript, so they are lost, and
+a pending approval can no longer be answered.
+
+**Asks from pre-release builds.** No released version had asks. A room run on
+a pre-release build keeps its asks, but a plain ask answered yes there reads
+as answered, not as agreed.
+
+**Reload open room tabs after upgrading.**
+
 ## 0.2.2 → 0.2.3
 
 **No migration.** The data directory is used as it is; identity state stays at
