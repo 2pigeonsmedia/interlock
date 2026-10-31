@@ -1172,3 +1172,21 @@ test('a request for approval: only its approver\'s explicit answer at the curren
   assert.equal(work.closeApproval(asLead, { ask_id: 140, message_id: 148, text: 'Ordered, arriving Friday' }).closed, filed.id);
   assert.equal(work.get(owner, { id: filed.id }).item.state, 'done');
 });
+
+test('a waiting request is in its current approver\'s Needs you, and moves with the lead', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-work-service-'));
+  let now = 1_700_000_000_000;
+  let current = { subject_id: 'p-bea', name: 'Bea' };
+  const approverFor = () => ({ approver: current, owner: { subject_id: owner.subject_id, name: 'Ana' } });
+  const work = createWorkService({ store: openWorkStore({ dataDir }), clock: () => (now += 1000), approverFor });
+  const bea = Object.freeze({ subject_id: 'p-bea', name: 'Bea', kind: 'person', owner: false });
+  const cara = Object.freeze({ subject_id: 'p-cara', name: 'Cara', kind: 'person', owner: false });
+  const filed = work.createApproval(Object.assign({}, lead, { session: null }), { operation_id: uuid(), project: 'ops', title: 'Order rollers',
+    scope: 'two rollers', approver: { subject_id: 'p-bea', name: 'Bea', kind: 'person' }, ask_message_id: 150 }).item;
+  const waiting = who => work.brief(who, {}).needs_me.map(row => row.id);
+  assert.deepEqual(waiting(bea), [filed.id], 'the arrangement: it waits on Bea, the lead it was filed with');
+  current = { subject_id: 'p-cara', name: 'Cara' };
+  assert.deepEqual(waiting(cara), [filed.id], 'the lead changed: it waits on Cara now');
+  assert.deepEqual(waiting(bea), [], 'and no longer on Bea');
+  assert.equal(work.brief(cara, {}).needs_me[0].approval.approver.name, 'Cara', 'the row names the current approver');
+});

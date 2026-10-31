@@ -1,4 +1,5 @@
 'use strict';
+const { createApproverRule } = require('./work/approver.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -2179,21 +2180,20 @@ function createFirstOwnerHandler(options) {
     sendJson(request, response, result.status, Object.assign({}, result.body, { item: bound.body.item, message: saved }));
   }
 
-  /* Who approves a request in this project: its lead (the holder of its
-   * active grant), else the first owner. A lead never approves their own
-   * request, and an AI lead's approval waits on a grant that says it may
-   * approve, so until then it goes to the first owner too. Null when the
-   * first owner cannot be resolved. */
-  function approverFor(project, asker, live, now) {
-    // Server-internal: the first owner's subject is used here to route, and
-    // never leaves the host.
-    const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
-    const owner = first ? live.find(row => row.kind === 'person' && row.subject_id === first.subject_id) || null : null;
-    const lead = people ? people.service.leadOf(project, now, new Set(live.map(row => row.subject_id))) : null;
-    const leadRow = lead && lead.kind === 'person'
-      ? live.find(row => row.kind === 'person' && row.subject_id === lead.subject_id) : null;
-    if (leadRow && leadRow.subject_id !== asker.subject_id) return { approver: leadRow, owner, why: 'lead' };
-    return { approver: owner, owner, why: lead ? 'lead-is-asker-or-ai' : 'no-lead' };
+  // Who approves a request for approval: the one rule (work/approver.js) that
+  // also places it in a Needs you, so routing, the answer check and the list
+  // can never disagree.
+  const approverRule = people ? createApproverRule({
+    leadOf: (project, now) => people.service.leadOf(project, now),
+    firstOwner: () => (typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null),
+  }) : null;
+
+  function approverFor(project, asker, _live, now) {
+    if (!approverRule) {
+      const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
+      return { approver: first, owner: first };
+    }
+    return approverRule(project, asker.subject_id, now);
   }
 
   /* Re-derived when an answer is given (Q4): which requests for approval this

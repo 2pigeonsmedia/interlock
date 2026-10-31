@@ -15,6 +15,7 @@ const { openStore } = require('./chat/store.js');
 const { createFirstOwnerHandler } = require('./first_owner.js');
 const { openWorkStore } = require('./work/store.js');
 const { createWorkService } = require('./work/service.js');
+const { createApproverRule } = require('./work/approver.js');
 const { openPeopleStore } = require('./room/people_store.js');
 const { createPeopleService } = require('./room/people.js');
 const { createWorkRoutes } = require('./work/routes.js');
@@ -452,8 +453,14 @@ async function startInterlockServer(options) {
         return document ? document.projects.filter(row => row.retired_at === null).map(row => row.id) : [];
       },
     });
+    // Who approves a request for approval: one rule for routing it, checking
+    // an answer and placing it in a Needs you (server-internal).
+    const approverFor = createApproverRule({
+      leadOf: (project, now) => people.service.leadOf(project, now),
+      firstOwner: () => (typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null),
+    });
     const work = createWorkRoutes({
-      work: createWorkService({ store: workStore }),
+      work: createWorkService({ store: workStore, approverFor }),
       participants: meta => house.listParticipants(meta),
       // A cited room message, looked up by id; null when it is not in the
       // room (never posted, or archived by a transcript clear).

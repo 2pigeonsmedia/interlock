@@ -278,8 +278,13 @@ test('the first owner\'s subject is read in-process for routing only, never serv
   const host = fs.readFileSync(path.join(__dirname, '..', 'src', 'first_owner.js'), 'utf8');
   const uses = host.split('\n').map((line, i) => [i + 1, line]).filter(([, line]) => line.includes('house.firstOwnerSubject'));
   assert.ok(uses.length > 0, 'the arrangement: the host uses it');
-  const fn = host.slice(host.indexOf('function approverFor('), host.indexOf('async function askApproval('));
-  for (const [n, line] of uses) assert.ok(fn.includes(line), `line ${n} uses it outside approverFor: ${line.trim()}`);
+  const fn = host.slice(host.indexOf('const approverRule = people ? createApproverRule({'), host.indexOf('async function askApproval('));
+  for (const [n, line] of uses) assert.ok(fn.includes(line), `line ${n} uses it outside the approver rule: ${line.trim()}`);
+  const server = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  const wiring = server.slice(server.indexOf('const approverFor = createApproverRule({'), server.indexOf('const work = createWorkRoutes({'));
+  for (const line of server.split('\n').filter(line => line.includes('house.firstOwnerSubject'))) {
+    assert.ok(wiring.includes(line), `server.js uses it outside the approver rule: ${line.trim()}`);
+  }
   assert.equal(/sendJson\([^)]*first\./.test(host), false, 'it is never in a response');
   const routes = host.match(/pathname === '[^']+'/g) || [];
   assert.equal(routes.some(route => /owner-subject|first-owner/i.test(route)), false, 'and has no route');

@@ -204,7 +204,7 @@ function stripIds(value) {
 }
 
 function createWorkService(options) {
-  const input = closedObject(options, ['store', 'clock']);
+  const input = closedObject(options, ['store', 'clock', 'approverFor']);
   const store = input && input.store;
   if (!store || typeof store.read !== 'function' || typeof store.commit !== 'function' ||
       typeof store.nextId !== 'function' || typeof store.nextEvent !== 'function') {
@@ -212,6 +212,14 @@ function createWorkService(options) {
   }
   const clock = input.clock === undefined ? Date.now : input.clock;
   if (typeof clock !== 'function') fail('invalid-options');
+  // The approver rule (approver.js); without it a request waits on the
+  // approver it was filed with.
+  const approverFor = typeof input.approverFor === 'function' ? input.approverFor : null;
+  function currentApprover(item) {
+    if (!approverFor) return item.approval.approver;
+    const route = approverFor(item.project, item.approval.by.subject_id, clock());
+    return route && route.approver ? route.approver : item.approval.approver;
+  }
 
   function requireActor(actor) {
     if (!validActor(actor)) fail('invalid-actor');
@@ -376,12 +384,19 @@ function createWorkService(options) {
       // ask it is answered through, so the panel shows it once.
       ask_message_id: item.approval ? item.ask_message_id : null,
       approval: item.approval ? {
-        state: item.approval.state, approver: clone(item.approval.approver), by: clone(item.approval.by), scope: item.approval.scope,
+        state: item.approval.state,
+        approver: item.approval.state === 'awaiting'
+          ? Object.assign({ kind: 'person', session: null }, clone(currentApprover(item))) : clone(item.approval.approver),
+        by: clone(item.approval.by), scope: item.approval.scope,
       } : null,
     };
   }
 
   function needsMe(item, subjectId) {
+    // A waiting request is in its current approver's Needs you, found live.
+    if (item.approval && item.approval.state === 'awaiting' && item.state === 'open') {
+      return currentApprover(item).subject_id === subjectId;
+    }
     if (item.kind === 'decision') {
       return decisionState(item) === 'awaiting' && item.asked_of.subject_id === subjectId;
     }
