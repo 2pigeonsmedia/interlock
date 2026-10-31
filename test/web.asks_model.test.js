@@ -118,7 +118,8 @@ test('the room page loads the model before room.js and posts asks through the an
 test('a page carrying a kind from a later release is used, and that row is passed over', () => {
   const page = { ok: true, first_id: 1, cursor: 2, rows: [
     post(1, 10, 'Lead', { ask: ask('Ana', 'm') }),
-    { seq: 2, ts: 2, kind: 'stamp', by: 'Lead', message_id: 10, project: 'finance' },
+    // `stamp` became a known kind in 0.3.1; a kind no release knows yet stands in.
+    { seq: 2, ts: 2, kind: 'pin', by: 'Lead', message_id: 10, project: 'orchard' },
   ] };
   assert.equal(Asks.validPage(page), true);
   const state = Asks.createAsksState();

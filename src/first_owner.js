@@ -30,6 +30,9 @@ const ANNOTATION_REFUSALS = Object.freeze({
   'ask-not-answered': 409,
   'ask-revised': 409,
   'not-approver': 403,
+  'not-author': 403,
+  'message-not-found': 404,
+  'unknown-project': 400,
 });
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const ADMISSION_ROUTE = /^\/api\/ai\/admissions\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(allow|decline)$/;
@@ -1315,6 +1318,7 @@ function createFirstOwnerHandler(options) {
       const saved = publicMessage(await chat.append(body, actor));
       if (saved === null) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
+      await stampAfterPost(actor, saved);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       if (error && error.code === 'invalid-text') {
@@ -1385,6 +1389,76 @@ function createFirstOwnerHandler(options) {
       people.service.clearPresenceOnPost({ subject_id: actor.subject_id, name: actor.name, kind: actor.kind,
         now: Date.now() });
     } catch (_) { /* the message is saved; a presence line is advisory */ }
+  }
+
+  // ── the project stamp ───────────────────────────────────────────────────
+  // Which project a saved message belongs to, and why, in order: its ask's
+  // project; else the Work records its text cites by exact id, when they all
+  // belong to one project; else its author's assignment, for an AI; else none.
+  // Deterministic: an id the text names exactly, never a reading of it.
+  const CITED_RECORD = /\b[WDF]-[1-9][0-9]*\b/g;
+
+  function derivedStamp(actor, saved, annotation) {
+    const ask = annotation && typeof annotation === 'object' && annotation.ask &&
+      typeof annotation.ask === 'object' ? annotation.ask : null;
+    if (ask) {
+      const project = typeof ask.project === 'string' ? ask.project : DEFAULT_PROJECT_ID;
+      return { project, reason: 'ask', record_id: null };
+    }
+    if (work && typeof work.recordProject === 'function' && typeof saved.text === 'string') {
+      const cited = [];
+      for (const match of saved.text.matchAll(CITED_RECORD)) {
+        if (cited.length >= 32) break;
+        const project = work.recordProject(match[0]);
+        if (typeof project === 'string') cited.push({ id: match[0], project });
+      }
+      const projects = new Set(cited.map(entry => entry.project));
+      if (projects.size === 1) return { project: cited[0].project, reason: 'record', record_id: cited[0].id };
+    }
+    if (people && actor.kind === 'seat') {
+      const assignment = people.service.assignmentOf(actor.name);
+      if (assignment && typeof assignment.project === 'string' &&
+          people.liveProjects().includes(assignment.project)) {
+        return { project: assignment.project, reason: 'assignment', record_id: null };
+      }
+    }
+    return null;
+  }
+
+  // The stamp is a separate store call after the message line, not inside the
+  // message's own lock: a crash between the two leaves the message unstamped,
+  // which reads as "no project" and is never hidden by a filter. Writing it
+  // never fails the post.
+  async function stampAfterPost(actor, saved, annotation = null) {
+    if (typeof chat.stamp !== 'function' || !saved || !Number.isSafeInteger(saved.id)) return;
+    try {
+      const stamp = derivedStamp(actor, saved, annotation);
+      if (stamp) await chat.stamp(actor, saved.id, stamp.project, stamp.reason, stamp.record_id);
+    } catch (_) { /* the message is saved; its stamp is advisory */ }
+  }
+
+  /* `{kind: 'stamp', message_id, project}`: the author re-stamps a message. */
+  function stampInput(body) {
+    const input = closedObject(body, ['kind', 'message_id', 'project']);
+    return input && input.kind === 'stamp' && Number.isSafeInteger(input.message_id) && input.message_id > 0 &&
+      (input.project === null || typeof input.project === 'string') ? input : null;
+  }
+
+  async function restamp(request, response, actor, input) {
+    if (typeof chat.stamp !== 'function') {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-annotation' });
+      return;
+    }
+    if (input.project !== null && !(people && people.liveProjects().includes(input.project))) {
+      sendJson(request, response, 400, { ok: false, error: 'unknown-project' });
+      return;
+    }
+    try {
+      const row = await chat.stamp(actor, input.message_id, input.project, 'set', null);
+      sendJson(request, response, 201, { ok: true, row });
+    } catch (error) {
+      annotationRefusal(request, response, error);
+    }
   }
 
   const PEOPLE_ERRORS = Object.freeze({
@@ -2077,6 +2151,7 @@ function createFirstOwnerHandler(options) {
       const saved = publicMessage(await chat.append({ text: input.text }, actor));
       if (!saved) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
+      await stampAfterPost(actor, saved);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
       if (error && (error.code === 'invalid-text' || error.code === 'message-id-collision')) {
@@ -2337,6 +2412,7 @@ function createFirstOwnerHandler(options) {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf));
       if (!saved) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
+      await stampAfterPost(actor, saved, asked.annotation);
       await bridgeRoomAnswers(actor, saved, request, gate.approverOf);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
@@ -2384,6 +2460,7 @@ function createFirstOwnerHandler(options) {
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf));
       if (saved === null) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
+      await stampAfterPost(actor, saved, asked.annotation);
       await bridgeRoomAnswers(actor, saved, request, gate.approverOf);
       sendJson(request, response, 201, { ok: true, message: saved });
     } catch (error) {
@@ -2419,14 +2496,19 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
     }
-    const input = lifecycleInput(body);
-    if (!input) {
+    const stamping = stampInput(body);
+    const input = stamping ? null : lifecycleInput(body);
+    if (!input && !stamping) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-annotation' });
       return;
     }
     const authorized = seatAuthorization(request, 'write');
     if (!authorized || authorized.allow !== true || typeof authorized.subject_name !== 'string') {
       sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    if (stamping) {
+      await restamp(request, response, { subject_id: authorized.subject_id, name: authorized.subject_name }, stamping);
       return;
     }
     try {
@@ -2444,8 +2526,9 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
     }
-    const input = lifecycleInput(body);
-    if (!input) {
+    const stamping = stampInput(body);
+    const input = stamping ? null : lifecycleInput(body);
+    if (!input && !stamping) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-annotation' });
       return;
     }
@@ -2458,6 +2541,10 @@ function createFirstOwnerHandler(options) {
     const actor = authorizedActor(request, authorized, now);
     if (actor === null) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    if (stamping) {
+      await restamp(request, response, actor, stamping);
       return;
     }
     try {

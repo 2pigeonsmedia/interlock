@@ -6,7 +6,11 @@
 // are open for the viewer, and which asks the composer may bind an answer to.
 // Nothing here reads message text.
 (function exposeAsksModel(root) {
-  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval']);
+  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval', 'stamp']);
+  // A message's project stamp: the project (null = the whole room) and why.
+  const STAMP_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'message_id', 'project', 'reason', 'record_id']);
+  const STAMP_REASONS = Object.freeze(['ask', 'record', 'assignment', 'set']);
+  const PROJECT_ID = /^[a-z][a-z0-9-]{1,31}$/;
   const REVISE_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id', 'means']);
   // Whose turn it is comes from the one shared rule, here and on the server.
   const askTurn = typeof module === 'object' && module && module.exports
@@ -87,6 +91,13 @@
           positive(row.agreed.message_id) && name(row.agreed.by) && row.agreed.revision === row.revision &&
           Number.isSafeInteger(row.agreed.at)));
     }
+    if (row.kind === 'stamp') {
+      return exact(row, STAMP_KEYS) && positive(row.seq) && name(row.by) && positive(row.message_id) &&
+        (row.project === null || (typeof row.project === 'string' && PROJECT_ID.test(row.project))) &&
+        STAMP_REASONS.includes(row.reason) &&
+        (row.reason === 'record' ? typeof row.record_id === 'string' && /^[WDF]-[1-9][0-9]*$/.test(row.record_id)
+          : row.record_id === null);
+    }
     if (row.kind === 'revise') {
       return exact(row, REVISE_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id) &&
         (row.means === null || name(row.means));
@@ -142,10 +153,13 @@
   function createAsksState() {
     let asks = new Map();
     let posts = new Map();
+    // message id -> its newest stamp, as the server bound it
+    let stamps = new Map();
 
     function reset() {
       asks = new Map();
       posts = new Map();
+      stamps = new Map();
     }
 
     function addAsk(askId, by, ask, askedAt, carriedFrom) {
@@ -169,7 +183,12 @@
       let changed = false;
       for (const row of rows) {
         if (!KINDS.includes(row.kind)) continue;
-        if (row.kind === 'post') {
+        if (row.kind === 'stamp') {
+          // Rows arrive in seq order: the newest stamp of a message wins.
+          stamps.set(row.message_id, Object.freeze({
+            project: row.project, reason: row.reason, record_id: row.record_id, by: row.by,
+          }));
+        } else if (row.kind === 'post') {
           posts.set(row.message_id, row);
           for (const answer of row.answers) {
             const ask = asks.get(answer.ask_id);
@@ -270,7 +289,56 @@
         .map(found => found.ask_id).sort((a, b) => a - b));
     }
 
-    return Object.freeze({ reset, apply, ask, post, openFor, answeredIds });
+    function stamp(messageId) {
+      return stamps.get(messageId) || null;
+    }
+
+    /* How many messages each project has stamped, for the filter chips; a
+     * whole-room stamp belongs to no project and is never filtered. */
+    function stampCounts() {
+      const counts = new Map();
+      for (const found of stamps.values()) {
+        if (found.project !== null) counts.set(found.project, (counts.get(found.project) || 0) + 1);
+      }
+      return counts;
+    }
+
+    return Object.freeze({ reset, apply, ask, post, openFor, answeredIds, stamp, stampCounts });
+  }
+
+  /* The plate on a stamped message: the project's name and why it is there. */
+  function stampPlate(found, projectName) {
+    const where = found.project === null ? 'Whole room' : projectName;
+    const why = found.reason === 'assignment' ? `from ${found.by}'s assignment`
+      : found.reason === 'record' ? `from ${found.record_id}`
+        : found.reason === 'ask' ? 'from its ask' : `set by ${found.by}`;
+    return `${where} · ${why}`;
+  }
+
+  /* A message that addresses the viewer always shows through a project
+   * filter: the viewer was rung by it, or it asks the viewer. */
+  function addressesViewer(delivery, ask, viewer) {
+    if (viewer === null || viewer === undefined) return false;
+    if (Array.isArray(delivery) && delivery.some(entry => entry && entry.name === viewer)) return true;
+    return !!ask && ask.of === viewer;
+  }
+
+  /* The project filter is one class on the conversation list and one CSS
+   * rule per project: a message stamped for another project is hidden unless
+   * it addresses the viewer; an unstamped (or whole-room) message has no
+   * data-project and always shows. Project ids are [a-z0-9-], safe here. */
+  function filterClass(project) {
+    return typeof project === 'string' && PROJECT_ID.test(project) ? `filter-project-${project}` : null;
+  }
+
+  function hiddenSelector(project) {
+    return typeof project === 'string' && PROJECT_ID.test(project)
+      ? `.message[data-project]:not([data-project="${project}"]):not([data-addressed-me])` : null;
+  }
+
+  function filterRule(project) {
+    const name = filterClass(project);
+    return name ? `.transcript.${name} ${hiddenSelector(project)} { display: none; }` : null;
   }
 
   /* What the ask's own line says, for every viewer. */
@@ -367,7 +435,7 @@
   }
 
   const contract = Object.freeze({
-    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, mayAnswer, bindAnswers, noteShown, answerText,
+    BARE_ANSWERS, bareAnswer, validRow, stampPlate, addressesViewer, filterClass, hiddenSelector, filterRule, validPage, createAsksState, askLine, age, chosen, mayAnswer, bindAnswers, noteShown, answerText,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {

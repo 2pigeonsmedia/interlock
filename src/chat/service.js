@@ -642,6 +642,14 @@ function createChatService(options) {
     });
   }
 
+  /* A message's project stamp; the store checks the actor is its author. */
+  async function stamp(actor, messageId, project, reason, recordId = null) {
+    requireOpen();
+    return await store.stamp({
+      subject_id: actor.subject_id, name: actor.name, message_id: messageId, project, reason, record_id: recordId,
+    });
+  }
+
   async function readAnnotations(query) {
     requireOpen();
     return await store.readAnnotationRows(query);
@@ -668,7 +676,7 @@ function createChatService(options) {
   }
 
   return Object.freeze({
-    append, appendAnnotated, annotate, readAnnotations, openAsks, postFacts, addresseeAnswers, revisionOf,
+    append, appendAnnotated, annotate, stamp, readAnnotations, openAsks, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,

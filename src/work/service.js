@@ -977,6 +977,13 @@ function createWorkService(options) {
     return item ? Object.freeze({ project: item.project, asker_subject_id: item.approval.by.subject_id }) : null;
   }
 
+  /* The project of the record with exactly this id, or null when there is
+   * none. For the room's project stamp: a message that cites a record. */
+  function recordProject(id) {
+    const item = typeof id === 'string' ? snapshot().items.find(row => row.id === id) : null;
+    return item ? item.project : null;
+  }
+
   function projectTakesWork(projectId) {
     const project = snapshot().projects.find(row => row.id === projectId);
     return !!project && project.retired_at === null;
@@ -1393,7 +1400,7 @@ function createWorkService(options) {
     createProject, retireProject, updateProject,
     createItem, updateWork, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, priorResult, reviseScope,
-    createApproval, closeApproval, projectTakesWork, approvalOf,
+    createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });

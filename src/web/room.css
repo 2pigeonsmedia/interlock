@@ -617,6 +617,18 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   text-transform: uppercase;
 }
 .conversation-heading p { font-size: 0.78rem; color: var(--ink-4); }
+.conversation-heading { flex-wrap: wrap; }
+/* The project filter: the viewer's own lens. Hiding is one class on the list
+ * and one rule per project, inserted by room.js into this sheet. */
+.project-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.project-filter[hidden], .project-filter-hidden[hidden] { display: none; }
+.project-filter button { padding: 2px 9px; font-family: var(--font-ai); font-size: 0.76rem; }
+.project-filter button[aria-pressed="true"] {
+  background: var(--signal-soft);
+  border-color: var(--signal);
+  color: var(--ink);
+}
+.conversation-heading .project-filter-hidden { flex-basis: 100%; font-family: var(--font-ai); font-size: 0.76rem; color: var(--ink-3); }
 
 .transcript {
   min-height: 0;
@@ -753,6 +765,21 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   font-size: 0.85em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* A message's project stamp: a dashed plate, no colour of its own. */
+.stamp-plate {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 6px;
+  padding: 1px 7px;
+  border: 1px dashed var(--ink-5);
+  border-radius: var(--radius);
+  font-family: var(--font-ai);
+  font-size: 0.74rem;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 /* Asks. The ask is a line under the message, never a new colour: teal is the
@@ -906,7 +933,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   .message-id { margin-top: 0; }
   .delivery { grid-column: 1; }
   .message-actions { grid-column: 1; }
-  .ask-chip, .answer-line { grid-column: 1; }
+  .ask-chip, .answer-line, .stamp-plate { grid-column: 1; }
   .conversation-heading, .composer, .room-notice { padding-left: 14px; padding-right: 14px; }
 }
 

@@ -44,6 +44,7 @@ Usage:
   interlock restore --from ABSOLUTE_PATH
   interlock join [--product LABEL] [--name NAME] [--url URL] [--project ID] [--model LABEL]
   interlock history --connection NAME [--drain | --skip-to-current | --before N | --find TEXT] [--json]
+  interlock history --connection NAME --project ID [--drain | --before N | --find TEXT]
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
       [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]]
@@ -103,7 +104,7 @@ function sayValue(args, index) {
 
 function commandOptions(command, args) {
   const options = {
-    connection: null, drain: false, skipToCurrent: false, before: null, find: null,
+    connection: null, drain: false, skipToCurrent: false, before: null, find: null, project: null,
     after: null, json: false, source: null,
     asksOf: null, means: null, deliver: null, answers: null, choice: null, status: null, discusses: null,
   };
@@ -148,6 +149,18 @@ function commandOptions(command, args) {
       }
       seen.add(flag);
       options.find = args[index + 1];
+      index += 1;
+      continue;
+    }
+    // A lens on what is printed: messages stamped for another project are
+    // left out, unless they address this AI. It reads and acknowledges
+    // exactly what the same history without it would.
+    if (command === 'history' && flag === '--project') {
+      if (seen.has(flag) || typeof args[index + 1] !== 'string' || !/^[a-z][a-z0-9-]{1,31}$/.test(args[index + 1])) {
+        return null;
+      }
+      seen.add(flag);
+      options.project = args[index + 1];
       index += 1;
       continue;
     }
@@ -249,6 +262,8 @@ function commandOptions(command, args) {
     return null;
   }
   if (options.connection === null || (command === 'say') !== (options.source !== null)) return null;
+  // The project lens is for reading text; it never applies to a skip or to JSON.
+  if (options.project !== null && (options.json || options.skipToCurrent)) return null;
   if ((options.means !== null || options.deliver !== null) && options.asksOf === null) return null;
   if (options.choice !== null && options.answers === null) return null;
   if (options.discusses !== null && options.answers !== null) return null;
@@ -728,8 +743,64 @@ async function annotationNotes(fetcher, profile, messages) {
   return notes;
 }
 
-async function renderAnnotated(stdout, fetcher, profile, messages) {
-  renderMessages(stdout, messages, await annotationNotes(fetcher, profile, messages));
+const STAMP_PAGES = 200;
+
+/* The project stamps and the asks of this AI, from the whole side-car of this
+ * era (a stamp may be re-set long after its message). Null when the side-car
+ * could not be read: the lens then shows everything and says so. */
+async function stampFacts(fetcher, profile) {
+  const stamps = new Map();
+  const askedOfMe = new Set();
+  let after = 0;
+  try {
+    for (let index = 0; index < STAMP_PAGES; index += 1) {
+      const page = await annotationPage(fetcher, profile, after, ANNOTATION_PAGE_LIMIT);
+      for (const row of page.rows) {
+        if (row && row.kind === 'stamp') {
+          const stamp = exactObject(row, ['seq', 'ts', 'kind', 'by', 'message_id', 'project', 'reason', 'record_id']);
+          if (!stamp || !Number.isSafeInteger(stamp.message_id) ||
+              !(stamp.project === null || typeof stamp.project === 'string')) throw incompatibleResponse();
+          stamps.set(stamp.message_id, stamp.project);
+        } else if (row && row.kind === 'post' && row.ask !== null && row.ask.of === profile.name) {
+          askedOfMe.add(row.message_id);
+        }
+      }
+      if (page.rows.length < ANNOTATION_PAGE_LIMIT || page.cursor <= after) {
+        return { stamps, askedOfMe };
+      }
+      after = page.cursor;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+/* `history --project`: the messages stamped for that project, those that
+ * address this AI (it was rung, or it is asked), and unstamped ones. */
+async function projectView(fetcher, profile, messages, project) {
+  const facts = await stampFacts(fetcher, profile);
+  if (facts === null) return { shown: messages, hidden: null };
+  const shown = messages.filter(message => {
+    const stamped = facts.stamps.has(message.id) ? facts.stamps.get(message.id) : null;
+    return stamped === null || stamped === project || facts.askedOfMe.has(message.id) ||
+      message.delivery.some(entry => entry.name === profile.name);
+  });
+  return { shown, hidden: messages.length - shown.length };
+}
+
+async function renderAnnotated(stdout, fetcher, profile, messages, project = null) {
+  if (project === null) {
+    renderMessages(stdout, messages, await annotationNotes(fetcher, profile, messages));
+    return;
+  }
+  const view = await projectView(fetcher, profile, messages, project);
+  renderMessages(stdout, view.shown, await annotationNotes(fetcher, profile, view.shown));
+  if (view.hidden === null) {
+    line(stdout, `Project stamps could not be read; every message is shown.`);
+  } else {
+    line(stdout, `${view.hidden} ${view.hidden === 1 ? 'message' : 'messages'} stamped for other projects not shown.`);
+  }
 }
 
 function validHead(result) {
@@ -919,7 +990,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
       }
     } catch (_) {
       if (parsed.json) line(io.stdout, JSON.stringify(page));
-      else await renderAnnotated(io.stdout, fetcher, profile, page.messages);
+      else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
       line(io.stderr, 'interlock: messages were received, but delivery could not be confirmed; run the command again.');
       return EXIT_RUNTIME;
     }
@@ -928,7 +999,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
     profiles.updateCursor(profile.name, profile.request_id, page.cursor);
   } catch (_) {
     if (parsed.json) line(io.stdout, JSON.stringify(page));
-    else await renderAnnotated(io.stdout, fetcher, profile, page.messages);
+    else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
     line(io.stderr, 'interlock: messages were received, but the local cursor could not be saved; run the command again.');
     return EXIT_RUNTIME;
   }
@@ -936,7 +1007,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
   if (parsed.json) {
     line(io.stdout, JSON.stringify(page));
   } else if (page.messages.length > 0) {
-    await renderAnnotated(io.stdout, fetcher, profile, page.messages);
+    await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
   } else if (wait) {
     line(io.stdout, `Nothing yet — run \`interlock listen --connection ${profile.name}\` again.`);
   } else {
@@ -963,7 +1034,7 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
 
   async function output(page) {
     if (parsed.json) writeReadOutput(io.stdout, parsed, page);
-    else await renderAnnotated(io.stdout, fetcher, profile, page.messages);
+    else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
   }
 
   for (let index = 0; index < HISTORY_DRAIN_MESSAGES; index += 1) {
@@ -1148,7 +1219,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
       }
     } catch (_) {
       if (parsed.json) line(io.stdout, JSON.stringify(page));
-      else await renderAnnotated(io.stdout, fetcher, profile, page.messages);
+      else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
       line(io.stderr, 'interlock: messages were received, but delivery could not be confirmed; run the command again.');
       return EXIT_RUNTIME;
     }
@@ -1158,7 +1229,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
     line(io.stdout, JSON.stringify(page));
     return EXIT_OK;
   }
-  if (page.messages.length > 0) await renderAnnotated(io.stdout, fetcher, profile, page.messages);
+  if (page.messages.length > 0) await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
   const range = `Searched #${page.searched_from}–#${page.searched_to}.`;
   if (page.complete) line(io.stdout, `${range} Complete.`);
   else line(io.stdout, `${range} Continue with --before ${page.next_before}.`);
@@ -1168,7 +1239,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
 async function runReadCommand(command, args, io, dependencies = {}) {
   const parsed = commandOptions(command, args);
   if (!parsed) {
-    line(io.stderr, `interlock: usage: interlock ${command} --connection NAME${command === 'history' ? ' [--drain | --skip-to-current | --before N | --find TEXT]' : ''} [--json]`);
+    line(io.stderr, `interlock: usage: interlock ${command} --connection NAME${command === 'history' ? ' [--drain | --skip-to-current | --before N | --find TEXT] [--project ID]' : ''} [--json]`);
     return EXIT_USAGE;
   }
   let selected;

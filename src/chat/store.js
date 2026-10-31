@@ -62,6 +62,7 @@ const ANNOTATIONS_MARKER_KEYS = Object.freeze([
   'schema', 'archive_id', 'source_next_id', 'staged_sha256', 'archive_sha256',
 ]);
 const LIFECYCLE_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'kind', 'ask_id', 'means']);
+const STAMP_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'message_id', 'project', 'reason', 'record_id']);
 const {
   DIRECTORY_SYNC_SUPPORTED, atomicWriteJson, fsyncDirectory, fsyncFile,
 } = require('../atomic_json.js');
@@ -77,6 +78,7 @@ const OWN_CODES = Object.freeze([
   'invalid-session-discriminator',
   'corrupt-annotations', 'invalid-annotation', 'ask-of-self', 'ask-not-found', 'ask-not-open',
   'ask-not-answered', 'not-asker', 'unread-addressed', 'already-posted', 'ask-revised',
+  'not-author', 'message-not-found',
 ]);
 
 function fail(code) {
@@ -414,7 +416,7 @@ function readAnnotations(filePath, messages, firstId) {
     try { value = JSON.parse(line); } catch (_) { fail('corrupt-annotations'); }
     const row = Annotations.parseRow(value, i + 1) || Annotations.laterRow(value, i + 1);
     if (!row) fail('corrupt-annotations');
-    index.replay(row, row.kind === 'post' ? byId.get(row.message_id) : undefined);
+    index.replay(row, row.kind === 'post' || row.kind === 'stamp' ? byId.get(row.message_id) : undefined);
   });
   return { index, torn, keptBytes };
 }
@@ -949,6 +951,58 @@ function openStore(opts) {
     });
   }
 
+  /* A stamp row: the project a message belongs to and why. Only the
+   * message's author stamps it, and only a message of this era. A derived
+   * stamp (any reason but `set`) is written once per message: a retried post
+   * keeps the stamp it has, so it never undoes its author's own `set`. Returns
+   * the public row, or the existing one when a derived stamp was not needed. */
+  function stamp(input) {
+    return exclusive(() => {
+      requireOpen();
+      const request = closedObject(input, STAMP_INPUT_KEYS);
+      if (!request || !boundedString(request.subject_id, 64) ||
+          !boundedString(request.name, MAX_BYLINE_BYTES)) fail('invalid-annotation');
+      assertLiveLog();
+      assertLiveReceipts();
+      assertLiveActivity();
+      const message = Number.isSafeInteger(request.message_id)
+        ? messages.find(candidate => candidate.id === request.message_id) : undefined;
+      if (!message) fail('message-not-found');
+      if (message.subject_id !== request.subject_id) fail('not-author');
+      if (request.reason !== 'set' && asks.stamps.has(message.id)) {
+        return Annotations.publicRow(asks.stamps.get(message.id));
+      }
+      const row = Annotations.parseRow({
+        v: Annotations.ROW_VERSION,
+        seq: asks.rows.length + 1,
+        ts: Date.now(),
+        kind: 'stamp',
+        subject_id: request.subject_id,
+        name: request.name,
+        message_id: request.message_id,
+        project: request.project,
+        reason: request.reason,
+        record_id: request.record_id,
+      }, asks.rows.length + 1);
+      if (!row) fail('invalid-annotation');
+      try {
+        appendLineExisting(annotationsPath, Annotations.encodeRow(row));
+        expectedAnnotations = fileIdentity(annotationsPath);
+        if (!expectedAnnotations) noteFatal('log-missing');
+        asks.replay(row, message);
+        return Annotations.publicRow(row);
+      } catch (error) {
+        if (error && (error.code === 'store-fatal' || error.code === 'log-missing' ||
+            error.code === 'log-changed')) {
+          fatal = error.code;
+          throw error;
+        }
+        if (error && OWN_CODES.includes(error.code)) throw error;
+        noteFatal('store-fatal');
+      }
+    });
+  }
+
   /* Bound rows after `after` (a side-car seq). The cursor passes over rows
    * that never bound. `first_id` is the era: a client that sees it change
    * starts again from 0, as it does for messages. */
@@ -1386,7 +1440,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf,
+    annotate, stamp, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf,
   });
 }
 
