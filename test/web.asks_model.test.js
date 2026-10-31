@@ -350,3 +350,16 @@ test('the composer offers "for approval" to members only, routes it, and sends t
   assert.ok(/if \(approvalMode\(\)\) \{\s+sendButton\.disabled = true;\s+try \{\s+await sendApprovalRequest\(\);/.test(ROOM_JS), 'the composer sends it instead of the message');
   assert.ok(ROOM_JS.includes('askOf.hidden = on;'), 'the room routes it: no one to pick');
 });
+
+test('a request for approval is answered from its chip by its live approver, a plain ask by the person asked', () => {
+  const request = { ask_id: 7, of: 'Bea', state: 'open', approval: true };
+  assert.equal(Asks.mayAnswer(request, 'Bea'), true, 'before the brief is read: the person it was asked of');
+  assert.equal(Asks.mayAnswer(request, 'Cal'), false);
+  assert.equal(Asks.mayAnswer(request, 'Cal', new Set([7])), true, 'a lead who took it over approves it');
+  assert.equal(Asks.mayAnswer(request, 'Bea', new Set()), false, 'the one it was first asked of no longer does');
+  assert.equal(Asks.mayAnswer(Object.assign({}, request, { state: 'answered' }), 'Cal', new Set([7])), false, 'only while open');
+  assert.equal(Asks.mayAnswer(request, null, new Set([7])), false, 'nobody signed in');
+  const plain = { ask_id: 8, of: 'Bea', state: 'open', approval: false };
+  assert.equal(Asks.mayAnswer(plain, 'Bea', new Set()), true, 'a plain ask ignores Needs you');
+  assert.equal(Asks.mayAnswer(plain, 'Cal', new Set([8])), false);
+});

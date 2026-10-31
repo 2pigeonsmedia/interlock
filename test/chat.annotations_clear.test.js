@@ -451,3 +451,28 @@ test('a kept-open ask that was revised keeps its revision across a clear too', a
   await assert.rejects(room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: ask.id, choice: 'yes', revision: 1 }] }),
     error => code(error) === 'ask-revised', 'a yes to the first scope is refused after the clear');
 });
+
+test('a cleared era whose side-car holds approval, revise and carried-story rows keeps its archive download', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-annotations-clear-'));
+  const room = open(dir);
+  const agreed = await room.chat.appendAnnotated({ text: 'Mealworms?' }, marlow(), { ask: { of: 'Ana', means: 'I buy mealworms' } });
+  await room.chat.annotate(MARLOW_ACTOR, 'approval', agreed.id);
+  await room.chat.appendAnnotated({ text: 'yes' }, PERSON, { answers: [{ ask_id: agreed.id, choice: 'yes' }] });
+  const revised = await room.chat.appendAnnotated({ text: 'Rollers?' }, marlow(), { ask: { of: 'Ana', means: 'scope one' } });
+  await room.chat.annotate(MARLOW_ACTOR, 'revise', revised.id, 'scope two');
+  const first = await room.archive.clearTranscript();
+  await room.chat.append({ text: 'still here' }, marlow());
+  const second = await room.archive.clearTranscript();
+  const kindsIn = receipt => fs.readFileSync(path.join(dir, 'archives', receipt.archive_id + '.annotations.jsonl'), 'utf8')
+    .trim().split('\n').map(line => JSON.parse(line).kind);
+  assert.ok(kindsIn(first).includes('approval') && kindsIn(first).includes('revise'),
+    'the arrangement: the first archive holds approval and revise rows');
+  assert.ok(kindsIn(second).includes('carry_state'), 'the arrangement: the second archive holds a carried story');
+  const listed = await room.archive.listArchives();
+  for (const receipt of [first, second]) {
+    const entry = listed.find(row => row.archive_id === receipt.archive_id);
+    assert.equal(entry.downloads.annotations, `/api/transcript/exports/${receipt.archive_id}.annotations.jsonl`);
+    const artifact = room.archive.readArtifact(receipt.archive_id, 'annotations.jsonl');
+    assert.ok(artifact.body.equals(fs.readFileSync(path.join(dir, 'archives', receipt.archive_id + '.annotations.jsonl'))));
+  }
+});

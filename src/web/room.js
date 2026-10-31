@@ -115,6 +115,9 @@ let rosterGrants = [];
 let rosterProjects = [];
 let grantsLoading = false;
 let projectsLoading = false;
+// The requests for approval waiting in this viewer's Needs you, by ask id,
+// from the Work brief; null until it is read.
+let approverAskIds = null;
 let roomFactTicks = 0;
 // What the viewer opened or folded in People survives each refresh.
 const rosterGroupChoice = new Map();
@@ -344,6 +347,7 @@ function showLogin(message = '') {
   rosterKnown = false;
   rosterGrants = [];
   rosterProjects = [];
+  approverAskIds = null;
   rosterGroupChoice.clear();
   rosterExpanded.clear();
   rosterList.replaceChildren();
@@ -1532,6 +1536,15 @@ async function loadPeopleProjects() {
         result.projects.some(row => !row || typeof row.id !== 'string' || typeof row.display_name !== 'string')) return;
     rosterProjects = result.projects.map(row => ({ id: row.id, display_name: row.display_name }));
     if (rosterKnown) drawRoster();
+    if (Array.isArray(result.needs_me)) {
+      const ids = new Set(result.needs_me
+        .filter(row => row && row.approval && row.approval.state === 'awaiting' && Number.isSafeInteger(row.ask_message_id))
+        .map(row => row.ask_message_id));
+      const changed = approverAskIds === null || ids.size !== approverAskIds.size ||
+        [...ids].some(id => !approverAskIds.has(id));
+      approverAskIds = ids;
+      if (changed) refreshAsks();
+    }
   } catch (_) {
     // The Work panel reports the brief's own failures; People keeps the last names.
   } finally {
@@ -2084,7 +2097,7 @@ function decorateMessage(article, messageId) {
       means.textContent = `A yes means: ${ask.means}`;
       chip.append(means);
     }
-    const mine = viewer !== null && ask.of === viewer && ask.state === 'open';
+    const mine = InterlockAsks.mayAnswer(ask, viewer, approverAskIds);
     const chosen = InterlockAsks.chosen(ask);
     for (const choice of ['yes', 'no']) {
       const word = ask.approval ? (choice === 'yes' ? 'Approve' : 'Decline') : (choice === 'yes' ? 'Yes' : 'No');

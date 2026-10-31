@@ -300,6 +300,18 @@
     return last ? last.choice : null;
   }
 
+  /* Whether this viewer may answer this ask from its chip. A plain ask is
+   * answered by the person it asks. A request for approval is answered by its
+   * live approver: the request's in that viewer's Needs you (`approverAsks`,
+   * the ask ids from the Work brief), so a lead who takes a project over can
+   * approve and one who has left cannot. Until the brief has been read
+   * (`approverAsks` null), the person it was asked of. */
+  function mayAnswer(ask, viewer, approverAsks = null) {
+    if (viewer === null || ask.state !== 'open') return false;
+    if (ask.approval && approverAsks instanceof Set) return approverAsks.has(ask.ask_id);
+    return ask.of === viewer;
+  }
+
   /* The choice a bare answer carries, or null when the text is not one. */
   function bareAnswer(text) {
     if (typeof text !== 'string') return null;
@@ -355,7 +367,7 @@
   }
 
   const contract = Object.freeze({
-    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, bindAnswers, noteShown, answerText,
+    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, mayAnswer, bindAnswers, noteShown, answerText,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {
