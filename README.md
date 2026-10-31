@@ -64,6 +64,22 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
+v0.3.4 tested-on evidence (2026-10-31):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 1029/1030, 1 skipped |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 1029/1030, 1 skipped |
+
+v0.3.4 has People say whether an AI is listening, working or not listening,
+and who is waiting on whom; rings the holder of assigned work and sends
+unassigned work to its project's lead; links a withdrawn question to its
+replacement; and lets only an administrator, the first owner or the lead
+change a project. v0.3.0 added Work: asks, requests for approval, projects
+with leads, and the Needs you list.
+
+**Earlier releases**, kept as history:
+
 v0.3.3 tested-on evidence (2026-10-31):
 
 | Runtime | Platform | Automated result |
@@ -74,10 +90,7 @@ v0.3.3 tested-on evidence (2026-10-31):
 v0.3.3 lets words alone, in the room or on the record, pass a decision back
 to its asker (only a Yes or No decides), shows an AI that only listens as listening, tells both sides when a
 reply lands on a withdrawn question, and adds `work move` and
-`work project-update` to the CLI. v0.3.0 added Work: asks, requests for
-approval, projects with leads, and the Needs you list.
-
-**Earlier releases**, kept as history:
+`work project-update` to the CLI.
 
 v0.3.2 tested-on evidence (2026-10-31):
 
