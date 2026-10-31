@@ -202,8 +202,10 @@ test('a person lead who has left the room approves nothing: the request goes bac
     const moved = (await needsAna()).find(row => row.id === waiting.json.item.id);
     assert.ok(moved, 'the waiting request moves to the first owner\'s Needs you');
     assert.equal(moved.approval.approver.name, 'Ana');
+    assert.equal(moved.next_to.name, 'Ana', 'its Needs you card says Next: Ana, the approver it now waits on');
     assert.equal((await item(runtime, owner, waiting.json.item.id)).approval.approver.name, 'Ana',
       'the item itself shows the live approver, as the lists do');
+    assert.equal((await item(runtime, owner, waiting.json.item.id)).next_to.name, 'Ana', 'and names her as Next');
     const fresh = await askFor('Order toner');
     assert.equal(fresh.status, 201, fresh.text);
     assert.equal(fresh.json.item.approval.approver.name, 'Ana', 'a new request routes to the first owner');
