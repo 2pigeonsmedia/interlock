@@ -153,7 +153,7 @@ function createChatService(options) {
 
   /* A message and its annotation in one call: the ask has to be known before
    * recipients are frozen on the row, or it could neither ring nor hold. */
-  async function appendAnnotated(body, actor, annotationIn, requireNew = false, approverOf = null) {
+  async function appendAnnotated(body, actor, annotationIn, requireNew = false, approverOf = null, decisionOf = null) {
     // Every key is optional on the wire; absent means none.
     const input = closedObject(annotationIn, ['ask', 'answers', 'status', 'read_through', 'discusses']);
     if (!input) throw fail('invalid-annotation');
@@ -178,10 +178,10 @@ function createChatService(options) {
       status: input.status === undefined ? null : input.status,
       read_through: input.read_through === undefined ? null : input.read_through,
       discusses: input.discusses === undefined ? null : input.discusses,
-    }, approverOf instanceof Set ? approverOf : null);
+    }, approverOf instanceof Set ? approverOf : null, decisionOf instanceof Set ? decisionOf : null);
   }
 
-  async function appendWith(body, actor, requireNew, annotationIn, approverOf = null) {
+  async function appendWith(body, actor, requireNew, annotationIn, approverOf = null, decisionOf = null) {
     requireOpen();
     const now = Date.now();
     await store.touch(actor.subject_id, now);
@@ -257,7 +257,7 @@ function createChatService(options) {
     const recipients = ringRecipients(
       body && body.text, roster, actor && actor.subject_id, askTarget, deliver, askers,
     );
-    const saved = await store.append(body, Object.assign({}, actor, { recipients }), annotation, requireNew, approverOf);
+    const saved = await store.append(body, Object.assign({}, actor, { recipients }), annotation, requireNew, approverOf, decisionOf);
     // Store append resolves only after its durable commit. A waiter can never
     // observe a wake for a message the append caller has not durably earned.
     for (const waiter of [...waiters]) waiter.notify();

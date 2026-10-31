@@ -1037,6 +1037,9 @@ function createWorkService(options) {
           actor.subject_id !== item.asked_of.subject_id || actor.kind !== item.asked_of.kind) {
         return { ok: true, recorded: null };
       }
+      // Words with no Yes or No are discussion, not a decision: the record
+      // stays awaiting and the turn passes back to the asker in the room.
+      if (body.choice === null) return { ok: true, recorded: null };
       // An answer stands on the record only for the scope it was given to:
       // the room ask's revision this decision's scope is.
       if (body.revision !== askRevision(item)) return { ok: true, recorded: null };
@@ -1073,6 +1076,12 @@ function createWorkService(options) {
   // its work item.
   // The request for approval bound to this room ask: its project and asker,
   // for the host to re-derive its approver. Null when there is none.
+  // Whether this room ask is a decision's ask: a words-only answer to it is
+  // discussion, so the room leaves it open (as it does a request for approval).
+  function decisionOf(askId) {
+    return snapshot().items.some(row => row.kind === 'decision' && !row.withdrawn && row.ask_message_id === askId);
+  }
+
   function approvalOf(askId) {
     const item = snapshot().items.find(row => row.kind === 'work' && row.approval && row.ask_message_id === askId);
     return item ? Object.freeze({ project: item.project, asker_subject_id: item.approval.by.subject_id }) : null;
@@ -1526,7 +1535,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, moveItem, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, priorResult, reviseScope,
+    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
     needsMe, replay,

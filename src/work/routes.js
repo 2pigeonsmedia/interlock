@@ -284,6 +284,13 @@ function createWorkRoutes(options) {
       return null;
     }
   }
+  function decisionOf(askId) {
+    try {
+      return work.decisionOf(askId);
+    } catch (_) {
+      return null;
+    }
+  }
 
   function recordProject(id) {
     try {
@@ -319,7 +326,7 @@ function createWorkRoutes(options) {
     }
   }
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }
