@@ -165,6 +165,10 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `items/evidence` | `id`, `target`, `observed`, `limits`, `reference` (optional when `source_message` is given), optional `relates_to`, `source_message` (`{ message_id, quote }`) |
 | `items/note` | `id`, `text` |
 | `items/move` | `id`, `expected_revision`, `project` (the first owner, the record's holder or the lead of its current project, else `403 not-mover`; `get` says `may_move` for its reader; a live project other than its own, else `404 unknown-project`, `409 project-retired` or `409 same-project`); kept as a `moved` event with `from` and `to` |
+
+Making someone else `responsible` (at `items/create` or `items/update`) posts
+`@Holder — W-n is yours: <title>` to the room, bylined to the writer, so the
+holder is rung; nobody is rung for a record they make their own.
 | `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (required when `sent` and refused otherwise: a room message the recording participant posted, else `invalid-message-id`), optional `detail` |
 | `decisions/answer` | `id`, `expected_revision`, `text`, optional `choice` (`yes`, `no` or null), `conditions`, `reason` (required when replacing an answer or answering for someone else) |
 | `decisions/report` | `id`, `expected_revision`, `text`, `source`, optional `conditions` |
@@ -266,8 +270,9 @@ Five sections, in this order:
 
 - **Needs you** — one card for each thing waiting on the viewer, across
   every active project; a project filter never hides it. It joins the brief's
-  `needs_me` (work whose next action is theirs, a decision awaiting their
-  answer, a request awaiting their approval) with room asks where it is the
+  `needs_me` (work whose next action is theirs, or that they hold while
+  nobody is next; a decision awaiting their answer; a request awaiting their
+  approval) with room asks where it is the
   viewer's turn and asks the viewer made that came back to them. A record and
   the room ask bound to it are one card, never two. A card's head shows who,
   the turn in words (`your turn`, `waiting on Ana`, `approved → you are on

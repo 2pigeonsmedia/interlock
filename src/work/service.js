@@ -449,7 +449,10 @@ function createWorkService(options) {
     if (item.kind === 'decision') {
       return decisionState(item) === 'awaiting' && item.asked_of.subject_id === subjectId;
     }
-    if (!item.next_to || item.next_to.subject_id !== subjectId) return false;
+    // Next to the viewer; or, with nobody next, held by the viewer: a record
+    // made someone's is theirs to act on until someone else is named next.
+    const holds = !item.next_to && item.responsible && item.responsible.subject_id === subjectId;
+    if (!holds && (!item.next_to || item.next_to.subject_id !== subjectId)) return false;
     return item.state === 'open' || item.state === 'active' || item.state === 'ready' || item.state === 'blocked';
   }
 

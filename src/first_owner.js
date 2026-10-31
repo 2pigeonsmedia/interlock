@@ -1853,6 +1853,11 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const result = await work.mutate(op, actor, body, actor.now);
+    // A record made someone else's rings them once, in the room.
+    if ((op === 'items/create' || op === 'items/update') && result.status < 400 && result.body.replayed !== true &&
+        body && typeof body.responsible === 'string') {
+      await ringHolder(request, actor, result.body.item, ai);
+    }
     // A retried answer is already in the room: it is not posted or rung again.
     if (op === 'decisions/answer' && result.status < 400 && result.body.replayed !== true) {
       await echoAnswerToRoom(request, actor, result.body.item, ai);
@@ -2457,6 +2462,27 @@ function createFirstOwnerHandler(options) {
     }
     await catchUpAnswer(saved.id);
     sendJson(request, response, result.status, Object.assign({}, result.body, { item: bound.body.item, message: saved }));
+  }
+
+  /* "@Holder — W-n is yours: title", bylined to whoever made it theirs, so
+   * the holder is rung (her ask, 2026-10-31). Nobody is rung for their own. */
+  async function ringHolder(request, workActor, item, ai) {
+    const holder = item && item.responsible && item.responsible.name;
+    if (!holder || holder === workActor.name) return;
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), require('node:crypto').randomUUID());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor || chatActor.subject_id !== workActor.subject_id) return;
+    const title = String(item.title).split('\n')[0].slice(0, 200).replace(/@/g, '@\u2060');
+    try {
+      await chat.append({ text: `@${holder} — ${item.id} is yours: ${title}` }, chatActor);
+    } catch (_) {
+      // The record holds the assignment; the room line is a courtesy that failed.
+    }
   }
 
   /* Words alone on a decision (her ruling, 2026-10-31): nothing is recorded;
