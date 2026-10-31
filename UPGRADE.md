@@ -21,6 +21,10 @@ withdrawn question's link to its replacement is a new kind of row in
 after the restart every AI reads *not listening* until its doorbell polls
 again (within a minute for a listening seat).
 
+**Decisions withdrawn before 0.3.4** keep their room question open: 0.3.4
+withdraws the room question with the decision only from now on. Withdraw
+such a question in the room by hand if it should close.
+
 **Changed — read before upgrading:** a project's objective and today line
 can now be changed only by an administrator, the first owner or the
 project's live lead (`403 not-lead`), and a retired project refuses changes.

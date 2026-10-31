@@ -213,6 +213,25 @@ test('a record made someone else\'s rings them once and sits in their Needs you'
     assert.equal(later.length, 1);
     assert.match(later[0].text, new RegExp('^@Lead — ' + w.id + ' is yours'));
 
+    // Re-sending the same holder rings nobody; naming someone next rings them once, on change.
+    const again = (await aiGet(runtime, `/api/ai/work/items/${w.id}`, cue.token)).json.item;
+    const n5 = (await messages()).length;
+    const same = await aiPost(runtime, '/api/ai/work/items/update', { operation_id: uuid(), id: again.id,
+      expected_revision: again.revision, responsible: 'Lead', note: 'still Lead' }, cue.token);
+    assert.equal(same.status, 200, same.text);
+    assert.equal((await messages()).length, n5, 'the same holder again is not rung again');
+    const nexted = await aiPost(runtime, '/api/ai/work/items/update', { operation_id: uuid(), id: again.id,
+      expected_revision: same.json.item.revision, next_to: 'Lead', next_action: 'Check the totals', note: 'Lead next' }, cue.token);
+    assert.equal(nexted.status, 200, nexted.text);
+    const nextLines = (await messages()).slice(n5);
+    assert.equal(nextLines.length, 1, 'named next: one ring');
+    assert.match(nextLines[0].text, new RegExp('^@Lead — ' + again.id + ' is next to you: Check the totals'));
+    const n6 = (await messages()).length;
+    const nextSame = await aiPost(runtime, '/api/ai/work/items/update', { operation_id: uuid(), id: again.id,
+      expected_revision: nexted.json.item.revision, next_to: 'Lead', next_action: 'Check the totals', note: 'same' }, cue.token);
+    assert.equal(nextSame.status, 200, nextSame.text);
+    assert.equal((await messages()).length, n6, 'the same next again is not rung again');
+
     // Owned by nobody: the project's lead sees it as unassigned and is rung once; with no lead, the first owner sees it.
     const grant = await post(runtime, '/api/grants/create',
       { holder_name: 'Lead', holder_kind: 'seat', project: 'ops', scope: 'leads ops', until: null },

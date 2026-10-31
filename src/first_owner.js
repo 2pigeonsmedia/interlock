@@ -1856,6 +1856,10 @@ function createFirstOwnerHandler(options) {
       await fileDecision(request, response, body, actor, ai);
       return;
     }
+    // Who held it and who was next before an update, so only a change rings.
+    const prior = op === 'items/update' && body && typeof body.id === 'string'
+      ? work.read('get', actor, { id: body.id }, actor.now) : null;
+    const before = prior && prior.status === 200 ? prior.body.item : null;
     const result = await work.mutate(op, actor, body, actor.now);
     // A record filed for nobody rings its project's lead once, as unassigned.
     const filed = result.body && result.body.item;
@@ -1863,10 +1867,18 @@ function createFirstOwnerHandler(options) {
         filed.kind !== 'decision' && !filed.approval && !filed.responsible && !filed.next_to) {
       await ringLead(request, actor, result.body.item, ai);
     }
-    // A record made someone else's rings them once, in the room.
+    // A record made someone else's, or naming someone else next, rings them
+    // once, in the room, and only when that changed.
     if ((op === 'items/create' || op === 'items/update') && result.status < 400 && result.body.replayed !== true &&
-        body && typeof body.responsible === 'string') {
-      await ringHolder(request, actor, result.body.item, ai);
+        result.body.item) {
+      const after = result.body.item;
+      const key = ref => (ref && typeof ref.name === 'string' ? ref.kind + ':' + ref.name + ':' + (ref.session ?? '') : null);
+      const changed = field => key(after[field]) !== null && key(after[field]) !== key(before && before[field]);
+      if (changed('responsible')) await ringHolder(request, actor, after, ai);
+      if (changed('next_to') && !(changed('responsible') && key(after.next_to) === key(after.responsible))) {
+        await ringHolder(request, actor, Object.assign({}, after, {
+          responsible: after.next_to, title: after.next_action || after.title }), ai, 'is next to you');
+      }
     }
     // A withdrawn decision withdraws the ask it put in the room, so nothing
     // said there afterwards closes it as answered.

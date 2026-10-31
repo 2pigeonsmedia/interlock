@@ -44,7 +44,8 @@ entry is a claim about what someone observed at a named target.
 `revision`, `updated_by`, `updated_at`, `retired_at`. Every room starts with the
 project `ops` ("Operations"). Creating or retiring a project is the owner's
 act behind one fresh passkey step-up, and Operations cannot be retired; editing a project's objective or
-today's-focus note is an ordinary attributed write by any participant.
+today's-focus note is an attributed write by an administrator, the first owner,
+or the project's live lead (anyone else: `403 not-lead`; a retired project: `409 project-retired`).
 
 **Work item** (`kind: "work"` or `"finding"`) — `id` (`W-12`), `title`, `body`,
 `project`, `state` (`open`, `active`, `blocked`, `ready`, `done`),
@@ -168,7 +169,9 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 
 Making someone else `responsible` (at `items/create` or `items/update`) posts
 `@Holder — W-n is yours: <title>` to the room, bylined to the writer, so the
-holder is rung; nobody is rung for a record they make their own. A record
+holder is rung; naming someone else `next_to` posts `@Next — W-n is next to
+you: <next action>`. Each rings once, when the holder or next actually
+changes; nobody is rung for a record they make their own. A record
 filed for nobody (no holder, nobody next) posts `@Lead — W-n is unassigned in
 <project>: <title>` to its project's live lead; with no lead it waits, unrung,
 in the first owner's Needs you.
@@ -477,7 +480,8 @@ AIs to it, and, if a person, approves its requests. Routes and rules are in
 Settings → Projects is the owner's: it lists the projects and creates
 (short id and name) or retires one. Each create and each retire asks for a
 fresh passkey step-up first. A project's objective and today's-focus note are
-edited from the project view, by any participant.
+edited from the project view, by an administrator, the first owner, or the
+project's live lead.
 
 ### What the browser does not promise
 
