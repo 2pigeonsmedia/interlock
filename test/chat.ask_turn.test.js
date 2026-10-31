@@ -305,3 +305,23 @@ test('a declined request for approval stays declined: no revise reopens it', asy
   await chat.annotate({ subject_id: SCOUT, name: 'Scout' }, 'revise', plain.id, 'y');
   assert.equal((await chat.openAsks(ANA, 'Ana')).addressed[0].ask_id, plain.id, 'the control: a plain ask still reopens on a revise');
 });
+
+test('a message that starts with "re #N", N an ask, is a reply on it: linked, the turn moves, the asker is rung', async () => {
+  const chat = room();
+  const ask = await chat.appendAnnotated({ text: 'Order rollers?' }, scout(), { ask: { of: 'Ana', means: 'I order two rollers' } });
+  // Typed by hand, with no Reply button: the plain message route.
+  const typed = await chat.append({ text: `re #${ask.id} what about three?` }, ANA_ACTOR);
+  assert.deepEqual(typed.recipients.map(r => r.name), ['Scout'], 'it rings the asker');
+  let open = (await chat.openAsks(ANA, 'Ana')).addressed[0];
+  assert.deepEqual([open.latest.kind, open.latest.party, open.turn.waiting_on], ['discussion', 'addressee', 'Scout']);
+  // The other way: the AI answers the same way.
+  await chat.append({ text: `re #${ask.id} three works` }, scout());
+  open = (await chat.openAsks(ANA, 'Ana')).addressed[0];
+  assert.equal(open.turn.waiting_on, 'Ana', 'his "re #N" passes it back');
+  // Mid-sentence, or naming a message that is not an ask: plain text.
+  const mid = await chat.append({ text: `about re #${ask.id}, later` }, ANA_ACTOR);
+  const notAsk = await chat.append({ text: `re #${typed.id} I meant that one` }, ANA_ACTOR);
+  const rows = (await chat.readAnnotations({ after: 0, limit: 50 })).rows;
+  assert.equal(rows.some(row => row.message_id === mid.id || row.message_id === notAsk.id), false, 'no link, nothing stored');
+  assert.deepEqual([mid.recipients, notAsk.recipients], [[], []]);
+});

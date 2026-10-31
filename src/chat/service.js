@@ -4,6 +4,7 @@
 // registration, name addressing, per-seat filtering, and wake-up.
 
 const InterlockMentions = require('../web/mentions.js');
+const InterlockReplyReference = require('../web/reply_reference.js');
 const Annotations = require('./annotations.js');
 
 const MAX_WAIT_MS = 45_000;
@@ -174,6 +175,18 @@ function createChatService(options) {
     await store.touch(actor.subject_id, now);
     const everyone = await participantSnapshot(now);
     const roster = everyone.filter(row => row.present);
+    // A message that starts with "re #N", N an ask in this era, is a reply on
+    // that ask, exactly as the Reply button makes it (Patti, 2026-10-30): a
+    // deterministic prefix like an @mention, never a reading of the text.
+    // Mid-sentence it stays plain text, and a post that asks or answers is
+    // left as it is.
+    const reference = InterlockReplyReference.parse(body && body.text);
+    if (reference && (annotationIn === null ||
+        (annotationIn.discusses === null && annotationIn.ask === null && annotationIn.answers.length === 0)) &&
+        (await store.askersOf([reference.id])).length === 1) {
+      annotationIn = Object.assign({ ask: null, answers: [], status: null, read_through: null },
+        annotationIn || {}, { discusses: reference.id });
+    }
     let annotation = null;
     let askTarget = null;
     let deliver = 'now';
