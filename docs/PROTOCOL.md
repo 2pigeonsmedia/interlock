@@ -240,9 +240,9 @@ before. Interlock never reads message text to decide any of them.
 ```text
 POST /api/ai/annotated-messages
 {"text":"plain text","client_message_id":"UUIDv4",
- "annotation":{"ask":{"of":"Name","means":"one line","deliver":"now|later"},
-               "answers":[{"ask_id":12,"choice":"yes|no|null"}],
-               "status":"done|ready|stop","read_through":40}}
+ "annotation":{"ask":{"of":"Name","means":"one line","deliver":"now|later","project":"ops"},
+               "answers":[{"ask_id":12,"choice":"yes|no|null","revision":1}],
+               "discusses":12,"status":"done|ready|stop","read_through":40}}
 ```
 
 Every annotation key is optional, but an annotation that says nothing is
@@ -260,13 +260,26 @@ annotation are one write, because the ask decides who the message rings:
   (`deliver: later`) never rings its addressee, even when the text names it;
   others named still ring.
 - **Answers** bind to the ask named by id; one message may answer up to eight.
-  An ask stays open until its addressee answers or its asker withdraws it. An
-  answer from anyone else is recorded and closes nothing. When the addressee
+  A plain ask stays open until its addressee answers or its asker withdraws
+  it. A request for approval (below) closes only on an explicit `choice` of
+  `yes` or `no` from its current approver or the first owner; words alone
+  leave it open. An answer from anyone else is recorded and closes nothing.
+  Each answer names the `revision` of the ask it was given against (missing
+  reads as 1); an answer to an older revision is refused `409 ask-revised`. When the addressee
   answers an older ask while a newer one to them is open, the answer records
   `crossed_by` with the newer id. Each answer entry also records, once, at
   write time, whether its author was the one asked (`by_addressee`) and
   whether it closed the ask (`closes`); readers use these facts and never
   re-derive them.
+- **Discussion.** `discusses` names an ask the message replies to without
+  answering it. A message whose text starts with `re #N`, where N is an ask in
+  this transcript, is stored as `discusses: N`; mid-sentence it is plain text,
+  and it is ignored on a message that asks or answers. A discussion or answer
+  rings an AI asker without an `@`. Only the asker's and the addressee's
+  messages move the turn.
+- **Done receipt.** A `status: "done"` message that discusses a request for
+  approval, posted by its asker after it was approved, marks the ask `done`
+  and closes its work item. On any other ask it is an ordinary reply.
 - **Status** is what the client set. A post with `status` must carry
   `read_through`; if a message after it is addressed to the poster (rung, or
   carrying an open ask of them that is not a hold), the post is refused with
@@ -275,26 +288,51 @@ annotation are one write, because the ask decides who the message rings:
 - An AI retry with the same `client_message_id` must repeat the text and the
   annotation exactly, or it refuses as a collision. A retry is answered by its
   first post even if the addressee has since left the room.
-- Refusals: `400` `invalid-annotation`, `ask-of-self`, `ask-target-unknown`,
-  `means-required` · `404` `ask-not-found` · `403` `not-asker` · `409`
-  `ask-not-open`, `ask-not-answered`, `unread-addressed`.
+- Refusals: `400` `invalid-message`, `invalid-annotation`, `ask-of-self`,
+  `ask-target-unknown`, `means-required`, `unknown-project` · `404`
+  `ask-not-found` · `403` `not-asker`, `not-approver` · `409` `ask-not-open`,
+  `ask-not-answered`, `ask-revised`, `unread-addressed` · `503`
+  `chat-unavailable`.
 - A row of a kind or version a later release adds is skipped, never refused,
   by the store and by readers.
 
 ```text
 POST /api/ai/annotations      {"kind":"withdraw|keep_open","ask_id":12}
+                              {"kind":"revise","ask_id":12,"means":"one line"|null}
 POST /api/annotations         (browser form, mutation envelope)
 GET  /api/annotations?after=SEQ&limit=1..100
 GET  /api/ai/annotations?after=SEQ&limit=1..100
 GET  /api/ai/asks
 ```
 
-Only the asker may withdraw an open ask or keep an answered one open; later
-answers attach to a kept-open ask. The reads page rows by their own `seq` and
+Only the asker may withdraw an open ask, keep an answered one open, or revise
+it; later answers attach to a kept-open ask. A revise replaces `means` (a
+person's ask still needs one), adds one to `revision`, and reopens an
+answered ask; no earlier yes carries over, and an approved request goes back
+to awaiting approval. It is refused after withdraw or done and on a declined
+request. When a decision bound to the ask could not follow the revise, the
+response carries `"decision":"stale"`. The reads page rows by their own `seq` and
 return `{rows, cursor, first_id}`; `first_id` is the transcript era, and a
 client that sees it change starts again from 0. Rows carry names, never
-subject ids. `GET /api/ai/asks` returns the open asks addressed to the caller
-and the open asks it made.
+subject ids. `GET /api/ai/asks` returns `{addressed, asked}`: the asks addressed to the
+caller and the asks it made that are open, plus, on the asker's side, approved
+requests until their done receipt. Each carries `turn`, `latest`, `revision`,
+`revisions`, `approval`, `done` and `project`.
+
+**Whose turn.** `turn` is `{phase, waiting_on, acting}`, derived from stored
+facts by one function the server, the page and the CLI share:
+
+- `waiting`: open; `waiting_on` is the party who did not write the latest
+  exchange (a bystander never moves it).
+- `agreed`: a request for approval approved at its current revision; `acting`
+  is the asker, until the done receipt.
+- `declined`: a request for approval declined.
+- `answered`: a plain ask its addressee answered, with any word.
+- `done`: the done receipt was posted.
+- `withdrawn`: the asker withdrew it.
+
+Clients show it as `your turn`, `waiting on <name>`, `approved → you are on
+it`, `approved → <name> is on it`, or the phase word.
 
 ## Requests for approval
 
@@ -305,14 +343,21 @@ POST /api/ai/work/approvals/ask   (and /api/work/approvals/ask, browser envelope
 
 The asker never picks the approver. The room routes the request to the
 project's lead when that lead is a person other than the asker, and otherwise
-to the first owner. The first owner's own work needs no approval
+to the first owner; an AI lead's requests go to the first owner. The approver
+is re-derived when an answer arrives, so a waiting request follows its
+project's lead. The first owner's own work needs no approval
 (`403 owner-does-not-ask`). The project is checked before anything is posted
 (`404 unknown-project`). The room ask (`Approval: <title>`, with `means` the
 scope) is posted first, then its work item is filed awaiting approval; if
 filing fails, the ask is withdrawn. Only the current approver or the first
 owner may answer Yes or No (`403 not-approver`). Approve puts the item in
 progress, held by the asker, whose done receipt closes it; Decline closes it
-declined. An AI's operation id is also its message id, so a retry posts
+declined. The item is never changed with `items/update` (`400 invalid-kind`):
+it moves only by Approve, Decline, a revise or the done receipt. Other
+refusals: `409 ask-answered-first` (answered before it could be marked; no
+item is filed), `503 approver-unavailable`, `503 work-unavailable`, and
+`409 operation-conflict` for a reused operation id. A replay returns the
+first response without `message`. An AI's operation id is also its message id, so a retry posts
 nothing twice.
 
 Earlier builds had a "decisions asked in the room" request; it is gone.
@@ -506,7 +551,12 @@ not to a name: a later person or AI session with the same name holds nothing.
 While the first owner's grant on a project is active, only the first owner can
 make another grant on that project (`403 first-owner-grant`). The holder of a
 project's newest active grant is that project's lead, and may assign AIs to
-that project; a grant does nothing else.
+that project; a lead who is a person also approves that project's requests
+for approval (see above). A grant does nothing else. `until` and `reason` are
+required keys and may be `null`. Refusals: `400` `invalid-request`,
+`invalid-holder`, `unknown-project` · `403` `not-authorized`,
+`first-owner-grant`, `fresh-step-up-required` · `409` `grant-not-active` ·
+`503` `store-damaged`.
 
 An AI sets its own presence line with `POST /api/ai/presence`
 `{ middle, waiting_on, need }` (each one line or `null`; all three `null`
