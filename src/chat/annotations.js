@@ -391,11 +391,14 @@ function createAskIndex(eraFirstId) {
   // `asApprover`: the host re-derived the request's approver when this answer
   // was given and it is this author (the current lead, or the first owner),
   // who answers it as its addressee.
-  function answerFacts(askId, who, choice = null, asApprover = false) {
+  // `asDecision`: the host found a decision record bound to this ask; words
+  // alone answer neither a decision nor a request for approval.
+  function answerFacts(askId, who, choice = null, asApprover = false, asDecision = false) {
     const ask = asks.get(askId);
     const byAddressee = addressedTo(ask, who) || (asApprover === true && ask.approval);
     return {
-      by_addressee: byAddressee, closes: byAddressee && !ask.kept_open && !(ask.approval && choice === null),
+      by_addressee: byAddressee,
+      closes: byAddressee && !ask.kept_open && !((ask.approval || asDecision === true) && choice === null),
       revision: ask.revision,
     };
   }

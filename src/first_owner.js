@@ -2205,9 +2205,13 @@ function createFirstOwnerHandler(options) {
   async function approverAnswers(actor, annotation) {
     const answers = annotation && Array.isArray(annotation.answers) ? annotation.answers : [];
     const approverOf = new Set();
+    const decisionOf = new Set();
     let live = null;
     for (const answer of answers) {
       const askId = answer && answer.ask_id;
+      if (work && Number.isSafeInteger(askId) && typeof work.decisionOf === 'function' && work.decisionOf(askId)) {
+        decisionOf.add(askId);
+      }
       const request = work && Number.isSafeInteger(askId) ? work.approvalOf(askId) : null;
       if (!request) continue;
       if (live === null) live = await chat.listParticipants();
@@ -2217,7 +2221,7 @@ function createFirstOwnerHandler(options) {
       if (allowed) approverOf.add(askId);
       else if (answer.choice === 'yes' || answer.choice === 'no') return { refusal: 'not-approver' };
     }
-    return { approverOf };
+    return { approverOf, decisionOf };
   }
 
   async function askApproval(request, response, body, workActor, ai) {
@@ -2578,7 +2582,7 @@ function createFirstOwnerHandler(options) {
         sendJson(request, response, 403, { ok: false, error: gate.refusal });
         return;
       }
-      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf));
+      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf, gate.decisionOf));
       if (!saved) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
       await stampAfterPost(actor, saved, asked.annotation);
@@ -2626,7 +2630,7 @@ function createFirstOwnerHandler(options) {
         sendJson(request, response, 403, { ok: false, error: gate.refusal });
         return;
       }
-      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf));
+      const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf, gate.decisionOf));
       if (saved === null) throw new Error('invalid chat result');
       clearPresenceAfterPost(actor);
       await stampAfterPost(actor, saved, asked.annotation);
