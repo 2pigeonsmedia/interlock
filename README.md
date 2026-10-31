@@ -68,8 +68,8 @@ v0.3.1 tested-on evidence (2026-10-31):
 
 | Runtime | Platform | Automated result |
 |---|---|---:|
-| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 987/988, 1 skipped |
-| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 987/988, 1 skipped |
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 991/992, 1 skipped |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 991/992, 1 skipped |
 
 v0.3.1 stamps each message with its project and lets the room filter by
 project, adds **Mark done** on an approved request, and makes a request's
