@@ -158,8 +158,32 @@ function uuid() {
   return crypto.randomUUID();
 }
 
-async function askOf(runtime, token, body) {
-  return aiPost(runtime, '/api/ai/work/decisions/ask', Object.assign({ operation_id: uuid() }, body), token);
+// What an earlier build's "Ask a decision" left: a room ask of Ana and the
+// decision bound to it. Nothing binds one today, so the binding is written
+// into the stored record and the room reopened, as an upgrade would open it.
+async function askedEarlier(runtime, token, title, means) {
+  const asked = await aiPost(runtime, '/api/ai/annotated-messages', {
+    text: `Decision: ${title}`, client_message_id: uuid(), annotation: { ask: { of: 'Ana', means, project: 'ops' } },
+  }, token);
+  assert.equal(asked.status, 201, asked.text);
+  const recorded = await aiPost(runtime, '/api/ai/work/items/create', {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title, body: 'b', asked_of: 'Ana', scope: means,
+    source_message: { message_id: asked.json.message.id, quote: `Decision: ${title}` },
+  }, token);
+  assert.equal(recorded.status, 201, recorded.text);
+  return { json: { message: asked.json.message, item: recorded.json.item } };
+}
+
+function bindAsEarlierBuild(dataDir, asks) {
+  const storeFile = path.join(dataDir, 'work', 'store.json');
+  const stored = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
+  for (const ask of asks) {
+    const row = stored.items.find(entry => entry.id === ask.json.item.id);
+    row.ask_message_id = ask.json.message.id;
+    row.ask_revision = 1;
+    row.revision += 1;
+  }
+  fs.writeFileSync(storeFile, JSON.stringify(stored));
 }
 
 async function item(runtime, owner, id) {
@@ -171,7 +195,7 @@ async function item(runtime, owner, id) {
 test('a yes binds to the revision she saw, on both doors; the record\'s answer reaches the room as what it is', async () => {
   const port = await reservePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-server-decisions-'));
-  const runtime = await startInterlockServer({ port, dataDir });
+  let runtime = await startInterlockServer({ port, dataDir });
   try {
     const { password, device } = await bootstrap(runtime);
     let owner = await login(runtime, password);
@@ -180,14 +204,21 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     owner = await elevate(runtime, owner, device);
     const scout = await admitSeat(runtime, owner, 'Scout');
     owner = await login(runtime, password);
+    const rollers = await askedEarlier(runtime, lead.token, 'Rollers', 'I order the OEM rollers');
+    const wipe = await askedEarlier(runtime, lead.token, 'Wipe', 'I wipe the old disk');
+    const drum = await askedEarlier(runtime, lead.token, 'Drum', 'I order a drum');
+    const lanes = await askedEarlier(runtime, lead.token, 'Lanes', 'I order the lanes by priority');
+    const grit = await askedEarlier(runtime, lead.token, 'Grit', 'I buy one bag of grit');
+    await runtime.close();
+    bindAsEarlierBuild(dataDir, [rollers, wipe, drum, lanes, grit]);
+    runtime = await startInterlockServer({ port, dataDir });
+    owner = await login(runtime, password);
+    assert.equal((await item(runtime, owner, rollers.json.item.id)).ask_message_id, rollers.json.message.id,
+      'ARRANGEMENT: the earlier build\'s binding opened');
     const leadTurn = async askId => (await aiGet(runtime, '/api/ai/asks', lead.token)).json.asked
       .find(row => row.ask_id === askId);
 
     // The person's door: Lead revises between her reading and her tap.
-    const rollers = await askOf(runtime, lead.token, {
-      project: 'ops', title: 'Rollers', body: 'b', asked_of: 'Ana', scope: 'I order the OEM rollers',
-    });
-    assert.equal(rollers.status, 201, rollers.text);
     const askId = rollers.json.message.id;
     const revised = await aiPost(runtime, '/api/ai/annotations',
       { kind: 'revise', ask_id: askId, means: 'I order the third-party rollers from eBay' }, lead.token);
@@ -228,9 +259,6 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     assert.equal(seatYes.status, 201, seatYes.text);
 
     // Her "no" written on the record: the room's copy is an answer, never a yes.
-    const wipe = await askOf(runtime, lead.token, {
-      project: 'ops', title: 'Wipe', body: 'b', asked_of: 'Ana', scope: 'I wipe the old disk',
-    });
     let fresh = await item(runtime, owner, wipe.json.item.id);
     const no = await post(runtime, '/api/work/decisions/answer', {
       operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'No, do not wipe it.',
@@ -243,9 +271,6 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     assert.equal(await leadTurn(wipe.json.message.id), undefined, 'answered, a plain ask: nobody is on it');
 
     // Answered on the record after a revision: the copy names the revision the record follows.
-    const drum = await askOf(runtime, lead.token, {
-      project: 'ops', title: 'Drum', body: 'b', asked_of: 'Ana', scope: 'I order a drum',
-    });
     await aiPost(runtime, '/api/ai/annotations', { kind: 'revise', ask_id: drum.json.message.id, means: 'I order two drums' }, lead.token);
     fresh = await item(runtime, owner, drum.json.item.id);
     assert.equal(fresh.ask_revision, 2, 'the arrangement: the record follows revision 2');
@@ -257,9 +282,6 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     assert.deepEqual(drumEcho.answers.map(entry => entry.revision), [2]);
 
     // A yes said on the record agrees in the room too; it binds to the scope the record showed her.
-    const lanes = await askOf(runtime, lead.token, {
-      project: 'ops', title: 'Lanes', body: 'b', asked_of: 'Ana', scope: 'I order the lanes by priority',
-    });
     fresh = await item(runtime, owner, lanes.json.item.id);
     const maybe = await post(runtime, '/api/work/decisions/answer', {
       operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'sure', choice: 'maybe',
@@ -275,9 +297,6 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     assert.deepEqual(lanesEcho.answers.map(entry => [entry.choice, entry.revision]), [['yes', 1]]);
     assert.equal(await leadTurn(lanes.json.message.id), undefined, 'her record yes answers the plain ask');
     // She had the record open at the old scope when Lead revised: her yes is refused, nothing reaches the room.
-    const grit = await askOf(runtime, lead.token, {
-      project: 'ops', title: 'Grit', body: 'b', asked_of: 'Ana', scope: 'I buy one bag of grit',
-    });
     const seen = await item(runtime, owner, grit.json.item.id);
     await aiPost(runtime, '/api/ai/annotations', { kind: 'revise', ask_id: grit.json.message.id, means: 'I buy ten bags of grit' }, lead.token);
     const lateYes = await post(runtime, '/api/work/decisions/answer', {

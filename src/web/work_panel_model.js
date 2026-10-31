@@ -113,7 +113,7 @@
       bound.revision > row.ask_revision;
   }
 
-  // Only an ask the server bound to the decision ("Ask a decision") counts;
+  // Only an ask the server bound to the decision (an earlier build's "Ask a decision") counts;
   // a decision merely citing a message has no ask of its own.
   function answeredInRoom(decision, answered) {
     return decision.state === 'awaiting' && Number.isSafeInteger(decision.ask_message_id) &&
@@ -776,6 +776,10 @@
     'kill-slot-replied': 'The kill question already has its reply.',
     'means-required': 'Asking a person needs a line saying what a yes means.',
     'ask-target-unknown': 'That name is not anyone in the room.',
+    'owner-does-not-ask': 'Your own work needs no approval.',
+    'unknown-project': 'That project is not taking work.',
+    'approver-unavailable': 'Nobody can approve requests in this room right now.',
+    'ask-answered-first': 'The request was answered before it could be filed; it stands in the room as a plain question.',
   });
 
   function errorWords(code) {

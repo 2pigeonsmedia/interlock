@@ -32,6 +32,18 @@ function fresh() {
   return { dataDir, store, work };
 }
 
+// A decision bound to its room ask, as an earlier build's "Ask a decision"
+// stored it. Nothing binds one today; the record still reads and answers it.
+function boundByEarlierBuild(store, id, askMessageId) {
+  return store.commit(draft => {
+    const item = draft.items.find(row => row.id === id);
+    item.ask_message_id = askMessageId;
+    item.ask_revision = 1;
+    item.revision += 1;
+    return Object.assign({}, item);
+  });
+}
+
 function newWork(work, actor, extra = {}) {
   return work.createItem(actor, Object.assign({
     operation_id: uuid(), kind: 'work', project: 'ops',
@@ -946,7 +958,7 @@ test('Operations, the default project, cannot be retired; another project can', 
 });
 
 test('a room answer reaches only the decision bound to its ask, from its addressee, and the latest one is the record', () => {
-  const { work } = fresh();
+  const { work, store } = fresh();
   const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
   const decision = work.createItem(lead, {
     operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Merge?', body: 'b',
@@ -957,12 +969,7 @@ test('a room answer reaches only the decision bound to its ask, from its address
     ask_id: 41, revision: 1, message_id, text: choice || 'ok', choice, by_addressee: true, of: ANA_OF,
   }, extra));
   assert.equal(say(49, 'yes').recorded, null, 'before the bind, nothing records');
-  assert.throws(() => work.bindAsk(Object.assign({}, lead, { session: null }), {
-    id: decision.id, ask_message_id: 41, of: { kind: 'seat', subject_id: 'x', name: 'Scout' },
-  }), error => error.code === 'invalid-asked-of', 'the room ask and the record must name the same person');
-  const bound = work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 41, of: ANA_OF });
-  assert.equal(bound.item.revision, decision.revision + 1, 'the bind bumps the revision');
-  assert.equal(work.get(owner, { id: decision.id }).history.filter(event => event.kind === 'ask-bound').length, 1);
+  boundByEarlierBuild(store, decision.id, 41);
   assert.equal(say(50, 'yes', { by_addressee: false }).recorded, null, 'the room says a bystander: nothing records');
   assert.equal(say(51, 'yes').recorded, decision.id);
   assert.equal(say(51, 'yes').replayed, true);
@@ -992,13 +999,13 @@ test('a room answer reaches only the decision bound to its ask, from its address
 });
 
 test('on the record, a room answer from a seat that only shares the asked seat\'s name records nothing', () => {
-  const { work } = fresh();
+  const { work, store } = fresh();
   const BUILDER_OF = { kind: 'seat', subject_id: builder.subject_id, name: 'Builder' };
   const decision = work.createItem(lead, {
     operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Rerun?', body: 'b',
     asked_of: ref(builder), source_message: { message_id: 70, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Rerun?' },
   }).item;
-  work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 70, of: BUILDER_OF });
+  boundByEarlierBuild(store, decision.id, 70);
   // The room counts a rejoined Builder as the addressee (by name); the record does not.
   assert.equal(work.answerFromRoom(Object.assign({}, sameName, { session: null }), {
     ask_id: 70, revision: 1, message_id: 71, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
@@ -1009,13 +1016,13 @@ test('on the record, a room answer from a seat that only shares the asked seat\'
 });
 
 test('the latest room answer is the one latest in the room, not the one that arrived last', () => {
-  const { work } = fresh();
+  const { work, store } = fresh();
   const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
   const decision = work.createItem(lead, {
     operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Order?', body: 'b',
     asked_of: ref(owner), source_message: { message_id: 90, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Order?' },
   }).item;
-  work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 90, of: ANA_OF });
+  boundByEarlierBuild(store, decision.id, 90);
   const asOwner = Object.assign({}, owner, { session: null });
   const say = (message_id, choice) => work.answerFromRoom(asOwner, {
     ask_id: 90, revision: 1, message_id, text: choice, choice, by_addressee: true, of: ANA_OF,
@@ -1028,7 +1035,7 @@ test('the latest room answer is the one latest in the room, not the one that arr
 });
 
 test('the first owner\'s recorded answer stands: no admin replaces or reopens it, no room answer replaces it', () => {
-  const { work } = fresh();
+  const { work, store } = fresh();
   const first = Object.assign({}, owner, { first_owner: true });
   const admin = Object.freeze({ subject_id: 'p-2', name: 'Bea', kind: 'person', owner: true, first_owner: false });
   const decision = newDecision(work, lead, owner);
@@ -1047,7 +1054,7 @@ test('the first owner\'s recorded answer stands: no admin replaces or reopens it
     operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Rerun?', body: 'b', asked_of: ref(builder),
     source_message: { message_id: 110, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Rerun?' },
   }).item;
-  const bound = work.bindAsk(Object.assign({}, lead, { session: null }), { id: ofSeat.id, ask_message_id: 110, of: BUILDER_OF }).item;
+  const bound = boundByEarlierBuild(store, ofSeat.id, 110);
   work.answer(first, { operation_id: uuid(), id: ofSeat.id, expected_revision: bound.revision, text: 'no', reason: 'on its behalf' });
   assert.equal(work.answerFromRoom(Object.assign({}, builder, { session: null, first_owner: false }), {
     ask_id: 110, revision: 1, message_id: 111, text: 'yes', choice: 'yes', by_addressee: true, of: BUILDER_OF,
@@ -1086,13 +1093,13 @@ test('a work row names the room message it was made from', () => {
 });
 
 test('a revised ask moves its decision\'s scope and voids an answer given to the old scope', () => {
-  const { work } = fresh();
+  const { work, store } = fresh();
   const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
   const decision = work.createItem(lead, {
     operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Rollers?', body: 'b', asked_of: ref(owner), scope: 'OEM',
     source_message: { message_id: 120, ts: 1, byline: 'Lead', kind: 'seat', session: null, quote: 'Decision: Rollers?' },
   }).item;
-  work.bindAsk(Object.assign({}, lead, { session: null }), { id: decision.id, ask_message_id: 120, of: ANA_OF });
+  boundByEarlierBuild(store, decision.id, 120);
   work.answerFromRoom(Object.assign({}, owner, { session: null }), {
     ask_id: 120, revision: 1, message_id: 121, text: 'yes', choice: 'yes', by_addressee: true, of: ANA_OF,
   });
@@ -1115,7 +1122,7 @@ test('a decision follows the room ask by revision number, and takes a room answe
   }).item;
   const asLead = Object.assign({}, lead, { session: null });
   const asOwner = Object.assign({}, owner, { session: null });
-  const bound = work.bindAsk(asLead, { id: decision.id, ask_message_id: 130, of: ANA_OF }).item;
+  const bound = boundByEarlierBuild(store, decision.id, 130);
   assert.equal(bound.ask_revision, 1, 'bound at the first revision');
   const say = (message_id, revision) => work.answerFromRoom(asOwner, {
     ask_id: 130, message_id, text: 'yes', choice: 'yes', by_addressee: true, of: ANA_OF, revision,

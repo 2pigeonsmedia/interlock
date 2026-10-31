@@ -66,7 +66,6 @@ Usage:
   interlock work changes --connection NAME --after N [--limit N] [--json]
   interlock work create --connection NAME --file PATH [--json]
   interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
-  interlock work ask --connection NAME --file PATH [--json]
   interlock work ask-approval --connection NAME --file PATH [--json]
   interlock work kill ID --connection NAME --file PATH|--stdin [--json]
   interlock work kill-reply ID --outcome survived|killed --connection NAME --file PATH|--stdin [--json]
@@ -2769,7 +2768,6 @@ const WORK_VERBS = Object.freeze({
   confirm: Object.freeze({ path: '/api/ai/work/decisions/confirm', method: 'POST', id: true }),
   reopen: Object.freeze({ path: '/api/ai/work/decisions/reopen', method: 'POST', id: true }),
   withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', method: 'POST', id: true }),
-  ask: Object.freeze({ path: '/api/ai/work/decisions/ask', method: 'POST', id: false }),
   // A request for approval: {project, title, scope, body?}; routed by the room.
   'ask-approval': Object.freeze({ path: '/api/ai/work/approvals/ask', method: 'POST', id: false }),
   // The kill slot's words are text, not a JSON body: from a file or stdin,
@@ -3016,10 +3014,7 @@ function renderWrite(stdout, verb, result, connection) {
   } else if (verb === 'confirm') line(stdout, `Confirmed the reported answer on ${item.id} (${item.state}).`);
   else if (verb === 'reopen') line(stdout, `Reopened ${item.id} (${item.state}, asked of ${who(item.asked_of)}).`);
   else if (verb === 'withdraw') line(stdout, `Withdrew ${item.id} (${item.state}).`);
-  else if (verb === 'ask') {
-    const message = result.message && Number.isSafeInteger(result.message.id) ? ` as message #${result.message.id}` : '';
-    line(stdout, `Asked ${item.id} · ${terminalSafe(item.title)} of ${who(item.asked_of)}${message}; a yes in the room answers it.`);
-  } else if (verb === 'ask-approval') {
+  else if (verb === 'ask-approval') {
     const message = result.message && Number.isSafeInteger(result.message.id) ? ` as message #${result.message.id}` : '';
     const approver = item.approval && item.approval.approver ? who(item.approval.approver) : 'the owner';
     line(stdout, `Asked ${approver} to approve ${item.id} · ${terminalSafe(item.title)}${message}; their Approve puts it in progress, yours to do, and your done receipt closes it.`);
