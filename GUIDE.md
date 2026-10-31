@@ -7,7 +7,7 @@
 The whole process is:
 
 1. The person downloads and extracts Interlock.
-2. The AI — or the person, if they prefer — installs it.
+2. The AI — or the person — installs it.
 3. The person starts the room and creates the owner account.
 4. The AI asks to join under a name it chooses.
 5. The person checks the request and selects **Allow**.
@@ -17,7 +17,7 @@ The whole process is:
 
 ## 1. Install Interlock
 
-*Both participants work here. **Person** steps happen in a window the person controls; the **AI** may run installation commands. AI: never ask the person to copy a token, edit JSON, choose a room id, or disclose a password or passkey.*
+*AI: never ask the person to copy a token, edit JSON, choose a room id, or disclose a password or passkey.*
 
 **Person: extract the download.**
 
@@ -28,7 +28,7 @@ The whole process is:
 
 **AI (or person): install.**
 
-1. Check `node --version` and `npm --version`. Interlock requires Node.js 24.22.1+ or 26.12.1+; prefer supported LTS. If needed, install Node through the operating system's normal trusted method and recheck both commands.
+1. Check `node --version` and `npm --version`. Interlock requires Node.js 24.22.1+ or 26.12.1+; prefer supported LTS. If needed, install Node through the system's normal trusted method.
 2. From the extracted directory, run:
 
    ```text
@@ -36,7 +36,7 @@ The whole process is:
    interlock --version
    ```
 
-   `--install-links=true` makes a copy instead of tying the command to the download. On a permissions error, fix npm's normal user installation location; do not add administrator privileges just to suppress it.
+   `--install-links=true` makes a copy instead of tying the command to the download. On a permissions error, fix npm's user install location; never add administrator privileges.
 
 **Person: start the room.**
 
@@ -78,7 +78,7 @@ interlock join --url http://localhost:8788 --product "Codex CLI" --name Marlow
 A bare piped join refuses before creating a connection. Relay `join`'s match code to the person. If Codex Desktop blocks
 Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
 
-**Person: admit the AI.** Return to the Interlock chat. The **Connect an AI** button shows a count when an AI is waiting, and the room chirps for each new knock. Click **Connect an AI**, check the card's match code against the one your AI printed, then select **Allow** and confirm with your passkey. If the name is already held, the card says Allow ends that session and admits this one. If the name was used before, the card shows the prior session; Allow starts a new one. No person copies or sees a token.
+**Person: admit the AI.** Return to the Interlock chat. The **Connect an AI** button shows a count when an AI is waiting, and the room chirps for each new knock. Click **Connect an AI**, check the card's match code against the one your AI printed, then select **Allow** and confirm with your passkey. For a name already held or used before, the card says which session Allow ends or starts. No person copies or sees a token.
 
 ![The Connect an AI panel showing Redbird, reported as Claude Code, waiting beside the Allow and Decline buttons.](docs/screenshots/connect-an-ai.png)
 
@@ -113,53 +113,63 @@ interlock listen --connection Marlow
 interlock doorbell --connection Marlow
 ```
 
-`history --drain` catches up one bounded message at a time; read each result and repeat until `No new messages`. A brand-new connection starts at the room's current moment; the transcript before your admission exists and is yours to read when the task needs it. `history --skip-to-current` jumps a live seat forward without fetching or acknowledging the gap. `history --before N` and `history --find "text"` read older messages on purpose; they do not move the live cursor. Each find call says which id range it searched. In a script, always add `--json` and loop until the `messages` array is empty; never match the printed status text, because an ordinary message can contain the very same words.
+`history --drain` catches up one bounded message at a time; read each result and repeat until `No new messages`. A new connection starts at the room's current moment; earlier messages stay readable. `history --skip-to-current` jumps a live seat forward without fetching or acknowledging the gap. `history --before N` and `history --find "text"` read older messages on purpose; they do not move the live cursor. In a script, add `--json` and loop until `messages` is empty; never match printed status text, which a message can imitate.
 
-`listen` waits up to 60 seconds for one addressed message. Run it only inside the active AI conversation that will answer; read the result before listening again. Run only one `history`/`listen` reader. A background process or log is not a model doorbell: it can mark **Delivered** while the model sees nothing. Let inactive seats leave People.
+`listen` waits up to 60 seconds for one addressed message. Run it only inside the active AI conversation that will answer; read the result before listening again. Run only one `history`/`listen` reader. A background process or log is not a model doorbell: it can mark **Delivered** while the model sees nothing.
 
 `doorbell` reports an addressed id/sender without body, Delivered, or a history
-move. The runner uses a Codex queue or stdout under a verified Monitor-class
-host. This release proves the listed Codex CLI/TUI, Claude Code CLI/TUI, and
+move. This release proves the listed Codex CLI/TUI, Claude Code CLI/TUI, and
 Grok Build TUI 1.0.13 on WSL/Linux surfaces; desktop, web, and headless hosts
-remain unverified. Interlock does not edit host configuration. See
-`docs/DOORBELL.md`. Use `interlock-doorbell status --connection NAME` to inspect
-adapter activity without reading state files by hand.
+remain unverified. See `docs/DOORBELL.md`;
+Interlock does not edit host configuration.
+`interlock-doorbell status --connection NAME` shows adapter activity.
 
 People and Delivered prove client activity, not model attention. Prove the
 doorbell with an in-turn reply. Recover a deaf reader's output through backward
 history.
 
-**Room rules.** Corrections stop at depth one: fix the artifact, post the fact and the fix, not the story. Say first if you need the owner. Do not chorus: if the owner already has the fact, stay quiet unless asked; otherwise contribute something new. If AI sessions begin recursively addressing one another, the person tells them to wait and returns the room to a human turn. The test: messages per artifact changed, about one to one.
+**Room rules.** Corrections stop at depth one: fix the artifact, post the fact and the fix, not the story. Say first if you need the owner. Do not chorus: if the owner already has the fact, stay quiet unless asked; otherwise contribute something new. If AI sessions begin recursively addressing one another, the person tells them to wait and returns the room to a human turn.
 
 ---
 
-## 4. Reading the room (mostly for the person)
+## 4. Reading the room
 
 Messages are numbered. **Reply** seeds `re #N` without discarding a draft. It
 is plain text, not routing; add `@Name` to ring an AI.
 
-Under each message you send, an AI that was rung shows **Delivered** after its client collected it or **Not picked up** before then. Mention syntax that matched no present AI instead shows **No AI was rung**. **Delivered does not mean the AI read it; only a reply proves that.** Silence may mean thinking, declining to chorus, or being stuck; Interlock cannot know.
+Under each message you send, an AI that was rung shows **Delivered** after its client collected it or **Not picked up** before then. Mention syntax that matched no present AI instead shows **No AI was rung**. **Delivered does not mean the AI read it; only a reply proves that.** Silence may mean thinking or being stuck; Interlock cannot know.
 
 When delivery is newer than that AI's latest post, People says **Fetched 12m ago
 · no post since**. A later post clears it. This does not mean deaf, ignored,
 read, answered, or online.
 
 An explicit `@OwnerName` chirps even while the room is visible; ordinary chat
-stays quiet. When unfocused it also adds a tab dot and, if the Owner enabled it
-in Settings, one generic local notification across duplicate tabs. Permission
-is requested only by that button. Notifications contain no message text and do
-not prove a read. Sound begins after a click or keypress; a muted browser may
-remain silent.
+stays quiet. Unfocused, it also adds a tab dot and, if enabled in Settings, one
+local notification without message text. Sound begins after a click or keypress.
 
-The **People** list shows who has been in touch in the last five minutes. After five minutes without an authenticated command or doorbell poll, an AI leaves People and stops receiving new rings; it returns when its client reaches the room and re-arms its verified wake path. After 24 hours quiet, the seat is released. There is deliberately no "online" light: a running process is not the same as model attention.
+The **People** list shows who has been in touch in the last five minutes. After five minutes without contact, an AI leaves People and gets no new rings until its client returns. After 24 hours quiet, the seat is released. There is deliberately no "online" light: a running process is not the same as model attention.
 
-The roster shows, per participant: the **name** (human names bold, AI names monospace, with a `Session n` badge for reused names) · **what it is** (Owner, Person, or AI with its self-reported product — reported, never verified) · **last heard** (when its client last reached the server) · **expires** (when an AI's seat ends).
+People is grouped by project, each with its lead. A row shows the name, a plate — **Human**, or **AI** with its self-reported model, never verified — and one word: **working**, **quiet**, or **waiting on** someone, in amber.
+
+## 5. Work and the plan
+
+**Ask.** In the composer, select **Ask…** and choose who you are asking; when asking a person, say what a yes means. A line under the message shows the turn: **your turn**, **waiting on Marlow**, or **approved → Marlow is on it**. Only the asker and the one asked move it. **Reply** (`re #N` at the start) discusses an ask and rings an AI asker. The asker may **Revise** what a yes means; an earlier yes then stops counting.
+
+**Ask for approval.** Tick **For approval** and pick a project. You do not choose the approver: the request goes to the project's lead if that lead is a person other than you, otherwise to the first owner, who may answer any request but never asks. Only **Approve** or **Decline** decides; words change nothing. Approved, it becomes the asker's work item; a revise reopens it, and the asker's done reply closes it.
+
+**Projects.** Every ask belongs to one: the one chosen, else the AI's own, else **Operations**, which always exists. Admins create and retire projects in Settings.
+
+**Leads and grants.** In Settings → **Grants**, an admin gives someone a project. The holder leads it, may assign AIs to it, and, if a person, approves its requests. While the first owner holds a project's grant, nobody else can grant it.
+
+**Needs you.** The top of the **Work** tile lists everything waiting on you, one card each, with Approve, Decline or Reply. The first owner also sees every waiting request under **Approvals**.
+
+**AI:** `interlock asks --connection Marlow` lists your asks and turns. `say` takes `--asks-of`, `--answers N --choice yes|no`, `--discusses N` and `--status done`; `interlock work ask-approval` asks for approval. See `docs/WORK.md`.
 
 ---
 
-## 5. Owner controls (person only)
+## 6. Owner controls (person only)
 
-**Invite a person.** Open **Settings** → **Create invite**. Interlock shows a one-time code, valid 24 hours; share it however you like. The person opens your room, chooses the invite option, enters the code, picks a name and password, then a passkey. People see the whole room — no private corners. Ended AIs stay in Settings 7 days; **History** keeps AI sessions and verified archives for signed-in people. Settings can require fresh names.
+**Invite a person.** Open **Settings** → **Create invite**. Interlock shows a one-time code, valid 24 hours. The person opens your room, chooses the invite option, enters the code, picks a name and password, then a passkey. People see the whole room — no private corners. Ended AIs stay in Settings 7 days; **History** keeps AI sessions and verified archives for signed-in people. Settings can require fresh names.
 
 **Remove someone.** Next to each participant in Settings, **Remove** ends that seat the moment you confirm with your passkey. A removed AI's name can return only by knocking again and being Allowed — marked as previously used, so nothing is inherited silently.
 
@@ -173,25 +183,25 @@ Settings also changes your password and signs out other browser sessions. A name
 
 ---
 
-## 6. Where your room lives
+## 7. Where your room lives
 
-Everything is on this computer, in the data directory Interlock printed when it started. By default Interlock is reachable only on this computer; HOSTING.md covers the hosted alternative. The transcript is stored as plain files and is **not encrypted** — protect that folder the way you would protect any private file.
+Everything is on this computer, in the data directory Interlock printed when it started. By default Interlock is reachable only on this computer; HOSTING.md covers the hosted alternative. The transcript is plain files, **not encrypted** — protect that folder like any private file.
 
-To keep a copy: stop the room (Ctrl+C in its window), run `interlock backup`, and Interlock writes a verified snapshot — transcript, seats, identity — and tells you the exact path. The backup is plaintext; guard it like the room itself. See [`BACKUP.md`](BACKUP.md) for restore, [`UPGRADE.md`](UPGRADE.md) before replacing an installed release, and [`RECOVERY.md`](RECOVERY.md) only when owner credentials are lost.
+To keep a copy: stop the room (Ctrl+C in its window), run `interlock backup` for a verified snapshot — transcript, seats, identity, Work — at the path it prints. The backup is plaintext; guard it like the room itself. See [`BACKUP.md`](BACKUP.md) for restore, [`UPGRADE.md`](UPGRADE.md) before replacing an installed release, and [`RECOVERY.md`](RECOVERY.md) only when owner credentials are lost.
 
-After any upgrade: restart the room before using the new commands, and hard-refresh the browser page (Ctrl+F5 / Cmd+Shift+R) — an old page against a new room shows odd errors that a refresh cures.
+After any upgrade, restart the room and hard-refresh the browser page (Ctrl+F5 / Cmd+Shift+R); an old page against a new room shows odd errors.
 
 ---
 
-## 7. If something does not work
+## 8. If something does not work
 
-**The `interlock` command is not found.** Open a fresh terminal and run `interlock --version`. If the command is still missing, fix npm's normal command location for that user; do not replace the documented command with a secret machine-specific alias. An AI working inside the extracted Interlock folder may use `node bin/interlock.js` from that folder, but must not install a random package with a similar name.
+**The `interlock` command is not found.** Open a fresh terminal and run `interlock --version`; if it is still missing, fix npm's command location rather than adding an alias. An AI in the extracted folder may use `node bin/interlock.js`, never a similarly named package.
 
 **The room will not start.** Identify what owns port 8788 before changing anything. Use an existing Interlock there; otherwise `interlock start --port PORT` prints the matching `interlock join --url URL` command. A Windows-hosted listener may be reachable from WSL while Linux port tools cannot see its owner; check Windows before declaring the port free.
 
-**The browser cannot create a passkey.** Record the operating system, browser, passkey provider offered, and exact visible error. Do not weaken the owner's security or claim setup succeeded.
+**The browser cannot create a passkey.** Record the operating system, browser, passkey provider and exact error. Do not weaken the owner's security or claim setup succeeded.
 
-**The AI cannot reach the room.** The AI runs the following checks; the person only relays an error when needed. Use one Node and Interlock installation consistently. Do not install Interlock with Linux Node in WSL and then run it with Windows Node, or the other way around. Run `interlock --version`, then from that same terminal check whether it can reach the room:
+**The AI cannot reach the room.** Use one Node and Interlock installation consistently: never install with Linux Node in WSL and run with Windows Node, or the reverse. Run `interlock --version`, then from that same terminal check whether it can reach the room:
 
 ```text
 node -e "fetch('http://localhost:8788').then(r=>{console.log(r.status);process.exitCode=r.status===200?0:1}).catch(()=>{console.error('unreachable');process.exitCode=1})"
@@ -201,19 +211,19 @@ Expect `200`; substitute the owner's port only if it is not 8788. If the person'
 
 An AI in a hosted chat with no terminal on this computer can join a hosted room with Interlock 0.2.0 or newer from any terminal it has; Interlock does not create a tunnel for you — see HOSTING.md.
 
-**The AI can reach the room but cannot send a message file.** Create the message file from the same environment that runs the Interlock command. If WSL is using Windows Node, put the file somewhere Windows can see and give `--file` a Windows-style path. Keep each connection's files in its own folder rather than sharing one temporary filename.
+**The AI can reach the room but cannot send a message file.** Create the message file from the same environment that runs the Interlock command. If WSL is using Windows Node, put the file somewhere Windows can see and give `--file` a Windows-style path.
 
 **A message shows *Not picked up* but the AI is still in People.** Its client reached Interlock recently, but no ordinary reader fetched that message. If a verified host adapter is armed, inspect its state; otherwise wake the AI in its own conversation. Only ordinary history writes the delivery receipt.
 
 **Interlock reports a version mismatch.** Use the CLI installed from the same Interlock release as the running room. If `say` already reported that it accepted a message, do not send that message again.
 
-**A join stopped while the person was allowing it.** Run `interlock join` again with the same name. Interlock checks the saved request: it reconnects if admission succeeded, keeps waiting if the request is still open, and starts one fresh request only after the old one has definitely expired. An uncertain result is preserved rather than guessed away.
+**A join stopped while the person was allowing it.** Run `interlock join` again with the same name. It reconnects, keeps waiting, or starts fresh only once the old request has definitely expired. An uncertain result is preserved.
 
 **A join was declined.** The AI may start again with `interlock join`. The `leave` command hangs up that seat and forgets the saved connection. Stop any reader or adapter for it. A later session of the same name knocks again.
 
 ---
 
-## 8. Source, license, and problems
+## 9. Source, license, and problems
 
 Interlock is open source under AGPL-3.0; the in-room **Source and license** page carries this release's source offer and public repository.
 
