@@ -196,12 +196,14 @@ test('a filed decision is asked in the room, and every answer on the record reac
     // Ana answers on the record (the panel): the room hears it and Scout is rung.
     const before = (await messages()).length;
     const yes = await post(runtime, '/api/work/decisions/answer',
-      { operation_id: uuid(), id: d.id, expected_revision: (await item(runtime, ana, d.id)).revision, choice: 'yes' }, ana);
+      { operation_id: uuid(), id: d.id, expected_revision: (await item(runtime, ana, d.id)).revision, choice: 'yes',
+        text: 'Yes, and @Lead can start' }, ana);
     assert.equal(yes.status, 200, yes.text);
     const echoed = (await messages()).slice(before);
     assert.equal(echoed.length, 1, 'one room line for her answer');
     assert.equal(echoed[0].byline, 'Ana');
     assert.ok(echoed[0].delivery.some(row => row.name === 'Scout'), 'it rings the asker');
+    assert.deepEqual(echoed[0].delivery.map(row => row.name), ['Scout'], 'and nobody her words @mention');
     assert.equal((await rows()).some(row => row.kind === 'post' && row.message_id === echoed[0].id &&
       row.answers.some(a => a.ask_id === d.ask_message_id && a.choice === 'yes')), true, 'and answers the room ask yes');
 
@@ -211,14 +213,20 @@ test('a filed decision is asked in the room, and every answer on the record reac
     }, scout.token);
     assert.equal(other.status, 201, other.text);
     const mark = (await messages()).length;
-    const forLead = await post(runtime, '/api/work/decisions/answer', { operation_id: uuid(), id: other.json.item.id,
-      expected_revision: other.json.item.revision, choice: 'no', reason: 'Lead is away today' }, ana);
+    const onBehalf = { operation_id: uuid(), id: other.json.item.id,
+      expected_revision: other.json.item.revision, choice: 'no', text: 'No; @Lead decides when back', reason: 'Lead is away today' };
+    const forLead = await post(runtime, '/api/work/decisions/answer', onBehalf, ana);
     assert.equal(forLead.status, 200, forLead.text);
     const told = (await messages()).slice(mark);
     assert.equal(told.length, 1, 'one room line');
     assert.match(told[0].text, new RegExp('^@Scout — ' + other.json.item.id + ': No'), 'naming the asker, the record and the answer');
     assert.ok(told[0].delivery.some(row => row.name === 'Scout'), 'it rings the asker');
-    assert.equal(told[0].delivery.some(row => row.name === 'Lead'), false, 'the addressee did not answer, so it is not their answer');
+    assert.deepEqual(told[0].delivery.map(row => row.name), ['Scout'], 'only the asker is rung, not whom the words @mention');
+    assert.match(told[0].text, /@\u2060Lead/, 'the copied words still read @Lead');
+    // A retried answer is a replay: it is not posted or rung again.
+    const replay = await post(runtime, '/api/work/decisions/answer', onBehalf, ana);
+    assert.equal(replay.status, 200, replay.text);
+    assert.equal((await messages()).length, mark + 1, 'the replay posts nothing');
 
     // A decision that cites what someone said keeps that citation; its ask replies to it.
     const said = await post(runtime, '/api/messages', { text: 'Use the March cut-off.' }, ana);
@@ -233,6 +241,28 @@ test('a filed decision is asked in the room, and every answer on the record reac
     assert.ok(cited.json.item.ask_message_id > said.json.message.id, 'and it is still asked in the room');
     assert.match((await messages()).find(row => row.id === cited.json.item.ask_message_id).text,
       new RegExp('^re #' + said.json.message.id + ' Decision: Which cut-off applies\\?'));
+
+    // A retried filing answers from the record as it is now; the same id with a different request conflicts.
+    const fileOp = uuid();
+    const filing = { operation_id: fileOp, kind: 'decision', project: 'ops', title: 'Archive March?', body: 'b', asked_of: 'Ana' };
+    const first = await aiPost(runtime, '/api/ai/work/items/create', filing, scout.token);
+    assert.equal(first.status, 201, first.text);
+    const n2 = (await messages()).length;
+    const retried = await aiPost(runtime, '/api/ai/work/items/create', filing, scout.token);
+    assert.deepEqual([retried.status, retried.json.item.id, retried.json.item.ask_message_id],
+      [200, first.json.item.id, first.json.item.ask_message_id], 'the same record, bound');
+    const changed = await aiPost(runtime, '/api/ai/work/items/create', Object.assign({}, filing, { title: 'Archive April?' }), scout.token);
+    assert.deepEqual([changed.status, changed.json.error], [409, 'operation-conflict']);
+    assert.equal((await messages()).length, n2, 'neither retry posted');
+
+    // A filing the record would refuse posts nothing to the room.
+    const nowhere = await aiPost(runtime, '/api/ai/work/items/create',
+      Object.assign({}, filing, { operation_id: uuid(), project: 'nowhere' }), scout.token);
+    assert.deepEqual([nowhere.status, nowhere.json.error], [404, 'unknown-project']);
+    const extra = await aiPost(runtime, '/api/ai/work/items/create',
+      Object.assign({}, filing, { operation_id: uuid(), ask_message_id: 3 }), scout.token);
+    assert.equal(extra.status, 400, extra.text);
+    assert.equal((await messages()).length, n2, 'no phantom ask');
 
     // A decision of one's own is recorded with no room ask: nobody to ask or ring.
     const count = (await messages()).length;

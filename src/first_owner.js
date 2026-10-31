@@ -1,5 +1,6 @@
 'use strict';
 const { createApproverRule } = require('./work/approver.js');
+const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -1728,8 +1729,9 @@ function createFirstOwnerHandler(options) {
     return Object.freeze({
       subject_id: actor.subject_id, name: actor.name, kind: actor.kind, session: null,
       owner: workOwnerFlag(request, authorized, now, activity), now,
-      // Writes only: a read is a passive poll and must not touch the session.
-      first_owner: mutation && isFirstOwner(request, actor.subject_id, now, activity),
+      // A read asks passively, so a poll never touches the session; it still
+      // knows the first owner, so a record can say what she may do.
+      first_owner: isFirstOwner(request, actor.subject_id, now, mutation ? activity : 'passive-delivery'),
     });
   }
 
@@ -1837,7 +1839,10 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const result = await work.mutate(op, actor, body, actor.now);
-    if (op === 'decisions/answer' && result.status < 400) await echoAnswerToRoom(request, actor, result.body.item, ai);
+    // A retried answer is already in the room: it is not posted or rung again.
+    if (op === 'decisions/answer' && result.status < 400 && result.body.replayed !== true) {
+      await echoAnswerToRoom(request, actor, result.body.item, ai);
+    }
     sendWorkResult(request, response, result);
   }
 
@@ -2325,7 +2330,10 @@ function createFirstOwnerHandler(options) {
   // operation id doubles as its message id, so its retry posts nothing twice.
 
   async function fileDecision(request, response, body, workActor, ai) {
+    // Checked before anything is posted, so a refused filing leaves no ask in the room.
     if (typeof body.operation_id !== 'string' || typeof body.title !== 'string' || body.title.trim() === '' ||
+        typeof body.body !== 'string' || body.body.trim() === '' ||
+        Object.keys(body).some(key => key !== 'operation_id' && !WORK_CREATE_KEYS.includes(key)) ||
         (body.scope !== undefined && typeof body.scope !== 'string') ||
         (body.proposal !== undefined && typeof body.proposal !== 'string')) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
@@ -2342,10 +2350,26 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return;
     }
-    // A retry of a completed filing is answered from its record; nothing is posted.
+    // A retry of a completed filing is answered from its record as it is now
+    // (bound to its ask); nothing is posted. The same id with a different
+    // request is a conflict, as on every other write.
     const prior = work.priorResult(workActor, body.operation_id);
     if (prior) {
-      sendJson(request, response, 200, prior.body);
+      const was = prior.body.item;
+      const same = was.kind === 'decision' && was.title === body.title && was.body === body.body &&
+        (body.project === undefined || was.project === body.project) &&
+        Boolean(was.asked_of) && was.asked_of.name === body.asked_of;
+      if (!same) {
+        sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
+        return;
+      }
+      const current = work.read('get', workActor, { id: was.id }, workActor.now);
+      sendJson(request, response, 200, Object.assign({}, prior.body,
+        current && current.status === 200 ? { item: current.body.item } : {}));
+      return;
+    }
+    if (typeof body.project === 'string' && !work.projectTakesWork(body.project)) {
+      sendJson(request, response, 404, { ok: false, error: 'unknown-project' });
       return;
     }
     // A decision that cites a room message is asked as a reply to it, and
@@ -2406,11 +2430,13 @@ function createFirstOwnerHandler(options) {
     const answers = await chat.addresseeAnswers(askId);
     const latest = answers[answers.length - 1];
     if (!latest) return;
-    // The answerer is not this request's person, so whether a person is the
-    // first owner cannot be shown here: a person's answer is protected.
+    // Protected only when the answerer is the first owner, read through the
+    // one rule that may know her subject.
+    const owner = approverRule ? approverRule(null, null, Date.now()).owner : null;
     work.answerFromRoom({
       subject_id: latest.author.subject_id, name: latest.author.name, kind: latest.author.kind,
-      session: null, owner: false, first_owner: latest.author.kind === 'person',
+      session: null, owner: false,
+      first_owner: latest.author.kind === 'person' && Boolean(owner) && owner.subject_id === latest.author.subject_id,
     }, {
       ask_id: askId, message_id: latest.message_id, text: latest.text, choice: latest.choice,
       by_addressee: true, of: latest.of, revision: latest.revision,
@@ -2433,7 +2459,9 @@ function createFirstOwnerHandler(options) {
       chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
     }
     if (!chatActor || chatActor.subject_id !== workActor.subject_id) return;
-    const firstLine = String(item.answer.text).split('\n')[0].slice(0, 200);
+    // The answer's words are copied, not said again: an @name in them rings
+    // nobody (a word joiner after each @), so only the asker is rung.
+    const firstLine = String(item.answer.text).split('\n')[0].slice(0, 200).replace(/@/g, '@\u2060');
     // Not the ask's own answer (no room ask, or given on someone's behalf):
     // the room is told by name, so the asker hears it all the same.
     if (!Number.isSafeInteger(item.ask_message_id) || !byAddressee) {

@@ -231,7 +231,8 @@ test('the owner, the holder and the current project\'s lead move a record, bylin
     const back = await aiMove(lead.token, inBooks, 'ops');
     assert.deepEqual([back.status, back.json.error], [403, 'not-mover'], 'Lead does not lead Books');
 
-    // The first owner moves anything; the checks on the target still hold.
+    // The first owner moves anything, and her read says so.
+    assert.equal(await mayMove(inBooks, owner), true, 'the first owner is offered Move');
     assert.deepEqual([(await personMove(owner, inBooks, 'nowhere')).status, (await personMove(owner, inBooks, 'books')).status],
       [404, 409]);
     const stale = await personMove(owner, plain, 'ops');
@@ -259,6 +260,7 @@ test('the owner, the holder and the current project\'s lead move a record, bylin
     assert.deepEqual([shopped.status, shopped.json.error], [403, 'not-mover'],
       'the lead of its project cannot move a waiting request: that would choose its approver');
     assert.equal((await item(runtime, owner, asked.json.item.id)).approval.approver.name, 'Ana', 'still Ana\'s');
+    assert.equal(await mayMove(asked.json.item, owner), true, 'only she may move a waiting request, and her read says so');
     const rerouted = await personMove(owner, asked.json.item, 'books');
     assert.equal(rerouted.status, 200, rerouted.text);
     const now = await item(runtime, owner, asked.json.item.id);

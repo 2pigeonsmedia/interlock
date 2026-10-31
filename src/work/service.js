@@ -1533,4 +1533,4 @@ function createWorkService(options) {
   });
 }
 
-module.exports = Object.freeze({ KINDS, WORK_STATES, SEVERITIES, canonical, createWorkService, stripIds });
+module.exports = Object.freeze({ KINDS, WORK_STATES, SEVERITIES, CREATE_KEYS, canonical, createWorkService, stripIds });
