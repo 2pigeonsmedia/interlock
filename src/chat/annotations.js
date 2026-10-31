@@ -26,6 +26,9 @@
 //             the story would later override
 //   revise    the asker's new scope for their own ask; it reopens an answered
 //             ask
+//   successor the asker's link from a withdrawn ask to the ask of theirs that
+//             replaces it; the newest link wins. A release before it passes
+//             the row over: the ask still reads as withdrawn there
 //   approval  the asker's ask is a request for approval: the room writes it
 //             with the ask, before any answer. Only an approval is agreed by a
 //             yes and closed by a done receipt; a plain ask is answered and
@@ -65,6 +68,7 @@ const DISCUSSES_KEYS = Object.freeze(['ask_id', 'party']);
 const PARTIES = Object.freeze(['asker', 'addressee', 'other']);
 const REVISE_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id', 'means']);
 const LIFECYCLE_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id']);
+const SUCCESSOR_KEYS = Object.freeze(['v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'ask_id', 'successor_id']);
 const REVISION_KEYS = Object.freeze(['means', 'revision']);
 const AGREED_KEYS = Object.freeze(['message_id', 'subject_id', 'name', 'revision', 'at']);
 const CARRY_KEYS = Object.freeze([
@@ -200,7 +204,7 @@ function parseRequest(value) {
 }
 
 const KNOWN_KINDS = Object.freeze([
-  'post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval', 'stamp',
+  'post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval', 'stamp', 'successor',
 ]);
 
 /* A row a later release wrote: a well-formed line in sequence whose `v` or
@@ -221,7 +225,8 @@ function parseRow(value, expectedSeq) {
   const keys = kind === 'post' ? POST_KEYS
     : (kind === 'withdraw' || kind === 'keep_open' || kind === 'approval') ? LIFECYCLE_KEYS
       : kind === 'carry' ? CARRY_KEYS : kind === 'revise' ? REVISE_KEYS
-        : kind === 'carry_state' ? CARRY_STATE_KEYS : kind === 'stamp' ? STAMP_KEYS : null;
+        : kind === 'carry_state' ? CARRY_STATE_KEYS : kind === 'successor' ? SUCCESSOR_KEYS
+          : kind === 'stamp' ? STAMP_KEYS : null;
   const row = earlierPost ? Object.assign({}, earlierPost, { discusses: null }) : keys && closedObject(value, keys);
   if (!row || row.v !== ROW_VERSION || row.seq !== expectedSeq || !validTs(row.ts) ||
       !boundedString(row.subject_id, 64) || !boundedString(row.name, MAX_NAME_BYTES)) return null;
@@ -257,6 +262,10 @@ function parseRow(value, expectedSeq) {
   if (kind === 'revise') {
     if (!(row.means === null || validMeans(row.means))) return null;
     return Object.freeze(Object.assign(base, { ask_id: row.ask_id, means: row.means }));
+  }
+  if (kind === 'successor') {
+    if (!positiveId(row.successor_id) || row.successor_id === row.ask_id) return null;
+    return Object.freeze(Object.assign(base, { ask_id: row.ask_id, successor_id: row.successor_id }));
   }
   if (kind !== 'carry' && kind !== 'carry_state') return Object.freeze(Object.assign(base, { ask_id: row.ask_id }));
   const ask = parseAsk(row.ask);
@@ -346,6 +355,7 @@ function createAskIndex(eraFirstId) {
       revisions: [],
       latest: { message_id: carriedFrom ? null : askId, kind: 'ask', party: 'asker', name: row.name, at: askedAt },
       done: null,
+      successor: null,
     });
   }
 
@@ -417,10 +427,19 @@ function createAskIndex(eraFirstId) {
 
   // `live`: a write being made now, never one replayed from the file; only a
   // replayed clear's carry block may re-mark an answered request.
-  function checkLifecycle(kind, askId, subjectId, live = false) {
+  // `successorId`: for a successor row, the ask that replaces this one.
+  function checkLifecycle(kind, askId, subjectId, live = false, successorId = null) {
     const ask = asks.get(askId);
     if (!ask) return 'ask-not-found';
     if (ask.asker_subject_id !== subjectId) return 'not-asker';
+    // A withdrawn ask points at the asker's own ask that replaces it.
+    if (kind === 'successor') {
+      if (ask.state !== 'withdrawn') return 'ask-not-withdrawn';
+      const next = asks.get(successorId);
+      if (!next) return 'ask-not-found';
+      if (next.asker_subject_id !== subjectId) return 'not-asker';
+      return null;
+    }
     if (kind === 'withdraw' && ask.state !== 'open') return 'ask-not-open';
     if (kind === 'keep_open' && ask.state !== 'answered') return 'ask-not-answered';
     // A revision is the asker's, while the ask is still live; after a yes it
@@ -454,6 +473,8 @@ function createAskIndex(eraFirstId) {
     const ask = asks.get(row.ask_id);
     if (row.kind === 'withdraw') {
       ask.state = 'withdrawn';
+    } else if (row.kind === 'successor') {
+      ask.successor = row.successor_id;
     } else if (row.kind === 'approval') {
       ask.approval = true;
     } else if (row.kind === 'revise') {
@@ -510,7 +531,8 @@ function createAskIndex(eraFirstId) {
       asks.get(row.ask_id).kept_open = row.kept_open;
       if (row.kind === 'carry_state') applyCarryState(row);
     } else {
-      if (checkLifecycle(row.kind, row.ask_id, row.subject_id) !== null) return false;
+      if (checkLifecycle(row.kind, row.ask_id, row.subject_id, false,
+        row.kind === 'successor' ? row.successor_id : null) !== null) return false;
       applyLifecycle(row);
       // The revision this row made, for the host to hand the Work record.
       if (row.kind === 'revise') entry.revision = asks.get(row.ask_id).revision;
@@ -647,6 +669,9 @@ function publicRow(row) {
     }));
   }
   if (row.kind === 'revise') return Object.freeze(Object.assign(base, { ask_id: row.ask_id, means: row.means }));
+  if (row.kind === 'successor') {
+    return Object.freeze(Object.assign(base, { ask_id: row.ask_id, successor_id: row.successor_id }));
+  }
   if (row.kind === 'stamp') {
     return Object.freeze(Object.assign(base, {
       message_id: row.message_id, project: row.project, reason: row.reason, record_id: row.record_id,

@@ -29,6 +29,7 @@ const ANNOTATION_REFUSALS = Object.freeze({
   'ask-not-found': 404,
   'not-asker': 403,
   'ask-not-open': 409,
+  'ask-not-withdrawn': 409,
   'ask-not-answered': 409,
   'ask-revised': 409,
   'not-approver': 403,
@@ -2642,12 +2643,19 @@ function createFirstOwnerHandler(options) {
   }
 
   function lifecycleInput(body) {
+    // The asker's link from a withdrawn ask to the ask that replaces it.
+    const successor = closedObject(body, ['kind', 'ask_id', 'successor_id']);
+    if (successor && successor.kind === 'successor' && Number.isSafeInteger(successor.ask_id) && successor.ask_id > 0 &&
+        Number.isSafeInteger(successor.successor_id) && successor.successor_id > 0) {
+      return Object.assign({}, successor, { means: null });
+    }
     const revise = closedObject(body, ['kind', 'ask_id', 'means']);
     if (revise && revise.kind === 'revise' && Number.isSafeInteger(revise.ask_id) && revise.ask_id > 0 &&
         (revise.means === null || typeof revise.means === 'string')) return revise;
     const input = closedObject(body, ['kind', 'ask_id']);
     return input && (input.kind === 'withdraw' || input.kind === 'keep_open') &&
-      Number.isSafeInteger(input.ask_id) && input.ask_id > 0 ? Object.assign({}, input, { means: null }) : null;
+      Number.isSafeInteger(input.ask_id) && input.ask_id > 0
+      ? Object.assign({}, input, { means: null, successor_id: null }) : null;
   }
 
   /* A revised ask that backs a decision: the decision's scope follows it, by
@@ -2686,7 +2694,7 @@ function createFirstOwnerHandler(options) {
     }
     try {
       const row = await chat.annotate({ subject_id: authorized.subject_id, name: authorized.subject_name },
-        input.kind, input.ask_id, input.means);
+        input.kind, input.ask_id, input.means, input.successor_id === undefined ? null : input.successor_id);
       const decision = await reviseDecision({ subject_id: authorized.subject_id, name: authorized.subject_name, kind: 'seat' }, row);
       sendJson(request, response, 201, decision ? { ok: true, row, decision } : { ok: true, row });
     } catch (error) {
@@ -2721,7 +2729,8 @@ function createFirstOwnerHandler(options) {
       return;
     }
     try {
-      const row = await chat.annotate(actor, input.kind, input.ask_id, input.means);
+      const row = await chat.annotate(actor, input.kind, input.ask_id, input.means,
+        input.successor_id === undefined ? null : input.successor_id);
       const decision = await reviseDecision(actor, row);
       sendJson(request, response, 201, decision ? { ok: true, row, decision } : { ok: true, row });
     } catch (error) {

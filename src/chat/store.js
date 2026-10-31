@@ -61,7 +61,7 @@ const CLEAR_KEYS = Object.freeze([
 const ANNOTATIONS_MARKER_KEYS = Object.freeze([
   'schema', 'archive_id', 'source_next_id', 'staged_sha256', 'archive_sha256',
 ]);
-const LIFECYCLE_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'kind', 'ask_id', 'means']);
+const LIFECYCLE_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'kind', 'ask_id', 'means', 'successor_id']);
 const STAMP_INPUT_KEYS = Object.freeze(['subject_id', 'name', 'message_id', 'project', 'reason', 'record_id']);
 const {
   DIRECTORY_SYNC_SUPPORTED, atomicWriteJson, fsyncDirectory, fsyncFile,
@@ -76,7 +76,7 @@ const OWN_CODES = Object.freeze([
   'corrupt-activity', 'torn-write', 'inconsistent-state', 'missing-history',
   'invalid-clear', 'archive-invalid', 'archive-stale',
   'invalid-session-discriminator',
-  'corrupt-annotations', 'invalid-annotation', 'ask-of-self', 'ask-not-found', 'ask-not-open',
+  'corrupt-annotations', 'invalid-annotation', 'ask-of-self', 'ask-not-found', 'ask-not-open', 'ask-not-withdrawn',
   'ask-not-answered', 'not-asker', 'unread-addressed', 'already-posted', 'ask-revised',
   'not-author', 'message-not-found',
 ]);
@@ -910,16 +910,20 @@ function openStore(opts) {
       const request = closedObject(input, LIFECYCLE_INPUT_KEYS);
       if (!request || !boundedString(request.subject_id, 64) ||
           !boundedString(request.name, MAX_BYLINE_BYTES) ||
-          !['withdraw', 'keep_open', 'revise', 'approval'].includes(request.kind) ||
+          !['withdraw', 'keep_open', 'revise', 'approval', 'successor'].includes(request.kind) ||
           !Number.isSafeInteger(request.ask_id) || request.ask_id < 1 ||
           (request.kind !== 'revise' && request.means !== null) ||
+          (request.kind === 'successor'
+            ? !Number.isSafeInteger(request.successor_id) || request.successor_id < 1 ||
+              request.successor_id === request.ask_id
+            : request.successor_id !== null) ||
           (request.kind === 'revise' && !(request.means === null || Annotations.validMeans(request.means)))) {
         fail('invalid-annotation');
       }
       assertLiveLog();
       assertLiveReceipts();
       assertLiveActivity();
-      const refusal = asks.checkLifecycle(request.kind, request.ask_id, request.subject_id, true);
+      const refusal = asks.checkLifecycle(request.kind, request.ask_id, request.subject_id, true, request.successor_id);
       if (refusal) fail(refusal);
       // An ask of a person always says what a yes means, revised or not.
       if (request.kind === 'revise' && request.means === null &&
@@ -932,7 +936,8 @@ function openStore(opts) {
         subject_id: request.subject_id,
         name: request.name,
         ask_id: request.ask_id,
-      }, request.kind === 'revise' ? { means: request.means } : {}), asks.rows.length + 1);
+      }, request.kind === 'revise' ? { means: request.means } : {},
+      request.kind === 'successor' ? { successor_id: request.successor_id } : {}), asks.rows.length + 1);
       if (!row) fail('invalid-annotation');
       try {
         appendLineExisting(annotationsPath, Annotations.encodeRow(row));

@@ -636,10 +636,10 @@ function createChatService(options) {
     return await store.peekFind(query);
   }
 
-  async function annotate(actor, kind, askId, means = null) {
+  async function annotate(actor, kind, askId, means = null, successorId = null) {
     requireOpen();
     return await store.annotate({
-      subject_id: actor.subject_id, name: actor.name, kind, ask_id: askId, means,
+      subject_id: actor.subject_id, name: actor.name, kind, ask_id: askId, means, successor_id: successorId,
     });
   }
 

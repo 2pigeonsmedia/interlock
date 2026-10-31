@@ -401,3 +401,34 @@ test('the composer warns a reply on a withdrawn ask, and only on a withdrawn ask
   assert.match(visibility, /InterlockAsks\.replyNote\(/);
   assert.match(visibility, /replyNote\.hidden = /);
 });
+
+// A withdrawn ask the asker linked to its replacement says so on its line and
+// in the composer's note; the newest link wins.
+test('a withdrawn ask names the ask that replaced it on its line and in the reply note', () => {
+  const state = Asks.createAsksState();
+  state.apply([
+    post(1, 10, 'Lead', { ask: ask('Ana', 'I carry the questions over') }),
+    post(2, 11, 'Lead', { ask: ask('Ana', 'I start a fresh list') }),
+    post(3, 12, 'Lead', { ask: ask('Ana', 'I start from the CPA list') }),
+    { seq: 4, ts: 4_000, kind: 'withdraw', by: 'Lead', ask_id: 10 },
+  ]);
+  assert.equal(Asks.askLine(state.ask(10), 5_000), 'Ask of Ana · withdrawn', 'no link yet');
+  const link = { seq: 5, ts: 5_000, kind: 'successor', by: 'Lead', ask_id: 10, successor_id: 11 };
+  assert.equal(Asks.validRow(link), true);
+  assert.equal(Asks.validRow(Object.assign({}, link, { successor_id: 10 })), false, 'an ask does not replace itself');
+  assert.equal(Asks.validRow(Object.assign({}, link, { extra: 1 })), false, 'the row shape is closed');
+  state.apply([link]);
+  assert.equal(state.successorOf(10), 11);
+  assert.equal(Asks.askLine(state.ask(10), 6_000, state.successorOf(10)), 'Ask of Ana · withdrawn · re-asked as #11');
+  assert.equal(Asks.replyNote(state.ask(10), state.successorOf(10)),
+    'Lead withdrew #10 and re-asked it as #11. Your reply still goes to Lead as discussion.');
+  state.apply([Object.assign({}, link, { seq: 6, successor_id: 12 })]);
+  assert.equal(Asks.askLine(state.ask(10), 6_000, state.successorOf(10)), 'Ask of Ana · withdrawn · re-asked as #12',
+    'the newest link wins');
+  assert.equal(state.successorOf(11), null, 'the replacement itself links nowhere');
+  assert.ok(!('successor' in state.ask(10)), 'the ask keeps the shape the server\'s ask list has');
+  // The page passes the link to the ask's line and to the composer's note.
+  assert.match(ROOM_JS, /InterlockAsks\.askLine\(ask, Date\.now\(\), asksState\.successorOf\(ask\.ask_id\)\)/);
+  assert.match(ROOM_JS, /InterlockAsks\.replyNote\(asksState\.ask\(reference\.id\), asksState\.successorOf\(reference\.id\)\)/);
+  assert.equal(state.ask(11).state, 'open', 'the link changes nothing about the replacement');
+});

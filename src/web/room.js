@@ -2068,7 +2068,7 @@ function updateBindVisibility() {
   askBind.hidden = addressed.length === 0 || composingDiscussion();
   // A reply on a withdrawn ask still goes, as discussion; she is told first.
   const reference = InterlockReplyReference.parse(messageBody.value);
-  const note = reference ? InterlockAsks.replyNote(asksState.ask(reference.id)) : null;
+  const note = reference ? InterlockAsks.replyNote(asksState.ask(reference.id), asksState.successorOf(reference.id)) : null;
   replyNote.textContent = note || '';
   replyNote.hidden = note === null;
 }
@@ -2224,7 +2224,7 @@ function decorateMessage(article, messageId) {
     chip.dataset.askState = ask.state;
     const line = document.createElement('span');
     line.className = 'ask-line';
-    line.textContent = InterlockAsks.askLine(ask, Date.now()) + (ask.project ? ` · ${projectName(ask.project)}` : '');
+    line.textContent = InterlockAsks.askLine(ask, Date.now(), asksState.successorOf(ask.ask_id)) + (ask.project ? ` · ${projectName(ask.project)}` : '');
     chip.append(line);
     // Whose turn, in the shared words, and the latest exchange: the same
     // story the Needs-you card and the CLI tell.

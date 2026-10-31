@@ -500,3 +500,47 @@ test('a room written by an earlier asks build opens, and its ask reads as Operat
   assert.equal(rows[1].answers[0].closes, true, 'its answer still closed it');
   assert.deepEqual((await chat.openAsks(ANA, 'Ana')).addressed, []);
 });
+
+// The asker links a withdrawn ask to the ask that replaces it: their own ask,
+// in this room. The link survives a reopen, the newest link wins, and nothing
+// else about either ask changes.
+test('a withdrawn ask links to its successor: asker only, withdrawn only, an ask of theirs', async () => {
+  const { chat, reopen } = room();
+  const marlow = { subject_id: MARLOW, name: 'Marlow' };
+  const codex = { subject_id: CODEX, name: 'Codex' };
+  const first = await chat.appendAnnotated({ text: 'carry the questions over?' }, seat(MARLOW, 'Marlow'),
+    { ask: { of: 'Ana', means: 'I carry the open questions over' } });
+  const second = await chat.appendAnnotated({ text: 'start a fresh list?' }, seat(MARLOW, 'Marlow'),
+    { ask: { of: 'Ana', means: 'I start a fresh list' } });
+  const theirs = await chat.appendAnnotated({ text: 'other?' }, seat(CODEX, 'Codex'),
+    { ask: { of: 'Ana', means: 'I do the other thing' } });
+
+  await assert.rejects(chat.annotate(marlow, 'successor', first.id, null, second.id),
+    error => code(error) === 'ask-not-withdrawn', 'an open ask has no successor');
+  await chat.annotate(marlow, 'withdraw', first.id);
+  await assert.rejects(chat.annotate(codex, 'successor', first.id, null, theirs.id),
+    error => code(error) === 'not-asker', 'only the asker links');
+  await assert.rejects(chat.annotate(marlow, 'successor', first.id, null, theirs.id),
+    error => code(error) === 'not-asker', 'the successor is an ask of the same asker');
+  await assert.rejects(chat.annotate(marlow, 'successor', first.id, null, 999),
+    error => code(error) === 'ask-not-found');
+  await assert.rejects(chat.annotate(marlow, 'successor', first.id, null, first.id),
+    error => code(error) === 'invalid-annotation', 'an ask does not replace itself');
+  await assert.rejects(chat.annotate(marlow, 'successor', first.id, null, 0),
+    error => code(error) === 'invalid-annotation');
+
+  const row = await chat.annotate(marlow, 'successor', first.id, null, second.id);
+  assert.deepEqual(Object.keys(row).sort(), ['ask_id', 'by', 'kind', 'seq', 'successor_id', 'ts']);
+  assert.equal(row.kind, 'successor');
+  assert.equal(row.successor_id, second.id);
+  const open = (await chat.openAsks(ANA, 'Ana')).addressed.map(ask => ask.ask_id);
+  assert.deepEqual(open, [second.id, theirs.id], 'the link reopens nothing and closes nothing');
+
+  // A later link wins; the rows replay the same after a reopen.
+  const third = await chat.appendAnnotated({ text: 'or this?' }, seat(MARLOW, 'Marlow'),
+    { ask: { of: 'Ana', means: 'I do this instead' } });
+  await chat.annotate(marlow, 'successor', first.id, null, third.id);
+  const again = reopen();
+  const rows = (await again.readAnnotations({ after: 0, limit: 100 })).rows.filter(entry => entry.kind === 'successor');
+  assert.deepEqual(rows.map(entry => [entry.ask_id, entry.successor_id]), [[first.id, second.id], [first.id, third.id]]);
+});

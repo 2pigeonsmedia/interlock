@@ -6,7 +6,8 @@
 // are open for the viewer, and which asks the composer may bind an answer to.
 // Nothing here reads message text.
 (function exposeAsksModel(root) {
-  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval', 'stamp']);
+  const KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval', 'stamp', 'successor']);
+  const SUCCESSOR_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'ask_id', 'successor_id']);
   // A message's project stamp: the project (null = the whole room) and why.
   const STAMP_KEYS = Object.freeze(['seq', 'ts', 'kind', 'by', 'message_id', 'project', 'reason', 'record_id']);
   const STAMP_REASONS = Object.freeze(['ask', 'record', 'assignment', 'set']);
@@ -98,6 +99,10 @@
         (row.reason === 'record' ? typeof row.record_id === 'string' && /^[WDF]-[1-9][0-9]*$/.test(row.record_id)
           : row.record_id === null);
     }
+    if (row.kind === 'successor') {
+      return exact(row, SUCCESSOR_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id) &&
+        positive(row.successor_id) && row.successor_id !== row.ask_id;
+    }
     if (row.kind === 'revise') {
       return exact(row, REVISE_KEYS) && positive(row.seq) && name(row.by) && positive(row.ask_id) &&
         (row.means === null || name(row.means));
@@ -155,11 +160,14 @@
     let posts = new Map();
     // message id -> its newest stamp, as the server bound it
     let stamps = new Map();
+    // withdrawn ask id -> the ask its asker named as its replacement
+    let successors = new Map();
 
     function reset() {
       asks = new Map();
       posts = new Map();
       stamps = new Map();
+      successors = new Map();
     }
 
     function addAsk(askId, by, ask, askedAt, carriedFrom) {
@@ -237,6 +245,8 @@
           const ask = asks.get(row.ask_id);
           if (!ask) continue;
           if (row.kind === 'withdraw') ask.state = 'withdrawn';
+          // The asker's link to the ask that replaces it; the newest wins.
+          else if (row.kind === 'successor') successors.set(row.ask_id, row.successor_id);
           else if (row.kind === 'approval') ask.approval = true;
           else if (row.kind === 'revise') {
             // The asker's new scope replaces the old in place; the old stays
@@ -259,6 +269,11 @@
     function ask(askId) {
       const found = asks.get(askId);
       return found ? publicAsk(found) : null;
+    }
+
+    /* The ask that replaced a withdrawn one, or null. */
+    function successorOf(askId) {
+      return successors.has(askId) ? successors.get(askId) : null;
     }
 
     function post(messageId) {
@@ -303,7 +318,7 @@
       return counts;
     }
 
-    return Object.freeze({ reset, apply, ask, post, openFor, answeredIds, stamp, stampCounts });
+    return Object.freeze({ reset, apply, ask, successorOf, post, openFor, answeredIds, stamp, stampCounts });
   }
 
   /* The plate on a stamped message: the project's name and why it is there. */
@@ -342,9 +357,12 @@
   }
 
   /* What the ask's own line says, for every viewer. */
-  function askLine(ask, now) {
+  // `successor`: the ask that replaced this one when it was withdrawn, or null.
+  function askLine(ask, now, successor = null) {
     const to = ask.deliver === 'later' ? `Hold for ${ask.of}` : `Ask of ${ask.of}`;
-    if (ask.state === 'withdrawn') return `${to} · withdrawn`;
+    if (ask.state === 'withdrawn') {
+      return Number.isSafeInteger(successor) ? `${to} · withdrawn · re-asked as #${successor}` : `${to} · withdrawn`;
+    }
     const last = ask.answers.filter(answer => answer.by_addressee).slice(-1)[0];
     if (ask.state === 'answered' && last) {
       return `${to} · answered ${last.choice === null ? '' : `"${last.choice}" `}· ${last.by} · #${last.message_id}`;
@@ -444,9 +462,10 @@
   /* What the composer tells someone replying on an ask that was withdrawn:
    * the reply is still sent and still reaches the asker, as discussion. Null
    * for any other ask, or none. */
-  function replyNote(ask) {
+  function replyNote(ask, successor = null) {
     if (!ask || ask.state !== 'withdrawn') return null;
-    return `${ask.by} withdrew #${ask.ask_id}. Your reply still goes to ${ask.by} as discussion.`;
+    const replaced = Number.isSafeInteger(successor) ? ` and re-asked it as #${successor}` : '';
+    return `${ask.by} withdrew #${ask.ask_id}${replaced}. Your reply still goes to ${ask.by} as discussion.`;
   }
 
   const contract = Object.freeze({

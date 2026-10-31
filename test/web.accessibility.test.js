@@ -472,7 +472,7 @@ test('the open dialog follows its record without wiping a half-written form', ()
 });
 
 test('an ask chip names the project the ask belongs to', () => {
-  assert.match(ROOM_JS, /InterlockAsks\.askLine\(ask, Date\.now\(\)\) \+ \(ask\.project \? ` · \$\{projectName\(ask\.project\)\}` : ''\)/);
+  assert.match(ROOM_JS, /InterlockAsks\.askLine\(ask, Date\.now\(\), asksState\.successorOf\(ask\.ask_id\)\) \+ \(ask\.project \? ` · \$\{projectName\(ask\.project\)\}` : ''\)/);
 });
 
 test('the Work tile hides what is empty and shows ages, not raw timestamps', () => {

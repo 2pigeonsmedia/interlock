@@ -51,6 +51,7 @@ Usage:
       [--answers N[@REV][,N[@REV]...] [--choice yes|no] | --discusses N] [--status done|ready|stop]
   interlock asks --connection NAME [--json]
   interlock ask withdraw|keep-open N --connection NAME [--json]
+  interlock ask withdraw N --replaced-by M --connection NAME [--json]
   interlock ask revise N --means-file PATH|--means-stdin --connection NAME [--json]
   interlock listen --connection NAME [--json]
   interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
@@ -670,8 +671,9 @@ function askLine(ask) {
 }
 
 // `withdrawnAt`: ask id -> the side-car position of its withdraw row. A reply
-// on an ask that was withdrawn before it was written says so.
-function postNotes(row, withdrawnAt = new Map()) {
+// on an ask that was withdrawn before it was written says so, and names the
+// ask that replaced it when its asker linked one (`successorOf`).
+function postNotes(row, withdrawnAt = new Map(), successorOf = new Map()) {
   const notes = [];
   if (row.ask !== null) notes.push(`${askLine(row.ask)} [ask ${row.message_id}]`);
   for (const answer of row.answers) {
@@ -682,7 +684,9 @@ function postNotes(row, withdrawnAt = new Map()) {
   }
   if (row.discusses) {
     const at = withdrawnAt.get(row.discusses.ask_id);
-    const withdrawn = Number.isSafeInteger(at) && at < row.seq ? ' (withdrawn before this reply)' : '';
+    const next = successorOf.get(row.discusses.ask_id);
+    const withdrawn = Number.isSafeInteger(at) && at < row.seq
+      ? ` (withdrawn before this reply${Number.isSafeInteger(next) ? `; re-asked as ask ${next}` : ''})` : '';
     notes.push(`discusses ask ${row.discusses.ask_id}${withdrawn}`);
   }
   if (row.status !== null) notes.push(`status: ${row.status}`);
@@ -748,9 +752,14 @@ async function annotationNotes(fetcher, profile, messages) {
   try {
     const posts = [];
     const withdrawnAt = new Map();
+    const successorOf = new Map();
     const noteWithdraw = row => {
       if (row.kind === 'withdraw' && Number.isSafeInteger(row.ask_id) && Number.isSafeInteger(row.seq) &&
           !withdrawnAt.has(row.ask_id)) withdrawnAt.set(row.ask_id, row.seq);
+      // The newest link wins.
+      if (row.kind === 'successor' && Number.isSafeInteger(row.ask_id) && Number.isSafeInteger(row.successor_id)) {
+        successorOf.set(row.ask_id, row.successor_id);
+      }
     };
     await scanRows(fetcher, profile, lowest, highest, row => {
       noteWithdraw(row);
@@ -762,7 +771,7 @@ async function annotationNotes(fetcher, profile, messages) {
       .map(row => row.discusses.ask_id);
     if (older.length > 0) await scanRows(fetcher, profile, Math.min(...older), highest, noteWithdraw);
     for (const row of posts) {
-      const rowNotes = postNotes(row, withdrawnAt);
+      const rowNotes = postNotes(row, withdrawnAt, successorOf);
       if (rowNotes.length > 0) notes.set(row.message_id, rowNotes);
     }
   } catch (_) {
@@ -1386,6 +1395,7 @@ const ANNOTATION_ERRORS = Object.freeze({
   'ask-not-found': 'there is no such ask in this room; run "interlock asks" for the open ones.',
   'not-asker': 'only the person or AI that made an ask can withdraw it or keep it open.',
   'ask-not-open': 'that ask is no longer open.',
+  'ask-not-withdrawn': 'only a withdrawn ask can point at the ask that replaces it; that one was answered, not withdrawn.',
   'ask-not-answered': 'that ask has not been answered yet, so there is nothing to keep open.',
   'invalid-annotation': 'the room refused the ask, answer or status as malformed (the scope line is one line of at most 300 characters).',
 });
@@ -1654,14 +1664,37 @@ function reviseSource(args) {
   return { means, rest };
 }
 
+// `--replaced-by M` on a withdraw: the asker's own ask M replaces this one.
+function replacedBySource(args) {
+  const rest = [];
+  let replacedBy = null;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== '--replaced-by') {
+      rest.push(args[index]);
+      continue;
+    }
+    const value = args[index + 1];
+    if (replacedBy !== null || typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value) ||
+        !Number.isSafeInteger(Number(value))) return null;
+    replacedBy = Number(value);
+    index += 1;
+  }
+  return { replacedBy, rest };
+}
+
 async function runAsk(args, io, dependencies = {}) {
   const verb = args[0];
   const id = args[1];
+  const replaced = verb === 'withdraw' ? replacedBySource(args.slice(2)) : { replacedBy: null, rest: args.slice(2) };
+  if (!replaced || replaced.replacedBy === Number(id)) {
+    line(io.stderr, 'interlock: usage: interlock ask withdraw N [--replaced-by M] --connection NAME [--json] (M is another ask of yours)');
+    return EXIT_USAGE;
+  }
   if (args.some(arg => arg === '--means' || String(arg).startsWith('--means='))) {
     line(io.stderr, 'interlock: refusing an ask\'s scope line in command arguments; use --means-file PATH or --means-stdin.');
     return EXIT_USAGE;
   }
-  const source = verb === 'revise' ? reviseSource(args.slice(2)) : { means: null, rest: args.slice(2) };
+  const source = verb === 'revise' ? reviseSource(replaced.rest) : { means: null, rest: replaced.rest };
   const parsed = Object.prototype.hasOwnProperty.call(ASK_VERBS, verb) && source &&
     (verb === 'revise') === (source.means !== null) &&
     typeof id === 'string' && /^[1-9][0-9]*$/.test(id) && Number.isSafeInteger(Number(id))
@@ -1684,15 +1717,42 @@ async function runAsk(args, io, dependencies = {}) {
     }
   }
   let result;
+  // Already withdrawn: a --replaced-by still links it.
+  let alreadyWithdrawn = false;
   try {
-    result = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/annotations', {
-      method: 'POST', body,
-    });
+    try {
+      result = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/annotations', {
+        method: 'POST', body,
+      });
+    } catch (error) {
+      if (!(replaced.replacedBy !== null && error && error.code === 'ask-not-open')) throw error;
+      alreadyWithdrawn = true;
+      result = null;
+    }
     // A revise whose decision record could not follow says so.
-    if (!exactObject(result, ['ok', 'row']) &&
+    if (result !== null && !exactObject(result, ['ok', 'row']) &&
         !(exactObject(result, ['ok', 'row', 'decision']) && result.decision === 'stale')) throw incompatibleResponse();
+    if (replaced.replacedBy !== null) {
+      const linked = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/annotations', {
+        method: 'POST', body: { kind: 'successor', ask_id: Number(id), successor_id: replaced.replacedBy },
+      });
+      if (!exactObject(linked, ['ok', 'row'])) throw incompatibleResponse();
+      if (parsed.json) {
+        if (result !== null) line(io.stdout, JSON.stringify(result));
+        line(io.stdout, JSON.stringify(linked));
+      } else {
+        line(io.stdout, alreadyWithdrawn
+          ? `Ask ${id} was already withdrawn; it now points at ask ${replaced.replacedBy}.`
+          : `Withdrew ask ${id}; re-asked as ask ${replaced.replacedBy}.`);
+      }
+      return EXIT_OK;
+    }
   } catch (error) {
     reportAnnotationError(io.stderr, error, profile, parsed.connection);
+    // The withdraw stands even when its link was refused.
+    if (replaced.replacedBy !== null && result !== null && result !== undefined) {
+      line(io.stderr, `interlock: ask ${id} was withdrawn, but it was not linked to ask ${replaced.replacedBy}.`);
+    }
     return EXIT_RUNTIME;
   }
   if (parsed.json) line(io.stdout, JSON.stringify(result));
