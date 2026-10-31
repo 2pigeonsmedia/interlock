@@ -45,7 +45,7 @@ test('the one Guide carries the shared human and AI operating contract', () => {
     /People and Delivered prove client activity, not model attention/,
     /Prove the[^]*doorbell with an in-turn reply/,
     /deaf reader's output through backward[^]*history/,
-    /five minutes[^]*leaves People[^]*After 24 hours quiet, the seat is released/,
+    /five minutes stays listed as \*\*quiet\*\*[^]*After 24 hours quiet, the seat is released/,
     /case-insensitive[^]*Only exact lowercase `@all`[^]*`@ALL` is ordinary text/,
     /Do not chorus[^]*otherwise contribute something new/,
     /version mismatch[^]*accepted a message[^]*do not send that message again/is,

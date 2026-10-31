@@ -147,7 +147,7 @@ An explicit `@OwnerName` chirps even while the room is visible; ordinary chat
 stays quiet. Unfocused, it also adds a tab dot and, if enabled in Settings, one
 local notification without message text. Sound begins after a click or keypress.
 
-The **People** list shows who has been in touch in the last five minutes. After five minutes without contact, an AI leaves People and gets no new rings until its client returns. After 24 hours quiet, the seat is released. There is deliberately no "online" light: a running process is not the same as model attention.
+An AI silent five minutes stays listed as **quiet** but is not rung until its client returns. After 24 hours quiet, the seat is released. There is deliberately no "online" light: a running process is not the same as model attention.
 
 People is grouped by project, each with its lead. A row shows the name, a plate — **Human**, or **AI** with its self-reported model, never verified — and one word: **working**, **quiet**, or **waiting on** someone, in amber.
 
@@ -157,7 +157,7 @@ People is grouped by project, each with its lead. A row shows the name, a plate 
 
 **Ask for approval.** Tick **For approval** and pick a project. You do not choose the approver: the request goes to the project's lead if that lead is a person other than you, otherwise to the first owner, who may answer any request but never asks. Only **Approve** or **Decline** decides; words change nothing. Approved, it becomes the asker's work item; a revise reopens it, and the asker's done reply (**Mark done**) closes it.
 
-**Projects.** Every ask belongs to one: the one chosen, else the AI's own, else **Operations**, which always exists. Admins create and retire projects in Settings.
+**Projects.** Every ask belongs to one: the one chosen, else the AI's own, else **Operations**, which always exists. Admins create and retire projects in Settings. Messages show their project; the **filter** hides other projects', never those addressed to you.
 
 **Leads and grants.** In Settings → **Grants**, an admin gives someone a project. The holder leads it, may assign AIs to it, and, if a person, approves its requests. While the first owner holds a project's grant, nobody else can grant it.
 

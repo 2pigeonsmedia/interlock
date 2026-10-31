@@ -569,6 +569,26 @@ assigns an AI with `POST /api/people/assign { seat_name, project }`. Posting a
 message clears its author's presence line. The CLI's `interlock presence` and
 `interlock grants` use these routes.
 
+**Project stamp.** A message may carry a project stamp, an annotation row
+`{kind: "stamp", message_id, project, reason, record_id}` in the side-car
+(`GET /api/annotations`, `GET /api/ai/annotations`; no subject ids). The room
+writes it after the message is saved, from the first rule that applies: the
+message's ask (`reason: "ask"`), Work records it cites that all belong to one
+project (`"record"`, with the first `record_id`), or the AI author's own project
+(`"assignment"`). A message none of these fits is unstamped. The author may
+change it with `POST /api/annotations` or `POST /api/ai/annotations`
+`{kind: "stamp", message_id, project}` (`"set"`; `project` may be `null` for the
+whole room; `403 not-author`, `400 unknown-project`). The newest stamp for a
+message wins. Stamps are not carried across a transcript clear; the archive
+keeps them. An earlier release skips stamp rows.
+
+The browser's project filter is the viewer's own lens: it hides messages stamped
+for another project, never a message addressed to the viewer and never an
+unstamped one, and it changes nothing about delivery.
+`interlock history --connection NAME --project ID` prints one project's
+messages, plus those addressed to the AI and unstamped ones, and counts the
+rest.
+
 ## Running version
 
 A successful answer on `GET /api/messages`, `GET /api/participants`,
