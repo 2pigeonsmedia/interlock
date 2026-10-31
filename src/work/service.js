@@ -787,11 +787,15 @@ function createWorkService(options) {
         const item = findDecision(draft, body.id);
         checkRevision(item, body.expected_revision);
         if (item.withdrawn) fail('invalid-state');
-        const text = requiredText(body.text, BODY_BYTES, 'text');
         // A Yes or No said on the record, as in the room; absent, the answer
         // is its words alone, and nobody reads it as a yes.
         const choice = body.choice === undefined || body.choice === null ? null : body.choice;
         if (choice !== null && choice !== 'yes' && choice !== 'no') fail('invalid-input');
+        // A Yes or No is a complete answer (her ruling, 2026-10-31): words are
+        // optional context, and a bare choice is recorded as its own word.
+        const words = optionalText(body.text, BODY_BYTES, 'text');
+        const text = choice !== null && (words === undefined || words.trim() === '')
+          ? (choice === 'yes' ? 'Yes' : 'No') : requiredText(body.text, BODY_BYTES, 'text');
         const conditions = optionalText(body.conditions, SHORT_BYTES, 'conditions') ?? '';
         const reason = optionalText(body.reason, SHORT_BYTES, 'reason') ?? '';
         const isAnswerer = actor.subject_id === item.asked_of.subject_id;

@@ -25,3 +25,13 @@ test('a refused move reads as words', () => {
   assert.equal(MODEL.errorWords('same-project'), 'It is already in that project.');
   assert.equal(MODEL.errorWords('not-mover'), 'Only the owner, its holder or its project\'s lead can move it.');
 });
+
+test('a choice alone answers: the decision form needs no words with Yes or No, and a waiting request\'s approver gets Approve and Decline in its drawer', () => {
+  assert.ok(PANEL.includes("const fields = [control('textarea', 'text', 'Answer (optional with Yes or No)')];"),
+    'the answer words are not required');
+  const drawer = PANEL.slice(PANEL.indexOf('function renderDrawerActions('), PANEL.indexOf('function renderDrawerActions(') + 2500);
+  assert.ok(drawer.includes("if (item.approval && item.approval.state === 'awaiting' && isMe(item.approval.approver) &&"),
+    'only the current approver of a waiting request is offered the choice');
+  assert.ok(drawer.includes("answerAsk(item.ask_message_id, 'yes', revision)") && drawer.includes("answerAsk(item.ask_message_id, 'no', revision)"),
+    'through the room ask, at the revision the record shows');
+});

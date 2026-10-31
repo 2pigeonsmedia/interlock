@@ -814,7 +814,8 @@
   ]);
 
   function answerFields(reasonLabel) {
-    const fields = [control('textarea', 'text', 'Answer', { required: true })];
+    // A Yes or No is the whole answer; the words are optional context.
+    const fields = [control('textarea', 'text', 'Answer (optional with Yes or No)')];
     const yesNo = choice('choice', 'Yes or no', ANSWER_CHOICES, '');
     yesNo.node.required = true;
     fields.push(yesNo);
@@ -832,6 +833,10 @@
     parts.push(make('p', 'work-proposal', item.proposal ? 'Proposal: ' + item.proposal : 'No proposal was written.'));
     parts.push(actionForm('work-answer', fields, submitText, async operation => {
       const body = { id: item.id, expected_revision: item.revision, text: text.node.value };
+      if (yesNo.node.value === 'words' && text.node.value.trim() === '') {
+        element('work-drawer-status').textContent = 'Write the answer, or choose Yes or No.';
+        return;
+      }
       if (yesNo.node.value === 'yes' || yesNo.node.value === 'no') body.choice = yesNo.node.value;
       if (optionalValue(conditions.node.value) !== undefined) body.conditions = conditions.node.value;
       if (reason) body.reason = reason.node.value;
@@ -1078,6 +1083,16 @@
     section.append(buttons, slot);
     if (item.kind === 'decision') renderDecisionActions(buttons, slot, item);
     else renderWorkActions(buttons, slot, item, result.evidence);
+    // A waiting request's approver answers it here as on the card: the choice
+    // alone, through the room ask, with no words required.
+    if (item.approval && item.approval.state === 'awaiting' && isMe(item.approval.approver) &&
+        Number.isSafeInteger(item.ask_message_id)) {
+      const revision = Number.isSafeInteger(item.ask_revision) ? item.ask_revision : 1;
+      buttons.append(
+        cardButton('Approve', 'Approve ' + item.id + ': ' + item.title, () => answerAsk(item.ask_message_id, 'yes', revision)),
+        cardButton('Decline', 'Decline ' + item.id + ': ' + item.title, () => answerAsk(item.ask_message_id, 'no', revision)),
+      );
+    }
     if (item.kind === 'decision') actionButton(buttons, slot, 'Add note', item, () => noteForm(item));
     if (result.may_move === true) actionButton(buttons, slot, 'Move to project', item, () => moveForm(item));
     const recipient = item.kind === 'decision' ? (item.state === 'awaiting' ? item.asked_of : null) : item.next_to;
