@@ -2091,7 +2091,8 @@ function createFirstOwnerHandler(options) {
   // also places it in a Needs you, so routing, the answer check and the list
   // can never disagree.
   const approverRule = people ? createApproverRule({
-    leadOf: (project, now) => people.service.leadOf(project, now),
+    leadOf: (project, now, live) => people.service.leadOf(project, now, live),
+    live: now => new Set(house.listParticipants({ now }).map(row => row.subject_id)),
     firstOwner: () => (typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null),
   }) : null;
 

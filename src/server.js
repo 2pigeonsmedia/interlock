@@ -465,7 +465,8 @@ async function startInterlockServer(options) {
     // Who approves a request for approval: one rule for routing it, checking
     // an answer and placing it in a Needs you (server-internal).
     const approverFor = createApproverRule({
-      leadOf: (project, now) => people.service.leadOf(project, now),
+      leadOf: (project, now, live) => people.service.leadOf(project, now, live),
+      live: now => new Set(house.listParticipants({ now }).map(row => row.subject_id)),
       firstOwner: () => (typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null),
     });
     const work = createWorkRoutes({
