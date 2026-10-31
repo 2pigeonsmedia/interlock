@@ -72,8 +72,8 @@ v0.3.4 tested-on evidence (2026-10-31):
 | Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 1029/1030, 1 skipped |
 
 v0.3.4 has People say whether an AI is listening, working or not listening,
-and who is waiting on whom; rings the holder of assigned work and sends
-unassigned work to its project's lead; links a withdrawn question to its
+and who is waiting on whom; rings whoever is assigned or named next and
+sends unassigned work to its project's lead; links a withdrawn question to its
 replacement; and lets only an administrator, the first owner or the lead
 change a project. v0.3.0 added Work: asks, requests for approval, projects
 with leads, and the Needs you list.
