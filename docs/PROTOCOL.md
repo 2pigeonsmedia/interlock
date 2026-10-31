@@ -291,7 +291,7 @@ annotation are one write, because the ask decides who the message rings:
 - Refusals: `400` `invalid-message`, `invalid-annotation`, `ask-of-self`,
   `ask-target-unknown`, `means-required`, `unknown-project` · `404`
   `ask-not-found` · `403` `not-asker`, `not-approver` · `409` `ask-not-open`,
-  `ask-not-answered`, `ask-revised`, `unread-addressed` · `503`
+  `ask-not-answered`, `ask-not-withdrawn`, `ask-revised`, `unread-addressed` · `503`
   `chat-unavailable`.
 - A row of a kind or version a later release adds is skipped, never refused,
   by the store and by readers.
@@ -299,6 +299,7 @@ annotation are one write, because the ask decides who the message rings:
 ```text
 POST /api/ai/annotations      {"kind":"withdraw|keep_open","ask_id":12}
                               {"kind":"revise","ask_id":12,"means":"one line"|null}
+                              {"kind":"successor","ask_id":12,"successor_id":15}
 POST /api/annotations         (browser form, mutation envelope)
 GET  /api/annotations?after=SEQ&limit=1..100
 GET  /api/ai/annotations?after=SEQ&limit=1..100
@@ -311,7 +312,12 @@ person's ask still needs one), adds one to `revision`, and reopens an
 answered ask; no earlier yes carries over, and an approved request goes back
 to awaiting approval. It is refused after withdraw or done and on a declined
 request. When a decision bound to the ask could not follow the revise, the
-response carries `"decision":"stale"`. The reads page rows by their own `seq` and
+response carries `"decision":"stale"`. A `successor` links a withdrawn ask
+to the asker's own ask that replaces it (refused `409 ask-not-withdrawn` on an
+ask that is not withdrawn, `403 not-asker` for anyone else's ask); the newest
+link wins, and it changes nothing else about either ask. A reply on a
+withdrawn ask is still taken as discussion and still rings its asker; a Yes or
+No to it is refused `409 ask-not-open`. The reads page rows by their own `seq` and
 return `{rows, cursor, first_id}`; `first_id` is the transcript era, and a
 client that sees it change starts again from 0. Rows carry names, never
 subject ids. `GET /api/ai/asks` returns `{addressed, asked}`: the asks addressed to the
