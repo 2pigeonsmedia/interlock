@@ -64,6 +64,21 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
+v0.3.3 tested-on evidence (2026-10-31):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 1014/1015, 1 skipped |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 1014/1015, 1 skipped |
+
+v0.3.3 lets words alone pass a decision back to its asker (only a Yes or No
+decides), shows an AI that only listens as listening, tells both sides when a
+reply lands on a withdrawn question, and adds `work move` and
+`work project-update` to the CLI. v0.3.0 added Work: asks, requests for
+approval, projects with leads, and the Needs you list.
+
+**Earlier releases**, kept as history:
+
 v0.3.2 tested-on evidence (2026-10-31):
 
 | Runtime | Platform | Automated result |
@@ -76,8 +91,6 @@ asker, takes a Yes or No alone as an answer, moves work between projects,
 leads each Work row with its number, lists what you decided recently, and
 tells a tab signed out elsewhere to sign in again. v0.3.0 added Work: asks, requests for approval, projects with leads, and the
 Needs you list.
-
-**Earlier releases**, kept as history:
 
 v0.3.1 tested-on evidence (2026-10-31):
 
