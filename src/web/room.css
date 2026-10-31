@@ -837,6 +837,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   color: var(--ink-2);
 }
 .ask-bind[hidden], .ask-fields[hidden] { display: none; }
+.reply-note[hidden] { display: none; }
 .ask-bind-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .ask-bind-chips button[aria-pressed="true"] {
   background: var(--signal-soft);

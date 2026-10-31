@@ -668,7 +668,9 @@ function askLine(ask) {
     : `asks ${terminalSafe(ask.of)}${later} — a yes means: ${terminalSafe(ask.means)}`;
 }
 
-function postNotes(row) {
+// `withdrawnAt`: ask id -> the side-car position of its withdraw row. A reply
+// on an ask that was withdrawn before it was written says so.
+function postNotes(row, withdrawnAt = new Map()) {
   const notes = [];
   if (row.ask !== null) notes.push(`${askLine(row.ask)} [ask ${row.message_id}]`);
   for (const answer of row.answers) {
@@ -676,6 +678,11 @@ function postNotes(row) {
     const crossed = answer.crossed_by === null ? ''
       : ` (crossed: ask ${answer.crossed_by} to the same person is newer)`;
     notes.push(`answers ask ${answer.ask_id}${choice}${crossed}`);
+  }
+  if (row.discusses) {
+    const at = withdrawnAt.get(row.discusses.ask_id);
+    const withdrawn = Number.isSafeInteger(at) && at < row.seq ? ' (withdrawn before this reply)' : '';
+    notes.push(`discusses ask ${row.discusses.ask_id}${withdrawn}`);
   }
   if (row.status !== null) notes.push(`status: ${row.status}`);
   return notes;
@@ -705,6 +712,32 @@ function firstPostId(page) {
   return post ? post.message_id : null;
 }
 
+/* Visit every side-car row from the first post row at or after message
+ * `fromId` up to the last post row at or below `toId`. */
+async function scanRows(fetcher, profile, fromId, toId, visit) {
+  const end = (await annotationPage(fetcher, profile, Number.MAX_SAFE_INTEGER, 1)).cursor;
+  // The last position whose first post row is still below `fromId`; reading
+  // starts just after it.
+  let low = 0;
+  let high = end;
+  for (let step = 0; step < ANNOTATION_SEEK_STEPS && high - low > ANNOTATION_PAGE_LIMIT; step += 1) {
+    const middle = Math.floor((low + high) / 2);
+    const first = firstPostId(await annotationPage(fetcher, profile, middle, ANNOTATION_PAGE_LIMIT));
+    if (first !== null && first < fromId) low = middle;
+    else high = middle;
+  }
+  let after = low;
+  for (let index = 0; index < ANNOTATION_PAGES; index += 1) {
+    const page = await annotationPage(fetcher, profile, after, ANNOTATION_PAGE_LIMIT);
+    for (const row of page.rows) {
+      if (row && row.kind === 'post' && row.message_id > toId) return;
+      if (row) visit(row);
+    }
+    if (page.cursor <= after) return;
+    after = page.cursor;
+  }
+}
+
 async function annotationNotes(fetcher, profile, messages) {
   const notes = new Map();
   if (messages.length === 0) return notes;
@@ -712,30 +745,24 @@ async function annotationNotes(fetcher, profile, messages) {
   const lowest = Math.min(...wanted);
   const highest = Math.max(...wanted);
   try {
-    const end = (await annotationPage(fetcher, profile, Number.MAX_SAFE_INTEGER, 1)).cursor;
-    // The last position whose first post row is still below the lowest
-    // message printed; reading starts just after it.
-    let low = 0;
-    let high = end;
-    for (let step = 0; step < ANNOTATION_SEEK_STEPS && high - low > ANNOTATION_PAGE_LIMIT; step += 1) {
-      const middle = Math.floor((low + high) / 2);
-      const first = firstPostId(await annotationPage(fetcher, profile, middle, ANNOTATION_PAGE_LIMIT));
-      if (first !== null && first < lowest) low = middle;
-      else high = middle;
-    }
-    let after = low;
-    for (let index = 0; index < ANNOTATION_PAGES; index += 1) {
-      const page = await annotationPage(fetcher, profile, after, ANNOTATION_PAGE_LIMIT);
-      let past = false;
-      for (const row of page.rows) {
-        if (!row || row.kind !== 'post') continue;
-        if (row.message_id > highest) { past = true; break; }
-        if (!wanted.has(row.message_id)) continue;
-        const rowNotes = postNotes(row);
-        if (rowNotes.length > 0) notes.set(row.message_id, rowNotes);
-      }
-      if (past || page.cursor <= after) break;
-      after = page.cursor;
+    const posts = [];
+    const withdrawnAt = new Map();
+    const noteWithdraw = row => {
+      if (row.kind === 'withdraw' && Number.isSafeInteger(row.ask_id) && Number.isSafeInteger(row.seq) &&
+          !withdrawnAt.has(row.ask_id)) withdrawnAt.set(row.ask_id, row.seq);
+    };
+    await scanRows(fetcher, profile, lowest, highest, row => {
+      noteWithdraw(row);
+      if (row.kind === 'post' && wanted.has(row.message_id)) posts.push(row);
+    });
+    // A reply on an ask older than the first message printed: that ask's
+    // withdraw row, if any, lies before the rows just read.
+    const older = posts.filter(row => row.discusses && row.discusses.ask_id < lowest)
+      .map(row => row.discusses.ask_id);
+    if (older.length > 0) await scanRows(fetcher, profile, Math.min(...older), highest, noteWithdraw);
+    for (const row of posts) {
+      const rowNotes = postNotes(row, withdrawnAt);
+      if (rowNotes.length > 0) notes.set(row.message_id, rowNotes);
     }
   } catch (_) {
     return new Map();

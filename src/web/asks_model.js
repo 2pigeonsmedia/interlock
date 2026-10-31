@@ -441,8 +441,16 @@
     return shown;
   }
 
+  /* What the composer tells someone replying on an ask that was withdrawn:
+   * the reply is still sent and still reaches the asker, as discussion. Null
+   * for any other ask, or none. */
+  function replyNote(ask) {
+    if (!ask || ask.state !== 'withdrawn') return null;
+    return `${ask.by} withdrew #${ask.ask_id}. Your reply still goes to ${ask.by} as discussion.`;
+  }
+
   const contract = Object.freeze({
-    BARE_ANSWERS, bareAnswer, validRow, stampPlate, addressesViewer, filterClass, hiddenSelector, filterRule, validPage, createAsksState, askLine, age, chosen, mayAnswer, bindAnswers, noteShown, answerText, mayMarkDone,
+    BARE_ANSWERS, bareAnswer, validRow, stampPlate, addressesViewer, filterClass, hiddenSelector, filterRule, validPage, createAsksState, askLine, age, chosen, mayAnswer, bindAnswers, noteShown, answerText, mayMarkDone, replyNote,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {

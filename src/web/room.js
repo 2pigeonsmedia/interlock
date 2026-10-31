@@ -71,6 +71,7 @@ const messageForm = document.querySelector('#message-form');
 const messageBody = document.querySelector('#message-body');
 const sendButton = document.querySelector('#send-button');
 const askBind = document.querySelector('#ask-bind');
+const replyNote = document.querySelector('#reply-note');
 const askBindLabel = document.querySelector('#ask-bind-label');
 const askBindChips = document.querySelector('#ask-bind-chips');
 const askFields = document.querySelector('#ask-fields');
@@ -2062,6 +2063,11 @@ function composingDiscussion() {
 function updateBindVisibility() {
   const addressed = asksState.openFor(viewerName()).addressed;
   askBind.hidden = addressed.length === 0 || composingDiscussion();
+  // A reply on a withdrawn ask still goes, as discussion; she is told first.
+  const reference = InterlockReplyReference.parse(messageBody.value);
+  const note = reference ? InterlockAsks.replyNote(asksState.ask(reference.id)) : null;
+  replyNote.textContent = note || '';
+  replyNote.hidden = note === null;
 }
 
 function askButton(label, onClick) {

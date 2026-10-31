@@ -375,3 +375,29 @@ test('Mark done is offered to the one carrying out an approved request, and only
     assert.equal(Asks.mayMarkDone(Object.assign({}, agreed, { turn: { phase, waiting_on: null, acting: null } }), 'Bea'), false, phase);
   }
 });
+
+// A reply on a withdrawn ask is still sent, and still reaches its asker; the
+// one writing it is told first. A reply on an open ask gets no note.
+test('the composer warns a reply on a withdrawn ask, and only on a withdrawn ask', () => {
+  const state = Asks.createAsksState();
+  state.apply([
+    post(1, 10, 'Lead', { ask: ask('Ana', 'I carry the questions over') }),
+    post(2, 11, 'Lead', { ask: ask('Ana', 'I start a fresh list') }),
+  ]);
+  assert.equal(Asks.replyNote(state.ask(10)), null, 'an open ask gets no note');
+  assert.equal(Asks.replyNote(null), null, 'a reference to no ask gets no note');
+  state.apply([{ seq: 3, ts: 3_000, kind: 'withdraw', by: 'Lead', ask_id: 10 }]);
+  assert.equal(state.ask(10).state, 'withdrawn', 'ARRANGEMENT: the first ask is withdrawn');
+  assert.equal(Asks.replyNote(state.ask(10)),
+    'Lead withdrew #10. Your reply still goes to Lead as discussion.');
+  assert.equal(Asks.replyNote(state.ask(11)), null, 'the open ask beside it gets no note');
+  state.apply([post(4, 12, 'Ana', { answers: [answer(11, 'yes', null, true, true)] })]);
+  assert.equal(Asks.replyNote(state.ask(11)), null, 'an answered ask gets no note');
+
+  // The page shows the note under the composer as she writes, from the ask
+  // her reply names, and still sends the reply.
+  assert.match(ROOM_HTML, /<p id="reply-note" class="mention-preview reply-note" aria-live="polite" hidden><\/p>/);
+  const visibility = ROOM_JS.slice(ROOM_JS.indexOf('function updateBindVisibility'), ROOM_JS.indexOf('function askButton'));
+  assert.match(visibility, /InterlockAsks\.replyNote\(/);
+  assert.match(visibility, /replyNote\.hidden = /);
+});
