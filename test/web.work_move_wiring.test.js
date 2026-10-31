@@ -49,3 +49,7 @@ test('the viewer\'s recent answers read as words, and the strip is drawn from th
 test('a Needs you card names the work it blocks', () => {
   assert.ok(PANEL.includes("if (card.blocks && card.blocks.length) facts.push('blocks ' + card.blocks.join(', '));"));
 });
+
+test('a Needs you card says when the record is owned by nobody', () => {
+  assert.ok(PANEL.includes("if (card.unassigned) facts.push('unassigned');"));
+});

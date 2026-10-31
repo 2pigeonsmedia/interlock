@@ -168,7 +168,10 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 
 Making someone else `responsible` (at `items/create` or `items/update`) posts
 `@Holder — W-n is yours: <title>` to the room, bylined to the writer, so the
-holder is rung; nobody is rung for a record they make their own.
+holder is rung; nobody is rung for a record they make their own. A record
+filed for nobody (no holder, nobody next) posts `@Lead — W-n is unassigned in
+<project>: <title>` to its project's live lead; with no lead it waits, unrung,
+in the first owner's Needs you.
 | `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (required when `sent` and refused otherwise: a room message the recording participant posted, else `invalid-message-id`), optional `detail` |
 | `decisions/answer` | `id`, `expected_revision`, `text`, optional `choice` (`yes`, `no` or null), `conditions`, `reason` (required when replacing an answer or answering for someone else) |
 | `decisions/report` | `id`, `expected_revision`, `text`, `source`, optional `conditions` |
@@ -271,7 +274,8 @@ Five sections, in this order:
 - **Needs you** — one card for each thing waiting on the viewer, across
   every active project; a project filter never hides it. It joins the brief's
   `needs_me` (work whose next action is theirs, or that they hold while
-  nobody is next; a decision awaiting their answer; a request awaiting their
+  nobody is next; work owned by nobody, marked `unassigned`, for its project's
+  live lead, else the first owner; a decision awaiting their answer; a request awaiting their
   approval) with room asks where it is the
   viewer's turn and asks the viewer made that came back to them. A record and
   the room ask bound to it are one card, never two. A card's head shows who,

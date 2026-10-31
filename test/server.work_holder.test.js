@@ -212,6 +212,33 @@ test('a record made someone else\'s rings them once and sits in their Needs you'
     const later = (await messages()).slice(n2);
     assert.equal(later.length, 1);
     assert.match(later[0].text, new RegExp('^@Lead — ' + w.id + ' is yours'));
+
+    // Owned by nobody: the project's lead sees it as unassigned and is rung once; with no lead, the first owner sees it.
+    const grant = await post(runtime, '/api/grants/create',
+      { holder_name: 'Lead', holder_kind: 'seat', project: 'ops', scope: 'leads ops', until: null },
+      await elevate(runtime, await login(runtime, password), device));
+    assert.equal(grant.status, 201, grant.text);
+    const n3 = (await messages()).length;
+    const loose = await aiPost(runtime, '/api/ai/work/items/create', {
+      operation_id: uuid(), kind: 'finding', project: 'ops', title: 'Totals drift by a cent', body: 'b',
+    }, cue.token);
+    assert.equal(loose.status, 201, loose.text);
+    const leadCard = (await aiGet(runtime, '/api/ai/work/brief', lead.token)).json.needs_me.find(row => row.id === loose.json.item.id);
+    assert.ok(leadCard, 'it is in the lead\'s Needs you');
+    assert.equal(leadCard.unassigned, true, 'marked unassigned');
+    const unowned = (await messages()).slice(n3);
+    assert.equal(unowned.length, 1, 'one ring');
+    assert.match(unowned[0].text, new RegExp('^@Lead — ' + loose.json.item.id + ' is unassigned in ops: Totals drift by a cent'));
+    const books = await post(runtime, '/api/work/projects/create', { operation_id: uuid(), id: 'books', display_name: 'Books' },
+      await elevate(runtime, await login(runtime, password), device));
+    assert.equal(books.status, 201, 'the arrangement: a project with no lead: ' + books.text);
+    const homeless = await aiPost(runtime, '/api/ai/work/items/create', {
+      operation_id: uuid(), kind: 'finding', project: 'books', title: 'No lead here', body: 'b',
+    }, cue.token);
+    assert.equal(homeless.status, 201, homeless.text);
+    const anaBrief = (await get(runtime, '/api/work/brief', await login(runtime, password))).json;
+    assert.ok(anaBrief.needs_me.some(row => row.id === homeless.json.item.id && row.unassigned === true),
+      'with no lead, the first owner sees it as unassigned');
   } finally {
     await runtime.close();
   }

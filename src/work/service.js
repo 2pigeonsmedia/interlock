@@ -422,6 +422,8 @@ function createWorkService(options) {
     return {
       id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: item.state,
       responsible: clone(item.responsible), next_action: item.next_action,
+      // Owned by nobody: shown to its project's lead (else the first owner) as such.
+      unassigned: unowned(item),
       // A waiting request is next to its live approver.
       next_to: item.approval && item.approval.state === 'awaiting' && item.state === 'open'
         ? currentApproverRef(item) : clone(item.next_to),
@@ -441,6 +443,21 @@ function createWorkService(options) {
     };
   }
 
+  // Who sees a record nobody owns (no holder, nobody next; her ruling,
+  // 2026-10-31): its project's live lead, else the first owner.
+  function unowned(item) {
+    return item.kind !== 'decision' && !item.approval && !item.next_to && !item.responsible &&
+      (item.state === 'open' || item.state === 'active' || item.state === 'ready' || item.state === 'blocked');
+  }
+  function unassignedTo(item) {
+    if (!unowned(item)) return null;
+    let lead = null;
+    try { lead = leadOf ? leadOf(item.project, clock()) : null; } catch (_) { lead = null; }
+    if (lead && typeof lead.subject_id === 'string') return lead.subject_id;
+    const route = approverFor ? approverFor(item.project, null, clock()) : null;
+    return route && route.owner ? route.owner.subject_id : null;
+  }
+
   function needsMe(item, subjectId) {
     // A waiting request is in its current approver's Needs you, found live.
     if (item.approval && item.approval.state === 'awaiting' && item.state === 'open') {
@@ -449,6 +466,7 @@ function createWorkService(options) {
     if (item.kind === 'decision') {
       return decisionState(item) === 'awaiting' && item.asked_of.subject_id === subjectId;
     }
+    if (unowned(item)) return unassignedTo(item) === subjectId;
     // Next to the viewer; or, with nobody next, held by the viewer: a record
     // made someone's is theirs to act on until someone else is named next.
     const holds = !item.next_to && item.responsible && item.responsible.subject_id === subjectId;
