@@ -177,6 +177,10 @@ test('a person closes their own approved request with a done receipt from the br
       { secret: invitation.json.invite_code, name: 'Bea', password: 'a separate member password' });
     assert.equal(redeemed.status, 200, redeemed.text);
     const bea = { cookie: redeemed.headers['set-cookie'][0].split(';', 1)[0], csrf: redeemed.json.csrf_token };
+    const tooLong = await post(runtime, '/api/work/approvals/ask',
+      { operation_id: uuid(), project: 'ops', title: 'Order rollers', scope: 'x'.repeat(301) }, bea);
+    assert.deepEqual([tooLong.status, tooLong.json.error, tooLong.json.max], [400, 'scope-too-long', 300],
+      'a scope past what the room ask can carry is refused by name');
     const asked = await post(runtime, '/api/work/approvals/ask',
       { operation_id: uuid(), project: 'ops', title: 'Order rollers', scope: 'I order two rollers, up to $40' }, bea);
     assert.equal(asked.status, 201, asked.text);

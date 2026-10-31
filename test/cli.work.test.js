@@ -395,3 +395,41 @@ test('work ask-approval posts a request for approval and says who approves it', 
   assert.match(calls[0].body.operation_id, UUID);
   assert.match(result.stdout, /Asked Ana to approve W-32 · Order printer rollers as message #31;/);
 });
+
+test('work move and work project-update reach their routes with the id from argv', async () => {
+  const { calls, dependencies } = world(({ url }) => url.endsWith('/items/move')
+    ? { status: 200, json: { ok: true, item: { id: 'W-3', kind: 'work', project: 'books', title: 'Import rows', state: 'open', revision: 4 } } }
+    : { status: 200, json: { ok: true, project: { id: 'books', display_name: 'Books', today: 'Close March.', revision: 2 } } });
+  const moved = await captureCommand(['work', 'move', 'W-3', '--connection', 'Marlow', '--file',
+    tempJson({ expected_revision: 3, project: 'books' })], dependencies);
+  assert.equal(moved.code, 0, moved.stderr);
+  assert.equal(calls[0].url, 'http://localhost:8788/api/ai/work/items/move');
+  assert.deepEqual([calls[0].body.id, calls[0].body.project, calls[0].body.expected_revision], ['W-3', 'books', 3]);
+  assert.match(moved.stdout, /Moved W-3 to books/);
+  const updated = await captureCommand(['work', 'project-update', 'books', '--connection', 'Marlow', '--file',
+    tempJson({ expected_revision: 1, today: 'Close March.' })], dependencies);
+  assert.equal(updated.code, 0, updated.stderr);
+  assert.equal(calls[1].url, 'http://localhost:8788/api/ai/work/projects/update');
+  assert.deepEqual([calls[1].body.id, calls[1].body.today], ['books', 'Close March.']);
+  assert.match(updated.stdout, /Updated project books \(revision 2\)/);
+  const bad = await captureCommand(['work', 'project-update', 'W-3', '--connection', 'Marlow', '--file', tempJson({})], dependencies);
+  assert.notEqual(bad.code, 0, 'a record id is not a project id');
+  assert.equal(calls.length, 2, 'nothing sent');
+});
+
+test('a Work refusal names the room it came from and says what the refused field needs', async () => {
+  const hosted = world(() => ({ status: 400, json: { ok: false, error: 'invalid-participant' } }));
+  const hostedProfile = hosted.dependencies.profiles.openProfiles().load();
+  hosted.dependencies.profiles.openProfiles = () => ({ load: () => Object.assign({}, hostedProfile, { server_url: 'https://room.example.test' }),
+    acquireReadLease() { return { release() {} }; } });
+  const refused = await captureCommand(['work', 'create', '--connection', 'Marlow', '--file',
+    tempJson({ kind: 'finding', project: 'ops', title: 't', body: 'b', responsible: 'Nobody' })], hosted.dependencies);
+  assert.match(refused.stderr, /^interlock: the Interlock room at https:\/\/room\.example\.test refused the command: invalid-participant\./);
+  assert.match(refused.stderr, /responsible, next_to or asked_of/, 'which fields take a participant');
+  assert.doesNotMatch(refused.stderr, /local Interlock/);
+  const links = world(() => ({ status: 400, json: { ok: false, error: 'invalid-links' } }));
+  const linked = await captureCommand(['work', 'create', '--connection', 'Marlow', '--file',
+    tempJson({ kind: 'finding', project: 'ops', title: 't', body: 'b', links: ['ticket'] })], links.dependencies);
+  assert.match(linked.stderr, /ids of records in this room \(W-n, D-n\)/);
+  assert.match(linked.stderr, /source/);
+});

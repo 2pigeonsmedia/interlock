@@ -1,6 +1,7 @@
 'use strict';
 const { createApproverRule } = require('./work/approver.js');
 const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
+const { MAX_MEANS_CHARS } = require('./chat/annotations.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -2226,6 +2227,12 @@ function createFirstOwnerHandler(options) {
         typeof body.scope !== 'string' || body.scope.trim() === '' ||
         (body.body !== undefined && typeof body.body !== 'string')) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    // The scope becomes the room ask's "a yes means", which the room caps:
+    // say so by name rather than as a refused annotation.
+    if (Array.from(body.scope.trim()).length > MAX_MEANS_CHARS) {
+      sendJson(request, response, 400, { ok: false, error: 'scope-too-long', max: MAX_MEANS_CHARS });
       return;
     }
     let chatActor;
