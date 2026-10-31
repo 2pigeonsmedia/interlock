@@ -142,6 +142,7 @@ function createChatService(options) {
         last_heard: state ? state.last_heard : null,
         outstanding: state ? state.outstanding : 0,
         fetched_without_post_at: state ? state.fetched_without_post_at : null,
+        last_posted_at: state && Number.isSafeInteger(state.last_posted_at) ? state.last_posted_at : null,
         present: isPresent(row, state, now),
       }));
     }));

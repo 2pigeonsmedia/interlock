@@ -157,7 +157,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 
 | Operation | Body (besides `operation_id`) |
 |---|---|
-| `items/create` | `kind`, `project`, `title`, `body`, optional `source`, `source_message` (`{ message_id, quote }`), `links`, `parent`; work: `responsible`, `next_to`, `next_action`, `target`, `consequence`, `severity`; decision: `asked_of`, `proposal`, `rationale`, `scope`, `conditions` |
+| `items/create` | `kind`, `project`, `title`, `body`, optional `source`, `source_message` (`{ message_id, quote }`), `links` (ids of records already in this room, W-n or D-n, else `invalid-links`; an outside reference goes in `source`), `parent`; work: `responsible`, `next_to`, `next_action`, `target`, `consequence`, `severity`; decision: `asked_of`, `proposal`, `rationale`, `scope`, `conditions` |
 | `items/update` | `id`, `expected_revision`, `note` (required: a change without one is refused with `invalid-note`), any work field above, `state`, `block_reason`, `done_account`, `done_evidence` or `no_evidence`, `title`, `body` |
 | `items/evidence` | `id`, `target`, `observed`, `limits`, `reference` (optional when `source_message` is given), optional `relates_to`, `source_message` (`{ message_id, quote }`) |
 | `items/note` | `id`, `text` |
@@ -170,7 +170,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `decisions/withdraw` | `id`, `expected_revision`, `reason` |
 | `decisions/kill` | `id`, `expected_revision`, `question` (anyone but the asker, once) |
 | `decisions/kill-reply` | `id`, `expected_revision`, `words`, `outcome` (`survived` or `killed`; the asker, once) |
-| `approvals/ask` | `project`, `title`, `scope` (what a yes means), optional `body`; posts the room ask first (see PROTOCOL.md) |
+| `approvals/ask` | `project`, `title`, `scope` (what a yes means, at most 300 characters, else `400 scope-too-long`), optional `body`; posts the room ask first (see PROTOCOL.md) |
 | `projects/create` | `id`, `display_name` (owner, fresh step-up) |
 | `projects/retire` | `id` (owner, fresh step-up) |
 | `projects/update` | `id`, `expected_revision`, `objective` and/or `today` |
@@ -235,7 +235,8 @@ interlock work list --connection NAME [--project ID] [--needs-me] [--after N] [-
 interlock work get ID --connection NAME [--json]
 interlock work changes --connection NAME --after N [--limit N] [--json]
 interlock work create --connection NAME --file PATH [--json]
-interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+interlock work project-update PROJECT --connection NAME --file PATH [--json]
 interlock work ask-approval --connection NAME --file PATH [--json]
 interlock work kill ID --connection NAME --file PATH|--stdin [--json]
 interlock work kill-reply ID --outcome survived|killed --connection NAME --file PATH|--stdin [--json]
@@ -446,7 +447,7 @@ never creates an answer.
 
 People groups participants by project, each group headed by its lead, and
 gives each a plate (`Human`, or `AI` with its self-reported model) and one
-state word: `working`, `quiet`, or `waiting on <name>`. In Settings →
+state word: `working`, `listening` (an AI that is present only through its doorbell or listen polls: ringable, but it has not posted or set its presence line in five minutes), `quiet`, or `waiting on <name>`. In Settings →
 **Grants** an administrator gives a participant a project, on a fresh passkey
 step-up; the holder of a project's newest active grant leads it, may assign
 AIs to it, and, if a person, approves its requests. Routes and rules are in

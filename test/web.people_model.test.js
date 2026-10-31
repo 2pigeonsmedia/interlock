@@ -175,3 +175,16 @@ test('groups: People is open; others fold unless someone in them waits on the vi
   assert.equal(asAna.get('project:ops').open, true, 'the same group opens for the person it waits on');
   assert.equal(asAna.get('project:finance').open, false);
 });
+
+test('stateOf: a seat that only listens reads listening; a post or a presence line makes it working', () => {
+  const listening = model.stateOf(seat('Cue', { last_posted_at: null }), NOW);
+  assert.deepEqual(listening, { word: 'listening', light: 'grey', age_since: NOW - MINUTE, notPickedUp: null },
+    'present (its polls keep it ringable) but it has said nothing');
+  assert.equal(model.stateOf(seat('Cue', { last_posted_at: NOW - 24 * 60 * MINUTE }), NOW).word, 'listening', 'a day since it spoke');
+  assert.equal(model.stateOf(seat('Cue', { last_posted_at: NOW - 2 * MINUTE }), NOW).word, 'working', 'it posted just now');
+  assert.equal(model.stateOf(seat('Cue', { last_posted_at: null,
+    presence: { middle: 'reconciling', waiting_on: null, need: null, since: NOW - MINUTE } }), NOW).word, 'working',
+  'a fresh presence line is work too');
+  assert.equal(model.stateOf(seat('Cue', { present: false, last_posted_at: NOW - MINUTE }), NOW).word, 'quiet', 'not present is quiet');
+  assert.equal(model.stateOf(seat('Cue'), NOW).word, 'working', 'a server that does not say when it last posted: as before');
+});

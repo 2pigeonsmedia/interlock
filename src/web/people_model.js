@@ -66,6 +66,11 @@
       now - row.last_heard < PERSON_HEARD_MS;
   }
 
+  function spokeLately(row, now) {
+    const recent = at => Number.isSafeInteger(at) && now - at >= 0 && now - at < PERSON_HEARD_MS;
+    return recent(row.last_posted_at) || Boolean(row.presence && recent(row.presence.since));
+  }
+
   // One word, one light. Waiting outranks working: a seat waiting on someone
   // is amber whether or not it was heard lately.
   function stateOf(row, now) {
@@ -75,6 +80,13 @@
       return { word: 'waiting on ' + row.presence.waiting_on, light: 'amber', age_since: row.presence.since, notPickedUp };
     }
     const lastHeard = Number.isSafeInteger(row.last_heard) ? row.last_heard : null;
+    // A seat that is present only because its doorbell or listen polls is
+    // ringable but not working: working means it said something (a post, an
+    // ask, an answer) or set its presence line lately. A server that does
+    // not say when a seat last posted leaves the word as it was.
+    if (row.kind === 'seat' && heard(row, now) && row.last_posted_at !== undefined && !spokeLately(row, now)) {
+      return { word: 'listening', light: 'grey', age_since: lastHeard, notPickedUp };
+    }
     if (heard(row, now)) return { word: 'working', light: 'teal', age_since: lastHeard, notPickedUp };
     return { word: 'quiet', light: 'grey', age_since: lastHeard, notPickedUp };
   }

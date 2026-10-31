@@ -66,7 +66,8 @@ Usage:
   interlock work get ID --connection NAME [--json]
   interlock work changes --connection NAME --after N [--limit N] [--json]
   interlock work create --connection NAME --file PATH [--json]
-  interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+  interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+  interlock work project-update PROJECT --connection NAME --file PATH [--json]
   interlock work ask-approval --connection NAME --file PATH [--json]
   interlock work kill ID --connection NAME --file PATH|--stdin [--json]
   interlock work kill-reply ID --outcome survived|killed --connection NAME --file PATH|--stdin [--json]
@@ -2864,6 +2865,7 @@ async function runCodexPolicy(args, io, dependencies = {}) {
 // an operation id so a retry replays instead of duplicating.
 
 const WORK_ITEM_ID = /^[WD]-[1-9][0-9]*$/;
+const WORK_PROJECT_ID = /^[a-z][a-z0-9-]{1,31}$/;
 const WORK_VERBS = Object.freeze({
   brief: Object.freeze({ path: '/api/ai/work/brief', method: 'GET', id: false, flags: ['project'] }),
   list: Object.freeze({ path: '/api/ai/work/list', method: 'GET', id: false, flags: ['project', 'needs-me', 'after', 'limit'] }),
@@ -2872,6 +2874,10 @@ const WORK_VERBS = Object.freeze({
   export: Object.freeze({ path: '/api/ai/work/export', method: 'GET', id: false, flags: ['format'], required: ['format'], raw: true }),
   create: Object.freeze({ path: '/api/ai/work/items/create', method: 'POST', id: false }),
   update: Object.freeze({ path: '/api/ai/work/items/update', method: 'POST', id: true }),
+  // A record to another project: {expected_revision, project}.
+  move: Object.freeze({ path: '/api/ai/work/items/move', method: 'POST', id: true }),
+  // A project's objective or today line: {expected_revision, objective?, today?}.
+  'project-update': Object.freeze({ path: '/api/ai/work/projects/update', method: 'POST', id: true, idKind: 'project' }),
   evidence: Object.freeze({ path: '/api/ai/work/items/evidence', method: 'POST', id: true }),
   note: Object.freeze({ path: '/api/ai/work/items/note', method: 'POST', id: true }),
   share: Object.freeze({ path: '/api/ai/work/items/share', method: 'POST', id: true }),
@@ -2901,7 +2907,9 @@ function workOptions(args) {
   const options = { verb, spec, id: null, connection: null, file: null, stdin: false, outcome: null, json: false, query: {} };
   let index = 1;
   if (spec.id) {
-    if (typeof args[1] !== 'string' || !WORK_ITEM_ID.test(args[1])) return { error: 'a record id like W-12 or D-7 comes right after the verb' };
+    if (spec.idKind === 'project') {
+      if (typeof args[1] !== 'string' || !WORK_PROJECT_ID.test(args[1])) return { error: 'a project id like ops comes right after the verb' };
+    } else if (typeof args[1] !== 'string' || !WORK_ITEM_ID.test(args[1])) return { error: 'a record id like W-12 or D-7 comes right after the verb' };
     options.id = args[1];
     index = 2;
   }
@@ -2999,10 +3007,18 @@ async function workRequest(fetcher, profile, pathname, options = {}) {
   }
 }
 
+// What a refused field needs, for the refusals that do not name it.
+const WORK_REFUSAL_HINTS = Object.freeze({
+  'invalid-participant': 'A name in responsible, next_to or asked_of is not a participant in this room.',
+  'invalid-links': 'links are ids of records in this room (W-n, D-n); put an outside reference in source.',
+  'scope-too-long': 'What a yes means (scope) is at most 300 characters; put the rest in body.',
+});
+
 function reportWorkError(stderr, error, profile) {
   if (error && Number.isSafeInteger(error.status) && error.status !== 401 && typeof error.code === 'string') {
     const revision = Number.isSafeInteger(error.revision) ? ` (current revision ${error.revision})` : '';
-    line(stderr, `interlock: the local Interlock refused the command: ${terminalSafe(error.code)}${revision}.`);
+    const hint = Object.prototype.hasOwnProperty.call(WORK_REFUSAL_HINTS, error.code) ? ' ' + WORK_REFUSAL_HINTS[error.code] : '';
+    line(stderr, `interlock: ${roomLabel(profile)} refused the command: ${terminalSafe(error.code)}${revision}.${hint}`);
     return;
   }
   reportRequestError(stderr, error, profile);
@@ -3114,12 +3130,17 @@ function renderWrite(stdout, verb, result, connection) {
   const item = result.item;
   const event = result.event;
   const exposure = result.exposure;
+  if (verb === 'project-update') {
+    line(stdout, `Updated project ${terminalSafe(String(result.project.id))} (revision ${result.project.revision}).`);
+    return;
+  }
   if (verb === 'create') line(stdout, `Created ${item.id} · ${terminalSafe(item.title)} (${item.state}) in ${item.project}.`);
   else if (verb === 'update') line(stdout, `Updated ${item.id} (${item.state}).`);
   else if (verb === 'evidence') line(stdout, `Attached evidence to ${event.item} (event ${event.seq}).`);
   else if (verb === 'note') line(stdout, `Added a note to ${event.item} (event ${event.seq}).`);
   else if (verb === 'share') line(stdout, `Recorded: ${terminalSafe(String(event.purpose))} ${terminalSafe(String(event.outcome))}${event.message_id ? ' as #' + terminalSafe(String(event.message_id)) : ''}.`);
   else if (verb === 'answer') line(stdout, `Recorded an answer on ${item.id} (${item.state}).`);
+  else if (verb === 'move') line(stdout, `Moved ${item.id} to ${terminalSafe(String(item.project))} (revision ${item.revision}).`);
   else if (verb === 'report-answer') {
     if (result.conflict === true) line(stdout, `Recorded a conflicting report on ${item.id}; the answer recorded here stands.`);
     else line(stdout, `Recorded a reported answer on ${item.id} (reported, not confirmed by ${who(item.answer && item.answer.attributed_to) === 'nobody' && exposure ? terminalSafe(exposure.to) : who(item.answer && item.answer.attributed_to)}).`);

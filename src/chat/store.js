@@ -1386,6 +1386,8 @@ function openStore(opts) {
           outstanding,
           fetched_without_post_at: lastFetchedAt !== null &&
             (lastPostedAt === null || lastFetchedAt > lastPostedAt) ? lastFetchedAt : null,
+          // When it last said something in this era: a poll is not speech.
+          last_posted_at: lastPostedAt,
         });
       }));
     });

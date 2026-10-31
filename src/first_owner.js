@@ -1,6 +1,7 @@
 'use strict';
 const { createApproverRule } = require('./work/approver.js');
 const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
+const { MAX_MEANS_CHARS } = require('./chat/annotations.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -266,6 +267,8 @@ function publicParticipant(participant) {
       !(participant.fetched_without_post_at === null ||
         (Number.isSafeInteger(participant.fetched_without_post_at) &&
           participant.fetched_without_post_at >= 0)) ||
+      !(participant.last_posted_at === undefined || participant.last_posted_at === null ||
+        (Number.isSafeInteger(participant.last_posted_at) && participant.last_posted_at >= 0)) ||
       typeof participant.present !== 'boolean' ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
@@ -279,6 +282,7 @@ function publicParticipant(participant) {
     present: participant.present,
     outstanding: participant.outstanding,
     fetched_without_post_at: participant.fetched_without_post_at,
+    last_posted_at: participant.last_posted_at === undefined ? null : participant.last_posted_at,
   });
 }
 
@@ -2227,6 +2231,12 @@ function createFirstOwnerHandler(options) {
         typeof body.scope !== 'string' || body.scope.trim() === '' ||
         (body.body !== undefined && typeof body.body !== 'string')) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    // The scope becomes the room ask's "a yes means", which the room caps:
+    // say so by name rather than as a refused annotation.
+    if (Array.from(body.scope.trim()).length > MAX_MEANS_CHARS) {
+      sendJson(request, response, 400, { ok: false, error: 'scope-too-long', max: MAX_MEANS_CHARS });
       return;
     }
     let chatActor;
