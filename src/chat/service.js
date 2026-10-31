@@ -143,6 +143,7 @@ function createChatService(options) {
         outstanding: state ? state.outstanding : 0,
         fetched_without_post_at: state ? state.fetched_without_post_at : null,
         last_posted_at: state && Number.isSafeInteger(state.last_posted_at) ? state.last_posted_at : null,
+        last_polled_at: state && Number.isSafeInteger(state.last_polled_at) ? state.last_polled_at : null,
         present: isPresent(row, state, now),
       }));
     }));
@@ -592,6 +593,12 @@ function createChatService(options) {
     return await store.touch(subjectId, now);
   }
 
+  /* A doorbell poll: the seat is listening (only the rings route calls this). */
+  function notePoll(subjectId, now) {
+    requireOpen();
+    if (typeof store.notePoll === 'function') store.notePoll(subjectId, now);
+  }
+
   async function listParticipants() {
     requireOpen();
     return await participantSnapshot(Date.now());
@@ -685,7 +692,7 @@ function createChatService(options) {
     append, appendAnnotated, annotate, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
-    touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
+    touchParticipant, notePoll, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });
 }
 

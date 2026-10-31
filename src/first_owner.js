@@ -270,6 +270,8 @@ function publicParticipant(participant) {
           participant.fetched_without_post_at >= 0)) ||
       !(participant.last_posted_at === undefined || participant.last_posted_at === null ||
         (Number.isSafeInteger(participant.last_posted_at) && participant.last_posted_at >= 0)) ||
+      !(participant.last_polled_at === undefined || participant.last_polled_at === null ||
+        (Number.isSafeInteger(participant.last_polled_at) && participant.last_polled_at >= 0)) ||
       typeof participant.present !== 'boolean' ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
@@ -284,6 +286,7 @@ function publicParticipant(participant) {
     outstanding: participant.outstanding,
     fetched_without_post_at: participant.fetched_without_post_at,
     last_posted_at: participant.last_posted_at === undefined ? null : participant.last_posted_at,
+    last_polled_at: participant.last_polled_at === undefined ? null : participant.last_polled_at,
   });
 }
 
@@ -1837,6 +1840,13 @@ function createFirstOwnerHandler(options) {
       await askApproval(request, response, body, actor, ai);
       return;
     }
+    // Words with no Yes or No are discussion, on the record as in the room:
+    // the decision stays open and the turn goes back to its asker.
+    if (op === 'decisions/answer' && body && typeof body === 'object' && !Array.isArray(body) &&
+        (body.choice === undefined || body.choice === null)) {
+      await discussDecision(request, response, body, actor, ai);
+      return;
+    }
     // A decision asked of someone is asked in the room, so it reaches them.
     if (op === 'items/create' && body && typeof body === 'object' && body.kind === 'decision' &&
         typeof body.asked_of === 'string' && body.asked_of.trim() !== '') {
@@ -1844,6 +1854,17 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const result = await work.mutate(op, actor, body, actor.now);
+    // A record filed for nobody rings its project's lead once, as unassigned.
+    const filed = result.body && result.body.item;
+    if (op === 'items/create' && result.status < 400 && result.body.replayed !== true && filed &&
+        filed.kind !== 'decision' && !filed.approval && !filed.responsible && !filed.next_to) {
+      await ringLead(request, actor, result.body.item, ai);
+    }
+    // A record made someone else's rings them once, in the room.
+    if ((op === 'items/create' || op === 'items/update') && result.status < 400 && result.body.replayed !== true &&
+        body && typeof body.responsible === 'string') {
+      await ringHolder(request, actor, result.body.item, ai);
+    }
     // A retried answer is already in the room: it is not posted or rung again.
     if (op === 'decisions/answer' && result.status < 400 && result.body.replayed !== true) {
       await echoAnswerToRoom(request, actor, result.body.item, ai);
@@ -2085,8 +2106,11 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
       return;
     }
-    try { await chat.touchParticipant(authorized.subject_id, Date.now()); }
-    catch (_) {
+    try {
+      await chat.touchParticipant(authorized.subject_id, Date.now());
+      // The doorbell's own poll: what tells a listening seat from a busy one.
+      if (typeof chat.notePoll === 'function') chat.notePoll(authorized.subject_id, Date.now());
+    } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
@@ -2445,6 +2469,90 @@ function createFirstOwnerHandler(options) {
     }
     await catchUpAnswer(saved.id);
     sendJson(request, response, result.status, Object.assign({}, result.body, { item: bound.body.item, message: saved }));
+  }
+
+  /* "@Lead — W-n is unassigned in <project>: title": a record filed for nobody
+   * reaches its project's live lead (a project with none waits in the first
+   * owner's Needs you, unrung). */
+  async function ringLead(request, workActor, item, ai) {
+    if (!people) return;
+    let lead = null;
+    try {
+      const live = new Set(house.listParticipants({ now: workActor.now }).map(row => row.subject_id));
+      lead = people.service.leadOf(item.project, workActor.now, live);
+    } catch (_) { lead = null; }
+    if (!lead || !lead.name || lead.subject_id === workActor.subject_id) return;
+    await ringHolder(request, workActor, Object.assign({}, item, { responsible: { name: lead.name } }), ai,
+      `is unassigned in ${item.project}`);
+  }
+
+  /* "@Holder — W-n is yours: title", bylined to whoever made it theirs, so
+   * the holder is rung (her ask, 2026-10-31). Nobody is rung for their own. */
+  async function ringHolder(request, workActor, item, ai, says = 'is yours') {
+    const holder = item && item.responsible && item.responsible.name;
+    if (!holder || holder === workActor.name) return;
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), require('node:crypto').randomUUID());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor || chatActor.subject_id !== workActor.subject_id) return;
+    const title = String(item.title).split('\n')[0].slice(0, 200).replace(/@/g, '@\u2060');
+    try {
+      await chat.append({ text: `@${holder} — ${item.id} ${says}: ${title}` }, chatActor);
+    } catch (_) {
+      // The record holds the assignment; the room line is a courtesy that failed.
+    }
+  }
+
+  /* Words alone on a decision (her ruling, 2026-10-31): nothing is recorded;
+   * they go to the room as a reply to its ask (the turn passes back to the
+   * asker, who is rung), or, with no room ask, as a line naming the asker. */
+  async function discussDecision(request, response, body, workActor, ai) {
+    if (typeof body.id !== 'string' || typeof body.operation_id !== 'string' ||
+        typeof body.text !== 'string' || body.text.trim() === '') {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-text' });
+      return;
+    }
+    const read = work.read('get', workActor, { id: body.id }, workActor.now);
+    if (read.status !== 200) {
+      sendWorkResult(request, response, read);
+      return;
+    }
+    const item = read.body.item;
+    if (item.kind !== 'decision' || item.withdrawn) {
+      sendJson(request, response, 409, { ok: false, error: 'invalid-state' });
+      return;
+    }
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), body.operation_id.toLowerCase());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return;
+    }
+    // Their own words, but only the asker is rung: an @name in them is quiet.
+    const words = body.text.trim().split('\n')[0].slice(0, 2000).replace(/@/g, '@\u2060');
+    const asker = item.asked_by && item.asked_by.name;
+    let saved;
+    try {
+      if (Number.isSafeInteger(item.ask_message_id)) {
+        saved = publicMessage(await chat.appendAnnotated({ text: `re #${item.ask_message_id} ${words}` }, chatActor,
+          { discusses: item.ask_message_id }));
+      } else if (asker && asker !== workActor.name) {
+        saved = publicMessage(await chat.append({ text: `@${asker} — ${item.id}: ${words}` }, chatActor));
+      }
+    } catch (error) {
+      annotationRefusal(request, response, error);
+      return;
+    }
+    sendJson(request, response, 200, { ok: true, discussed: true, item, message: saved || null });
   }
 
   /* An answer the addressee gave between the ask's post and its binding:

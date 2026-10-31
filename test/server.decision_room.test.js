@@ -207,6 +207,30 @@ test('a filed decision is asked in the room, and every answer on the record reac
     assert.equal((await rows()).some(row => row.kind === 'post' && row.message_id === echoed[0].id &&
       row.answers.some(a => a.ask_id === d.ask_message_id && a.choice === 'yes')), true, 'and answers the room ask yes');
 
+    // Words alone, on the record (the panel), are discussion: the decision stays
+    // open, its room ask is not closed, the turn goes back to the asker, who is rung.
+    const talk = await aiPost(runtime, '/api/ai/work/items/create', {
+      operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Split the April import?', body: 'b', asked_of: 'Ana',
+    }, scout.token);
+    assert.equal(talk.status, 201, talk.text);
+    const t = talk.json.item;
+    const n4 = (await messages()).length;
+    const words = await post(runtime, '/api/work/decisions/answer',
+      { operation_id: uuid(), id: t.id, expected_revision: t.revision, text: 'Which rows go in which half?' }, ana);
+    assert.equal(words.status, 200, words.text);
+    assert.equal(words.json.discussed, true, 'reported as discussion');
+    const stillOpen = await item(runtime, ana, t.id);
+    assert.deepEqual([stillOpen.state, stillOpen.answer], ['awaiting', null], 'the decision is not recorded');
+    const replyLine = (await messages()).slice(n4);
+    assert.equal(replyLine.length, 1, 'one room line');
+    assert.ok(replyLine[0].delivery.some(row => row.name === 'Scout'), 'the asker is rung');
+    const askRow = (await get(runtime, '/api/annotations?after=0&limit=100', ana)).json.rows
+      .find(row => row.kind === 'post' && row.message_id === replyLine[0].id);
+    assert.ok(askRow && askRow.discusses && askRow.discusses.ask_id === t.ask_message_id, 'it discusses the ask');
+    const turn = (await aiGet(runtime, '/api/ai/asks', scout.token)).json.asked.find(a => a.ask_id === t.ask_message_id);
+    assert.ok(turn && turn.state === 'open', 'the room ask stays open');
+    assert.equal(turn.turn.waiting_on, 'Scout', 'and it is the asker\'s turn');
+
     // An answer given on someone's behalf still reaches the asker, by name.
     const other = await aiPost(runtime, '/api/ai/work/items/create', {
       operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Rename the export?', body: 'The CPA asked.', asked_of: 'Lead',

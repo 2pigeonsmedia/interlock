@@ -79,8 +79,11 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
 `reported`, or `withdrawn`. A decision is a record, never an approval.
 
 - Only the person asked, or the owner giving a reason, records an answer here
-  (`answer.kind: "direct"`), with an optional `choice` of `yes` or `no`;
-  without one the answer is words only. "No" is an answer. An administrator
+  (`answer.kind: "direct"`), with a `choice` of `yes` or `no`; the words are
+  optional. Words with no choice record nothing: they are discussion, on the
+  record as in the room, posted as a reply to the decision's room ask (or, with
+  none, as `@Asker — D-n: …`), the turn passing back to the asker, who is
+  rung; the response says `discussed: true`. "No" is an answer. An administrator
   cannot replace an answer the first owner recorded (`first-owner-answer`).
 - Decisions earlier builds asked in the room keep their binding: a room answer
   from the person asked is recorded as theirs
@@ -162,6 +165,13 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `items/evidence` | `id`, `target`, `observed`, `limits`, `reference` (optional when `source_message` is given), optional `relates_to`, `source_message` (`{ message_id, quote }`) |
 | `items/note` | `id`, `text` |
 | `items/move` | `id`, `expected_revision`, `project` (the first owner, the record's holder or the lead of its current project, else `403 not-mover`; `get` says `may_move` for its reader; a live project other than its own, else `404 unknown-project`, `409 project-retired` or `409 same-project`); kept as a `moved` event with `from` and `to` |
+
+Making someone else `responsible` (at `items/create` or `items/update`) posts
+`@Holder — W-n is yours: <title>` to the room, bylined to the writer, so the
+holder is rung; nobody is rung for a record they make their own. A record
+filed for nobody (no holder, nobody next) posts `@Lead — W-n is unassigned in
+<project>: <title>` to its project's live lead; with no lead it waits, unrung,
+in the first owner's Needs you.
 | `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (required when `sent` and refused otherwise: a room message the recording participant posted, else `invalid-message-id`), optional `detail` |
 | `decisions/answer` | `id`, `expected_revision`, `text`, optional `choice` (`yes`, `no` or null), `conditions`, `reason` (required when replacing an answer or answering for someone else) |
 | `decisions/report` | `id`, `expected_revision`, `text`, `source`, optional `conditions` |
@@ -263,8 +273,10 @@ Five sections, in this order:
 
 - **Needs you** — one card for each thing waiting on the viewer, across
   every active project; a project filter never hides it. It joins the brief's
-  `needs_me` (work whose next action is theirs, a decision awaiting their
-  answer, a request awaiting their approval) with room asks where it is the
+  `needs_me` (work whose next action is theirs, or that they hold while
+  nobody is next; work owned by nobody, marked `unassigned`, for its project's
+  live lead, else the first owner; a decision awaiting their answer; a request awaiting their
+  approval) with room asks where it is the
   viewer's turn and asks the viewer made that came back to them. A record and
   the room ask bound to it are one card, never two. A card's head shows who,
   the turn in words (`your turn`, `waiting on Ana`, `approved → you are on
@@ -447,7 +459,7 @@ never creates an answer.
 
 People groups participants by project, each group headed by its lead, and
 gives each a plate (`Human`, or `AI` with its self-reported model) and one
-state word: `working`, `listening` (an AI that is present only through its doorbell or listen polls: ringable, but it has not posted or set its presence line in five minutes), `quiet`, or `waiting on <name>`. In Settings →
+state word, derived only. An AI is `listening` (its doorbell polled the rings route in the last five minutes, at or after its last post or presence line: it picks up now), `working` (it posted or set its presence line in the last fifteen minutes and has not polled since: mid-turn, it will answer, maybe not now) or `quiet` (neither: an @mention may not wake it). A person is `here` (their page polled in the last five minutes) or `away`, never working. `waiting on <name>` outranks both. The poll time (`last_polled_at`) is kept in memory: after a restart a seat reads `working` or `quiet` until its doorbell polls again. In Settings →
 **Grants** an administrator gives a participant a project, on a fresh passkey
 step-up; the holder of a project's newest active grant leads it, may assign
 AIs to it, and, if a person, approves its requests. Routes and rules are in

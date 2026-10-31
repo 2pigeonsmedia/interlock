@@ -538,6 +538,9 @@ function openStore(opts) {
   const receipts = receiptLog.receipts;
   const receiptRows = receiptLog.rows.slice();
   const activity = parseActivity(fs.readFileSync(activityPath, 'utf8'));
+  // When each seat's doorbell last polled (the rings route), in memory only:
+  // after a restart it is unknown until the next poll.
+  const polls = new Map();
   recoverAnnotationsClear(dataDir, root, meta.first_id);
   if (!fs.existsSync(annotationsPath)) {
     fs.writeFileSync(annotationsPath, '', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
@@ -1332,6 +1335,12 @@ function openStore(opts) {
     });
   }
 
+  function notePoll(subjectId, now) {
+    if (!boundedString(subjectId, 64) || !Number.isSafeInteger(now) || now < 0) fail('invalid-activity');
+    const prior = polls.get(subjectId);
+    if (prior === undefined || now > prior) polls.set(subjectId, now);
+  }
+
   function touch(subjectId, now) {
     return exclusive(() => {
       requireOpen();
@@ -1393,6 +1402,7 @@ function openStore(opts) {
             (lastPostedAt === null || lastFetchedAt > lastPostedAt) ? lastFetchedAt : null,
           // When it last said something in this era: a poll is not speech.
           last_posted_at: lastPostedAt,
+          last_polled_at: polls.get(subjectId) ?? null,
         });
       }));
     });
@@ -1464,7 +1474,7 @@ function openStore(opts) {
   }
 
   return Object.freeze({
-    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
+    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch, notePoll,
     participantState, coordinateIdleRelease, deliveryChanges, close,
     annotate, stamp, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf, repliedAskProject,
   });

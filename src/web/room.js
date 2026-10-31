@@ -916,14 +916,17 @@ function validPeopleFacts(value) {
 function validParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  // `last_posted_at` is new in 0.3.3; a row from an earlier server has none.
+  // `last_posted_at` is new in 0.3.3 and `last_polled_at` in 0.3.4; a row
+  // from an earlier server has neither.
   const posted = keys.includes('last_posted_at');
-  if (keys.length !== (posted ? 15 : 14) || ![
+  const polled = keys.includes('last_polled_at');
+  if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
   ].every(key => keys.includes(key)) || !validPeopleFacts(value) ||
-    (posted && !(value.last_posted_at === null || Number.isSafeInteger(value.last_posted_at)))) return false;
+    (posted && !(value.last_posted_at === null || Number.isSafeInteger(value.last_posted_at))) ||
+    (polled && !(value.last_polled_at === null || Number.isSafeInteger(value.last_polled_at)))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'

@@ -325,6 +325,8 @@
         revision: bound && Number.isSafeInteger(bound.revision) ? bound.revision : null,
         // The open work this one holds up, as the room derives it.
         blocks: Array.isArray(row.blocks) ? row.blocks.filter(id => typeof id === 'string') : [],
+        // Owned by nobody: it is here because this viewer leads its project.
+        unassigned: row.unassigned === true,
       };
       if (bound) Object.assign(card, storyFields(bound, viewer));
       if (decision && killWord(row)) card.kill = killWord(row);

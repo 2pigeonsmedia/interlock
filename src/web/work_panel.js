@@ -222,6 +222,7 @@
       if (card.detail) node.append(make('p', 'work-card-detail', card.detail));
       const facts = [card.who, card.project];
       if (card.blocks && card.blocks.length) facts.push('blocks ' + card.blocks.join(', '));
+      if (card.unassigned) facts.push('unassigned');
       if (card.kill) facts.push(card.kill);
       node.append(make('p', 'work-tree-facts', facts.join(' · ')));
       if (card.note) node.append(make('p', 'work-tree-facts', card.note));
@@ -851,7 +852,7 @@
   // Yes or No is chosen, never defaulted: only an explicit yes is agreement.
   const ANSWER_CHOICES = Object.freeze([
     { value: '', text: 'Choose…' }, { value: 'yes', text: 'Yes' }, { value: 'no', text: 'No' },
-    { value: 'words', text: 'Neither: my words are the answer' },
+    { value: 'words', text: 'Neither: reply with my words (it stays open)' },
   ]);
 
   function answerFields(reasonLabel) {

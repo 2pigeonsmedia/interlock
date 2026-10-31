@@ -271,7 +271,9 @@ test('the CLI asks, answers, withdraws and posts status through the real routes'
     ], 'the scope line arrives without its trailing newline');
 
     // Scout answers Lead's ask with a yes; the ask closes.
-    const answer = sentId(await cli(scout, ['say', '--file', 'yes.md', '--answers', String(toScout), '--choice', 'yes']));
+    const yesSaid = await cli(scout, ['say', '--file', 'yes.md', '--answers', String(toScout), '--choice', 'yes']);
+    const answer = sentId(yesSaid);
+    assert.doesNotMatch(yesSaid.stdout, /words alone are discussion/, 'a choice decides; no discussion note');
     const afterAnswer = JSON.parse((await cli(lead, ['asks', '--json'])).stdout);
     assert.deepEqual(afterAnswer.asked.map(ask => ask.ask_id), [toAna], 'the answered ask is no longer open');
 
@@ -332,6 +334,12 @@ test('the CLI asks, answers, withdraws and posts status through the real routes'
     const statusRow = rows.find(row => row.message_id === statusId);
     assert.equal(statusRow.status, 'done');
     assert.equal(statusRow.read_through, lead.profile.cursor, 'the status carries the cursor it was read through');
+
+    // Words with no choice: the CLI says a decision or request would stay open.
+    const wordsAsk = sentId(await cli(lead, ['say', '--file', 'check.md', '--asks-of', 'Scout']));
+    const wordsSaid = await cli(scout, ['say', '--file', 'yes.md', '--answers', String(wordsAsk)]);
+    assert.equal(wordsSaid.code, EXIT_OK, wordsSaid.stderr);
+    assert.match(wordsSaid.stdout, new RegExp('If ask ' + wordsAsk + ' is a decision or a request for approval, it stays open: words alone are discussion; add --choice yes\\|no to decide\\.'));
   } finally {
     await runtime.close();
   }

@@ -5,6 +5,27 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.2 → 0.3.3
+
+0.3.3 refines Work and People: a words-only answer to a decision passes the
+turn back to the asker (only a Yes or No decides it); a reply to a withdrawn
+question tells both sides; an AI that only listens reads *listening*, not
+*working*; a refused decision filing posts nothing to the room; and the CLI
+gains `work move` and `work project-update`, with refusals that name the
+room and the field. Use the stopped-server procedure below.
+
+**No migration, no new files.** Every file 0.3.2 wrote is used as it is; no
+record or row changes shape. People rows from the server gain
+`last_posted_at`.
+
+**Everyone signs in again.** As with any restart, people sign in again and
+reload open tabs; AI connections carry on.
+
+**Going back to 0.3.2.** Restore the 0.3.2 release and start it on the same
+data directory. 0.3.2 reads every record and row as written; a words-only
+answer given under 0.3.3 stays a reply there too. While it runs, People
+shows a listening AI as *working* again.
+
 ## 0.3.1 → 0.3.2
 
 0.3.2 makes Work easier to act on: a decision filed for someone is asked in

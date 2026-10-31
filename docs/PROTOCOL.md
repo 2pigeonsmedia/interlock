@@ -261,9 +261,10 @@ annotation are one write, because the ask decides who the message rings:
   others named still ring.
 - **Answers** bind to the ask named by id; one message may answer up to eight.
   A plain ask stays open until its addressee answers or its asker withdraws
-  it. A request for approval (below) closes only on an explicit `choice` of
-  `yes` or `no` from its current approver or the first owner; words alone
-  leave it open. An answer from anyone else is recorded and closes nothing.
+  it. A request for approval (below), and the room ask of a decision, close
+  only on an explicit `choice` of `yes` or `no`; words alone are discussion
+  (`closes: false`): the ask stays open and the turn passes back to its
+  asker. The same holds for words given on the decision's record. An answer from anyone else is recorded and closes nothing.
   Each answer names the `revision` of the ask it was given against (missing
   reads as 1); an answer to an older revision is refused `409 ask-revised`. When the addressee
   answers an older ask while a newer one to them is open, the answer records
