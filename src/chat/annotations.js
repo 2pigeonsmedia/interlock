@@ -625,6 +625,7 @@ function sha256(buffer) {
 }
 
 module.exports = Object.freeze({
+  KNOWN_KINDS,
   ROW_VERSION,
   MAX_ANSWERS,
   MAX_MEANS_CHARS,

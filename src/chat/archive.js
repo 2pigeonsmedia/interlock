@@ -8,7 +8,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { encodeArchive, sha256: sha256Buffer } = require('./annotations.js');
+const { KNOWN_KINDS, encodeArchive, sha256: sha256Buffer } = require('./annotations.js');
 
 const ARCHIVE_SCHEMA = 2;
 const LEGACY_ARCHIVE_SCHEMA = 1;
@@ -343,7 +343,7 @@ function validAnnotationsArchive(body) {
     try { row = JSON.parse(line); } catch (_) { return false; }
     if (!row || typeof row !== 'object' || Array.isArray(row) ||
         !Number.isSafeInteger(row.seq) || row.seq <= seq ||
-        !['post', 'withdraw', 'keep_open', 'carry'].includes(row.kind) ||
+        !KNOWN_KINDS.includes(row.kind) ||
         Object.prototype.hasOwnProperty.call(row, 'subject_id')) return false;
     seq = row.seq;
   }
