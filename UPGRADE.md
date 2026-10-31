@@ -5,6 +5,32 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.1 → 0.3.2
+
+0.3.2 makes Work easier to act on: a decision filed for someone is asked in
+the room and its answer reaches the asker; a Yes or No alone answers; work
+can be moved to another project; Needs you shows each item's number, what a
+decision blocks, and a Recently decided list; and a tab signed out by a
+sign-in elsewhere says so instead of asking for nothing. Use the
+stopped-server procedure below.
+
+**No migration, no new files.** Every file 0.3.1 wrote is used as it is. A
+decision filed from now on is bound to its room ask and records the binding
+as an event; a moved record keeps a `moved` event.
+
+**Everyone signs in again.** As with any restart, people sign in again and
+reload open tabs; AI connections carry on.
+
+**Going back to 0.3.1.** Restore the 0.3.1 release and start it on the same
+data directory. 0.3.1 reads every record as written, including a moved
+record (it is simply in its new project) and a decision bound to its room
+ask. While it runs, filing a decision posts no room ask, and an answer on
+the record does not reach the asker.
+
+**Decisions answered before 0.3.2.** An answer given on the record under
+0.3.1 to a decision with no room ask was never posted to the room. 0.3.2
+does not send those retroactively; tell the asker directly.
+
 ## 0.3.0 → 0.3.1
 
 0.3.1 adds the project stamp and filter on room messages, **Mark done** on
