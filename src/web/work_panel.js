@@ -1079,7 +1079,7 @@
     if (item.kind === 'decision') renderDecisionActions(buttons, slot, item);
     else renderWorkActions(buttons, slot, item, result.evidence);
     if (item.kind === 'decision') actionButton(buttons, slot, 'Add note', item, () => noteForm(item));
-    if (session.user.first_owner === true) actionButton(buttons, slot, 'Move to project', item, () => moveForm(item));
+    if (result.may_move === true) actionButton(buttons, slot, 'Move to project', item, () => moveForm(item));
     const recipient = item.kind === 'decision' ? (item.state === 'awaiting' ? item.asked_of : null) : item.next_to;
     if (recipient && !isMe(recipient)) {
       const notify = make('button', 'quiet-action', 'Notify');

@@ -464,13 +464,16 @@ async function startInterlockServer(options) {
     });
     // Who approves a request for approval: one rule for routing it, checking
     // an answer and placing it in a Needs you (server-internal).
+    const liveSubjects = now => new Set(house.listParticipants({ now }).map(row => row.subject_id));
     const approverFor = createApproverRule({
       leadOf: (project, now, live) => people.service.leadOf(project, now, live),
-      live: now => new Set(house.listParticipants({ now }).map(row => row.subject_id)),
+      live: liveSubjects,
       firstOwner: () => (typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null),
     });
     const work = createWorkRoutes({
-      work: createWorkService({ store: workStore, approverFor }),
+      // A project's lead for moving its records: in the room now, as for approvals.
+      work: createWorkService({ store: workStore, approverFor,
+        leadOf: (project, now) => people.service.leadOf(project, now, liveSubjects(now)) }),
       participants: meta => house.listParticipants(meta),
       // A cited room message, looked up by id; null when it is not in the
       // room (never posted, or archived by a transcript clear).

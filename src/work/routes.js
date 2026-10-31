@@ -34,7 +34,7 @@ const READS = Object.freeze(['brief', 'list', 'get', 'changes', 'export']);
 const CITING_OPS = Object.freeze(['items/create', 'items/evidence']);
 const QUOTE_BYTES = 4 * 1024;
 const STATUS = Object.freeze({
-  'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-a-relay': 403,
+  'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-mover': 403, 'not-a-relay': 403,
   'ambiguous-participant': 400,
   'unknown-item': 404, 'unknown-project': 404,
   'kill-own-pick': 403, 'first-owner-answer': 403,

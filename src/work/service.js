@@ -204,7 +204,7 @@ function stripIds(value) {
 }
 
 function createWorkService(options) {
-  const input = closedObject(options, ['store', 'clock', 'approverFor']);
+  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf']);
   const store = input && input.store;
   if (!store || typeof store.read !== 'function' || typeof store.commit !== 'function' ||
       typeof store.nextId !== 'function' || typeof store.nextEvent !== 'function') {
@@ -212,6 +212,18 @@ function createWorkService(options) {
   }
   const clock = input.clock === undefined ? Date.now : input.clock;
   if (typeof clock !== 'function') fail('invalid-options');
+  // A project's live lead `{subject_id, ...}` or null (server-internal);
+  // without it no one moves a record as its project's lead.
+  const leadOf = typeof input.leadOf === 'function' ? input.leadOf : null;
+  // Who may move a record to another project (her rulings, 2026-10-31): the
+  // first owner, the record's holder, and the lead of its current project.
+  function mayMove(actor, item, now) {
+    if (actor.first_owner === true) return true;
+    if (item.responsible && item.responsible.subject_id === actor.subject_id) return true;
+    let lead = null;
+    try { lead = leadOf ? leadOf(item.project, now) : null; } catch (_) { lead = null; }
+    return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
+  }
   // The approver rule (approver.js); without it a request waits on the
   // approver it was filed with.
   const approverFor = typeof input.approverFor === 'function' ? input.approverFor : null;
@@ -538,13 +550,15 @@ function createWorkService(options) {
     });
   }
 
-  /* The first owner moves any record to another live project (her ruling,
-   * 2026-10-31): bylined, kept as a `moved` event, and readable by everyone
-   * as before. A request for approval then routes by its new project. */
+  /* The first owner, the record's holder or its project's lead moves it to
+   * another live project (her rulings, 2026-10-31): bylined, kept as a
+   * `moved` event, readable by everyone as before. Moving into a project
+   * needs nothing there. A request for approval then routes by its new
+   * project. */
   function moveItem(actor, rawInput) {
     return operation(actor, 'items.move', rawInput, ['id', 'expected_revision', 'project'], (draft, body, now) => {
-      if (actor.first_owner !== true) fail('owner-only');
       const item = findItem(draft, body.id);
+      if (!mayMove(actor, item, now)) fail('not-mover');
       checkRevision(item, body.expected_revision);
       const project = findProject(draft, body.project);
       if (project.retired_at !== null) fail('project-retired');
@@ -1243,6 +1257,8 @@ function createWorkService(options) {
       item: publicItem(item),
       evidence: evidenceRows(draft, item),
       history: draft.events.filter(event => event.item === item.id).map(clone),
+      // Whether this reader may move it, so a page offers Move only to them.
+      may_move: mayMove(actor, item, clock()),
     };
   }
 

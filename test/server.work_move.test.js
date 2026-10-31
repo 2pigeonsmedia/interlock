@@ -1,7 +1,9 @@
 'use strict';
 
-// Moving a work item to another project: the first owner may move any item,
-// the move is bylined and kept as an event, and nobody else may move one.
+// Moving a record to another project: the first owner, the record's holder
+// and the lead of its current project may move it; anyone else is refused.
+// The move is bylined and kept as an event, and a request for approval then
+// routes by its new project.
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -163,7 +165,7 @@ async function item(runtime, owner, id) {
   return read.json.item;
 }
 
-test('the first owner moves a work item to another project, bylined; nobody else can', async () => {
+test('the owner, the holder and the current project\'s lead move a record, bylined; anyone else is refused', async () => {
   const port = await reservePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-server-move-'));
   const runtime = await startInterlockServer({ port, dataDir });
@@ -172,50 +174,91 @@ test('the first owner moves a work item to another project, bylined; nobody else
     let owner = await elevate(runtime, await login(runtime, password), device);
     const scout = await admitSeat(runtime, owner, 'Scout');
     owner = await elevate(runtime, owner, device);
+    const lead = await admitSeat(runtime, owner, 'Lead');
+    owner = await elevate(runtime, owner, device);
     const books = await post(runtime, '/api/work/projects/create', { operation_id: uuid(), id: 'books', display_name: 'Books' }, owner);
     assert.equal(books.status, 201, books.text);
-    owner = await login(runtime, password);
-    const invitation = await post(runtime, '/api/invitations', {}, await elevate(runtime, owner, device));
+    const fresh = async () => elevate(runtime, await login(runtime, password), device);
+    const invitation = await post(runtime, '/api/invitations', {}, await fresh());
     const redeemed = await post(runtime, '/api/invitations/redeem',
       { secret: invitation.json.invite_code, name: 'Bea', password: 'a separate member password' });
     assert.equal(redeemed.status, 200, redeemed.text);
     const bea = { cookie: redeemed.headers['set-cookie'][0].split(';', 1)[0], csrf: redeemed.json.csrf_token };
+    const grant = async (holder, kind, project) => {
+      const made = await post(runtime, '/api/grants/create',
+        { holder_name: holder, holder_kind: kind, project, scope: 'leads ' + project, until: null }, await fresh());
+      assert.equal(made.status, 201, made.text);
+    };
+    await grant('Lead', 'seat', 'ops');
     owner = await login(runtime, password);
 
-    const filed = await aiPost(runtime, '/api/ai/work/items/create', {
-      operation_id: uuid(), kind: 'finding', project: 'ops', title: 'Import skips the last row',
-      body: 'Seen on the March file.',
-    }, scout.token);
-    assert.equal(filed.status, 201, filed.text);
-    const w = filed.json.item;
-    assert.equal(w.project, 'ops', 'the arrangement: filed in Operations');
-    const move = (session, extra) => post(runtime, '/api/work/items/move',
-      Object.assign({ operation_id: uuid(), id: w.id, expected_revision: w.revision, project: 'books' }, extra), session);
+    const file = async extra => {
+      const filed = await aiPost(runtime, '/api/ai/work/items/create', Object.assign({
+        operation_id: uuid(), kind: 'work', project: 'ops', title: 'Import skips the last row', body: 'Seen on the March file.',
+      }, extra), scout.token);
+      assert.equal(filed.status, 201, filed.text);
+      return filed.json.item;
+    };
+    const plain = await file({});
+    const held = await file({ responsible: 'Bea', next_to: 'Bea', next_action: 'Check the March file.' });
+    assert.deepEqual([plain.project, plain.responsible, held.responsible && held.responsible.name], ['ops', null, 'Bea'],
+      'the arrangement: two records in Operations, one held by Bea');
+    const body = (record, project) => ({ operation_id: uuid(), id: record.id, expected_revision: record.revision, project });
+    const personMove = (session, record, project) => post(runtime, '/api/work/items/move', body(record, project), session);
+    const aiMove = (token, record, project) => aiPost(runtime, '/api/ai/work/items/move', body(record, project), token);
+    const mayMove = async (record, session) => (await get(runtime, `/api/work/items/${record.id}`, session)).json.may_move;
 
-    const byAi = await aiPost(runtime, '/api/ai/work/items/move',
-      { operation_id: uuid(), id: w.id, expected_revision: w.revision, project: 'books' }, scout.token);
-    assert.deepEqual([byAi.status, byAi.json.error], [403, 'owner-only'], 'not its author, an AI');
-    const byMember = await move(bea);
-    assert.deepEqual([byMember.status, byMember.json.error], [403, 'owner-only'], 'not a member');
-    assert.equal((await item(runtime, owner, w.id)).project, 'ops', 'the refusals moved nothing');
+    // Refused: the record's author who neither holds nor leads it, and a member who does not hold it.
+    assert.equal((await aiGet(runtime, `/api/ai/work/items/${plain.id}`, scout.token)).json.may_move, false);
+    assert.deepEqual([(await aiMove(scout.token, plain, 'books')).json.error, (await personMove(bea, plain, 'books')).json.error],
+      ['not-mover', 'not-mover']);
+    assert.equal((await aiMove(scout.token, plain, 'books')).status, 403);
+    assert.equal(await mayMove(plain, bea), false);
+    assert.equal((await item(runtime, owner, plain.id)).project, 'ops', 'the refusals moved nothing');
 
-    const nowhere = await move(owner, { project: 'nowhere' });
-    assert.deepEqual([nowhere.status, nowhere.json.error], [404, 'unknown-project']);
-    const same = await move(owner, { project: 'ops' });
-    assert.equal(same.status, 409, same.text);
-    const stale = await move(owner, { expected_revision: w.revision + 5 });
+    // The holder moves the record they hold.
+    assert.equal(await mayMove(held, bea), true);
+    const byHolder = await personMove(bea, held, 'books');
+    assert.equal(byHolder.status, 200, byHolder.text);
+    assert.equal((await item(runtime, owner, held.id)).project, 'books');
+
+    // The lead of the current project moves it; once it is in a project they do not lead, they cannot.
+    assert.equal((await aiGet(runtime, `/api/ai/work/items/${plain.id}`, lead.token)).json.may_move, true);
+    const byLead = await aiMove(lead.token, plain, 'books');
+    assert.equal(byLead.status, 200, byLead.text);
+    const inBooks = await item(runtime, owner, plain.id);
+    assert.deepEqual([inBooks.project, inBooks.revision], ['books', plain.revision + 1]);
+    const back = await aiMove(lead.token, inBooks, 'ops');
+    assert.deepEqual([back.status, back.json.error], [403, 'not-mover'], 'Lead does not lead Books');
+
+    // The first owner moves anything; the checks on the target still hold.
+    assert.deepEqual([(await personMove(owner, inBooks, 'nowhere')).status, (await personMove(owner, inBooks, 'books')).status],
+      [404, 409]);
+    const stale = await personMove(owner, plain, 'ops');
     assert.deepEqual([stale.status, stale.json.error], [409, 'stale-revision']);
+    const byOwner = await personMove(owner, inBooks, 'ops');
+    assert.equal(byOwner.status, 200, byOwner.text);
 
-    const moved = await move(owner);
-    assert.equal(moved.status, 200, moved.text);
-    const after = await item(runtime, owner, w.id);
-    assert.deepEqual([after.project, after.revision], ['books', w.revision + 1]);
-    const events = (await get(runtime, '/api/work/changes?after=0', owner)).json.events;
-    const event = events.find(row => row.kind === 'moved' && row.item === w.id);
-    assert.ok(event, 'the move is kept as an event');
-    assert.deepEqual([event.from, event.to, event.project, event.by.name], ['ops', 'books', 'books', 'Ana'], 'bylined: who, from, to');
-    const read = await aiGet(runtime, `/api/ai/work/items/${w.id}`, scout.token);
-    assert.equal(read.json.item.project, 'books', 'everyone still reads it, in its new project');
+    const events = (await get(runtime, '/api/work/changes?after=0', owner)).json.events.filter(row => row.kind === 'moved');
+    assert.deepEqual(events.map(row => [row.item, row.from, row.to, row.project, row.by.name]), [
+      [held.id, 'ops', 'books', 'books', 'Bea'],
+      [plain.id, 'ops', 'books', 'books', 'Lead'],
+      [plain.id, 'books', 'ops', 'ops', 'Ana'],
+    ], 'every move is bylined: who, from, to');
+    assert.equal((await aiGet(runtime, `/api/ai/work/items/${plain.id}`, scout.token)).json.item.project, 'ops',
+      'everyone still reads it');
+
+    // A waiting request for approval re-routes to its new project's approver.
+    await grant('Bea', 'person', 'books');
+    const asked = await aiPost(runtime, '/api/ai/work/approvals/ask',
+      { operation_id: uuid(), project: 'ops', title: 'Order rollers', scope: 'I order two rollers, up to $40' }, scout.token);
+    assert.equal(asked.status, 201, asked.text);
+    assert.equal(asked.json.item.approval.approver.name, 'Ana', 'the arrangement: Operations has an AI lead, so Ana approves');
+    const rerouted = await personMove(owner, asked.json.item, 'books');
+    assert.equal(rerouted.status, 200, rerouted.text);
+    const now = await item(runtime, owner, asked.json.item.id);
+    assert.deepEqual([now.project, now.approval.state, now.approval.approver.name, now.next_to.name],
+      ['books', 'awaiting', 'Bea', 'Bea'], 'Bea leads Books, so the request now waits on her');
   } finally {
     await runtime.close();
   }
