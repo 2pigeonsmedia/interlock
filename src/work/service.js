@@ -967,6 +967,42 @@ function createWorkService(options) {
    * is recorded here as theirs, directly, with its Yes or No. The addressee's
    * latest room answer is the record; earlier ones stay on the trail. A room
    * message is recorded at most once in a decision's life. */
+  /* Bind a decision to the ask the host just posted for it, in the room, as
+   * this actor. Never a route: only a decision filed asked of someone calls it, with a message
+   * it wrote itself and that ask's room addressee. A citation alone never
+   * binds; the room ask and the record must name the same person; one ask,
+   * one decision. The bind is on the record's trail. */
+  function bindAsk(actor, rawInput) {
+    requireActor(actor);
+    // `cites_other`: the record cites another room message (who said what),
+    // so the ask the host just posted for it is not its citation.
+    const body = closedObject(rawInput, ['id', 'ask_message_id', 'of', 'cites_other']) ||
+      closedObject(rawInput, ['id', 'ask_message_id', 'of']);
+    if (!body || !Number.isSafeInteger(body.ask_message_id) || body.ask_message_id < 1 ||
+        (body.cites_other !== undefined && body.cites_other !== true)) fail('invalid-input');
+    return store.commit(draft => {
+      const item = findDecision(draft, body.id);
+      if (item.ask_message_id === body.ask_message_id) return { ok: true, item: publicItem(item), replayed: true };
+      if (item.ask_message_id !== null && item.ask_message_id !== undefined) fail('invalid-state');
+      if (item.created_by.subject_id !== actor.subject_id || !item.source_message ||
+          (body.cites_other !== true && item.source_message.message_id !== body.ask_message_id) ||
+          (body.cites_other === true && item.source_message.message_id >= body.ask_message_id)) fail('not-authorized');
+      if (!sameAddressee(item, body.of)) fail('invalid-asked-of');
+      if (draft.items.some(row => row.kind === 'decision' && row.ask_message_id === body.ask_message_id)) {
+        fail('invalid-state');
+      }
+      const now = clock();
+      item.ask_message_id = body.ask_message_id;
+      // The revision of the room ask this decision's scope is; it moves only
+      // with a revision the room says it made.
+      item.ask_revision = 1;
+      touch(item, now);
+      appendEvent(draft, now, actor, {
+        item: item.id, project: item.project, kind: 'ask-bound', ask_message_id: body.ask_message_id, before: null,
+      });
+      return { ok: true, item: publicItem(item) };
+    });
+  }
   function answerFromRoom(actor, rawInput) {
     requireActor(actor);
     const keys = ['ask_id', 'message_id', 'text', 'choice', 'by_addressee', 'of', 'revision'];
@@ -1478,7 +1514,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, moveItem, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, priorResult, reviseScope,
+    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
     needsMe, replay,

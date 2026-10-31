@@ -33,7 +33,7 @@ function fresh() {
 }
 
 // A decision bound to its room ask, as an earlier build's "Ask a decision"
-// stored it. Nothing binds one today; the record still reads and answers it.
+// stored it; filing a decision binds one the same way (bindAsk).
 function boundByEarlierBuild(store, id, askMessageId) {
   return store.commit(draft => {
     const item = draft.items.find(row => row.id === id);
@@ -1196,4 +1196,25 @@ test('a waiting request is in its current approver\'s Needs you, and moves with 
   assert.deepEqual(waiting(cara), [filed.id], 'the lead changed: it waits on Cara now');
   assert.deepEqual(waiting(bea), [], 'and no longer on Bea');
   assert.equal(work.brief(cara, {}).needs_me[0].approval.approver.name, 'Cara', 'the row names the current approver');
+});
+
+test('a filed decision binds only the ask its host just posted for it; a cited message is never the ask', () => {
+  const { work } = fresh();
+  const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const file = (source) => work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Which cut-off?', body: 'b',
+    asked_of: ref(owner), source_message: { message_id: source, ts: 1, byline: 'Ana', kind: 'person', session: null, quote: 'March' },
+  }).item;
+  const cites = file(50);
+  code(() => work.bindAsk(lead, { id: cites.id, ask_message_id: 49, of: ANA_OF, cites_other: true }), 'not-authorized');
+  code(() => work.bindAsk(lead, { id: cites.id, ask_message_id: 50, of: ANA_OF, cites_other: true }), 'not-authorized');
+  code(() => work.bindAsk(builder, { id: cites.id, ask_message_id: 51, of: ANA_OF, cites_other: true }), 'not-authorized');
+  code(() => work.bindAsk(lead, { id: cites.id, ask_message_id: 51, of: ANA_OF, cites_other: false }), 'invalid-input');
+  const bound = work.bindAsk(lead, { id: cites.id, ask_message_id: 51, of: ANA_OF, cites_other: true });
+  assert.deepEqual([bound.item.ask_message_id, bound.item.source_message.message_id], [51, 50],
+    'bound to the newer ask its host posted; the citation stays');
+  const plain = file(60);
+  code(() => work.bindAsk(lead, { id: plain.id, ask_message_id: 61, of: ANA_OF }), 'not-authorized');
+  assert.equal(work.bindAsk(lead, { id: plain.id, ask_message_id: 60, of: ANA_OF }).item.ask_message_id, 60,
+    'without a citation of its own, the ask is what it cites');
 });

@@ -1830,6 +1830,12 @@ function createFirstOwnerHandler(options) {
       await askApproval(request, response, body, actor, ai);
       return;
     }
+    // A decision asked of someone is asked in the room, so it reaches them.
+    if (op === 'items/create' && body && typeof body === 'object' && body.kind === 'decision' &&
+        typeof body.asked_of === 'string' && body.asked_of.trim() !== '') {
+      await fileDecision(request, response, body, actor, ai);
+      return;
+    }
     const result = await work.mutate(op, actor, body, actor.now);
     if (op === 'decisions/answer' && result.status < 400) await echoAnswerToRoom(request, actor, result.body.item, ai);
     sendWorkResult(request, response, result);
@@ -2312,14 +2318,113 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // ── decisions asked in the room ───────────────────────────────────────────
+  // A decision filed asked of someone is asked in the room first and the
+  // record binds that ask, so its addressee sees it, can answer it in the
+  // room, and is rung. A crash between the two leaves an ordinary ask. An AI's
+  // operation id doubles as its message id, so its retry posts nothing twice.
+
+  async function fileDecision(request, response, body, workActor, ai) {
+    if (typeof body.operation_id !== 'string' || typeof body.title !== 'string' || body.title.trim() === '' ||
+        (body.scope !== undefined && typeof body.scope !== 'string') ||
+        (body.proposal !== undefined && typeof body.proposal !== 'string')) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), body.operation_id.toLowerCase());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return;
+    }
+    // A retry of a completed filing is answered from its record; nothing is posted.
+    const prior = work.priorResult(workActor, body.operation_id);
+    if (prior) {
+      sendJson(request, response, 200, prior.body);
+      return;
+    }
+    // A decision that cites a room message is asked as a reply to it, and
+    // keeps that citation: who said what stays on the record.
+    const cited = body.source_message && typeof body.source_message === 'object' &&
+      Number.isSafeInteger(body.source_message.message_id) ? body.source_message.message_id : null;
+    const text = (cited ? `re #${cited} ` : '') + `Decision: ${body.title.trim()}`;
+    // What a yes means: the stated scope, else the proposal, else the question.
+    const means = [body.scope, body.proposal].find(value => typeof value === 'string' && value.trim() !== '');
+    const ask = { of: body.asked_of, means: (means || body.title).trim() };
+    if (typeof body.project === 'string') ask.project = body.project;
+    let saved;
+    try {
+      saved = publicMessage(await chat.appendAnnotated({ text }, chatActor, { ask }, true));
+      if (!saved) throw new Error('invalid chat result');
+    } catch (error) {
+      if (error && error.code === 'already-posted') {
+        sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
+        return;
+      }
+      // A decision of one's own has nobody to ask or ring: it is recorded only.
+      if (error && error.code === 'ask-of-self') {
+        sendWorkResult(request, response, await work.mutate('items/create', workActor, body, workActor.now));
+        return;
+      }
+      annotationRefusal(request, response, error);
+      return;
+    }
+    // The room resolves the addressee once; the record is asked of the
+    // participant its ask is addressed to, never of a string from the body.
+    const facts = await chat.postFacts(saved.id);
+    if (!facts || !facts.ask) {
+      sendJson(request, response, 503, { ok: false, error: 'work-unavailable', message: saved });
+      return;
+    }
+    const create = Object.assign({}, body, { asked_of: facts.ask.subject_id },
+      cited ? {} : { source_message: { message_id: saved.id, quote: text } });
+    const result = await work.mutate('items/create', workActor, create, workActor.now);
+    if (result.status >= 400) {
+      // No record: the ask is withdrawn, so the room holds no decision without one.
+      try { await chat.annotate(chatActor, 'withdraw', saved.id); } catch (_) { /* already closed */ }
+      sendJson(request, response, result.status, Object.assign({}, result.body, { message: saved }));
+      return;
+    }
+    const bound = work.bindAsk(workActor, Object.assign({ id: result.body.item.id, ask_message_id: saved.id, of: facts.ask },
+      cited ? { cites_other: true } : {}));
+    if (bound.status !== 200) {
+      sendJson(request, response, bound.status, Object.assign({}, bound.body, { message: saved }));
+      return;
+    }
+    await catchUpAnswer(saved.id);
+    sendJson(request, response, result.status, Object.assign({}, result.body, { item: bound.body.item, message: saved }));
+  }
+
+  /* An answer the addressee gave between the ask's post and its binding:
+   * the latest one is recorded now, as it would have been. */
+  async function catchUpAnswer(askId) {
+    const answers = await chat.addresseeAnswers(askId);
+    const latest = answers[answers.length - 1];
+    if (!latest) return;
+    // The answerer is not this request's person, so whether a person is the
+    // first owner cannot be shown here: a person's answer is protected.
+    work.answerFromRoom({
+      subject_id: latest.author.subject_id, name: latest.author.name, kind: latest.author.kind,
+      session: null, owner: false, first_owner: latest.author.kind === 'person',
+    }, {
+      ask_id: askId, message_id: latest.message_id, text: latest.text, choice: latest.choice,
+      by_addressee: true, of: latest.of, revision: latest.revision,
+    });
+  }
+
   /* The person a decision is asked of answered it on the record, not in the
    * room: their answer is also posted in the room, as a reply to the ask, so
    * the room and the record agree. The post goes straight to the room, so the
    * bridge does not record it a second time. Anyone else's answer on the
    * record leaves the room's ask as it is: its addressee has not answered. */
   async function echoAnswerToRoom(request, workActor, item, ai) {
-    if (!item || !Number.isSafeInteger(item.ask_message_id) || !item.answer ||
-        !item.asked_of || item.asked_of.name !== workActor.name || item.asked_of.kind !== workActor.kind) return;
+    if (!item || !item.answer) return;
+    const byAddressee = Boolean(item.asked_of && item.asked_of.name === workActor.name && item.asked_of.kind === workActor.kind);
     let chatActor;
     if (ai) {
       chatActor = seatActor(seatAuthorization(request, 'write'), require('node:crypto').randomUUID());
@@ -2329,6 +2434,20 @@ function createFirstOwnerHandler(options) {
     }
     if (!chatActor || chatActor.subject_id !== workActor.subject_id) return;
     const firstLine = String(item.answer.text).split('\n')[0].slice(0, 200);
+    // Not the ask's own answer (no room ask, or given on someone's behalf):
+    // the room is told by name, so the asker hears it all the same.
+    if (!Number.isSafeInteger(item.ask_message_id) || !byAddressee) {
+      const asker = item.asked_by && item.asked_by.name;
+      if (!asker || asker === workActor.name) return;
+      const word = item.answer.choice === 'yes' ? 'Yes' : item.answer.choice === 'no' ? 'No' : null;
+      const words = word && firstLine !== word ? `${word}. ${firstLine}` : firstLine;
+      try {
+        await chat.append({ text: `@${asker} — ${item.id}: ${words}` }, chatActor);
+      } catch (_) {
+        // The record holds the answer; the room line is a courtesy that failed.
+      }
+      return;
+    }
     // The copy carries what the record holds and nothing more: the record's
     // choice (none, for an answer written on the record, so the room reads it
     // as answered, never as a yes) and the revision of the ask its scope is,

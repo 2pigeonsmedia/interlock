@@ -233,7 +233,7 @@ test('work records ride the existing identity and survive a clear, a restart and
     assert.equal(d2.json.item.id, 'D-2');
     assert.deepEqual(d2.json.item.asked_of, { name: 'Ana', kind: 'person', session: null });
     const forged = await aiPost(runtime, '/api/ai/work/decisions/answer',
-      { operation_id: uuid(), id: 'D-2', expected_revision: 1, text: 'Yes.' }, lead.token);
+      { operation_id: uuid(), id: 'D-2', expected_revision: d2.json.item.revision, text: 'Yes.' }, lead.token);
     assert.equal(forged.status, 403, forged.text);
     assert.equal(forged.json.error, 'not-answerer');
 
@@ -242,7 +242,7 @@ test('work records ride the existing identity and survive a clear, a restart and
     assert.deepEqual(brief.json.needs_me.map(row => row.id), ['D-2']);
     assert.equal(brief.text.includes('subject_id'), false);
     const answered = await post(runtime, '/api/work/decisions/answer',
-      { operation_id: uuid(), id: 'D-2', expected_revision: 1, text: 'No.' }, owner);
+      { operation_id: uuid(), id: 'D-2', expected_revision: d2.json.item.revision, text: 'No.' }, owner);
     assert.equal(answered.status, 200, answered.text);
     assert.equal(answered.json.item.state, 'answered');
     assert.deepEqual(answered.json.item.answer.by, { name: 'Ana', kind: 'person', session: null });

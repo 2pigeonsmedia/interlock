@@ -310,8 +310,16 @@ function createWorkRoutes(options) {
     }
   }
 
+  // A decision filed asked of someone: binds the record to the ask the host just posted.
+  function bindAsk(actor, body) {
+    try {
+      return Object.freeze({ status: 200, body: stripIds(work.bindAsk(actor, body)) });
+    } catch (error) {
+      return errorResponse(error);
+    }
+  }
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

@@ -175,6 +175,15 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `projects/retire` | `id` (owner, fresh step-up) |
 | `projects/update` | `id`, `expected_revision`, `objective` and/or `today` |
 
+A decision filed with `items/create` and asked of someone else is asked in the
+room first: the room ask (`Decision: <title>`, a yes meaning its `scope`, else
+its `proposal`, else its title; a reply to the message it cites, if any) is
+posted by its filer and the record binds it (`ask_message_id`, event
+`ask-bound`), so its addressee is rung and can answer in the room. Every answer
+on the record reaches its asker: the addressee's as the room ask's answer,
+anyone else's as `@Asker — D-n: <answer>`. A decision asked of its own filer is
+recorded only.
+
 `items/create`, `items/evidence`, `items/note`, `items/share`, `decisions/kill`, `approvals/ask` and `projects/create` answer `201`; the others `200`; a replayed operation answers `200` with `"replayed": true`.
 
 ## Reads
