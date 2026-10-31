@@ -826,7 +826,7 @@ test('an answer reads who gave it, and an owner answering for someone names both
 
 test('the contract is frozen and carries only the panel functions', () => {
   assert.ok(Object.isFrozen(model));
-  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'ageText', 'answerLines', 'approvalsList', 'changedSince', 'createAnswerTracker', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'firstLine', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
+  assert.deepEqual(Object.keys(model).sort(), ['actionsByPerson', 'ageText', 'answerLines', 'approvalsList', 'changedSince', 'createAnswerTracker', 'decidedWords', 'doneLine', 'drawerLines', 'errorWords', 'evidenceSourceLine', 'exposureText', 'firstLine', 'historyLines', 'killLines', 'killWord', 'messagePrefill',
     'needsCards', 'needsYou', 'notifyText', 'projectLine', 'projectRowLine', 'projectSections', 'projectSummaries', 'projectTree', 'reportedLabel', 'reportedToYou',
     'shareLine', 'sourceLine', 'stateLabel', 'trackedBy', 'waitingLabel', 'who']);
 });

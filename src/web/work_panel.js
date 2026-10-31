@@ -206,6 +206,7 @@
       { asked: state ? state.asked : [], viewer: state && state.user ? state.user.name : null });
     element('needs-you-count').textContent = String(needs.count);
     renderApprovals(brief);
+    renderDecided(brief);
     element('work-count-button').textContent = 'Needs you · ' + needs.count;
     element('needs-you-list').replaceChildren(...(needs.count ? needs.cards.map(card => {
       const node = make('div', 'work-row work-card');
@@ -238,6 +239,24 @@
       node.append(actions);
       return node;
     }) : [make('p', 'work-tree-facts', 'Nothing needs you.')]));
+  }
+
+  // What the viewer decided lately: each answer stays in sight, by number,
+  // after its card leaves Needs you, and opens its record.
+  function renderDecided(brief) {
+    const rows = Array.isArray(brief.recently_decided) ? brief.recently_decided : [];
+    element('decided-section').hidden = rows.length === 0;
+    element('decided-list').replaceChildren(...rows.map(row => {
+      const card = make('div', 'work-row');
+      const facts = make('p', 'work-tree-facts', model().decidedWords(row.decided) + ' · ');
+      facts.append(ageNode(row.decided.at));
+      card.append(
+        idBadge(row.id),
+        openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id), row.id),
+        facts,
+      );
+      return card;
+    }));
   }
 
   function renderReported(brief) {

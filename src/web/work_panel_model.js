@@ -784,6 +784,19 @@
     'ask-answered-first': 'The request was answered before it could be filed; it stands in the room as a plain question.',
   });
 
+  // The viewer's own answer, in words: their Yes or No (Approved or
+  // Declined on a request), else the start of what they wrote.
+  function decidedWords(decided) {
+    if (!decided) return '';
+    if (decided.choice === 'yes' || decided.choice === 'no') {
+      const word = decided.text === 'Approved' || decided.text === 'Declined' ? decided.text
+        : (decided.choice === 'yes' ? 'Yes' : 'No');
+      return 'You said ' + word;
+    }
+    const text = String(decided.text || '').trim().split('\n')[0];
+    return 'You answered: ' + (text.length > 80 ? text.slice(0, 79) + '…' : text);
+  }
+
   function errorWords(code) {
     return Object.hasOwn(ERROR_WORDS, code) ? ERROR_WORDS[code] : 'That did not work (' + String(code) + ').';
   }
@@ -808,7 +821,7 @@
     who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou,
     ageText, firstLine, needsCards, trackedBy, projectLine, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine, approvalsList,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
-    errorWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
+    errorWords, decidedWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockWorkPanelModel', {

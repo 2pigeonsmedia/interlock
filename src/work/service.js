@@ -1273,6 +1273,24 @@ function createWorkService(options) {
   const CHANGES_LIMIT = 100;
   const CHANGES_LIMIT_MAX = 500;
 
+  // What a viewer decided lately (her ask, 2026-10-31): a decision they
+  // answered on the record, or a request they approved or declined. The
+  // answer stays in sight after its card leaves Needs you.
+  const RECENTLY_DECIDED = 5;
+  function decidedBy(item, me) {
+    if (item.kind === 'decision' && !item.withdrawn && item.answer && item.answer.kind === 'direct' &&
+        item.answer.by && item.answer.by.subject_id === me) {
+      return { choice: item.answer.choice, text: item.answer.text, at: item.answer.at };
+    }
+    const approval = item.approval;
+    if (approval && approval.answered && approval.answered.by && approval.answered.by.subject_id === me &&
+        (approval.state === 'approved' || approval.state === 'declined' || item.state === 'done')) {
+      const choice = approval.state === 'declined' ? 'no' : 'yes';
+      return { choice, text: choice === 'yes' ? 'Approved' : 'Declined', at: approval.answered.at };
+    }
+    return null;
+  }
+
   function brief(actor, rawQuery) {
     requireActor(actor);
     const query = closedObject(rawQuery === undefined ? {} : rawQuery, ['project']);
@@ -1305,6 +1323,11 @@ function createWorkService(options) {
         item.answer.kind === 'reported' && item.answer.attributed_to.subject_id === me).map(item => row(draft, item)),
       open: items.filter(item => item.kind !== 'decision' && item.state !== 'done').map(item => row(draft, item)),
       decisions: items.filter(item => item.kind === 'decision' && !item.withdrawn).map(item => row(draft, item)),
+      recently_decided: mine.map(item => ({ item, decided: decidedBy(item, me) }))
+        .filter(entry => entry.decided !== null)
+        .sort((a, b) => b.decided.at - a.decided.at || idNumber(b.item.id) - idNumber(a.item.id))
+        .slice(0, RECENTLY_DECIDED)
+        .map(entry => Object.assign(row(draft, entry.item), { decided: entry.decided })),
     };
   }
 

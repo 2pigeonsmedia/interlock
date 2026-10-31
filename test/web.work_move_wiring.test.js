@@ -35,3 +35,13 @@ test('a choice alone answers: the decision form needs no words with Yes or No, a
   assert.ok(drawer.includes("answerAsk(item.ask_message_id, 'yes', revision)") && drawer.includes("answerAsk(item.ask_message_id, 'no', revision)"),
     'through the room ask, at the revision the record shows');
 });
+
+test('the viewer\'s recent answers read as words, and the strip is drawn from the brief', () => {
+  assert.equal(MODEL.decidedWords({ choice: 'yes', text: 'Yes', at: 1 }), 'You said Yes');
+  assert.equal(MODEL.decidedWords({ choice: 'no', text: 'Declined', at: 1 }), 'You said Declined');
+  assert.equal(MODEL.decidedWords({ choice: null, text: 'Only if the CPA agrees.\nMore.', at: 1 }), 'You answered: Only if the CPA agrees.');
+  assert.equal(MODEL.decidedWords({ choice: null, text: 'x'.repeat(100), at: 1 }).length, 'You answered: '.length + 80);
+  const strip = PANEL.slice(PANEL.indexOf('function renderDecided('), PANEL.indexOf('function renderReported('));
+  assert.ok(strip.includes("element('decided-section').hidden = rows.length === 0;"), 'hidden when nothing was decided');
+  assert.ok(strip.includes('idBadge(row.id)') && strip.includes('() => openItem(row.id)'), 'each leads with its number and opens its record');
+});
