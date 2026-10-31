@@ -363,3 +363,14 @@ test('a request for approval is answered from its chip by its live approver, a p
   assert.equal(Asks.mayAnswer(plain, 'Bea', new Set()), true, 'a plain ask ignores Needs you');
   assert.equal(Asks.mayAnswer(plain, 'Cal', new Set([8])), false);
 });
+
+test('Mark done is offered to the one carrying out an approved request, and only then', () => {
+  const agreed = { ask_id: 7, by: 'Bea', of: 'Ana', state: 'answered', approval: true, turn: { phase: 'agreed', waiting_on: null, acting: 'Bea' } };
+  assert.equal(Asks.mayMarkDone(agreed, 'Bea'), true);
+  assert.equal(Asks.mayMarkDone(agreed, 'Ana'), false, 'not the approver');
+  assert.equal(Asks.mayMarkDone(agreed, null), false);
+  assert.equal(Asks.mayMarkDone(Object.assign({}, agreed, { approval: false }), 'Bea'), false, 'a plain ask has no done receipt button');
+  for (const phase of ['waiting', 'declined', 'done']) {
+    assert.equal(Asks.mayMarkDone(Object.assign({}, agreed, { turn: { phase, waiting_on: null, acting: null } }), 'Bea'), false, phase);
+  }
+});

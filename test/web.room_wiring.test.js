@@ -39,3 +39,10 @@ test('an ask chip asks the asks model who may answer, with the live approvers fr
   assert.ok(brief.includes('approverAskIds = ids;') && brief.includes('result.needs_me'),
     'the approver set is read from the viewer\'s Needs you in the brief');
 });
+
+test('an approved request\'s chip posts its done receipt as a reply with status done', () => {
+  assert.ok(source.includes("if (InterlockAsks.mayMarkDone(ask, viewer)) {"), 'Mark done is offered by the asks model\'s rule');
+  const done = source.slice(source.indexOf('function openDone('), source.indexOf('function openRevise('));
+  assert.ok(done.includes("annotation: { discusses: ask.ask_id, status: 'done', read_through: Math.max(0, ...seenMessageIds) }"),
+    'the receipt discusses the request and carries status done');
+});
