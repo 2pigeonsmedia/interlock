@@ -1,7 +1,8 @@
 # The Work record
 
 Interlock keeps one shared Work record beside the room: projects, work and
-finding items, decisions, and the evidence attached to them. It is a place to
+finding items, requests for approval, decisions, and the evidence attached to
+them. It is a place to
 write down claims with a byline so that any participant, human or AI, can find
 the next useful action without re-reading the day's conversation.
 
@@ -26,7 +27,13 @@ entry is a claim about what someone observed at a named target.
   `"Builder (session 2)"`, the form every rendering shows.
 - Routine changes to the record do not post to the room, do not move anyone's
   chat cursor, and do not wake any AI. Sharing a change into the conversation
-  is a deliberate, ordinary message by its author.
+  is a deliberate, ordinary message by its author. Two things do cross: a
+  request for approval is posted to the room as an ask (`Approval: <title>`)
+  before its item is filed, and the room's Approve, Decline, revise and done
+  receipt on that ask write to its item. See
+  [`PROTOCOL.md`](PROTOCOL.md), "Requests for approval".
+- "The owner" below means any administrator, the first owner included. Every
+  signed-in person and every AI seat can read the whole record.
 - The record survives a transcript clear and a restart, and is included in
   `interlock backup`. A store the server cannot read opens read-only as
   `damaged`; writes are refused (`store-damaged`) and nothing is rewritten.
@@ -36,14 +43,25 @@ entry is a claim about what someone observed at a named target.
 **Project** — `id` (a slug, immutable), `display_name`, `objective`, `today`,
 `revision`, `updated_by`, `updated_at`, `retired_at`. Every room starts with the
 project `ops` ("Operations"). Creating or retiring a project is the owner's
-act behind one fresh passkey step-up; editing a project's objective or
+act behind one fresh passkey step-up, and Operations cannot be retired; editing a project's objective or
 today's-focus note is an ordinary attributed write by any participant.
 
 **Work item** (`kind: "work"` or `"finding"`) — `id` (`W-12`), `title`, `body`,
 `project`, `state` (`open`, `active`, `blocked`, `ready`, `done`),
 `responsible`, `next_to`, `next_action`, `target`, `block_reason`,
 `done_account`, `consequence`, `severity` (`blocking`, `non-blocking`, or
-null), `links`, `parent`, `source`, `revision`.
+null), `links`, `parent`, `source`, `source_message`, `done_evidence`,
+`done_without_evidence`, `revision`. A request for approval is a work item
+that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
+`approver`, `by`, `scope`, `answered`) and `ask_message_id`, `ask_revision`.
+
+- A request for approval is filed only through `approvals/ask`, never
+  `items/create`, and refuses `items/update` (`invalid-kind`): its title,
+  body and scope are what is being approved. It moves only by Approve
+  (`active`, held by the asker), Decline (`done`, `declined by <approver>`),
+  a revise in the room (back to awaiting) or the asker's done receipt
+  (`done`). Its events are `approval-asked`, `approved`, `declined`,
+  `scope-revised` and `done`. Notes and evidence attach as usual.
 
 - `ready` requires a `next_to`; entering `blocked` requires a `block_reason`
   and drops `next_to` unless the request names both the unblocker and the
@@ -56,11 +74,22 @@ null), `links`, `parent`, `source`, `revision`.
 
 **Decision** (`kind: "decision"`, `id` `D-7`) — `title`, `body`, `project`,
 `asked_of`, `asked_by`, `proposal`, `rationale`, `scope`, `conditions`,
-`answer`, `withdrawn`, `links`, `parent`, `source`, `revision`. The displayed
-`state` is derived: `awaiting`, `answered`, `reported`, or `withdrawn`.
+`answer`, `withdrawn`, `kill`, `kill_state`, `links`, `parent`, `source`,
+`revision`. The displayed `state` is derived: `awaiting`, `answered`,
+`reported`, or `withdrawn`. A decision is a record, never an approval.
 
 - Only the person asked, or the owner giving a reason, records an answer here
-  (`answer.kind: "direct"`). "No" is an answer.
+  (`answer.kind: "direct"`), with an optional `choice` of `yes` or `no`;
+  without one the answer is words only. "No" is an answer. An administrator
+  cannot replace an answer the first owner recorded (`first-owner-answer`).
+- Decisions earlier builds asked in the room keep their binding: a room answer
+  from the person asked is recorded as theirs
+  (`source: "answered in the room #M"`), and a revise of that ask stops the
+  recorded answer standing.
+- Anyone but its asker may ask the one question that would sink the pick
+  (`decisions/kill`, once); the asker replies once (`decisions/kill-reply`,
+  `survived` or `killed`). `kill_state` is `unattacked`, `attacked`,
+  `survived` or `killed`; killed withdraws nothing.
 - Anyone else may record that an answer was given elsewhere
   (`answer.kind: "reported"`) with the exact words and a source. The record
   shows who reported it and that it is not confirmed here. The response
@@ -88,7 +117,9 @@ for every field it changed, so a replaced body or target is never lost.
 ## Personal queue
 
 An item needs a participant when its next action is addressed to them and it
-is not done, or when it is a decision awaiting their answer. Being responsible
+is not done, when it is a decision awaiting their answer, or when it is a
+request awaiting their approval. The approver is worked out again on every
+read, so a waiting request moves with its project's lead. Being responsible
 for an item does not by itself put it in anyone's queue, and a blocked item
 whose next step is a wait is in nobody's queue.
 
@@ -131,16 +162,19 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `items/evidence` | `id`, `target`, `observed`, `limits`, `reference` (optional when `source_message` is given), optional `relates_to`, `source_message` (`{ message_id, quote }`) |
 | `items/note` | `id`, `text` |
 | `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (required when `sent` and refused otherwise: a room message the recording participant posted, else `invalid-message-id`), optional `detail` |
-| `decisions/answer` | `id`, `expected_revision`, `text`, optional `conditions`, `reason` (required when replacing an answer or answering for someone else) |
+| `decisions/answer` | `id`, `expected_revision`, `text`, optional `choice` (`yes`, `no` or null), `conditions`, `reason` (required when replacing an answer or answering for someone else) |
 | `decisions/report` | `id`, `expected_revision`, `text`, `source`, optional `conditions` |
 | `decisions/confirm` | `id`, `expected_revision`, optional `reason` |
 | `decisions/reopen` | `id`, `expected_revision`, `reason`, optional `asked_of` |
 | `decisions/withdraw` | `id`, `expected_revision`, `reason` |
+| `decisions/kill` | `id`, `expected_revision`, `question` (anyone but the asker, once) |
+| `decisions/kill-reply` | `id`, `expected_revision`, `words`, `outcome` (`survived` or `killed`; the asker, once) |
+| `approvals/ask` | `project`, `title`, `scope` (what a yes means), optional `body`; posts the room ask first (see PROTOCOL.md) |
 | `projects/create` | `id`, `display_name` (owner, fresh step-up) |
 | `projects/retire` | `id` (owner, fresh step-up) |
 | `projects/update` | `id`, `expected_revision`, `objective` and/or `today` |
 
-`items/create`, `items/evidence`, `items/note`, `items/share` and `projects/create` answer `201`; the others `200`; a replayed operation answers `200` with `"replayed": true`.
+`items/create`, `items/evidence`, `items/note`, `items/share`, `decisions/kill`, `approvals/ask` and `projects/create` answer `201`; the others `200`; a replayed operation answers `200` with `"replayed": true`.
 
 ## Reads
 
@@ -173,10 +207,12 @@ while the state is `blocked`.
 `ambiguous-participant`, `invalid-query`, and the field-specific `invalid-*`
 codes · `401` `not-authenticated` (no usable session) or `invalid-connection`
 (no usable bearer) · `403` `not-authorized`, `not-answerer`, `not-asker`, `owner-only`,
-`not-a-relay`, `fresh-step-up-required`, `request-refused` · `404`
-`unknown-item`, `unknown-project` · `409` `stale-revision`, `operation-conflict`,
-`answer-recorded`, `project-retired`, `default-project` (Operations cannot be retired), `project-exists`, `invalid-state` · `503`
-`store-damaged`.
+`not-a-relay`, `fresh-step-up-required`, `request-refused`, `first-owner-answer`,
+`kill-own-pick`, `owner-does-not-ask` · `404` `unknown-item`, `unknown-project` ·
+`405` (wrong method, with `allow`) · `409` `stale-revision`, `operation-conflict`,
+`answer-recorded`, `project-retired`, `default-project` (Operations cannot be retired), `project-exists`, `invalid-state`,
+`kill-slot-filled`, `kill-slot-empty`, `kill-slot-replied`, `ask-answered-first` · `503`
+`store-damaged`, `approver-unavailable`, `work-unavailable`.
 
 ## CLI
 
@@ -187,6 +223,9 @@ interlock work get ID --connection NAME [--json]
 interlock work changes --connection NAME --after N [--limit N] [--json]
 interlock work create --connection NAME --file PATH [--json]
 interlock work update|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+interlock work ask-approval --connection NAME --file PATH [--json]
+interlock work kill ID --connection NAME --file PATH|--stdin [--json]
+interlock work kill-reply ID --outcome survived|killed --connection NAME --file PATH|--stdin [--json]
 interlock work export --connection NAME --format json|md
 ```
 
@@ -206,19 +245,22 @@ never from message text.
 
 ### The tile
 
-Four sections, in this order:
+Five sections, in this order:
 
-- **Needs you** — every record whose next action is addressed to the viewer,
-  or a decision awaiting their answer, oldest change first. It counts
-  distinct records across every active project; a project filter never hides
-  it (the brief's `needs_me` is not narrowed by `project`). Each row names the
-  project, the id, how long it has waited, the ask, and `asked by <name>`:
-  for a decision the person who asked it, for a work item the person who
-  recorded it, followed by ` · responsible: <name>` when someone is. Rows are
-  buttons whose accessible name is `<action> <id>: <title>`: `Answer D-7: …`
-  for a decision, `Open work W-12: …` for work. The heading collapses the
-  list. The header button reads `Needs you · N` at every width, and choosing
-  it jumps to the tile and focuses this section.
+- **Needs you** — one card for each thing waiting on the viewer, across
+  every active project; a project filter never hides it. It joins the brief's
+  `needs_me` (work whose next action is theirs, a decision awaiting their
+  answer, a request awaiting their approval) with room asks where it is the
+  viewer's turn and asks the viewer made that came back to them. A record and
+  the room ask bound to it are one card, never two. A card's head shows who,
+  the turn in words (`your turn`, `waiting on Ana`, `approved → you are on
+  it`) and the age; its body is a button `Open <id>: <title>`, `A yes means:
+  …` when the ask says, the latest exchange, and `project · id`. Its acts are
+  **Yes**/**No**, or **Approve**/**Decline** for a request for approval, plus
+  **Reply** and **Open**. The header button reads `Needs you · N` at every
+  width, and choosing it jumps to the tile and focuses this section.
+- **Approvals** — the first owner only: every request awaiting approval in
+  the room, as a list. It rings nobody.
 - **Reported to you** — decisions where someone else reported an answer as
   yours, each reading `Reported by X · attributed to Y · not confirmed here`.
 - **Actions** — beside the personal queue, one section every participant
@@ -231,8 +273,8 @@ Four sections, in this order:
   you. It shows the count of distinct records and collapses like Needs you.
   It is a status of who holds what, not a second queue: it never rings anyone
   and it does not change who a request is addressed to. It is built from the
-  same brief the personal queue uses, so the two can never disagree: a
-  viewer's group here holds exactly the records in their Needs you.
+  brief alone, so Needs you also holds room asks it does not; a request for
+  approval sits here under the approver it was filed with.
 - **Projects** — each active project in place, with no pop-up for a
   project. Its heading is the project's name with its open, blocked, ready
   and awaiting counts; under it, its objective, today's-focus note and who
@@ -319,6 +361,12 @@ recorded when the draft is sent or declined.
   signed-in participant: target examined, what was observed, a reference, and
   what it does not show. **Add note** — on any record, offered to any
   signed-in participant.
+- **Approve** / **Decline** — on a request for approval, on the ask in the
+  room and on the approver's Needs you card. The room also accepts the first
+  owner's answer. Nobody updates
+  it; the asker's done receipt in the room closes it after approval.
+- **Ask the kill question** — on a decision, for anyone but its asker, once;
+  the asker replies once, `survived` or `killed`.
 - **Notify** — shown when the record's next step is addressed to someone other
   than the viewer (or a decision awaits someone else's answer).
 
@@ -363,16 +411,27 @@ write succeeds or any field changes.
 Every message has a **Work…** button beside Reply. It opens a dialog,
 *Record from a message*, prefilled with the message's words: **Create work**
 (the title is the first non-blank line, the details are the message up to
-16 KiB), **Ask a
-decision** (who to ask is required), or **Attach as evidence** to an open
+16 KiB), **Ask for approval** (a project and what a yes means are required;
+the room picks the approver, and the first owner is not offered it), or
+**Attach as evidence** to an open
 work item (the quoted words are what was observed; the server checks them
 against the message and credits its speaker). The
 dialog names the message's speaker and the person recording separately. The
 quote is the start of the message, up to 4 KiB; when the message is longer
 the dialog says "Quoted the first 4 KB of message #N". For
-work and decisions the server checks the quoted words against the room before
-it creates the record. There is no answer field: promoting someone's message
+work the server checks the quoted words against the room before it creates
+the record; a request for approval is posted to the room as a new ask. There is no answer field: promoting someone's message
 never creates an answer.
+
+### People, leads and grants
+
+People groups participants by project, each group headed by its lead, and
+gives each a plate (`Human`, or `AI` with its self-reported model) and one
+state word: `working`, `quiet`, or `waiting on <name>`. In Settings →
+**Grants** an administrator gives a participant a project, on a fresh passkey
+step-up; the holder of a project's newest active grant leads it, may assign
+AIs to it, and, if a person, approves its requests. Routes and rules are in
+[`PROTOCOL.md`](PROTOCOL.md), "People facts and grants".
 
 ### Projects in Settings
 
