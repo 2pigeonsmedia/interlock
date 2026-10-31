@@ -650,6 +650,13 @@ function createChatService(options) {
     });
   }
 
+  /* The asker of an ask in this era, `{subject_id, name}`, or null. */
+  async function askerOf(askId) {
+    requireOpen();
+    const found = await store.askersOf([askId]);
+    return found.length === 1 ? Object.freeze({ subject_id: found[0].subject_id, name: found[0].name }) : null;
+  }
+
   /* A message's project stamp; the store checks the actor is its author. */
   async function stamp(actor, messageId, project, reason, recordId = null) {
     requireOpen();
@@ -689,7 +696,7 @@ function createChatService(options) {
   }
 
   return Object.freeze({
-    append, appendAnnotated, annotate, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
+    append, appendAnnotated, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, notePoll, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,

@@ -177,7 +177,7 @@ in the first owner's Needs you.
 | `decisions/report` | `id`, `expected_revision`, `text`, `source`, optional `conditions` |
 | `decisions/confirm` | `id`, `expected_revision`, optional `reason` |
 | `decisions/reopen` | `id`, `expected_revision`, `reason`, optional `asked_of` |
-| `decisions/withdraw` | `id`, `expected_revision`, `reason` |
+| `decisions/withdraw` | `id`, `expected_revision`, `reason`; its room ask is withdrawn with it (as its asker's, whoever withdrew the record) |
 | `decisions/kill` | `id`, `expected_revision`, `question` (anyone but the asker, once) |
 | `decisions/kill-reply` | `id`, `expected_revision`, `words`, `outcome` (`survived` or `killed`; the asker, once) |
 | `approvals/ask` | `project`, `title`, `scope` (what a yes means, at most 300 characters, else `400 scope-too-long`), optional `body`; posts the room ask first (see PROTOCOL.md) |

@@ -1865,6 +1865,11 @@ function createFirstOwnerHandler(options) {
         body && typeof body.responsible === 'string') {
       await ringHolder(request, actor, result.body.item, ai);
     }
+    // A withdrawn decision withdraws the ask it put in the room, so nothing
+    // said there afterwards closes it as answered.
+    if (op === 'decisions/withdraw' && result.status < 400 && result.body.replayed !== true) {
+      await withdrawRoomAsk(result.body.item);
+    }
     // A retried answer is already in the room: it is not posted or rung again.
     if (op === 'decisions/answer' && result.status < 400 && result.body.replayed !== true) {
       await echoAnswerToRoom(request, actor, result.body.item, ai);
@@ -2579,6 +2584,20 @@ function createFirstOwnerHandler(options) {
    * the room and the record agree. The post goes straight to the room, so the
    * bridge does not record it a second time. Anyone else's answer on the
    * record leaves the room's ask as it is: its addressee has not answered. */
+  /* The room ask of a decision just withdrawn on the record. The ask is its
+   * asker's, so the row is written as theirs, whoever withdrew the record
+   * (its asker, or an administrator); the record's own event names who did.
+   * An ask already answered or withdrawn in the room is left as it is. */
+  async function withdrawRoomAsk(item) {
+    if (!item || item.withdrawn !== true || !Number.isSafeInteger(item.ask_message_id)) return;
+    try {
+      const asker = await chat.askerOf(item.ask_message_id);
+      if (asker) await chat.annotate(asker, 'withdraw', item.ask_message_id);
+    } catch (_) {
+      // Already closed in the room, or the room is not reachable: the record holds the withdraw.
+    }
+  }
+
   async function echoAnswerToRoom(request, workActor, item, ai) {
     if (!item || !item.answer) return;
     const byAddressee = Boolean(item.asked_of && item.asked_of.name === workActor.name && item.asked_of.kind === workActor.kind);
