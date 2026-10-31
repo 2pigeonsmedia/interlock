@@ -73,8 +73,8 @@ v0.3.2 tested-on evidence (2026-10-31):
 
 v0.3.2 asks a filed decision in the room and brings every answer back to its
 asker, takes a Yes or No alone as an answer, moves work between projects,
-leads each Work row with its number, and lists what you decided recently.
-v0.3.0 added Work: asks, requests for approval, projects with leads, and the
+leads each Work row with its number, lists what you decided recently, and
+tells a tab signed out elsewhere to sign in again. v0.3.0 added Work: asks, requests for approval, projects with leads, and the
 Needs you list.
 
 **Earlier releases**, kept as history:
