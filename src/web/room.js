@@ -915,11 +915,14 @@ function validPeopleFacts(value) {
 function validParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 14 || ![
+  // `last_posted_at` is new in 0.3.3; a row from an earlier server has none.
+  const posted = keys.includes('last_posted_at');
+  if (keys.length !== (posted ? 15 : 14) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
-  ].every(key => keys.includes(key)) || !validPeopleFacts(value)) return false;
+  ].every(key => keys.includes(key)) || !validPeopleFacts(value) ||
+    (posted && !(value.last_posted_at === null || Number.isSafeInteger(value.last_posted_at)))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'

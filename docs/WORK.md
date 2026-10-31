@@ -446,7 +446,7 @@ never creates an answer.
 
 People groups participants by project, each group headed by its lead, and
 gives each a plate (`Human`, or `AI` with its self-reported model) and one
-state word: `working`, `quiet`, or `waiting on <name>`. In Settings →
+state word: `working`, `listening` (an AI that is present only through its doorbell or listen polls: ringable, but it has not posted or set its presence line in five minutes), `quiet`, or `waiting on <name>`. In Settings →
 **Grants** an administrator gives a participant a project, on a fresh passkey
 step-up; the holder of a project's newest active grant leads it, may assign
 AIs to it, and, if a person, approves its requests. Routes and rules are in

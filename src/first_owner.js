@@ -266,6 +266,8 @@ function publicParticipant(participant) {
       !(participant.fetched_without_post_at === null ||
         (Number.isSafeInteger(participant.fetched_without_post_at) &&
           participant.fetched_without_post_at >= 0)) ||
+      !(participant.last_posted_at === undefined || participant.last_posted_at === null ||
+        (Number.isSafeInteger(participant.last_posted_at) && participant.last_posted_at >= 0)) ||
       typeof participant.present !== 'boolean' ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
@@ -279,6 +281,7 @@ function publicParticipant(participant) {
     present: participant.present,
     outstanding: participant.outstanding,
     fetched_without_post_at: participant.fetched_without_post_at,
+    last_posted_at: participant.last_posted_at === undefined ? null : participant.last_posted_at,
   });
 }
 
