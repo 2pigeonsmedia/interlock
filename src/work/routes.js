@@ -327,8 +327,14 @@ function createWorkRoutes(options) {
       return errorResponse(error);
     }
   }
+  // What a participant's own open work waits on: {name, item, since} or null.
+  function waitingOf(subjectId) {
+    try { return typeof work.waitingOf === 'function' ? work.waitingOf(subjectId) : null; }
+    catch (_) { return null; }
+  }
+
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

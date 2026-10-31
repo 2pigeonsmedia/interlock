@@ -920,13 +920,18 @@ function validParticipant(value) {
   // from an earlier server has neither.
   const posted = keys.includes('last_posted_at');
   const polled = keys.includes('last_polled_at');
-  if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) || ![
+  // `waiting` (0.3.4): {name, item, since} derived from Work, or null.
+  const waits = keys.includes('waiting');
+  if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
   ].every(key => keys.includes(key)) || !validPeopleFacts(value) ||
     (posted && !(value.last_posted_at === null || Number.isSafeInteger(value.last_posted_at))) ||
-    (polled && !(value.last_polled_at === null || Number.isSafeInteger(value.last_polled_at)))) return false;
+    (polled && !(value.last_polled_at === null || Number.isSafeInteger(value.last_polled_at))) ||
+    (waits && !(value.waiting === null || (value.waiting && typeof value.waiting === 'object' &&
+      Object.keys(value.waiting).length === 3 && typeof value.waiting.name === 'string' &&
+      typeof value.waiting.item === 'string' && Number.isSafeInteger(value.waiting.since))))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'

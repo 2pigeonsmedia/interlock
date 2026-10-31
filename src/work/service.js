@@ -466,6 +466,38 @@ function createWorkService(options) {
     return route && route.owner ? route.owner.subject_id : null;
   }
 
+  /* What a participant's own open work waits on (her ask, 2026-10-31): the
+   * first of their open items (held or next) linked to an unfinished item
+   * someone else holds — a decision awaiting its addressee, a request
+   * awaiting its approver, or work in another's hands. Derived, never typed.
+   * Names only; no subject ids leave this function. */
+  function waitingOf(subjectId) {
+    if (typeof subjectId !== 'string') return null;
+    const draft = store.read();
+    if (!draft) return null;
+    const active = state => state === 'open' || state === 'active' || state === 'ready' || state === 'blocked';
+    const byIdOrder = (a, b) => idNumber(a.id) - idNumber(b.id);
+    const holderOf = other => {
+      if (other.kind === 'decision') return decisionState(other) === 'awaiting' ? other.asked_of : null;
+      if (other.approval) return other.approval.state === 'awaiting' ? currentApproverRef(other) : null;
+      return active(other.state) ? (other.next_to || other.responsible) : null;
+    };
+    const mine = draft.items.filter(item => item.kind !== 'decision' && active(item.state) &&
+      ((item.responsible && item.responsible.subject_id === subjectId) ||
+        (item.next_to && item.next_to.subject_id === subjectId))).sort(byIdOrder);
+    for (const item of mine) {
+      const linked = item.links.concat(item.parent ? [item.parent] : []);
+      for (const id of linked) {
+        const other = draft.items.find(row => row.id === id);
+        const holder = other ? holderOf(other) : null;
+        if (holder && holder.subject_id && holder.subject_id !== subjectId) {
+          return { name: holder.name, item: other.id, since: item.updated_at };
+        }
+      }
+    }
+    return null;
+  }
+
   function needsMe(item, subjectId) {
     // A waiting request is in its current approver's Needs you, found live.
     if (item.approval && item.approval.state === 'awaiting' && item.state === 'open') {
@@ -1574,7 +1606,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, moveItem, checkOnly, attachEvidence, addNote, share,
+    createItem, updateWork, moveItem, checkOnly, waitingOf, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
