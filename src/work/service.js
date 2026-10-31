@@ -538,6 +538,25 @@ function createWorkService(options) {
     });
   }
 
+  /* The first owner moves any record to another live project (her ruling,
+   * 2026-10-31): bylined, kept as a `moved` event, and readable by everyone
+   * as before. A request for approval then routes by its new project. */
+  function moveItem(actor, rawInput) {
+    return operation(actor, 'items.move', rawInput, ['id', 'expected_revision', 'project'], (draft, body, now) => {
+      if (actor.first_owner !== true) fail('owner-only');
+      const item = findItem(draft, body.id);
+      checkRevision(item, body.expected_revision);
+      const project = findProject(draft, body.project);
+      if (project.retired_at !== null) fail('project-retired');
+      if (project.id === item.project) fail('same-project');
+      const from = item.project;
+      item.project = project.id;
+      touch(item, now);
+      appendEvent(draft, now, actor, { item: item.id, project: project.id, kind: 'moved', from, to: project.id });
+      return { ok: true, item: publicItem(item) };
+    });
+  }
+
   function updateWork(actor, rawInput) {
     return operation(actor, 'items.update', rawInput, UPDATE_KEYS, (draft, body, now) => {
       const item = findItem(draft, body.id);
@@ -1411,7 +1430,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, attachEvidence, addNote, share,
+    createItem, updateWork, moveItem, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,

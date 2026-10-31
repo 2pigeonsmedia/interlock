@@ -12,6 +12,7 @@ const { canonical, stripIds } = require('./service.js');
 const MUTATIONS = Object.freeze({
   'items/create': Object.freeze(['createItem', 201]),
   'items/update': Object.freeze(['updateWork', 200]),
+  'items/move': Object.freeze(['moveItem', 200]),
   'items/evidence': Object.freeze(['attachEvidence', 201]),
   'items/note': Object.freeze(['addNote', 201]),
   'items/share': Object.freeze(['share', 201]),
@@ -39,7 +40,7 @@ const STATUS = Object.freeze({
   'kill-own-pick': 403, 'first-owner-answer': 403,
   'stale-revision': 409, 'operation-conflict': 409, 'answer-recorded': 409, 'project-retired': 409, 'default-project': 409,
   'kill-slot-filled': 409, 'kill-slot-replied': 409, 'kill-slot-empty': 409,
-  'project-exists': 409, 'invalid-state': 409,
+  'project-exists': 409, 'invalid-state': 409, 'same-project': 409,
   'store-damaged': 503,
 });
 
