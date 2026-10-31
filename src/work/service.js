@@ -255,6 +255,15 @@ function createWorkService(options) {
   // operation's digest recorded so a retry replays and a reuse refuses. A
   // caller may add raw_digest, its digest of the request as sent; it is kept
   // beside the resolved digest so replay() can recognise a retry early.
+  // Inside checkOnly, an operation runs on a copy and writes nothing: the
+  // host asks "would this be refused?" before it posts anything for it.
+  let checking = false;
+  function checkOnly(run) {
+    if (typeof store.check !== 'function') fail('invalid-options');
+    checking = true;
+    try { return run(); } finally { checking = false; }
+  }
+
   function operation(actor, op, rawInput, keys, handler) {
     requireActor(actor);
     let rawDigest;
@@ -271,7 +280,7 @@ function createWorkService(options) {
     const rest = Object.assign({}, body);
     delete rest.operation_id;
     const digest = digestOf(actor, op, rest);
-    return store.commit(draft => {
+    return (checking ? store.check : store.commit)(draft => {
       const prior = draft.operations[operationId];
       if (prior) {
         if (prior.digest === digest) return Object.assign({}, clone(prior.result), { replayed: true });
@@ -1534,7 +1543,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, moveItem, attachEvidence, addNote, share,
+    createItem, updateWork, moveItem, checkOnly, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,

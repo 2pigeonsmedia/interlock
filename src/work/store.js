@@ -159,6 +159,17 @@ function openWorkStore(options) {
     return result;
   }
 
+  // The same change on a copy, validated and thrown away: nothing is written.
+  function check(mutate) {
+    requireOpen();
+    if (state !== 'ready') fail('store-damaged');
+    if (typeof mutate !== 'function') fail('invalid-mutation');
+    const draft = structuredClone(current);
+    const result = mutate(draft);
+    if (!validStore(draft)) fail('invalid-store');
+    return result;
+  }
+
   function nextId(draft, prefix) {
     if (!plainObject(draft) || !Number.isSafeInteger(draft.next_id)) fail('invalid-draft');
     if (!ID_PREFIXES.includes(prefix)) fail('invalid-prefix');
@@ -180,7 +191,7 @@ function openWorkStore(options) {
 
   return Object.freeze({
     get state() { return state; }, get reason() { return reason; },
-    path: filePath, read, commit, nextId, nextEvent, close,
+    path: filePath, read, commit, check, nextId, nextEvent, close,
   });
 }
 

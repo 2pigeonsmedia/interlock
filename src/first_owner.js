@@ -2362,7 +2362,8 @@ function createFirstOwnerHandler(options) {
       const was = prior.body.item;
       const same = was.kind === 'decision' && was.title === body.title && was.body === body.body &&
         (body.project === undefined || was.project === body.project) &&
-        Boolean(was.asked_of) && was.asked_of.name === body.asked_of;
+        // The room resolves an addressee's name regardless of case; so does this.
+        Boolean(was.asked_of) && was.asked_of.name.toLowerCase() === String(body.asked_of).toLowerCase();
       if (!same) {
         sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
         return;
@@ -2372,8 +2373,15 @@ function createFirstOwnerHandler(options) {
         current && current.status === 200 ? { item: current.body.item } : {}));
       return;
     }
-    if (typeof body.project === 'string' && !work.projectTakesWork(body.project)) {
-      sendJson(request, response, 404, { ok: false, error: 'unknown-project' });
+    // The record is tried first, on a copy: anything it would refuse (project,
+    // links, participants, citation) is refused before the room hears of it.
+    // The addressee as the room will resolve it (a name regardless of case).
+    const named = house.listParticipants({ now: workActor.now })
+      .filter(row => typeof row.name === 'string' && row.name.toLowerCase() === body.asked_of.toLowerCase());
+    const trialBody = named.length === 1 ? Object.assign({}, body, { asked_of: named[0].subject_id }) : body;
+    const trial = await work.mutate('items/create', workActor, trialBody, workActor.now, true);
+    if (trial.status >= 400) {
+      sendWorkResult(request, response, trial);
       return;
     }
     // A decision that cites a room message is asked as a reply to it, and
