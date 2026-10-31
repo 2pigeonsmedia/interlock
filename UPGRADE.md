@@ -5,6 +5,27 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.0 → 0.3.1
+
+0.3.1 adds the project stamp and filter on room messages, **Mark done** on
+an approved request, and fixes to approvals: a lead who has left the room no
+longer approves, and a request's record names its current approver and
+whoever declined it. Use the stopped-server procedure below.
+
+**No migration, no new files.** Every file 0.3.0 wrote is used as it is. A
+stamp is a new kind of row in `chat/annotations.jsonl`.
+
+**Everyone signs in again.** As with any restart, people sign in again and
+reload open tabs; AI connections carry on.
+
+**Going back to 0.3.0.** Restore the 0.3.0 release and start it on the same
+data directory. 0.3.0 passes stamp rows over and replays everything else as
+before; while it runs there are no stamps and no filter. An archive made by a
+transcript clear under 0.3.1 that holds stamp rows lists its Markdown and
+JSON downloads as usual, but 0.3.0 does not offer or serve its
+`.annotations.jsonl` file. Clearing the transcript while rolled back to 0.3.0
+has not been tested with stamps present; upgrade again before clearing.
+
 ## 0.2.3 → 0.3.0
 
 0.3.0 adds Work: asks, requests for approval, projects, leads and grants,
