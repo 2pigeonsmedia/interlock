@@ -10,7 +10,7 @@ const { openPeopleStore } = require('../src/room/people_store.js');
 const { createPeopleService } = require('../src/room/people.js');
 
 const NOW = 1_800_000_000_000;
-const PROJECTS = Object.freeze(['finance', 'stateroom']);
+const PROJECTS = Object.freeze(['finance', 'orchard']);
 
 const OWNER = Object.freeze({ subject_id: 'subject-ana', name: 'Ana', kind: 'person', owner: true, now: NOW });
 const ADMIN = Object.freeze({ subject_id: 'subject-ben', name: 'Ben', kind: 'person', owner: true, now: NOW });
@@ -47,14 +47,14 @@ test('assign: join is the server only, self is the seat named, assigned is an ow
   assert.throws(() => people.assign(SCOUT, { seat_name: 'Scout', project: 'finance', how: 'join' }, ctx),
     { code: 'not-authorized' });
 
-  assert.equal(people.assign(SCOUT, { seat_name: 'Scout', project: 'stateroom', how: 'self' }, ctx).how, 'self');
+  assert.equal(people.assign(SCOUT, { seat_name: 'Scout', project: 'orchard', how: 'self' }, ctx).how, 'self');
   assert.throws(() => people.assign(WREN, { seat_name: 'Scout', project: 'finance', how: 'self' }, ctx),
     { code: 'not-authorized' });
 
   assert.equal(people.assign(ADMIN, { seat_name: 'Wren', project: null, how: 'assigned' }, ctx).project, null);
   assert.equal(people.assign(OWNER, { seat_name: 'Wren', project: 'finance', how: 'assigned' }, ctx).how, 'assigned');
   assert.deepEqual(people.assignmentOf('Wren'), { project: 'finance', how: 'assigned', by_name: 'Ana', at: NOW });
-  assert.deepEqual(people.assignmentOf('Scout'), { project: 'stateroom', how: 'self', by_name: 'Scout', at: NOW });
+  assert.deepEqual(people.assignmentOf('Scout'), { project: 'orchard', how: 'self', by_name: 'Scout', at: NOW });
   assert.equal(people.assignmentOf('Nobody'), null);
 });
 
@@ -78,7 +78,7 @@ test('assign: a lead assigns into its own grant project only; a non-owner non-le
     { code: 'not-authorized' });
   grantTo(people, OWNER, SCOUT, 'finance');
   assert.equal(people.assign(SCOUT, { seat_name: 'Wren', project: 'finance', how: 'assigned' }, ctx).by_name, 'Scout');
-  assert.throws(() => people.assign(SCOUT, { seat_name: 'Wren', project: 'stateroom', how: 'assigned' }, ctx),
+  assert.throws(() => people.assign(SCOUT, { seat_name: 'Wren', project: 'orchard', how: 'assigned' }, ctx),
     { code: 'not-authorized' });
   assert.throws(() => people.assign(SCOUT, { seat_name: 'Wren', project: null, how: 'assigned' }, ctx),
     { code: 'not-authorized' });
@@ -99,7 +99,7 @@ test('grant: owner only, closed validation, ids increase and are never reused af
   assert.throws(() => grantTo(people, SCOUT, WREN, 'finance'), { code: 'not-authorized' });
   const g1 = grantTo(people, OWNER, SCOUT, 'finance');
   assert.equal(g1.grant_id, 'G-1');
-  assert.equal(grantTo(people, ADMIN, WREN, 'stateroom').grant_id, 'G-2');
+  assert.equal(grantTo(people, ADMIN, WREN, 'orchard').grant_id, 'G-2');
   people.revoke(OWNER, { grant_id: 'G-2' }, FIRST);
   assert.equal(grantTo(people, OWNER, WREN, null).grant_id, 'G-3');
   const reopened = open(dir).people;
@@ -121,7 +121,7 @@ test('grant: owner only, closed validation, ids increase and are never reused af
 test('revoke: the first owner can revoke an admin grant and an own grant; an admin cannot revoke the first owner grant', () => {
   const { people } = open();
   const fromOwner = grantTo(people, OWNER, SCOUT, 'finance');
-  const fromAdmin = grantTo(people, ADMIN, WREN, 'stateroom');
+  const fromAdmin = grantTo(people, ADMIN, WREN, 'orchard');
   const fromAdmin2 = grantTo(people, ADMIN2, WREN, 'ops');
 
   assert.throws(() => people.revoke(ADMIN, { grant_id: fromOwner.grant_id }, FIRST), { code: 'first-owner-grant' });
@@ -158,7 +158,7 @@ test('expiry and leadOf: newest active grant wins; expired and revoked grants dr
   people.revoke(OWNER, { grant_id: 'G-1' }, FIRST);
   assert.equal(people.leadOf('finance', NOW + 100), null);
   assert.equal(people.leadOf('finance', NOW).name, 'Wren');
-  assert.equal(people.leadOf('stateroom', NOW), null);
+  assert.equal(people.leadOf('orchard', NOW), null);
 });
 
 test('presence: own subject only, explicit clear, and a post clears a set line durably', () => {
