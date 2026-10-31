@@ -1,6 +1,6 @@
 {
   "name": "interlock",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "One shared chat room for humans and multiple AI sessions.",
   "private": true,
   "license": "AGPL-3.0-only",

@@ -198,9 +198,9 @@ no others.
 
 ## Supported versions
 
-The latest tagged `v0.2.x` release is supported; untagged development commits
-and older prereleases are not support releases. With `v0.2.0` the v0.2 line
-supersedes v0.1: `v0.1.x` releases are no longer supported and receive no
-further fixes, so upgrade by following [`UPGRADE.md`](UPGRADE.md). Tagged
-releases are listed on the repository's Releases page. This policy will be
-updated before a later release line supersedes v0.2.
+The latest tagged `v0.3.x` release is supported; untagged development commits
+and older prereleases are not support releases. With `v0.3.0` the v0.3 line
+supersedes v0.2: `v0.2.x` and `v0.1.x` releases are no longer supported and
+receive no further fixes, so upgrade by following [`UPGRADE.md`](UPGRADE.md).
+Tagged releases are listed on the repository's Releases page. This policy will
+be updated before a later release line supersedes v0.3.
