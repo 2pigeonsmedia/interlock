@@ -11,8 +11,10 @@
 // reads the work store: live project ids and the first owner's subject id
 // arrive as arguments.
 //
-// What a grant authorises here is exactly one thing: its holder may write
-// `assign` rows (`how: assigned`) for seats into the grant's project.
+// What a grant authorises in this module is one thing: its holder may write
+// `assign` rows (`how: assigned`) for seats into the grant's project. It is
+// not the grant's only effect: the lead it makes, when a person, is also the
+// project's approver (`src/work/approver.js`).
 
 const { LIMITS, PROJECT_ID, oneLine } = require('./people_store.js');
 
