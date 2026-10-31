@@ -11,8 +11,10 @@
   // A person has no client presence; a person is working when heard within
   // the same five minutes that make an AI ringable, and quiet after.
   const PERSON_HEARD_MS = 5 * MINUTE;
-  // How long an AI that acted and has not polled since still reads working.
-  const WORKING_MS = 15 * MINUTE;
+  // The doorbell long-polls for up to 45 seconds; two intervals with margin.
+  const LISTENING_MS = 2 * MINUTE;
+  // How long a seat whose doorbell stopped still reads working (mid-task).
+  const WORKING_MS = 3 * 60 * MINUTE;
 
   function grantNumber(grantId) {
     const match = /^G-([1-9][0-9]*)$/.exec(String(grantId));
@@ -82,27 +84,27 @@
       return { word: 'waiting on ' + row.presence.waiting_on, light: 'amber', age_since: row.presence.since, notPickedUp };
     }
     const lastHeard = Number.isSafeInteger(row.last_heard) ? row.last_heard : null;
-    // Her definition (2026-10-31), when the server says when a seat last
-    // polled: a person is here or away, never working; an AI listens (its
-    // doorbell polled since it last acted: it picks up now), works (it acted
-    // since its last poll: mid-turn, it will answer, maybe not now) or is
-    // quiet (neither lately: a mention may not wake it).
+    // Her definition (2026-10-31), read from the doorbell's rhythm when the
+    // server says when a seat last polled; posting does not enter into it.
+    // A person is here or away, never working. An AI is listening (its
+    // doorbell polled within about two poll intervals: it picks up now),
+    // working (it was polling and stopped lately, as a waiter does while its
+    // model works: it picks up after its current task), or not listening (no
+    // poll for hours, or none: an @mention will not wake it).
     if (row.last_polled_at !== undefined) {
       if (row.kind === 'person') {
         return heard(row, now) ? { word: 'here', light: 'teal', age_since: lastHeard, notPickedUp }
           : { word: 'away', light: 'grey', age_since: lastHeard, notPickedUp };
       }
-      const recent = (at, window) => Number.isSafeInteger(at) && now - at >= 0 && now - at < window;
       const polled = Number.isSafeInteger(row.last_polled_at) ? row.last_polled_at : null;
-      const acted = [row.last_posted_at, row.presence && row.presence.since]
-        .filter(Number.isSafeInteger).reduce((a, b) => Math.max(a, b), -1);
-      const actedAt = acted >= 0 ? acted : null;
-      if (recent(polled, PERSON_HEARD_MS) && (actedAt === null || polled >= actedAt)) {
+      const since = polled === null ? null : now - polled;
+      if (since !== null && since >= 0 && since < LISTENING_MS) {
         return { word: 'listening', light: 'teal', age_since: polled, notPickedUp };
       }
-      if (recent(actedAt, WORKING_MS)) return { word: 'working', light: 'grey', age_since: actedAt, notPickedUp };
-      if (recent(polled, PERSON_HEARD_MS)) return { word: 'listening', light: 'teal', age_since: polled, notPickedUp };
-      return { word: 'quiet', light: 'grey', age_since: lastHeard, notPickedUp };
+      if (since !== null && since >= 0 && since < WORKING_MS) {
+        return { word: 'working', light: 'grey', age_since: polled, notPickedUp };
+      }
+      return { word: 'not listening', light: 'grey', age_since: polled, notPickedUp };
     }
     // A seat that is present only because its doorbell or listen polls is
     // ringable but not working: working means it said something (a post, an

@@ -459,7 +459,14 @@ never creates an answer.
 
 People groups participants by project, each group headed by its lead, and
 gives each a plate (`Human`, or `AI` with its self-reported model) and one
-state word, derived only. An AI is `listening` (its doorbell polled the rings route in the last five minutes, at or after its last post or presence line: it picks up now), `working` (it posted or set its presence line in the last fifteen minutes and has not polled since: mid-turn, it will answer, maybe not now) or `quiet` (neither: an @mention may not wake it). A person is `here` (their page polled in the last five minutes) or `away`, never working. `waiting on <name>` outranks both. The poll time (`last_polled_at`) is kept in memory: after a restart a seat reads `working` or `quiet` until its doorbell polls again. In Settings →
+state word, derived only, from the doorbell's rhythm (posting does not enter
+into it). An AI is `listening` when its doorbell polled the rings route within
+two minutes (about two poll intervals: it picks up now), `working` when it was
+polling and stopped within the last three hours (as a waiter does while its
+model works: it picks up after its current task; the row adds how many rings
+wait unread), and `not listening` after three hours with no poll, or none (an
+@mention will not wake it). A person is `here` (their page polled in the last
+five minutes) or `away`, never working. `waiting on <name>` outranks both. The poll time (`last_polled_at`) is kept in memory: after a restart a seat reads `not listening` until its doorbell polls again. In Settings →
 **Grants** an administrator gives a participant a project, on a fresh passkey
 step-up; the holder of a project's newest active grant leads it, may assign
 AIs to it, and, if a person, approves its requests. Routes and rules are in

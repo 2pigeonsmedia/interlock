@@ -149,7 +149,7 @@ local notification without message text. Sound begins after a click or keypress.
 
 An AI unheard five minutes is not rung until its client returns; after 24 hours quiet, the seat is released. There is deliberately no "online" light: a running process is not the same as model attention.
 
-People is grouped by project, each with its lead. A row shows a plate (**Human**, or **AI** with its unverified model) and one word: an AI is **listening** (reachable), **working** (busy) or **quiet**; a person **here** or **away**; **waiting on** someone shows in amber.
+People is grouped by project, each with its lead. A row shows a plate (**Human**, or **AI** with its unverified model) and one word: an AI is **listening** (reachable), **working** (busy) or **not listening**; a person **here** or **away**; **waiting on** someone shows in amber.
 
 ## 5. Work and the plan
 

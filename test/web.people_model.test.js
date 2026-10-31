@@ -189,18 +189,17 @@ test('stateOf: a seat that only listens reads listening; a post or a presence li
   assert.equal(model.stateOf(seat('Cue'), NOW).word, 'working', 'a server that does not say when it last posted: as before');
 });
 
-test('state words by her definition: an AI listens, works or is quiet; a person is here or away, never working', () => {
-  const ai = extra => model.stateOf(seat('Cue', Object.assign({ last_posted_at: null, last_polled_at: null }, extra)), NOW).word;
-  assert.equal(ai({ last_polled_at: NOW - MINUTE }), 'listening', 'idle, its doorbell polled lately: it picks up now');
-  assert.equal(ai({ last_polled_at: NOW - MINUTE, last_posted_at: NOW - 3 * MINUTE }), 'listening', 'polled since it last acted');
-  assert.equal(ai({ last_polled_at: NOW - 10 * MINUTE, last_posted_at: NOW - 2 * MINUTE }), 'working',
-    'acted since its last poll: mid-turn, it will answer, maybe not now');
-  assert.equal(ai({ last_polled_at: null, last_posted_at: NOW - 2 * MINUTE }), 'working');
-  assert.equal(ai({ last_polled_at: NOW - 60 * MINUTE, last_posted_at: NOW - 40 * MINUTE }), 'quiet',
-    'no recent poll and no recent activity: a mention may not wake it');
-  assert.equal(ai({ present: false, last_polled_at: null, last_posted_at: null }), 'quiet');
-  assert.equal(model.stateOf(seat('Cue', { last_posted_at: null, last_polled_at: NOW - MINUTE,
-    presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW } }), NOW).word, 'waiting on Patti', 'waiting still outranks');
+test('state words by her definition: an AI listens, works or is not listening, by its doorbell; a person is here or away', () => {
+  const ai = extra => model.stateOf(seat('Cue', Object.assign({ last_posted_at: null, last_polled_at: null }, extra)), NOW);
+  assert.equal(ai({ last_polled_at: NOW - 30_000 }).word, 'listening', 'its doorbell polled within two poll intervals: it picks up now');
+  const kingbird = ai({ last_polled_at: NOW - 10 * MINUTE, outstanding: 1, last_posted_at: null });
+  assert.equal(kingbird.word, 'working', 'it polled, a ring was delivered, and it has not polled for 10 minutes: mid-task');
+  assert.equal(kingbird.notPickedUp, '1 not picked up', 'the card says what waits for it');
+  assert.equal(ai({ last_polled_at: NOW - 2 * 60 * MINUTE }).word, 'working', 'two hours into a long task');
+  assert.equal(ai({ last_polled_at: NOW - 4 * 60 * MINUTE }).word, 'not listening', 'no poll for hours: a mention will not wake it');
+  assert.equal(ai({ last_polled_at: null, last_posted_at: NOW - MINUTE }).word, 'not listening', 'posting is not a doorbell');
+  assert.equal(ai({ last_polled_at: NOW - 30_000,
+    presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW } }).word, 'waiting on Patti', 'waiting still outranks');
   const human = extra => model.stateOf(person('Ana', Object.assign({ last_polled_at: null }, extra)), NOW).word;
   assert.equal(human({ last_heard: NOW - MINUTE }), 'here', 'her page polled lately');
   assert.equal(human({ last_heard: NOW - 30 * MINUTE }), 'away');
