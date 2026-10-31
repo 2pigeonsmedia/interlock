@@ -183,7 +183,7 @@ in the first owner's Needs you.
 | `approvals/ask` | `project`, `title`, `scope` (what a yes means, at most 300 characters, else `400 scope-too-long`), optional `body`; posts the room ask first (see PROTOCOL.md) |
 | `projects/create` | `id`, `display_name` (owner, fresh step-up) |
 | `projects/retire` | `id` (owner, fresh step-up) |
-| `projects/update` | `id`, `expected_revision`, `objective` and/or `today` |
+| `projects/update` | `id`, `expected_revision`, `objective` and/or `today` (an administrator, the first owner, or the project's live lead, else `403 not-lead`; a retired project `409 project-retired`) |
 
 A decision filed with `items/create` and asked of someone else is asked in the
 room first: the room ask (`Decision: <title>`, a yes meaning its `scope`, else

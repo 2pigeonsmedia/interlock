@@ -417,6 +417,16 @@ test('work move and work project-update reach their routes with the id from argv
   assert.equal(calls.length, 2, 'nothing sent');
 });
 
+// Only an administrator, the first owner or the project's lead changes a
+// project; the refusal says who may.
+test('work project-update words a refusal by someone who is not the project\'s lead', async () => {
+  const { dependencies } = world(() => ({ status: 403, json: { ok: false, error: 'not-lead' } }));
+  const refused = await captureCommand(['work', 'project-update', 'books', '--connection', 'Marlow', '--file',
+    tempJson({ expected_revision: 1, today: 'Close March.' })], dependencies);
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /refused the command: not-lead\. Only an administrator, the first owner or the project's lead changes its objective or today line\./);
+});
+
 test('a Work refusal names the room it came from and says what the refused field needs', async () => {
   const hosted = world(() => ({ status: 400, json: { ok: false, error: 'invalid-participant' } }));
   const hostedProfile = hosted.dependencies.profiles.openProfiles().load();

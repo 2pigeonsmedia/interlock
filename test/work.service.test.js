@@ -24,11 +24,13 @@ function uuid() {
   return crypto.randomUUID();
 }
 
-function fresh() {
+function fresh(leads = null) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-work-service-'));
   let now = 1_700_000_000_000;
   const store = openWorkStore({ dataDir });
-  const work = createWorkService({ store, clock: () => (now += 1000) });
+  // `leads`: project id -> its live lead, as the room's grants say.
+  const work = createWorkService(Object.assign({ store, clock: () => (now += 1000) },
+    leads ? { leadOf: project => leads[project] || null } : {}));
   return { dataDir, store, work };
 }
 
@@ -94,16 +96,30 @@ test('only the owner creates or retires a project, slugs are checked, and creati
   code(() => newWork(work, lead, { project: 'finance' }), 'project-retired');
 });
 
-test('any writer updates a project narrative, attributed and revisioned', () => {
-  const { work } = fresh();
+// A project's objective and today line are changed by an administrator, the
+// first owner, or that project's live lead; nobody changes a retired one.
+test('a project narrative is updated by an admin, the first owner or its lead, attributed and revisioned', () => {
+  const { work } = fresh({ ops: lead, finance: reviewer });
+  work.createProject(owner, { operation_id: uuid(), id: 'finance', display_name: 'Finance' });
+  const update = (actor, id, revision, today) => work.updateProject(actor,
+    { operation_id: uuid(), id, expected_revision: revision, today });
   const updated = work.updateProject(lead, {
     operation_id: uuid(), id: 'ops', expected_revision: 1,
     objective: 'Keep the room useful.', today: 'Record open questions.',
   });
   assert.equal(updated.project.revision, 2);
   assert.deepEqual(updated.project.updated_by, ref(lead));
-  code(() => work.updateProject(builder, { operation_id: uuid(), id: 'ops', expected_revision: 1, today: 'stale' }),
-    'stale-revision');
+  code(() => update(builder, 'ops', 2, 'not mine'), 'not-lead');
+  code(() => update(lead, 'finance', 1, 'another lead\'s project'), 'not-lead');
+  code(() => update(builder, 'ops', 1, 'stale'), 'not-lead');
+  assert.equal(update(owner, 'ops', 2, 'by an admin').project.revision, 3);
+  const firstOwner = Object.freeze({ subject_id: 'p-7', name: 'Mara', kind: 'person', owner: false, first_owner: true });
+  assert.equal(update(firstOwner, 'finance', 1, 'by the first owner').project.revision, 2);
+  code(() => update(lead, 'ops', 1, 'stale'), 'stale-revision');
+  work.retireProject(owner, { operation_id: uuid(), id: 'finance' });
+  code(() => update(owner, 'finance', 3, 'after retire'), 'project-retired');
+  code(() => update(reviewer, 'finance', 3, 'after retire'), 'project-retired');
+  assert.equal(work.brief(owner, {}).projects.find(p => p.id === 'ops').today, 'by an admin');
 });
 
 // ── the personal queue ────────────────────────────────────────────────────────
@@ -568,7 +584,7 @@ test('name reuse does not inherit a pending question', () => {
 // ── brief, changes, pagination, export ────────────────────────────────────────
 
 test('brief returns projects, what needs me, what was reported to me, open work and decisions, with the cursor changes continue from', () => {
-  const { work } = fresh();
+  const { work } = fresh({ ops: lead });
   work.updateProject(lead, { operation_id: uuid(), id: 'ops', expected_revision: 1, objective: 'Keep the room useful.', today: 'Open questions.' });
   const item = newWork(work, lead, { next_to: ref(builder), next_action: 'Prepare a candidate.' });
   const reported = newDecision(work, builder, owner);

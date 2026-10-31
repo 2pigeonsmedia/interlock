@@ -3087,6 +3087,8 @@ const WORK_REFUSAL_HINTS = Object.freeze({
   'invalid-participant': 'A name in responsible, next_to or asked_of is not a participant in this room.',
   'invalid-links': 'links are ids of records in this room (W-n, D-n); put an outside reference in source.',
   'scope-too-long': 'What a yes means (scope) is at most 300 characters; put the rest in body.',
+  'not-lead': 'Only an administrator, the first owner or the project\'s lead changes its objective or today line.',
+  'project-retired': 'That project is retired; nothing in it changes.',
 });
 
 function reportWorkError(stderr, error, profile) {

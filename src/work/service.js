@@ -228,6 +228,14 @@ function createWorkService(options) {
     try { lead = leadOf ? leadOf(item.project, now) : null; } catch (_) { lead = null; }
     return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
   }
+  // Who may change a project's objective and today line: an administrator,
+  // the first owner, or that project's live lead.
+  function mayEditProject(actor, project, now) {
+    if (actor.owner === true || actor.first_owner === true) return true;
+    let lead = null;
+    try { lead = leadOf ? leadOf(project.id, now) : null; } catch (_) { lead = null; }
+    return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
+  }
   // The approver rule (approver.js); without it a request waits on the
   // approver it was filed with.
   const approverFor = typeof input.approverFor === 'function' ? input.approverFor : null;
@@ -512,6 +520,8 @@ function createWorkService(options) {
     return operation(actor, 'projects.update', rawInput, ['id', 'expected_revision', 'objective', 'today'],
       (draft, body, now) => {
         const project = findProject(draft, body.id);
+        if (!mayEditProject(actor, project, now)) fail('not-lead');
+        if (project.retired_at !== null) fail('project-retired');
         checkRevision(project, body.expected_revision);
         const objective = optionalText(body.objective, SHORT_BYTES, 'objective');
         const today = optionalText(body.today, SHORT_BYTES, 'today');

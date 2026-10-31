@@ -770,6 +770,7 @@
     'owner-only': 'Only the owner of this room can do that.',
     'same-project': 'It is already in that project.',
     'not-mover': 'Only the owner, its holder or its project\'s lead can move it.',
+    'not-lead': 'Only an administrator, the owner or this project\'s lead can change it.',
     'not-a-relay': 'An answer can be reported only on behalf of someone else; answer it directly instead.',
     'stale-revision': 'This record changed since you opened it. Review it and try again.',
     'operation-conflict': 'That request was already used for a different change. Try again.',
