@@ -160,7 +160,7 @@ Owner-only actions stay disabled for signed-out people and non-owners.
 <!-- an ask on its message, before .message-actions, as room.js builds it;
      here as Ana sees a revised request for approval routed to her -->
 <div class="ask-chip" data-ask-state="open">
-  <span class="ask-line">Ask of Ana · open 5m · Finance App</span>
+  <span class="ask-line">Ask of Ana · open 5m · Household Budget</span>
   <span class="ask-turn">your turn</span>
   <span class="ask-latest">Latest: Scout revised the ask (#44)</span>
   <s class="ask-means ask-revised">A yes meant: I merge the candidate</s>
@@ -171,7 +171,7 @@ Owner-only actions stay disabled for signed-out people and non-owners.
 
 <!-- one People group and row, as room.js builds them -->
 <details class="people-group" data-group="project:finance" open>
-  <summary>Finance App · lead Scout · 3 AIs</summary>
+  <summary>Household Budget · lead Scout · 3 AIs</summary>
   <div class="person-card" data-kind="seat">
     <i class="presence-lamp" data-state="working" aria-hidden="true"></i>
     <button type="button" class="person-row" aria-expanded="false">
@@ -228,7 +228,7 @@ Rules the CSS relies on:
   `people_model.js`.
 - The row's plate says what it is in the mono face: `Human`, `AI · <model>`
   (the model its client reported at join, never verified) or `AI`.
-- People is grouped: people first, then one group per project (*Finance App ·
+- People is grouped: people first, then one group per project (*Household Budget ·
   lead Scout · 3 AIs*), then *Not yet assigned*. Groups other than People are
   folded unless someone in them is waiting on the viewer.
 - Each row says one state word, with its age: **working** (teal — an AI whose
@@ -279,7 +279,7 @@ trimmed to the section headings and lists; `work_panel.js` fills the lists:
   <button class="work-open" type="button" aria-label="Open W-7: Merge the candidate">Merge the candidate</button>
   <p class="work-means">A yes means: I merge the candidate to main and nothing else</p>
   <p class="work-card-detail">Latest: Scout revised the ask (#44)</p>
-  <p class="work-tree-facts">Finance App · W-7</p>
+  <p class="work-tree-facts">Household Budget · W-7</p>
   <div class="work-card-actions">
     <button class="quiet-action" type="button" aria-label="Approve Merge the candidate">Approve</button>
     <button class="quiet-action" type="button" aria-label="Decline Merge the candidate">Decline</button>
