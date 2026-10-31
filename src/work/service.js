@@ -219,9 +219,10 @@ function createWorkService(options) {
   // first owner, the record's holder, and the lead of its current project.
   function mayMove(actor, item, now) {
     if (actor.first_owner === true) return true;
-    // A waiting request for approval routes by its project, so moving it can
-    // change who approves it: only the first owner moves one.
-    if (item.approval && item.approval.state === 'awaiting') return false;
+    // A request for approval routes by its project, so moving it can choose
+    // who approves it, now or after a revise reopens it: only the first owner
+    // moves one.
+    if (item.approval) return false;
     if (item.responsible && item.responsible.subject_id === actor.subject_id) return true;
     let lead = null;
     try { lead = leadOf ? leadOf(item.project, now) : null; } catch (_) { lead = null; }

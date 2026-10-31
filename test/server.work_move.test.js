@@ -264,6 +264,19 @@ test('the owner, the holder and the current project\'s lead move a record, bylin
     const now = await item(runtime, owner, asked.json.item.id);
     assert.deepEqual([now.project, now.approval.state, now.approval.approver.name, now.next_to.name],
       ['books', 'awaiting', 'Bea', 'Bea'], 'Bea leads Books, so the request now waits on her');
+
+    // Approved, its asker holds it, yet cannot move it: a move then a revise would pick its next approver.
+    const second = await aiPost(runtime, '/api/ai/work/approvals/ask',
+      { operation_id: uuid(), project: 'ops', title: 'Order toner', scope: 'I order one toner, up to $30' }, scout.token);
+    assert.equal(second.status, 201, second.text);
+    const approved = await post(runtime, '/api/annotated-messages',
+      { text: '@Scout yes', annotation: { answers: [{ ask_id: second.json.message.id, choice: 'yes' }] } }, owner);
+    assert.equal(approved.status, 201, approved.text);
+    const holding = await item(runtime, owner, second.json.item.id);
+    assert.deepEqual([holding.approval.state, holding.responsible.name], ['approved', 'Scout'], 'the arrangement: Scout holds the approved request');
+    assert.equal((await aiGet(runtime, `/api/ai/work/items/${holding.id}`, scout.token)).json.may_move, false);
+    const holderMove = await aiMove(scout.token, holding, 'books');
+    assert.deepEqual([holderMove.status, holderMove.json.error], [403, 'not-mover'], 'its holder cannot move a request for approval');
   } finally {
     await runtime.close();
   }
