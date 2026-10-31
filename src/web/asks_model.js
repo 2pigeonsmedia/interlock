@@ -312,6 +312,13 @@
     return ask.of === viewer;
   }
 
+  /* Whether this viewer marks this ask done from its chip: an approved
+   * request, and the viewer is the one carrying it out. */
+  function mayMarkDone(ask, viewer) {
+    return viewer !== null && ask.approval === true && !!ask.turn &&
+      ask.turn.phase === 'agreed' && ask.turn.acting === viewer;
+  }
+
   /* The choice a bare answer carries, or null when the text is not one. */
   function bareAnswer(text) {
     if (typeof text !== 'string') return null;
@@ -367,7 +374,7 @@
   }
 
   const contract = Object.freeze({
-    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, mayAnswer, bindAnswers, noteShown, answerText,
+    BARE_ANSWERS, bareAnswer, validRow, validPage, createAsksState, askLine, age, chosen, mayAnswer, mayMarkDone, bindAnswers, noteShown, answerText,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {

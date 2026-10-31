@@ -2118,6 +2118,9 @@ function decorateMessage(article, messageId) {
     if (viewer !== null && ask.by === viewer && ask.state === 'answered') {
       chip.append(askButton('Keep open', () => askLifecycle('keep_open', ask.ask_id)));
     }
+    if (InterlockAsks.mayMarkDone(ask, viewer)) {
+      chip.append(askButton('Mark done', () => openDone(chip, ask)));
+    }
     article.insertBefore(chip, anchor);
   }
   if (post && (post.answers.length > 0 || post.status !== null)) {
@@ -2316,6 +2319,45 @@ async function askLifecycle(kind, askId, extra = {}) {
     setRoomNotice(ASK_REFUSALS[error.code] || 'Interlock could not confirm that change. Try again.');
   }
   loadAnnotations();
+}
+
+/* The done receipt for an approved request, written in place under it: one
+ * line saying what was done, posted as a reply to the request with status
+ * done, which closes its work item. */
+function openDone(chip, ask) {
+  if (chip.querySelector('.ask-done')) return;
+  const form = document.createElement('form');
+  form.className = 'ask-revise ask-done';
+  const label = document.createElement('label');
+  label.textContent = 'What was done';
+  const input = document.createElement('input');
+  input.maxLength = 300;
+  input.required = true;
+  label.append(input);
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'quiet-action';
+  save.textContent = 'Post done receipt';
+  const cancel = askButton('Cancel', () => form.remove());
+  form.append(label, save, cancel);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const text = input.value.trim();
+    if (text === '') return;
+    save.disabled = true;
+    try {
+      await ownerMutation('/api/annotated-messages', {
+        text, annotation: { discusses: ask.ask_id, status: 'done', read_through: Math.max(0, ...seenMessageIds) },
+      });
+      setRoomNotice(`Marked #${ask.ask_id} done.`, 'success');
+    } catch (error) {
+      save.disabled = false;
+      setRoomNotice(ASK_REFUSALS[error.code] || 'Interlock could not confirm the done receipt. Check the transcript.');
+    }
+    loadAnnotations();
+  });
+  chip.append(form);
+  input.focus();
 }
 
 /* The asker's new "a yes means" line, written in place under the ask. */
