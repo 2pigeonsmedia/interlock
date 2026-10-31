@@ -417,6 +417,20 @@ test('work move and work project-update reach their routes with the id from argv
   assert.equal(calls.length, 2, 'nothing sent');
 });
 
+// Words alone on a decision are discussion: nothing is recorded, and the
+// CLI says so rather than "Recorded an answer".
+test('work answer with words only says they went to the room and nothing was recorded', async () => {
+  const { dependencies } = world(() => ({ status: 200, json: { ok: true, discussed: true,
+    item: { id: 'D-2', kind: 'decision', project: 'ops', title: 'Carry over?', state: 'awaiting', revision: 3 },
+    message: { id: 41 } } }));
+  const sent = await captureCommand(['work', 'answer', 'D-2', '--connection', 'Marlow', '--file',
+    tempJson({ expected_revision: 3, text: 'Show me first.' })], dependencies);
+  assert.equal(sent.code, 0, sent.stderr);
+  assert.match(sent.stdout,
+    /\nSent your words on D-2 to the room as #41: discussion, nothing recorded\. It stays awaiting; answer with "choice": "yes" or "no" to decide\.\n$/);
+  assert.doesNotMatch(sent.stdout, /Recorded/);
+});
+
 // Only an administrator, the first owner or the project's lead changes a
 // project; the refusal says who may.
 test('work project-update words a refusal by someone who is not the project\'s lead', async () => {

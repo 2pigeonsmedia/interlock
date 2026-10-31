@@ -3216,7 +3216,11 @@ function renderWrite(stdout, verb, result, connection) {
   else if (verb === 'evidence') line(stdout, `Attached evidence to ${event.item} (event ${event.seq}).`);
   else if (verb === 'note') line(stdout, `Added a note to ${event.item} (event ${event.seq}).`);
   else if (verb === 'share') line(stdout, `Recorded: ${terminalSafe(String(event.purpose))} ${terminalSafe(String(event.outcome))}${event.message_id ? ' as #' + terminalSafe(String(event.message_id)) : ''}.`);
-  else if (verb === 'answer') line(stdout, `Recorded an answer on ${item.id} (${item.state}).`);
+  else if (verb === 'answer' && result.discussed === true) {
+    // Words alone are discussion: the room has them, the record does not.
+    const where = result.message && Number.isSafeInteger(result.message.id) ? ` as #${result.message.id}` : '';
+    line(stdout, `Sent your words on ${item.id} to the room${where}: discussion, nothing recorded. It stays ${terminalSafe(String(item.state))}; answer with "choice": "yes" or "no" to decide.`);
+  } else if (verb === 'answer') line(stdout, `Recorded an answer on ${item.id} (${item.state}).`);
   else if (verb === 'move') line(stdout, `Moved ${item.id} to ${terminalSafe(String(item.project))} (revision ${item.revision}).`);
   else if (verb === 'report-answer') {
     if (result.conflict === true) line(stdout, `Recorded a conflicting report on ${item.id}; the answer recorded here stands.`);

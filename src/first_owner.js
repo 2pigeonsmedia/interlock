@@ -2512,6 +2512,12 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // Words alone already posted, by author and operation: a person's post
+  // carries no client id, so a retried answer is matched here and posted
+  // once. In memory; the newest entries are kept.
+  const discussedPosts = new Map();
+  const DISCUSSED_POSTS_KEPT = 1000;
+
   /* Words alone on a decision (her ruling, 2026-10-31): nothing is recorded;
    * they go to the room as a reply to its ask (the turn passes back to the
    * asker, who is rung), or, with no room ask, as a line naming the asker. */
@@ -2542,8 +2548,19 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return;
     }
-    // Their own words, but only the asker is rung: an @name in them is quiet.
-    const words = body.text.trim().split('\n')[0].slice(0, 2000).replace(/@/g, '@\u2060');
+    const key = `${chatActor.subject_id}\u0000${body.operation_id}`;
+    const prior = discussedPosts.get(key);
+    if (prior) {
+      if (prior.id !== item.id || prior.text !== body.text) {
+        sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
+        return;
+      }
+      sendJson(request, response, 200, { ok: true, discussed: true, item, message: prior.message, replayed: true });
+      return;
+    }
+    // Their own words, every line, but only the asker is rung: an @name in
+    // them is quiet. Words too long for one message are refused, never cut.
+    const words = body.text.trim().replace(/@/g, '@\u2060');
     const asker = item.asked_by && item.asked_by.name;
     let saved;
     try {
@@ -2557,6 +2574,8 @@ function createFirstOwnerHandler(options) {
       annotationRefusal(request, response, error);
       return;
     }
+    discussedPosts.set(key, { id: item.id, text: body.text, message: saved || null });
+    if (discussedPosts.size > DISCUSSED_POSTS_KEPT) discussedPosts.delete(discussedPosts.keys().next().value);
     sendJson(request, response, 200, { ok: true, discussed: true, item, message: saved || null });
   }
 
