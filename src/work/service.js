@@ -220,6 +220,10 @@ function createWorkService(options) {
     const route = approverFor(item.project, item.approval.by.subject_id, clock());
     return route && route.approver ? route.approver : item.approval.approver;
   }
+  // The current approver as a full participant ref, the shape the record keeps.
+  function currentApproverRef(item) {
+    return Object.assign({ kind: 'person', session: null }, clone(currentApprover(item)));
+  }
 
   function requireActor(actor) {
     if (!validActor(actor)) fail('invalid-actor');
@@ -336,6 +340,8 @@ function createWorkService(options) {
 
   function publicItem(item) {
     const copy = clone(item);
+    // A waiting request shows its live approver here too, as the lists do.
+    if (copy.approval && copy.approval.state === 'awaiting') copy.approval.approver = currentApproverRef(item);
     if (copy.kind === 'decision') {
       copy.state = decisionState(item);
       copy.kill = item.kill ? clone(item.kill) : null;
@@ -386,7 +392,7 @@ function createWorkService(options) {
       approval: item.approval ? {
         state: item.approval.state,
         approver: item.approval.state === 'awaiting'
-          ? Object.assign({ kind: 'person', session: null }, clone(currentApprover(item))) : clone(item.approval.approver),
+          ? currentApproverRef(item) : clone(item.approval.approver),
         by: clone(item.approval.by), scope: item.approval.scope,
       } : null,
     };
@@ -1041,7 +1047,7 @@ function createWorkService(options) {
       item.state = 'done';
       item.next_to = null;
       item.next_action = '';
-      item.done_account = 'declined by ' + approval.approver.name + ' in the room #' + body.message_id;
+      item.done_account = 'declined by ' + refOf(actor).name + ' in the room #' + body.message_id;
     }
     approval.answered = { by: refOf(actor), message_id: body.message_id, revision: body.revision, at: now };
     touch(item, now);
@@ -1068,7 +1074,7 @@ function createWorkService(options) {
       approval.answered = null;
       item.state = 'open';
       item.responsible = null;
-      item.next_to = clone(approval.approver);
+      item.next_to = currentApproverRef(item);
       item.next_action = 'approve or decline';
     }
     touch(item, now);

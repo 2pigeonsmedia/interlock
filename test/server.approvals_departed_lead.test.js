@@ -186,6 +186,8 @@ test('a person lead who has left the room approves nothing: the request goes bac
       { operation_id: uuid(), project: 'ops', title, scope: 'I order two rollers, up to $40' }, scout.token);
     const waiting = await askFor('Order rollers');
     assert.equal(waiting.status, 201, waiting.text);
+    const toDecline = await askFor('Order a second printer');
+    assert.equal(toDecline.json.item.approval.approver.name, 'Bea', 'the arrangement: filed with Bea as approver');
     assert.equal(waiting.json.item.approval.approver.name, 'Bea', 'the arrangement: Bea leads ops and approves its requests');
     const needsAna = async () => (await get(runtime, '/api/work/brief', owner)).json.needs_me;
     assert.equal((await needsAna()).some(row => row.id === waiting.json.item.id), false,
@@ -200,6 +202,8 @@ test('a person lead who has left the room approves nothing: the request goes bac
     const moved = (await needsAna()).find(row => row.id === waiting.json.item.id);
     assert.ok(moved, 'the waiting request moves to the first owner\'s Needs you');
     assert.equal(moved.approval.approver.name, 'Ana');
+    assert.equal((await item(runtime, owner, waiting.json.item.id)).approval.approver.name, 'Ana',
+      'the item itself shows the live approver, as the lists do');
     const fresh = await askFor('Order toner');
     assert.equal(fresh.status, 201, fresh.text);
     assert.equal(fresh.json.item.approval.approver.name, 'Ana', 'a new request routes to the first owner');
@@ -207,6 +211,19 @@ test('a person lead who has left the room approves nothing: the request goes bac
       { text: '@Scout — yes', annotation: { answers: [{ ask_id: waiting.json.message.id, choice: 'yes' }] } }, owner);
     assert.equal(yes.status, 201, yes.text);
     assert.equal((await item(runtime, owner, waiting.json.item.id)).approval.state, 'approved');
+
+    // A revise after the yes sends the request back to its live approver.
+    const revised = await aiPost(runtime, '/api/ai/annotations',
+      { kind: 'revise', ask_id: waiting.json.message.id, means: 'I order two rollers, up to $45' }, scout.token);
+    assert.equal(revised.status, 201, revised.text);
+    const back = await item(runtime, owner, waiting.json.item.id);
+    assert.deepEqual([back.approval.state, back.next_to.name], ['awaiting', 'Ana'], 'back to Ana, not to Bea who left');
+
+    // A decline's account names who declined.
+    const no = await post(runtime, '/api/annotated-messages',
+      { text: '@Scout — no', annotation: { answers: [{ ask_id: toDecline.json.message.id, choice: 'no' }] } }, owner);
+    assert.equal(no.status, 201, no.text);
+    assert.match((await item(runtime, owner, toDecline.json.item.id)).done_account, /^declined by Ana in the room #\d+$/);
   } finally {
     await runtime.close();
   }
