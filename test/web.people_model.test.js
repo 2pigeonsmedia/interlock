@@ -69,7 +69,7 @@ test('heldGrants and grantLine: the active grants a participant holds, in words'
     grant('G-3', { holder_kind: 'person' })];
   const held = model.heldGrants(grants, seat('Scout'), NOW);
   assert.deepEqual(held.map(row => row.grant_id), ['G-1']);
-  assert.equal(model.grantLine(held[0], 'Finance App'), 'leads Finance App · under Ana\'s grant G-1');
+  assert.equal(model.grantLine(held[0], 'Household Budget'), 'leads Household Budget · under Ana\'s grant G-1');
   assert.equal(model.grantLine(grant('G-9', { project: null }), null), 'holds a whole-room grant · under Ana\'s grant G-9');
 });
 
@@ -124,7 +124,7 @@ test('assignedLine: the byline for each way a project is set', () => {
   assert.equal(model.assignedLine(seat('A')), null);
 });
 
-const PROJECTS = [{ id: 'finance', display_name: 'Finance App' }, { id: 'ops', display_name: 'Ops' }];
+const PROJECTS = [{ id: 'finance', display_name: 'Household Budget' }, { id: 'ops', display_name: 'Ops' }];
 
 test('groups: People first, projects in the live order with lead and count, Not yet assigned last', () => {
   const rows = [
@@ -139,7 +139,7 @@ test('groups: People first, projects in the live order with lead and count, Not 
   const groups = model.groups(rows, { projects: PROJECTS, leads: new Map([['finance', 'Scout']]), viewerName: 'Patti' });
   assert.deepEqual(groups.map(group => group.key), ['people', 'project:finance', 'project:ops', 'project:archive', 'unassigned']);
   assert.deepEqual(groups.map(group => group.heading), [
-    'People', 'Finance App · lead Scout · 2 AIs', 'Ops · 1 AI', 'archive · 1 AI', 'Not yet assigned · 1 AI',
+    'People', 'Household Budget · lead Scout · 2 AIs', 'Ops · 1 AI', 'archive · 1 AI', 'Not yet assigned · 1 AI',
   ]);
   assert.deepEqual(groups[0].rows.map(row => row.name), ['Patti', 'Ana']);
   assert.deepEqual(groups[1].rows.map(row => row.name), ['Scout', 'Kite']);
@@ -165,7 +165,7 @@ test('groups: People is open; others fold unless someone in them waits on the vi
     .map(group => [group.key, group]));
   assert.equal(byKey.get('people').open, true);
   assert.equal(byKey.get('project:finance').open, true);
-  assert.equal(byKey.get('project:finance').heading, 'Finance App · 1 AI · 1 waiting on you');
+  assert.equal(byKey.get('project:finance').heading, 'Household Budget · 1 AI · 1 waiting on you');
   assert.equal(byKey.get('unassigned').open, true);
   assert.equal(byKey.get('project:ops').open, false, 'waiting on someone else folds');
   assert.equal(byKey.get('project:ops').heading, 'Ops · 1 AI');

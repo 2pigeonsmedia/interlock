@@ -113,7 +113,7 @@ test('append refuses an unknown key, a wrong v, an unknown kind and a caller seq
   assert.throws(() => store.append(assignRow({ kind: 'nickname' })), { code: 'invalid-row' });
   assert.throws(() => store.append(Object.assign(assignRow(), { seq: 2 })), { code: 'invalid-row' });
   assert.throws(() => store.append(assignRow({ how: 'sideways' })), { code: 'invalid-row' });
-  assert.throws(() => store.append(assignRow({ project: 'Finance App' })), { code: 'invalid-row' });
+  assert.throws(() => store.append(assignRow({ project: 'Household Budget' })), { code: 'invalid-row' });
   assert.equal(store.rows().length, 1);
 });
 

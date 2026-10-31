@@ -469,7 +469,7 @@ test('an ask may carry its project; a malformed project is refused', async () =>
   await chat.appendAnnotated({ text: 'ok?' }, PERSON, { ask: { of: 'Marlow', project: 'finance-app' } });
   assert.equal((await chat.readAnnotations({ after: 0, limit: 10 })).rows[0].ask.project, 'finance-app');
   assert.equal((await chat.openAsks(MARLOW, 'Marlow')).addressed[0].project, 'finance-app');
-  await assert.rejects(chat.appendAnnotated({ text: 'ok?' }, PERSON, { ask: { of: 'Marlow', project: 'Finance App' } }),
+  await assert.rejects(chat.appendAnnotated({ text: 'ok?' }, PERSON, { ask: { of: 'Marlow', project: 'Household Budget' } }),
     error => code(error) === 'invalid-annotation');
 });
 
