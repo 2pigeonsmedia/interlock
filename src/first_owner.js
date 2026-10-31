@@ -269,6 +269,8 @@ function publicParticipant(participant) {
           participant.fetched_without_post_at >= 0)) ||
       !(participant.last_posted_at === undefined || participant.last_posted_at === null ||
         (Number.isSafeInteger(participant.last_posted_at) && participant.last_posted_at >= 0)) ||
+      !(participant.last_polled_at === undefined || participant.last_polled_at === null ||
+        (Number.isSafeInteger(participant.last_polled_at) && participant.last_polled_at >= 0)) ||
       typeof participant.present !== 'boolean' ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
@@ -283,6 +285,7 @@ function publicParticipant(participant) {
     outstanding: participant.outstanding,
     fetched_without_post_at: participant.fetched_without_post_at,
     last_posted_at: participant.last_posted_at === undefined ? null : participant.last_posted_at,
+    last_polled_at: participant.last_polled_at === undefined ? null : participant.last_polled_at,
   });
 }
 
@@ -2091,8 +2094,11 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
       return;
     }
-    try { await chat.touchParticipant(authorized.subject_id, Date.now()); }
-    catch (_) {
+    try {
+      await chat.touchParticipant(authorized.subject_id, Date.now());
+      // The doorbell's own poll: what tells a listening seat from a busy one.
+      if (typeof chat.notePoll === 'function') chat.notePoll(authorized.subject_id, Date.now());
+    } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }

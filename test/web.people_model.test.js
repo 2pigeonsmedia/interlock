@@ -188,3 +188,21 @@ test('stateOf: a seat that only listens reads listening; a post or a presence li
   assert.equal(model.stateOf(seat('Cue', { present: false, last_posted_at: NOW - MINUTE }), NOW).word, 'quiet', 'not present is quiet');
   assert.equal(model.stateOf(seat('Cue'), NOW).word, 'working', 'a server that does not say when it last posted: as before');
 });
+
+test('state words by her definition: an AI listens, works or is quiet; a person is here or away, never working', () => {
+  const ai = extra => model.stateOf(seat('Cue', Object.assign({ last_posted_at: null, last_polled_at: null }, extra)), NOW).word;
+  assert.equal(ai({ last_polled_at: NOW - MINUTE }), 'listening', 'idle, its doorbell polled lately: it picks up now');
+  assert.equal(ai({ last_polled_at: NOW - MINUTE, last_posted_at: NOW - 3 * MINUTE }), 'listening', 'polled since it last acted');
+  assert.equal(ai({ last_polled_at: NOW - 10 * MINUTE, last_posted_at: NOW - 2 * MINUTE }), 'working',
+    'acted since its last poll: mid-turn, it will answer, maybe not now');
+  assert.equal(ai({ last_polled_at: null, last_posted_at: NOW - 2 * MINUTE }), 'working');
+  assert.equal(ai({ last_polled_at: NOW - 60 * MINUTE, last_posted_at: NOW - 40 * MINUTE }), 'quiet',
+    'no recent poll and no recent activity: a mention may not wake it');
+  assert.equal(ai({ present: false, last_polled_at: null, last_posted_at: null }), 'quiet');
+  assert.equal(model.stateOf(seat('Cue', { last_posted_at: null, last_polled_at: NOW - MINUTE,
+    presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW } }), NOW).word, 'waiting on Patti', 'waiting still outranks');
+  const human = extra => model.stateOf(person('Ana', Object.assign({ last_polled_at: null }, extra)), NOW).word;
+  assert.equal(human({ last_heard: NOW - MINUTE }), 'here', 'her page polled lately');
+  assert.equal(human({ last_heard: NOW - 30 * MINUTE }), 'away');
+  assert.equal(human({ last_heard: NOW - MINUTE, last_posted_at: NOW - MINUTE }), 'here', 'a person is never working');
+});
