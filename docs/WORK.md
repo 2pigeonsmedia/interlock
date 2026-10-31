@@ -161,6 +161,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `items/update` | `id`, `expected_revision`, `note` (required: a change without one is refused with `invalid-note`), any work field above, `state`, `block_reason`, `done_account`, `done_evidence` or `no_evidence`, `title`, `body` |
 | `items/evidence` | `id`, `target`, `observed`, `limits`, `reference` (optional when `source_message` is given), optional `relates_to`, `source_message` (`{ message_id, quote }`) |
 | `items/note` | `id`, `text` |
+| `items/move` | `id`, `expected_revision`, `project` (first owner only, else `403 owner-only`; a live project other than its own, else `404 unknown-project`, `409 project-retired` or `409 same-project`); kept as a `moved` event with `from` and `to` |
 | `items/share` | `id`, `purpose` (`exposure` or `notify`), `outcome` (`sent`, `declined` or `failed`), `to`, `message_id` (required when `sent` and refused otherwise: a room message the recording participant posted, else `invalid-message-id`), optional `detail` |
 | `decisions/answer` | `id`, `expected_revision`, `text`, optional `choice` (`yes`, `no` or null), `conditions`, `reason` (required when replacing an answer or answering for someone else) |
 | `decisions/report` | `id`, `expected_revision`, `text`, `source`, optional `conditions` |
@@ -357,6 +358,9 @@ recorded when the draft is sent or declined.
   what it waits on; **Done** needs an account of what was done plus one
   evidence entry or **No evidence attached**, not both. The service's refusal
   stays the backstop.
+- **Move to project** — on any record, offered to the first owner only:
+  pick another live project; the move is a bylined `moved` event, and a
+  request for approval then routes by its new project's lead.
 - **Attach evidence** — on work and finding records, offered to any
   signed-in participant: target examined, what was observed, a reference, and
   what it does not show. **Add note** — on any record, offered to any
