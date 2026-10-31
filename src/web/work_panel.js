@@ -62,6 +62,16 @@
     return session !== null && session === state;
   }
 
+  async function stillSignedIn() {
+    try {
+      const response = await fetch('/api/session', { cache: 'no-store', credentials: 'same-origin' });
+      const result = await response.json().catch(() => null);
+      return response.ok && !!result && result.ok === true && result.authenticated === true && !!result.user;
+    } catch {
+      return false;
+    }
+  }
+
   async function workGet(path) {
     const state = session;
     let response;
@@ -71,7 +81,10 @@
       throw workError('unavailable', 0);
     }
     if (response.status === 401) {
-      if (current(state)) state.deps.onSessionEnded();
+      // A passkey step-up rotates the session id, so a read sent just before it
+      // can come back 401 while the person is still signed in. Ask the room
+      // once before treating it as a sign-out.
+      if (current(state) && !(await stillSignedIn())) state.deps.onSessionEnded();
       throw workError('not-authenticated', 401);
     }
     const json = await response.json().catch(() => ({ ok: false, error: 'unavailable' }));
