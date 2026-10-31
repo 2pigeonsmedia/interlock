@@ -99,6 +99,12 @@
   // node, and found again when the drawer closes.
   const OPENER_LISTS = Object.freeze(['needs-you-list', 'reported-list', 'actions-list', 'project-list']);
 
+  // Every row leads with its number (W-4, D-12; an ask, its message #), so
+  // one item is told from the next at a glance.
+  function idBadge(id) {
+    return make('span', 'work-id', id);
+  }
+
   function openButton(className, text, label, onClick, id) {
     const button = make('button', className, text);
     button.type = 'button';
@@ -204,7 +210,7 @@
     element('needs-you-list').replaceChildren(...(needs.count ? needs.cards.map(card => {
       const node = make('div', 'work-row work-card');
       const head = make('p', 'work-card-head');
-      head.append(make('span', 'work-card-who', card.who));
+      head.append(idBadge(card.kind === 'ask' ? '#' + card.askId : card.id));
       if (card.turn) head.append(make('span', 'work-turn', card.turn));
       head.append(ageNode(card.at));
       const open = card.kind === 'ask' ? () => showAsk({ askId: card.askId }) : () => openItem(card.id);
@@ -213,7 +219,7 @@
       // The latest exchange, so every place the ask shows tells the same story.
       if (card.latest) node.append(make('p', 'work-card-detail', 'Latest: ' + card.latest));
       if (card.detail) node.append(make('p', 'work-card-detail', card.detail));
-      const facts = [card.project, card.kind === 'ask' ? 'message #' + card.askId : card.id];
+      const facts = [card.who, card.project];
       if (card.kill) facts.push(card.kill);
       node.append(make('p', 'work-tree-facts', facts.join(' · ')));
       if (card.note) node.append(make('p', 'work-tree-facts', card.note));
@@ -240,9 +246,10 @@
     sectionOf('reported-list').hidden = rows.length === 0;
     element('reported-list').replaceChildren(...rows.map(row => {
       const card = make('div', 'work-row');
-      const facts = make('p', 'work-tree-facts', row.id + ' · ');
+      const facts = make('p', 'work-tree-facts');
       facts.append(ageNode(row.at));
       card.append(
+        idBadge(row.id),
         openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id), row.id),
         facts,
         make('p', '', model().reportedLabel(answers.get(row.id))),
@@ -281,8 +288,8 @@
       for (const row of group.rows) {
         const card = make('div', 'work-row');
         card.append(
+          idBadge(row.id),
           openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id), row.id),
-          make('p', 'work-state', row.id),
           make('p', '', row.line),
         );
         block.append(card);
@@ -351,8 +358,9 @@
   function renderTreeRow(node) {
     const row = node.row;
     const entry = make('li');
+    entry.append(idBadge(row.id));
     entry.append(openButton('work-open', row.title, 'Open ' + row.id + ': ' + row.title, () => openItem(row.id), row.id));
-    entry.append(make('span', 'work-state', ' ' + row.id + ' · ' + model().stateLabel(row)));
+    entry.append(make('span', 'work-state', ' ' + model().stateLabel(row)));
     if (node.facts) entry.append(make('p', 'work-tree-facts', node.facts));
     if (node.children && node.children.length) {
       const children = make('ul', 'work-tree');

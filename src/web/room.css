@@ -1199,6 +1199,18 @@ a.quiet-action { display: inline-block; text-decoration: none; line-height: 1.3;
 /* Work panel, as cards and folds: one thing, one row; empty sections hidden. */
 .work-card-head { display: flex; justify-content: space-between; gap: 8px; font-size: 0.8rem; color: var(--ink-2); }
 .work-card-who { font-weight: 600; color: var(--ink); }
+/* An item's number leads its row, worn as the same plate as a message id. */
+.work-id {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--tile-edge);
+  border-radius: 3px;
+  font-family: var(--font-ai);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+}
 .work-age { font-family: var(--font-ai); font-size: 0.72rem; color: var(--ink-3); white-space: nowrap; }
 .work-means { font-size: 0.82rem; color: var(--ink-2); overflow-wrap: anywhere; }
 .work-card-detail { font-size: 0.8rem; color: var(--ink-3); overflow-wrap: anywhere; }

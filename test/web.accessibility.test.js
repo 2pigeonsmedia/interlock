@@ -270,9 +270,12 @@ test('a write with no error code reads as unavailable, and an open form keeps on
 });
 
 test('the tile says who is responsible, the drawer says whom an owner answered for, and the project id pattern is valid', () => {
-  // A Needs-you card names who asked at its head, then the question and what a yes means.
-  assert.match(WORK_PANEL_JS, /head\.append\(make\('span', 'work-card-who', card\.who\)\);\s*if \(card\.turn\) head\.append\(make\('span', 'work-turn', card\.turn\)\);\s*head\.append\(ageNode\(card\.at\)\);/,
-    'whose turn it is shows in words beside who asked');
+  // A Needs-you card leads with its number (Patti, 2026-10-31), then the
+  // question and what a yes means; who asked moves to the footer line.
+  assert.match(WORK_PANEL_JS, /head\.append\(idBadge\(card\.kind === 'ask' \? '#' \+ card\.askId : card\.id\)\);\s*if \(card\.turn\) head\.append\(make\('span', 'work-turn', card\.turn\)\);\s*head\.append\(ageNode\(card\.at\)\);/,
+    'whose turn it is shows in words beside the item number');
+  assert.match(WORK_PANEL_JS, /const facts = \[card\.who, card\.project\];/, 'who asked is in the footer');
+  assert.equal(WORK_PANEL_JS.split('idBadge(row.id)').length - 1, 3, 'reported, holds and tree rows each lead with the number');
   assert.match(WORK_PANEL_JS, /make\('p', 'work-means', 'A yes means: ' \+ card\.means\)/);
   assert.doesNotMatch(WORK_PANEL_JS, /asked by ' \+ row\.askedBy/);
   // The drawer's answer lines come from the model's drawerLines, which calls answerLines.
