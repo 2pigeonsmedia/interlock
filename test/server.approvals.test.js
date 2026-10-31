@@ -158,10 +158,6 @@ function uuid() {
   return crypto.randomUUID();
 }
 
-async function askOf(runtime, token, body) {
-  return aiPost(runtime, '/api/ai/work/decisions/ask', Object.assign({ operation_id: uuid() }, body), token);
-}
-
 async function item(runtime, owner, id) {
   const read = await get(runtime, `/api/work/items/${id}`, owner);
   assert.equal(read.status, 200, read.text);

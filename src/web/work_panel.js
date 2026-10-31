@@ -1210,21 +1210,22 @@
     element('work-create-title').value = evidence ? prefill.target : prefill.title;
     element('work-create-body').value = evidence ? '' : prefill.body;
     element('work-create-quote').value = prefill.source_message.quote;
-    element('work-create-to-label').textContent = kind === 'decision' ? 'Ask' : 'Next action for';
-    fillSelect(element('work-create-to'),
-      participantOptions({ value: '', text: kind === 'decision' ? 'Choose who to ask' : 'Nobody yet' }), '');
+    const approval = kind === 'approval';
+    fillSelect(element('work-create-to'), participantOptions({ value: '', text: 'Nobody yet' }), '');
     element('work-create-next-action').value = '';
     element('work-create-title').required = true;
     element('work-create-body').required = true;
-    element('work-create-to').required = kind === 'decision';
+    element('work-create-to').required = false;
     element('work-create-next-action').required = false;
     element('work-create-item').required = evidence;
+    element('work-create-scope').required = approval;
     showCreateField('work-create-project', !evidence);
-    showCreateField('work-create-to', !evidence);
+    // A request for approval is routed by the room: there is no one to pick.
+    showCreateField('work-create-to', kind === 'work');
     showCreateField('work-create-next-action', kind === 'work');
-    showCreateField('work-create-scope', kind === 'decision');
+    showCreateField('work-create-scope', approval);
     element('work-create-scope').value = '';
-    element('work-create-save').textContent = kind === 'decision' ? 'Ask a decision' : 'Save';
+    element('work-create-save').textContent = approval ? 'Ask for approval' : 'Save';
     showCreateField('work-create-item', evidence);
     element('work-create-status').textContent = '';
   }
@@ -1259,6 +1260,8 @@
       projects.some(project => project.id === 'ops') ? 'ops' : (projects[0] && projects[0].id));
     fillSelect(element('work-create-item'), [{ value: '', text: 'Choose an item' }].concat(
       (brief ? brief.open : []).map(row => ({ value: row.id, text: row.id + ' · ' + row.title }))), '');
+    // The first owner's own work needs no approval, so she is never offered it.
+    element('work-create-approval-label').hidden = state.user.first_owner === true;
     applyCreateKind();
     element('work-create-dialog').showModal();
   }
@@ -1280,18 +1283,15 @@
         id: element('work-create-item').value, target: element('work-create-title').value,
         observed: prefill.observed, limits: element('work-create-body').value, source_message: prefill.source_message,
       };
-    } else if (kind === 'decision') {
-      // "Ask a decision": the server posts a new message carrying the ask,
-      // then records the decision citing it, so a yes in the room answers
-      // it. The message it was made from is linked, not cited.
-      op = 'decisions/ask';
+    } else if (kind === 'approval') {
+      // "Ask for approval": the server posts the request, routed to the
+      // project's lead or the first owner, and files its work item.
+      op = 'approvals/ask';
       body = {
         project: element('work-create-project').value,
         title: element('work-create-title').value, body: element('work-create-body').value,
-        asked_of: element('work-create-to').value, about_message: message.id,
+        scope: element('work-create-scope').value,
       };
-      const scope = element('work-create-scope').value;
-      if (scope.trim() !== '') body.scope = scope;
     } else {
       op = 'items/create';
       body = {

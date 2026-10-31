@@ -433,19 +433,23 @@ test('the kill slot is asked by anyone but the asker and replied to only by the 
   assert.match(WORK_PANEL_JS, /if \(card\.kill\) facts\.push\(card\.kill\);/, 'the Needs you card shows the kill state');
 });
 
-test('a decision made from a message is asked in the room through the ask route', () => {
-  assert.match(WORK_PANEL_JS, /op = 'decisions\/ask';[\s\S]{0,400}asked_of: element\('work-create-to'\)\.value, about_message: message\.id,/);
-  assert.doesNotMatch(WORK_PANEL_JS.slice(WORK_PANEL_JS.indexOf("op = 'decisions/ask'"), WORK_PANEL_JS.indexOf("op = 'items/create'")),
-    /source_message/, 'the server cites the new ask message; the panel does not send one');
-  const askBody = WORK_PANEL_JS.slice(WORK_PANEL_JS.indexOf("op = 'decisions/ask'"), WORK_PANEL_JS.indexOf("op = 'items/create'"));
+test('a message becomes a request for approval through the approval route, never offered to the first owner', () => {
+  assert.doesNotMatch(ROOM, /Ask a decision/, '"Ask a decision" is folded into Ask for approval');
+  assert.doesNotMatch(WORK_PANEL_JS, /decisions\/ask/);
+  assert.match(ROOM, /<label id="work-create-approval-label"><input type="radio" name="kind" value="approval"> Ask for approval<\/label>/);
+  assert.match(WORK_PANEL_JS, /element\('work-create-approval-label'\)\.hidden = state\.user\.first_owner === true;/);
+  const askBody = WORK_PANEL_JS.slice(WORK_PANEL_JS.indexOf("op = 'approvals/ask'"), WORK_PANEL_JS.indexOf("op = 'items/create'"));
   const sent = askBody.slice(askBody.indexOf('body = {'), askBody.indexOf('};') + 2).match(/(?<=[{,]\s*)[a-z_]+(?=\s*[:,}])/g);
-  const serverKeys = /const ASK_DECISION_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/.exec(fs.readFileSync(path.join(ROOT, 'src', 'first_owner.js'), 'utf8'))[1]
+  const serverKeys = /const ASK_APPROVAL_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/.exec(fs.readFileSync(path.join(ROOT, 'src', 'first_owner.js'), 'utf8'))[1]
     .match(/'([a-z_]+)'/g).map(key => key.slice(1, -1));
-  assert.ok(sent.length >= 5, 'ARRANGEMENT: the panel ask body was found: ' + sent.join(','));
-  for (const key of sent.concat(['scope'])) assert.ok(serverKeys.includes(key), `the ask route accepts the panel's ${key}`);
-  assert.match(WORK_PANEL_JS, /element\('work-create-save'\)\.textContent = kind === 'decision' \? 'Ask a decision' : 'Save'/);
+  assert.ok(sent && sent.length === 4, 'ARRANGEMENT: the panel approval body was found: ' + sent);
+  for (const key of sent) assert.ok(serverKeys.includes(key), `the approval route accepts the panel's ${key}`);
+  assert.doesNotMatch(askBody, /asked_of|next_to/, 'the room routes the request: nobody is picked');
+  assert.match(WORK_PANEL_JS, /element\('work-create-save'\)\.textContent = approval \? 'Ask for approval' : 'Save'/);
+  assert.match(WORK_PANEL_JS, /element\('work-create-scope'\)\.required = approval;/);
+  assert.match(WORK_PANEL_JS, /showCreateField\('work-create-to', kind === 'work'\)/);
   assert.match(ROOM, /<label for="work-create-scope">A yes means<\/label>\s*<input id="work-create-scope" maxlength="300">/);
-  assert.match(WORK_PANEL_JS, /showCreateField\('work-create-scope', kind === 'decision'\)/);
+
 });
 
 test('the room-answer line comes from the asks event\'s answered ids', () => {

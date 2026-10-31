@@ -261,7 +261,7 @@ test('work get shows the conditions a decision was asked with', async () => {
   assert.match(got.stdout, /^ {2}asked with conditions: Only under 500$/m);
 });
 
-// ── the kill slot and "Ask a decision" ─────────────────────────────────────
+// ── the kill slot ─────────────────────────────────────────────────────────
 
 function decisionItem(overrides = {}) {
   return Object.assign({
@@ -347,20 +347,16 @@ test('a refused kill names the refusal and posts nothing more', async () => {
   assert.equal(calls.length, 2);
 });
 
-test('work ask posts the decision body to the ask route and reports the message that carries the ask', async () => {
-  const { calls, dependencies } = world(() => ({ status: 201, json: {
-    ok: true, item: decisionItem({ revision: 1 }),
-    message: { id: 31, ts: 1, byline: 'Marlow', kind: 'seat', session: null, text: 'Decision D-7: Pick the bank',
-      product: 'Codex CLI', product_provenance: 'client-reported', delivery: [] },
-  } }));
-  const file = tempJson({ project: 'finance', title: 'Pick the bank', asked_of: 'Ana', proposal: 'Use the credit union.',
-    scope: 'I open the account and nothing else', about_message: 12 });
+test('work ask is not a verb: a request for approval is work ask-approval', async () => {
+  const { calls, dependencies } = world(() => { throw new Error('no request expected'); });
+  const file = tempJson({ project: 'finance', title: 'Pick the bank', asked_of: 'Ana', scope: 'I open the account' });
   const result = await captureCommand(['work', 'ask', '--connection', 'Marlow', '--file', file], dependencies);
-  assert.equal(result.code, EXIT_OK, result.stderr);
-  assert.equal(calls[0].url, 'http://localhost:8788/api/ai/work/decisions/ask');
-  assert.equal(calls[0].body.about_message, 12);
-  assert.match(calls[0].body.operation_id, UUID);
-  assert.match(result.stdout, /Asked D-7 · Pick the bank of Ana as message #31; a yes in the room answers it\./);
+  assert.equal(result.code, EXIT_USAGE, result.stderr);
+  assert.match(result.stderr, /unknown verb/);
+  assert.equal(calls.length, 0);
+  const known = await captureCommand(['work', 'ask-approval', '--connection', 'Marlow', '--file', file], world(() => ({
+    status: 400, json: { ok: false, error: 'invalid-request' } })).dependencies);
+  assert.notEqual(known.code, EXIT_USAGE, 'ARRANGEMENT: ask-approval is a verb: ' + known.stderr);
 });
 
 test('work get, list and brief show the kill slot in words; a record from before it shows none', async () => {

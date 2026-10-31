@@ -1,7 +1,7 @@
 'use strict';
 
-// The CLI's decision verbs against a real room: asking a decision in the
-// room, and its kill slot. Its own file: one identity binding per process.
+// The CLI's decision verbs against a real room: recording a decision, and
+// its kill slot. Its own file: one identity binding per process.
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -225,7 +225,7 @@ function sentId(result) {
   return Number(match[1]);
 }
 
-test('the CLI asks a decision in the room, fills its kill slot and replies, through the real routes', async () => {
+test('the CLI records a decision, fills its kill slot and replies, through the real routes', async () => {
   const port = await reservePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-cli-decisions-'));
   const runtime = await startInterlockServer({ port, dataDir });
@@ -237,15 +237,15 @@ test('the CLI asks a decision in the room, fills its kill slot and replies, thro
     owner = await elevate(runtime, owner, device);
     const scout = connection(runtime, await admitSeat(runtime, owner, 'Scout'));
 
-    lead.files.set('ask.json', JSON.stringify({
-      project: 'ops', title: 'Merge the candidate', body: 'Green on both suites.', asked_of: 'Ana',
+    lead.files.set('decision.json', JSON.stringify({
+      kind: 'decision', project: 'ops', title: 'Merge the candidate', body: 'Green on both suites.', asked_of: 'Ana',
       scope: 'I merge the candidate to main and nothing else', proposal: 'merge now',
     }));
-    const asked = await cli(lead, ['work', 'ask', '--file', 'ask.json']);
-    assert.equal(asked.code, EXIT_OK, asked.stderr);
-    const match = /Asked (D-[0-9]+) · Merge the candidate of Ana as message #([0-9]+); a yes in the room answers it\./.exec(asked.stdout);
-    assert.ok(match, asked.stdout);
-    const [, id, messageId] = match;
+    const created = await cli(lead, ['work', 'create', '--file', 'decision.json']);
+    assert.equal(created.code, EXIT_OK, created.stderr);
+    const match = /Created (D-[0-9]+) · Merge the candidate \(awaiting\) in ops\./.exec(created.stdout);
+    assert.ok(match, created.stdout);
+    const [, id] = match;
 
     // The asker cannot attack their own decision; Scout can, once.
     lead.files.set('q.txt', 'Would the merge break the hosted room?\n');
@@ -275,11 +275,6 @@ test('the CLI asks a decision in the room, fills its kill slot and replies, thro
     assert.match(got.stdout, /  kill reply \(survived\) by Lead: No: the hosted room runs the release, not main\.\n/);
     const listed = await cli(scout, ['work', 'list']);
     assert.match(listed.stdout, new RegExp(`^${id} · awaiting · attacked, survived · asked of Ana by Lead · Merge the candidate$`, 'm'));
-
-    // The ask the decision rides is a real ask in the room.
-    const asks = JSON.parse((await cli(lead, ['asks', '--json'])).stdout);
-    assert.deepEqual(asks.asked.map(ask => [ask.ask_id, ask.of, ask.means]),
-      [[Number(messageId), 'Ana', 'I merge the candidate to main and nothing else']]);
   } finally {
     await runtime.close();
   }

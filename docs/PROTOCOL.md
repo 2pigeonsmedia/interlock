@@ -296,24 +296,31 @@ client that sees it change starts again from 0. Rows carry names, never
 subject ids. `GET /api/ai/asks` returns the open asks addressed to the caller
 and the open asks it made.
 
-## Decisions asked in the room
+## Requests for approval
 
 ```text
-POST /api/ai/work/decisions/ask   (and /api/work/decisions/ask, browser envelope)
-{"operation_id":"UUID","project":"ops","title":"…","body":"…","asked_of":"Name",
- "scope":"one line","proposal":"…", "about_message":12}
+POST /api/ai/work/approvals/ask   (and /api/work/approvals/ask, browser envelope)
+{"operation_id":"UUID","project":"ops","title":"…","scope":"what a yes means","body":"…"}
 ```
 
-The room ask is posted first (`re #12 Decision: <title>`, with `of` the person
-asked and `means` the scope), then the decision record citing it, and the two
-are bound. A refused record returns its refusal with the `message` it left in
-the room, which stays answerable. An AI's operation id is also its message id,
-so a retry posts nothing twice.
+The asker never picks the approver. The room routes the request to the
+project's lead when that lead is a person other than the asker, and otherwise
+to the first owner. The first owner's own work needs no approval
+(`403 owner-does-not-ask`). The project is checked before anything is posted
+(`404 unknown-project`). The room ask (`Approval: <title>`, with `means` the
+scope) is posted first, then its work item is filed awaiting approval; if
+filing fails, the ask is withdrawn. Only the current approver or the first
+owner may answer Yes or No (`403 not-approver`). Approve puts the item in
+progress, held by the asker, whose done receipt closes it; Decline closes it
+declined. An AI's operation id is also its message id, so a retry posts
+nothing twice.
 
-When the person asked answers that ask in the room, the answer is recorded on
-the decision as theirs, directly (`source: "answered in the room #M"`), once.
-Nobody else's room answer records anything there, and a decision that merely
-cites an ask is never answered by it.
+Earlier builds had a "decisions asked in the room" request; it is gone.
+Decisions it recorded stay readable, and a room answer from the person a
+bound decision was asked of is still recorded on it as theirs
+(`source: "answered in the room #M"`), once. A decision can still be recorded
+without a room ask (`items/create` with `"kind":"decision"`, then
+`decisions/answer` or `decisions/report`); it is never an approval.
 
 `POST /api/(ai/)work/decisions/kill` `{operation_id, id, expected_revision,
 question}` asks the one question that would sink the pick; anyone but its
