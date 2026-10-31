@@ -20,6 +20,8 @@ const ROOM_JS = fs.readFileSync(path.join(WEB, 'room.js'), 'utf8');
 const ROOM_HTML = fs.readFileSync(path.join(WEB, 'room.html'), 'utf8');
 const ASK_TURN_JS = fs.readFileSync(path.join(WEB, 'ask_turn.js'), 'utf8');
 const ASKS_JS = fs.readFileSync(path.join(WEB, 'asks_model.js'), 'utf8');
+const MENTIONS_JS = fs.readFileSync(path.join(WEB, 'mentions.js'), 'utf8');
+const REPLY_REFERENCE_JS = fs.readFileSync(path.join(WEB, 'reply_reference.js'), 'utf8');
 
 function stamp(seq, messageId, project, reason = 'set', by = 'Scout', recordId = null) {
   return { seq, ts: seq, kind: 'stamp', by, message_id: messageId, project, reason, record_id: recordId };
@@ -104,6 +106,8 @@ class Element {
     this.parent = null;
   }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
+  set dateTime(value) { this.attributes.set('datetime', String(value)); }
+  scrollIntoView() {}
   set textContent(value) { this._text = String(value); this.children = []; }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
@@ -182,7 +186,9 @@ function hiddenBy(sheet, row) {
   });
 }
 
-function loadRoom() {
+/* `realText`: the page's own mention and reply-reference parsers instead of
+ * stand-ins, so room.js can render a whole message as it does on the page. */
+function loadRoom({ realText = false } = {}) {
   const elements = new Map();
   const sheet = {
     href: 'http://localhost/room.css',
@@ -202,6 +208,7 @@ function loadRoom() {
     },
     querySelectorAll() { return []; },
     createElement(tag) { return new Element(tag); },
+    createTextNode(text) { const node = new Element('#text'); node._text = String(text); return node; },
     addEventListener() {},
     dispatchEvent() {},
     styleSheets: [sheet],
@@ -240,7 +247,15 @@ function loadRoom() {
   page.window = page;
   page.window.addEventListener = () => {};
   page.PublicKeyCredential = function PublicKeyCredential() {};
+  if (realText) {
+    delete page.InterlockMentions;
+    delete page.InterlockReplyReference;
+  }
   vm.createContext(page);
+  if (realText) {
+    vm.runInContext(MENTIONS_JS, page, { filename: 'mentions.js' });
+    vm.runInContext(REPLY_REFERENCE_JS, page, { filename: 'reply_reference.js' });
+  }
   vm.runInContext(ASK_TURN_JS, page, { filename: 'ask_turn.js' });
   vm.runInContext(ASKS_JS, page, { filename: 'asks_model.js' });
   vm.runInContext(ROOM_JS, page, { filename: 'room.js' });
@@ -327,6 +342,40 @@ test('room.js marks rows, filters by one class and one inserted rule, and never 
   assert.equal(stored.has('interlock.projectFilter'), false);
   assert.equal(transcript.replaceCalls, rebuildsBefore, 'the list was never rebuilt');
   assert.equal(transcript.replaceCalls, 0);
+});
+
+// Cold read F1: a person is never in delivery (only AIs are rung), so an
+// @mention of the viewer is how another project's message addresses a person.
+test('a message from another project that @mentions the person viewer addresses her and shows through the filter', () => {
+  const { page, sheet, transcript, el } = loadRoom({ realText: true });
+  vm.runInContext(`currentUser = { name: 'Ana', kind: 'person', roles: ['owner'] };
+    rosterProjects = [{ id: 'ops', display_name: 'Operations' }, { id: 'books', display_name: 'Books' }];`, page);
+  const seat = (id, text) => ({ id, ts: 1000 + id, byline: 'Marlow', kind: 'seat', session: null, text,
+    product: 'Codex CLI', product_provenance: 'client-reported', delivery: [] });
+  const sent = [
+    seat(1, '@Ana the books are ready'),
+    seat(2, 'the books are ready'),
+    seat(3, 'ping @ANA, folded'),
+    seat(4, '@Anabel is someone else'),
+    seat(5, 'ops work'),
+  ];
+  for (const message of sent) assert.equal(page.renderMessage(message), true, 'ARRANGEMENT: rendered #' + message.id);
+  page.__rows = [stamp(1, 1, 'books', 'assignment', 'Marlow'), stamp(2, 2, 'books', 'assignment', 'Marlow'),
+    stamp(3, 3, 'books', 'assignment', 'Marlow'), stamp(4, 4, 'books', 'assignment', 'Marlow'),
+    stamp(5, 5, 'ops', 'assignment', 'Marlow')];
+  vm.runInContext('asksState.apply(__rows)', page);
+  page.refreshAsks();
+  page.renderProjectFilter();
+  const article = id => transcript.children.find(child => child.dataset.messageId === String(id));
+  assert.equal(article(1).querySelector('.mention').textContent, '@Ana', 'ARRANGEMENT: the real mention parser ran');
+  assert.deepEqual(sent.map(message => [article(message.id).dataset.project ?? null, article(message.id).dataset.addressedMe ?? null]),
+    [['books', 'true'], ['books', null], ['books', 'true'], ['books', null], ['ops', null]],
+    'a mention of the viewer (any case) addresses her; no mention, or a longer handle, does not');
+
+  el('#project-filter').children.find(chip => chip.textContent.startsWith('Operations')).click();
+  assert.deepEqual(sheet.cssRules, [Asks.filterRule('ops')], 'ARRANGEMENT: the ops filter is on');
+  assert.deepEqual(sent.map(message => hiddenBy(sheet, article(message.id))), [false, true, false, true, false],
+    'under the ops filter the books messages that mention Ana stay; the others are hidden');
 });
 
 test('the Conversation header holds the filter chips and the hidden line; the source never rebuilds the list for them', () => {

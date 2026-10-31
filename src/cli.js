@@ -751,6 +751,10 @@ const STAMP_PAGES = 200;
 async function stampFacts(fetcher, profile) {
   const stamps = new Map();
   const askedOfMe = new Set();
+  // This AI's own asks, and the posts that answer or discuss them: a reply
+  // belongs to the question's project, but the asker always sees it.
+  const myAsks = new Set();
+  const repliesToMe = new Set();
   let after = 0;
   try {
     for (let index = 0; index < STAMP_PAGES; index += 1) {
@@ -761,12 +765,20 @@ async function stampFacts(fetcher, profile) {
           if (!stamp || !Number.isSafeInteger(stamp.message_id) ||
               !(stamp.project === null || typeof stamp.project === 'string')) throw incompatibleResponse();
           stamps.set(stamp.message_id, stamp.project);
-        } else if (row && row.kind === 'post' && row.ask !== null && row.ask.of === profile.name) {
-          askedOfMe.add(row.message_id);
+        } else if (row && (row.kind === 'carry' || row.kind === 'carry_state') && row.by === profile.name &&
+            Number.isSafeInteger(row.ask_id)) {
+          // An ask of this AI's carried across a transcript clear: still its own.
+          myAsks.add(row.ask_id);
+        } else if (row && row.kind === 'post') {
+          if (row.ask !== null && row.ask.of === profile.name) askedOfMe.add(row.message_id);
+          if (row.ask !== null && row.by === profile.name) myAsks.add(row.message_id);
+          const replied = (Array.isArray(row.answers) ? row.answers.map(answer => answer && answer.ask_id) : [])
+            .concat(row.discusses ? [row.discusses.ask_id] : []);
+          if (replied.some(id => myAsks.has(id))) repliesToMe.add(row.message_id);
         }
       }
       if (page.rows.length < ANNOTATION_PAGE_LIMIT || page.cursor <= after) {
-        return { stamps, askedOfMe };
+        return { stamps, askedOfMe, repliesToMe };
       }
       after = page.cursor;
     }
@@ -777,13 +789,15 @@ async function stampFacts(fetcher, profile) {
 }
 
 /* `history --project`: the messages stamped for that project, those that
- * address this AI (it was rung, or it is asked), and unstamped ones. */
+ * address this AI (it was rung, it is asked, or it answers or discusses this
+ * AI's own ask), and unstamped ones. */
 async function projectView(fetcher, profile, messages, project) {
   const facts = await stampFacts(fetcher, profile);
   if (facts === null) return { shown: messages, hidden: null };
   const shown = messages.filter(message => {
     const stamped = facts.stamps.has(message.id) ? facts.stamps.get(message.id) : null;
     return stamped === null || stamped === project || facts.askedOfMe.has(message.id) ||
+      facts.repliesToMe.has(message.id) ||
       message.delivery.some(entry => entry.name === profile.name);
   });
   return { shown, hidden: messages.length - shown.length };

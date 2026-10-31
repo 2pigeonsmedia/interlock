@@ -1398,13 +1398,16 @@ function createFirstOwnerHandler(options) {
   // Deterministic: an id the text names exactly, never a reading of it.
   const CITED_RECORD = /\b[WDF]-[1-9][0-9]*\b/g;
 
-  function derivedStamp(actor, saved, annotation) {
+  function derivedStamp(actor, saved, annotation, repliedProject = null) {
     const ask = annotation && typeof annotation === 'object' && annotation.ask &&
       typeof annotation.ask === 'object' ? annotation.ask : null;
     if (ask) {
       const project = typeof ask.project === 'string' ? ask.project : DEFAULT_PROJECT_ID;
       return { project, reason: 'ask', record_id: null };
     }
+    // An answer to an ask, or a reply discussing one, sits in that ask's
+    // project, not its author's: it belongs to the question.
+    if (typeof repliedProject === 'string') return { project: repliedProject, reason: 'ask', record_id: null };
     if (work && typeof work.recordProject === 'function' && typeof saved.text === 'string') {
       const cited = [];
       for (const match of saved.text.matchAll(CITED_RECORD)) {
@@ -1432,7 +1435,8 @@ function createFirstOwnerHandler(options) {
   async function stampAfterPost(actor, saved, annotation = null) {
     if (typeof chat.stamp !== 'function' || !saved || !Number.isSafeInteger(saved.id)) return;
     try {
-      const stamp = derivedStamp(actor, saved, annotation);
+      const replied = typeof chat.repliedAskProject === 'function' ? await chat.repliedAskProject(saved.id) : null;
+      const stamp = derivedStamp(actor, saved, annotation, replied);
       if (stamp) await chat.stamp(actor, saved.id, stamp.project, stamp.reason, stamp.record_id);
     } catch (_) { /* the message is saved; its stamp is advisory */ }
   }

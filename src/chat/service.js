@@ -670,13 +670,18 @@ function createChatService(options) {
     return await store.revisionOf(row);
   }
 
+  async function repliedAskProject(messageId) {
+    requireOpen();
+    return await store.repliedAskProject(messageId);
+  }
+
   async function openAsks(subjectId, name) {
     requireOpen();
     return await store.openAsks(subjectId, name);
   }
 
   return Object.freeze({
-    append, appendAnnotated, annotate, stamp, readAnnotations, openAsks, postFacts, addresseeAnswers, revisionOf,
+    append, appendAnnotated, annotate, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,

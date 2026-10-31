@@ -108,6 +108,9 @@ const seenMessageIds = new Set();
 // Who each rendered message rang, by id: a message that rang the viewer
 // shows through a project filter.
 const messageDelivery = new Map();
+// Each rendered message's @mentioned handles, folded: a person is never in
+// delivery (only AIs are rung), so a mention is how a message addresses one.
+const messageMentions = new Map();
 let pendingAiTimer = null;
 let pendingAiLoading = false;
 let currentUser = null;
@@ -310,6 +313,7 @@ function resetTranscript() {
   knownEra = null;
   seenMessageIds.clear();
   messageDelivery.clear();
+  messageMentions.clear();
   deliveryCursor = 0;
   resetAsks();
   initialTranscriptPosition = false;
@@ -2111,7 +2115,10 @@ function applyStamp(article, messageId, ask) {
   const stamp = asksState.stamp(messageId);
   if (stamp && stamp.project !== null) article.dataset.project = stamp.project;
   else delete article.dataset.project;
-  if (InterlockAsks.addressesViewer(messageDelivery.get(messageId), ask, viewerName())) {
+  const viewer = viewerName();
+  const mentioned = typeof viewer === 'string' &&
+    (messageMentions.get(messageId) || []).includes(viewer.toLowerCase());
+  if (mentioned || InterlockAsks.addressesViewer(messageDelivery.get(messageId), ask, viewer)) {
     article.dataset.addressedMe = 'true';
   } else {
     delete article.dataset.addressedMe;
@@ -2600,6 +2607,7 @@ function renderMessage(message) {
     article.append(delivery);
   }
   messageDelivery.set(message.id, message.delivery);
+  messageMentions.set(message.id, InterlockMentions.tokens(message.text).map(token => token.handle.toLowerCase()));
   transcript.append(article);
   decorateMessage(article, message.id);
   seenMessageIds.add(message.id);
@@ -2654,6 +2662,7 @@ async function runMessages(generation, signal) {
           if (id >= page.first_id) continue;
           seenMessageIds.delete(id);
           messageDelivery.delete(id);
+          messageMentions.delete(id);
           const old = transcript.querySelector(`[data-message-id="${id}"]`);
           if (old) old.remove();
           removed = true;

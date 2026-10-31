@@ -1086,6 +1086,24 @@ function openStore(opts) {
     });
   }
 
+  /* For the host only, never a route: the project of the ask this saved post
+   * answers or discusses, so a reply sits in its question's project. Null when
+   * the post answers and discusses no known ask. */
+  function repliedAskProject(messageId) {
+    return exclusive(() => {
+      requireOpen();
+      const row = asks.posts.get(messageId);
+      if (!row) return null;
+      const ids = row.answers.map(answer => answer.ask_id);
+      if (row.discusses) ids.push(row.discusses.ask_id);
+      for (const id of ids) {
+        const ask = asks.asks.get(id);
+        if (ask && typeof ask.project === 'string') return ask.project;
+      }
+      return null;
+    });
+  }
+
   /* For the host only, never a route: who asked each of these asks, so an
    * answer or a reply to an ask can ring its asker. Unknown ids are left out. */
   function askersOf(askIds) {
@@ -1440,7 +1458,7 @@ function openStore(opts) {
   return Object.freeze({
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch,
     participantState, coordinateIdleRelease, deliveryChanges, close,
-    annotate, stamp, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf,
+    annotate, stamp, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf, repliedAskProject,
   });
 }
 

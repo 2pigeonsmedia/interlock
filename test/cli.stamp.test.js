@@ -42,7 +42,7 @@ const ROWS = [
   stamp(8, 7, 'orchard', 'set'),
 ];
 
-function world(rows = ROWS) {
+function world(rows = ROWS, messages = MESSAGES) {
   const profile = {
     schema: 2, name: 'Lead', product: 'Codex CLI', product_provenance: 'client-reported',
     server_url: 'http://localhost:8788', request_id: crypto.randomUUID(), token: 'test-bearer-not-a-real-credential',
@@ -70,7 +70,7 @@ function world(rows = ROWS) {
         const page = rows.filter(row => row.seq > after).slice(0, limit);
         body = { ok: true, rows: page, cursor: page.length ? page[page.length - 1].seq : Math.min(after, rows.length), first_id: 1 };
       } else {
-        const next = MESSAGES.find(row => row.id > after);
+        const next = messages.find(row => row.id > after);
         body = { ok: true, messages: next ? [next] : [], cursor: next ? next.id : after, timed_out: false, connection_session: null };
       }
       return { ok: true, status: 200, json: async () => body };
@@ -79,8 +79,8 @@ function world(rows = ROWS) {
   return { dependencies, urls, profile };
 }
 
-async function history(argv, rows) {
-  const w = world(rows);
+async function history(argv, rows, messages) {
+  const w = world(rows, messages);
   let stdout = '';
   let stderr = '';
   const code = await run(['history', '--connection', 'Lead'].concat(argv),
@@ -121,4 +121,54 @@ test('history --project against a side-car it cannot read shows everything and s
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.deepEqual(result.printed, [1, 2, 3, 4, 5, 6, 7]);
   assert.match(result.stdout, /Project stamps could not be read; every message is shown\.\n$/);
+});
+
+// Cold read F1: an answer (or a reply) is stamped with its ask's project, so an
+// AI that asked in another project still sees what answers its own ask.
+test('history --project shows answers and replies to this AI\'s own ask from another project', async () => {
+  const post = (seq, messageId, by, fields) => Object.assign({ seq, ts: seq, kind: 'post', by, message_id: messageId,
+    ask: null, answers: [], status: null, read_through: null, discusses: null }, fields);
+  const messages = [
+    message(1, 'Lead asks Ana, in household'),
+    message(2, 'Ana answers it'),
+    message(3, 're #1 Ana discusses it'),
+    message(4, 'unrelated household'),
+    message(5, 'Ana answers someone else\'s ask'),
+    message(6, 'Wren asks Ana, in household'),
+  ];
+  const rows = [
+    post(1, 1, 'Lead', { ask: { of: 'Ana', of_kind: 'person', means: 'm', deliver: 'now', project: 'household' } }),
+    stamp(2, 1, 'household', 'ask'),
+    post(3, 2, 'Ana', { answers: [{ ask_id: 1, choice: 'yes', crossed_by: null, by_addressee: true, closes: true, revision: 1 }] }),
+    stamp(4, 2, 'household', 'ask'),
+    post(5, 3, 'Ana', { discusses: { ask_id: 1, party: 'addressee' } }),
+    stamp(6, 3, 'household', 'ask'),
+    stamp(7, 4, 'household', 'assignment'),
+    post(8, 6, 'Wren', { ask: { of: 'Ana', of_kind: 'person', means: 'm', deliver: 'now', project: 'household' } }),
+    stamp(9, 6, 'household', 'ask'),
+    post(10, 5, 'Ana', { answers: [{ ask_id: 6, choice: 'yes', crossed_by: null, by_addressee: true, closes: true, revision: 1 }] }),
+    stamp(11, 5, 'household', 'ask'),
+  ];
+  const all = await history(['--drain'], rows, messages);
+  assert.deepEqual(all.printed, [1, 2, 3, 4, 5, 6], 'ARRANGEMENT: without the lens every message prints');
+  const lens = await history(['--drain', '--project', 'orchard'], rows, messages);
+  assert.equal(lens.code, EXIT_OK, lens.stderr);
+  assert.deepEqual(lens.printed, [2, 3],
+    'the answer and the reply to Lead\'s own ask print; the ask itself, an unrelated message and an answer to Wren\'s ask do not');
+  assert.match(lens.stdout, /\n4 messages stamped for other projects not shown\.\n$/);
+});
+
+test('history --project still shows replies to this AI\'s own ask carried across a clear', async () => {
+  const messages = [message(40, 'Ana answers the carried ask'), message(41, 'unrelated household')];
+  const rows = [
+    { seq: 1, ts: 1, kind: 'carry', by: 'Lead', ask_id: 12, archive_id: 'transcript-x', asked_at: 1,
+      ask: { of: 'Ana', of_kind: 'person', means: 'm', deliver: 'now', project: 'household' }, kept_open: false },
+    { seq: 2, ts: 2, kind: 'post', by: 'Ana', message_id: 40, ask: null, status: null, read_through: null, discusses: null,
+      answers: [{ ask_id: 12, choice: 'yes', crossed_by: null, by_addressee: true, closes: true, revision: 1 }] },
+    stamp(3, 40, 'household', 'ask'),
+    stamp(4, 41, 'household', 'assignment'),
+  ];
+  const lens = await history(['--drain', '--project', 'orchard'], rows, messages);
+  assert.equal(lens.code, EXIT_OK, lens.stderr);
+  assert.deepEqual(lens.printed, [40], 'the answer to Lead\'s carried ask prints; the unrelated message does not');
 });
