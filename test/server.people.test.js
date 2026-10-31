@@ -161,7 +161,7 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     const people = await call(runtime, { path: '/api/participants', headers: { cookie: owner.cookie } });
     assert.equal(people.status, 200, people.text);
     const row = name => people.json.participants.find(item => item.name === name);
-    assert.equal(Object.keys(row('Scout')).length, 16);
+    assert.equal(Object.keys(row('Scout')).length, 17);
     assert.deepEqual([row('Scout').model, row('Scout').project, row('Scout').assigned.how, row('Scout').presence],
       ['Opus 5.5', 'ops', 'join', null]);
     assert.deepEqual([row('Wren').model, row('Wren').project, row('Wren').assigned], [null, null, null]);
@@ -171,7 +171,7 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     const settings = await call(runtime, { path: '/api/settings/participants', headers: { cookie: owner.cookie } });
     assert.equal(settings.status, 200, settings.text);
     const scout = settings.json.participants.find(item => item.name === 'Scout');
-    assert.equal(Object.keys(scout).length, 15);
+    assert.equal(Object.keys(scout).length, 16);
     assert.deepEqual([scout.model, scout.project, scout.assigned.how], ['Opus 5.5', 'ops', 'join']);
 
     // Presence, own project, a lead assigning, the owner assigning, a post clearing.

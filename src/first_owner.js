@@ -1367,7 +1367,7 @@ function createFirstOwnerHandler(options) {
   }
 
   function peopleFacts(row) {
-    const none = { model: null, project: null, assigned: null, presence: null };
+    const none = { model: null, project: null, assigned: null, presence: null, waiting: null };
     if (!people || !row) return none;
     const service = people.service;
     const assignment = row.kind === 'seat' ? service.assignmentOf(row.name) : null;
@@ -1376,6 +1376,9 @@ function createFirstOwnerHandler(options) {
       project: assignment ? assignment.project : null,
       assigned: assignment ? Object.freeze({ how: assignment.how, by_name: assignment.by_name, at: assignment.at }) : null,
       presence: typeof row.subject_id === 'string' ? service.presenceOf(row.subject_id) : null,
+      // Derived from the Work record: whose item this participant's work waits on.
+      waiting: work && typeof row.subject_id === 'string' && typeof work.waitingOf === 'function'
+        ? work.waitingOf(row.subject_id) : null,
     };
   }
 

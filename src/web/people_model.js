@@ -77,12 +77,26 @@
 
   // One word, one light. Waiting outranks working: a seat waiting on someone
   // is amber whether or not it was heard lately.
+  // The state word from the doorbell's rhythm alone (see stateOf).
+  function pollWord(row, now, lastHeard, notPickedUp) {
+    if (row.kind === 'person') {
+      return heard(row, now) ? { word: 'here', light: 'teal', age_since: lastHeard, notPickedUp }
+        : { word: 'away', light: 'grey', age_since: lastHeard, notPickedUp };
+    }
+    const polled = Number.isSafeInteger(row.last_polled_at) ? row.last_polled_at : null;
+    const since = polled === null ? null : now - polled;
+    if (since !== null && since >= 0 && since < LISTENING_MS) {
+      return { word: 'listening', light: 'teal', age_since: polled, notPickedUp };
+    }
+    if (since !== null && since >= 0 && since < WORKING_MS) {
+      return { word: 'working', light: 'grey', age_since: polled, notPickedUp };
+    }
+    return { word: 'not listening', light: 'grey', age_since: polled, notPickedUp };
+  }
+
   function stateOf(row, now) {
     const notPickedUp = Number.isSafeInteger(row.outstanding) && row.outstanding > 0
       ? row.outstanding + ' not picked up' : null;
-    if (row.presence && row.presence.waiting_on) {
-      return { word: 'waiting on ' + row.presence.waiting_on, light: 'amber', age_since: row.presence.since, notPickedUp };
-    }
     const lastHeard = Number.isSafeInteger(row.last_heard) ? row.last_heard : null;
     // Her definition (2026-10-31), read from the doorbell's rhythm when the
     // server says when a seat last polled; posting does not enter into it.
@@ -92,19 +106,23 @@
     // model works: it picks up after its current task), or not listening (no
     // poll for hours, or none: an @mention will not wake it).
     if (row.last_polled_at !== undefined) {
-      if (row.kind === 'person') {
-        return heard(row, now) ? { word: 'here', light: 'teal', age_since: lastHeard, notPickedUp }
-          : { word: 'away', light: 'grey', age_since: lastHeard, notPickedUp };
+      const base = pollWord(row, now, lastHeard, notPickedUp);
+      // Waiting on someone goes ahead of the state word, in amber: declared
+      // on the presence line, or derived from a blocked item (until the seat
+      // posts after the wait began).
+      const derived = row.waiting && typeof row.waiting.name === 'string' &&
+        !(Number.isSafeInteger(row.last_posted_at) && Number.isSafeInteger(row.waiting.since) &&
+          row.last_posted_at > row.waiting.since) ? row.waiting : null;
+      const declared = row.presence && row.presence.waiting_on ? row.presence.waiting_on : null;
+      if (declared || derived) {
+        const head = declared ? 'waiting on ' + declared : 'waiting on ' + derived.name + ' · ' + derived.item;
+        return { word: head + ' · ' + base.word, light: 'amber',
+          age_since: declared ? row.presence.since : derived.since, notPickedUp };
       }
-      const polled = Number.isSafeInteger(row.last_polled_at) ? row.last_polled_at : null;
-      const since = polled === null ? null : now - polled;
-      if (since !== null && since >= 0 && since < LISTENING_MS) {
-        return { word: 'listening', light: 'teal', age_since: polled, notPickedUp };
-      }
-      if (since !== null && since >= 0 && since < WORKING_MS) {
-        return { word: 'working', light: 'grey', age_since: polled, notPickedUp };
-      }
-      return { word: 'not listening', light: 'grey', age_since: polled, notPickedUp };
+      return base;
+    }
+    if (row.presence && row.presence.waiting_on) {
+      return { word: 'waiting on ' + row.presence.waiting_on, light: 'amber', age_since: row.presence.since, notPickedUp };
     }
     // A seat that is present only because its doorbell or listen polls is
     // ringable but not working: working means it said something (a post, an
