@@ -30,3 +30,12 @@ test('the room page pauses once after an instant empty answer to a waited read',
   assert.ok(loop.includes('InterlockMessagePage.instantEmptyAnswer(page, wait)'),
     'the pause lives inside runMessages, the loop that re-asks');
 });
+
+test('an ask chip asks the asks model who may answer, with the live approvers from the Work brief', () => {
+  const chip = source.slice(source.indexOf('function decorateMessage('), source.indexOf('function decorateMessage(') + 6000);
+  assert.ok(chip.includes('const mine = InterlockAsks.mayAnswer(ask, viewer, approverAskIds);'),
+    'Approve and Decline follow the live approver, not only the person first asked');
+  const brief = source.slice(source.indexOf('async function loadPeopleProjects('), source.indexOf('// ── Settings: your status'));
+  assert.ok(brief.includes('approverAskIds = ids;') && brief.includes('result.needs_me'),
+    'the approver set is read from the viewer\'s Needs you in the brief');
+});
