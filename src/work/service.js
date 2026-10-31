@@ -340,8 +340,12 @@ function createWorkService(options) {
 
   function publicItem(item) {
     const copy = clone(item);
-    // A waiting request shows its live approver here too, as the lists do.
-    if (copy.approval && copy.approval.state === 'awaiting') copy.approval.approver = currentApproverRef(item);
+    // A waiting request shows its live approver here too, as the lists do,
+    // and names that approver as Next.
+    if (copy.approval && copy.approval.state === 'awaiting') {
+      copy.approval.approver = currentApproverRef(item);
+      if (copy.state === 'open') copy.next_to = currentApproverRef(item);
+    }
     if (copy.kind === 'decision') {
       copy.state = decisionState(item);
       copy.kill = item.kill ? clone(item.kill) : null;
@@ -381,7 +385,10 @@ function createWorkService(options) {
     }
     return {
       id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: item.state,
-      responsible: clone(item.responsible), next_to: clone(item.next_to), next_action: item.next_action,
+      responsible: clone(item.responsible), next_action: item.next_action,
+      // A waiting request is next to its live approver.
+      next_to: item.approval && item.approval.state === 'awaiting' && item.state === 'open'
+        ? currentApproverRef(item) : clone(item.next_to),
       target: item.target, block_reason: item.block_reason, created_by: clone(item.created_by), updated_at: item.updated_at,
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),
       awaiting: awaitingDecision(draft, item),
