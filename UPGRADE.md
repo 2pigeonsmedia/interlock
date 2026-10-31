@@ -8,9 +8,9 @@ your own checks.
 ## 0.3.0 → 0.3.1
 
 0.3.1 adds the project stamp and filter on room messages, **Mark done** on
-an approved request, and fixes to approvals: a lead who has left the room no
-longer approves, and a request's record names its current approver and
-whoever declined it. Use the stopped-server procedure below.
+an approved request, and fixes to approvals: a request's record names its
+current approver and whoever declined it, and a revise after a yes goes back
+to the current approver. Use the stopped-server procedure below.
 
 **No migration, no new files.** Every file 0.3.0 wrote is used as it is. A
 stamp is a new kind of row in `chat/annotations.jsonl`.
