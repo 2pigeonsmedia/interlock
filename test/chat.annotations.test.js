@@ -379,7 +379,8 @@ test('a row a later release wrote is counted and skipped; the room still opens a
   await chat.appendAnnotated({ text: 'A?' }, PERSON, { ask: { of: 'Marlow' } });
   await chat.close();
   const file = path.join(dir, 'chat', 'annotations.jsonl');
-  fs.appendFileSync(file, JSON.stringify({ v: 1, seq: 2, kind: 'stamp', message_id: 1, project: 'finance' }) + '\n');
+  // `stamp` became a known kind in 0.3.1; a kind no release knows yet stands in.
+  fs.appendFileSync(file, JSON.stringify({ v: 1, seq: 2, kind: 'pin', message_id: 1, project: 'orchard' }) + '\n');
   fs.appendFileSync(file, JSON.stringify({ v: 2, seq: 3, kind: 'post', message_id: 1, anything: true }) + '\n');
   const again = reopen();
   assert.equal((await again.openAsks(MARLOW, 'Marlow')).addressed.length, 1);

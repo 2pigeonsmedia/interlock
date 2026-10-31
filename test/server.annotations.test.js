@@ -229,10 +229,12 @@ test('asks, answers and status ride the side-car routes; the message and the pla
 
     const browserRows = await get(runtime, '/api/annotations?after=0&limit=100', owner);
     assert.equal(browserRows.status, 200, browserRows.text);
-    assert.deepEqual(browserRows.json.rows.map(row => row.kind), ['post', 'post', 'post', 'keep_open']);
-    const aiRows = await aiGet(runtime, '/api/ai/annotations?after=2&limit=100', scout.token);
-    assert.deepEqual(aiRows.json.rows.map(row => row.seq), [3, 4]);
-    assert.equal(aiRows.json.cursor, 4);
+    // Each ask is stamped with its project right after its post (0.3.1).
+    assert.deepEqual(browserRows.json.rows.map(row => row.kind),
+      ['post', 'stamp', 'post', 'stamp', 'post', 'keep_open']);
+    const aiRows = await aiGet(runtime, '/api/ai/annotations?after=4&limit=100', scout.token);
+    assert.deepEqual(aiRows.json.rows.map(row => row.seq), [5, 6]);
+    assert.equal(aiRows.json.cursor, 6);
     assert.equal((await get(runtime, '/api/annotations?after=0', owner)).status, 400);
     assert.equal((await call(runtime, { path: '/api/annotations?after=0&limit=1' })).status, 401,
       'the browser read needs a session');
@@ -242,7 +244,7 @@ test('asks, answers and status ride the side-car routes; the message and the pla
     const cleared = await post(runtime, '/api/transcript/clear', {}, owner);
     assert.equal(cleared.status, 200, cleared.text);
     const sidecarArchive = path.join(dataDir, 'archives', cleared.json.archive_id + '.annotations.jsonl');
-    assert.equal(fs.readFileSync(sidecarArchive, 'utf8').trim().split('\n').length, 4);
+    assert.equal(fs.readFileSync(sidecarArchive, 'utf8').trim().split('\n').length, 6);
     const after = await get(runtime, '/api/annotations?after=0&limit=100', owner);
     assert.deepEqual(after.json.rows.map(row => [row.kind, row.ask_id]),
       [['carry', asked.json.message.id], ['carry', toScout.json.message.id]]);

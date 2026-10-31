@@ -30,6 +30,12 @@
 //             with the ask, before any answer. Only an approval is agreed by a
 //             yes and closed by a done receipt; a plain ask is answered and
 //             done. A release before it passes the row over
+//   stamp     the project a message belongs to and why: derived by the room
+//             after the message is saved (its ask, a record it cites, its
+//             author's assignment) or set later by its author. The newest
+//             stamp of a message wins. It binds only to a message in this era
+//             written by the stamp's author; a clear does not carry it. A
+//             release before it passes the row over
 //
 // Nothing here reads message text. Status is what the client set; an answer
 // binds to the ask the client named.
@@ -71,6 +77,13 @@ const ASK_KEYS = Object.freeze(['of_subject_id', 'of_name', 'of_kind', 'means', 
 // A project id, as the Work record names it; whether the project exists and
 // whether one is required is the Work side's rule, not the room's.
 const PROJECT_ID = /^[a-z][a-z0-9-]{1,31}$/;
+// A stamp: who set it (the message's author), the project (null = the whole
+// room), and why. A record id is the cited Work record, for `record` only.
+const STAMP_KEYS = Object.freeze([
+  'v', 'seq', 'ts', 'kind', 'subject_id', 'name', 'message_id', 'project', 'reason', 'record_id',
+]);
+const STAMP_REASONS = Object.freeze(['ask', 'record', 'assignment', 'set']);
+const RECORD_ID = /^[WDF]-[1-9][0-9]*$/;
 // An answer entry before asks could be revised reads as answering revision 1.
 const ANSWER_KEYS_BEFORE_REVISION = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes']);
 const ANSWER_KEYS = Object.freeze([...ANSWER_KEYS_BEFORE_REVISION, 'revision']);
@@ -186,7 +199,9 @@ function parseRequest(value) {
   });
 }
 
-const KNOWN_KINDS = Object.freeze(['post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval']);
+const KNOWN_KINDS = Object.freeze([
+  'post', 'withdraw', 'keep_open', 'carry', 'revise', 'carry_state', 'approval', 'stamp',
+]);
 
 /* A row a later release wrote: a well-formed line in sequence whose `v` or
  * kind this release does not know. It keeps its place in the sequence and is
@@ -206,7 +221,7 @@ function parseRow(value, expectedSeq) {
   const keys = kind === 'post' ? POST_KEYS
     : (kind === 'withdraw' || kind === 'keep_open' || kind === 'approval') ? LIFECYCLE_KEYS
       : kind === 'carry' ? CARRY_KEYS : kind === 'revise' ? REVISE_KEYS
-        : kind === 'carry_state' ? CARRY_STATE_KEYS : null;
+        : kind === 'carry_state' ? CARRY_STATE_KEYS : kind === 'stamp' ? STAMP_KEYS : null;
   const row = earlierPost ? Object.assign({}, earlierPost, { discusses: null }) : keys && closedObject(value, keys);
   if (!row || row.v !== ROW_VERSION || row.seq !== expectedSeq || !validTs(row.ts) ||
       !boundedString(row.subject_id, 64) || !boundedString(row.name, MAX_NAME_BYTES)) return null;
@@ -226,6 +241,16 @@ function parseRow(value, expectedSeq) {
     }
     return Object.freeze(Object.assign(base, {
       message_id: row.message_id, ask, answers, status: row.status, read_through: row.read_through, discusses,
+    }));
+  }
+  if (kind === 'stamp') {
+    if (!positiveId(row.message_id) || !STAMP_REASONS.includes(row.reason) ||
+        !(row.project === null || (typeof row.project === 'string' && PROJECT_ID.test(row.project))) ||
+        !(row.reason === 'record'
+          ? typeof row.record_id === 'string' && RECORD_ID.test(row.record_id) && row.project !== null
+          : row.record_id === null)) return null;
+    return Object.freeze(Object.assign(base, {
+      message_id: row.message_id, project: row.project, reason: row.reason, record_id: row.record_id,
     }));
   }
   if (!positiveId(row.ask_id)) return null;
@@ -296,6 +321,8 @@ function createAskIndex(eraFirstId) {
   // True while the era's leading carry rows replay, before any other row.
   let carrying = true;
   const posts = new Map();
+  // message id -> its newest bound stamp row
+  const stamps = new Map();
   const rows = [];
 
   function addAsk(askId, row, ask, askedAt, carriedFrom) {
@@ -459,7 +486,11 @@ function createAskIndex(eraFirstId) {
     const entry = rows[rows.length - 1];
     if (row.kind === 'later') return false;
     if (row.kind !== 'carry' && row.kind !== 'carry_state' && row.kind !== 'approval') carrying = false;
-    if (row.kind === 'post') {
+    if (row.kind === 'stamp') {
+      // Only the message's author stamps it, and only a message of this era.
+      if (!message || message.id !== row.message_id || message.subject_id !== row.subject_id) return false;
+      stamps.set(row.message_id, row);
+    } else if (row.kind === 'post') {
       if (!message || message.subject_id !== row.subject_id || message.ts !== row.ts ||
           posts.has(row.message_id) || asks.has(row.message_id)) return false;
       posts.set(row.message_id, row);
@@ -528,7 +559,7 @@ function createAskIndex(eraFirstId) {
   }
 
   return {
-    rows, posts, asks, checkAnswer, answerFacts, checkLifecycle, crossingFor, replay, partyOf, checkDiscuss,
+    rows, posts, asks, stamps, checkAnswer, answerFacts, checkLifecycle, crossingFor, replay, partyOf, checkDiscuss,
     isOpenAskOf, openAsksFor, openAsks, carriedState,
   };
 }
@@ -613,6 +644,11 @@ function publicRow(row) {
     }));
   }
   if (row.kind === 'revise') return Object.freeze(Object.assign(base, { ask_id: row.ask_id, means: row.means }));
+  if (row.kind === 'stamp') {
+    return Object.freeze(Object.assign(base, {
+      message_id: row.message_id, project: row.project, reason: row.reason, record_id: row.record_id,
+    }));
+  }
   return Object.freeze(Object.assign(base, { ask_id: row.ask_id }));
 }
 
@@ -627,6 +663,8 @@ function sha256(buffer) {
 module.exports = Object.freeze({
   KNOWN_KINDS,
   ROW_VERSION,
+  RECORD_ID,
+  STAMP_REASONS,
   MAX_ANSWERS,
   MAX_MEANS_CHARS,
   MAX_UNREAD_IDS,

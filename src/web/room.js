@@ -63,6 +63,8 @@ const pendingAiList = document.querySelector('#pending-ai-list');
 const pendingAiStatus = document.querySelector('#pending-ai-status');
 const connectionState = document.querySelector('#connection-state');
 const transcript = document.querySelector('#transcript');
+const projectFilterChips = document.querySelector('#project-filter');
+const projectFilterHidden = document.querySelector('#project-filter-hidden');
 const emptyState = document.querySelector('#empty-state');
 const messageForm = document.querySelector('#message-form');
 const messageBody = document.querySelector('#message-body');
@@ -103,6 +105,9 @@ let knownEra = null; // the last first_id this page rendered, sent as `era`
 let messageController = null;
 let messageGeneration = 0;
 const seenMessageIds = new Set();
+// Who each rendered message rang, by id: a message that rang the viewer
+// shows through a project filter.
+const messageDelivery = new Map();
 let pendingAiTimer = null;
 let pendingAiLoading = false;
 let currentUser = null;
@@ -304,6 +309,7 @@ function resetTranscript() {
   messageCursor = 0;
   knownEra = null;
   seenMessageIds.clear();
+  messageDelivery.clear();
   deliveryCursor = 0;
   resetAsks();
   initialTranscriptPosition = false;
@@ -1994,6 +2000,7 @@ function refreshAsks() {
   for (const article of transcript.querySelectorAll('.message')) {
     decorateMessage(article, Number(article.dataset.messageId));
   }
+  renderProjectFilter();
   const open = asksState.openFor(viewerName());
   for (const id of [...pickedAsks]) {
     if (!open.addressed.some(ask => ask.ask_id === id)) pickedAsks.delete(id);
@@ -2039,6 +2046,118 @@ function askButton(label, onClick) {
   return button;
 }
 
+// ── the project stamp and the filter ─────────────────────────────────────────
+// A stamp is drawn as a plate on its message and carried as data-project; a
+// message that addresses the viewer carries data-addressed-me. The filter is
+// one class on the conversation list plus one CSS rule per project, inserted
+// into the room's own stylesheet: changing it never rebuilds or walks the
+// list. It is the viewer's own lens: never sent, never changes delivery.
+const PROJECT_FILTER_KEY = 'interlock.projectFilter';
+let projectFilter = readProjectFilter();
+const insertedFilterRules = new Set();
+// A filter remembered from earlier in this tab is put on at the first draw.
+let projectFilterApplied = false;
+
+function readProjectFilter() {
+  try {
+    const stored = sessionStorage.getItem(PROJECT_FILTER_KEY);
+    return stored && InterlockAsks.filterClass(stored) ? stored : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function rememberProjectFilter(project) {
+  try {
+    if (project === null) sessionStorage.removeItem(PROJECT_FILTER_KEY);
+    else sessionStorage.setItem(PROJECT_FILTER_KEY, project);
+  } catch (_) { /* the choice lasts for this page only */ }
+}
+
+function roomStyleSheet() {
+  for (const sheet of document.styleSheets || []) {
+    try {
+      if (sheet.href && new URL(sheet.href).pathname === '/room.css') return sheet;
+    } catch (_) { /* not ours */ }
+  }
+  return null;
+}
+
+function ensureFilterRule(project) {
+  if (insertedFilterRules.has(project)) return;
+  const rule = InterlockAsks.filterRule(project);
+  const sheet = roomStyleSheet();
+  if (!rule || !sheet) return;
+  sheet.insertRule(rule, sheet.cssRules.length);
+  insertedFilterRules.add(project);
+}
+
+function setProjectFilter(project) {
+  const next = project === null || InterlockAsks.filterClass(project) ? project : null;
+  if (projectFilter !== null) transcript.classList.remove(InterlockAsks.filterClass(projectFilter));
+  if (next !== null) {
+    ensureFilterRule(next);
+    transcript.classList.add(InterlockAsks.filterClass(next));
+  }
+  projectFilter = next;
+  projectFilterApplied = true;
+  rememberProjectFilter(next);
+  renderProjectFilter();
+}
+
+/* The stamp facts on one message row, patched in place. */
+function applyStamp(article, messageId, ask) {
+  for (const old of article.querySelectorAll('.stamp-plate')) old.remove();
+  const stamp = asksState.stamp(messageId);
+  if (stamp && stamp.project !== null) article.dataset.project = stamp.project;
+  else delete article.dataset.project;
+  if (InterlockAsks.addressesViewer(messageDelivery.get(messageId), ask, viewerName())) {
+    article.dataset.addressedMe = 'true';
+  } else {
+    delete article.dataset.addressedMe;
+  }
+  if (!stamp) return;
+  const plate = document.createElement('p');
+  plate.className = 'stamp-plate';
+  plate.textContent = InterlockAsks.stampPlate(stamp, stamp.project === null ? null : projectName(stamp.project));
+  article.insertBefore(plate, article.querySelector('.message-actions'));
+}
+
+function renderProjectFilter() {
+  if (!projectFilterChips || !projectFilterHidden) return;
+  if (!projectFilterApplied) {
+    projectFilterApplied = true;
+    if (projectFilter !== null) {
+      ensureFilterRule(projectFilter);
+      transcript.classList.add(InterlockAsks.filterClass(projectFilter));
+    }
+  }
+  const counts = asksState.stampCounts();
+  const projects = [...counts.keys()].sort((a, b) => projectName(a).localeCompare(projectName(b)));
+  if (projectFilter !== null && !counts.has(projectFilter)) projects.push(projectFilter);
+  const chip = (label, project) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'quiet-action';
+    button.textContent = label;
+    button.setAttribute('aria-pressed', projectFilter === project ? 'true' : 'false');
+    button.addEventListener('click', () => setProjectFilter(project));
+    return button;
+  };
+  projectFilterChips.replaceChildren(chip('All', null),
+    ...projects.map(project => chip(`${projectName(project)} (${counts.get(project) || 0})`, project)));
+  projectFilterChips.hidden = projects.length === 0;
+  if (projectFilter === null) {
+    projectFilterHidden.hidden = true;
+    projectFilterHidden.textContent = '';
+    return;
+  }
+  const hidden = transcript.querySelectorAll(InterlockAsks.hiddenSelector(projectFilter)).length;
+  projectFilterHidden.textContent =
+    `${hidden} ${hidden === 1 ? 'message' : 'messages'} hidden by the ${projectName(projectFilter)} filter`;
+  projectFilterHidden.hidden = false;
+}
+
 function decorateMessage(article, messageId) {
   for (const old of article.querySelectorAll('.ask-chip, .answer-line')) old.remove();
   const anchor = article.querySelector('.message-actions');
@@ -2059,6 +2178,7 @@ function decorateMessage(article, messageId) {
   const ask = asksState.ask(messageId);
   const post = asksState.post(messageId);
   const viewer = viewerName();
+  applyStamp(article, messageId, ask);
   if (ask) {
     const chip = document.createElement('div');
     chip.className = 'ask-chip';
@@ -2479,6 +2599,7 @@ function renderMessage(message) {
     delivery.append(state);
     article.append(delivery);
   }
+  messageDelivery.set(message.id, message.delivery);
   transcript.append(article);
   decorateMessage(article, message.id);
   seenMessageIds.add(message.id);
@@ -2532,6 +2653,7 @@ async function runMessages(generation, signal) {
         for (const id of [...seenMessageIds]) {
           if (id >= page.first_id) continue;
           seenMessageIds.delete(id);
+          messageDelivery.delete(id);
           const old = transcript.querySelector(`[data-message-id="${id}"]`);
           if (old) old.remove();
           removed = true;
