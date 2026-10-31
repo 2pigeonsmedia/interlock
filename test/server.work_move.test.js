@@ -254,6 +254,11 @@ test('the owner, the holder and the current project\'s lead move a record, bylin
       { operation_id: uuid(), project: 'ops', title: 'Order rollers', scope: 'I order two rollers, up to $40' }, scout.token);
     assert.equal(asked.status, 201, asked.text);
     assert.equal(asked.json.item.approval.approver.name, 'Ana', 'the arrangement: Operations has an AI lead, so Ana approves');
+    assert.equal((await aiGet(runtime, `/api/ai/work/items/${asked.json.item.id}`, lead.token)).json.may_move, false);
+    const shopped = await aiMove(lead.token, asked.json.item, 'books');
+    assert.deepEqual([shopped.status, shopped.json.error], [403, 'not-mover'],
+      'the lead of its project cannot move a waiting request: that would choose its approver');
+    assert.equal((await item(runtime, owner, asked.json.item.id)).approval.approver.name, 'Ana', 'still Ana\'s');
     const rerouted = await personMove(owner, asked.json.item, 'books');
     assert.equal(rerouted.status, 200, rerouted.text);
     const now = await item(runtime, owner, asked.json.item.id);
