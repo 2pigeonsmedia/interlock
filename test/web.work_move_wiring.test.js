@@ -45,3 +45,7 @@ test('the viewer\'s recent answers read as words, and the strip is drawn from th
   assert.ok(strip.includes("element('decided-section').hidden = rows.length === 0;"), 'hidden when nothing was decided');
   assert.ok(strip.includes('idBadge(row.id)') && strip.includes('() => openItem(row.id)'), 'each leads with its number and opens its record');
 });
+
+test('a Needs you card names the work it blocks', () => {
+  assert.ok(PANEL.includes("if (card.blocks && card.blocks.length) facts.push('blocks ' + card.blocks.join(', '));"));
+});

@@ -221,6 +221,7 @@
       if (card.latest) node.append(make('p', 'work-card-detail', 'Latest: ' + card.latest));
       if (card.detail) node.append(make('p', 'work-card-detail', card.detail));
       const facts = [card.who, card.project];
+      if (card.blocks && card.blocks.length) facts.push('blocks ' + card.blocks.join(', '));
       if (card.kill) facts.push(card.kill);
       node.append(make('p', 'work-tree-facts', facts.join(' · ')));
       if (card.note) node.append(make('p', 'work-tree-facts', card.note));

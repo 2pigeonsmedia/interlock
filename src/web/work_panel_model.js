@@ -323,6 +323,8 @@
         project: project(row.project),
         askId: bound ? bound.ask_id : null,
         revision: bound && Number.isSafeInteger(bound.revision) ? bound.revision : null,
+        // The open work this one holds up, as the room derives it.
+        blocks: Array.isArray(row.blocks) ? row.blocks.filter(id => typeof id === 'string') : [],
       };
       if (bound) Object.assign(card, storyFields(bound, viewer));
       if (decision && killWord(row)) card.kill = killWord(row);
@@ -345,7 +347,9 @@
         ...storyFields(ask, viewer),
       });
     }
-    cards.sort((a, b) => a.at - b.at);
+    // What holds up other work comes first; the rest keep their age order.
+    const holding = card => (Array.isArray(card.blocks) && card.blocks.length > 0 ? 1 : 0);
+    cards.sort((a, b) => holding(b) - holding(a) || a.at - b.at);
     for (const card of cards) {
       card.age = ageText(card.at, now);
       card.when = stamp(card.at);

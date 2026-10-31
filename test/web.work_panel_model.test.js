@@ -1079,3 +1079,13 @@ test('a request for approval\'s card reads Approve even before its work item is 
   const plain = needsCards(brief, NOW, [{ ask_id: 9, asked_at: NOW, by: 'Scout', means: 'I order toner', project: 'ops' }]);
   assert.equal(plain.cards[0].approval, false, 'the control: a plain ask reads Yes and No');
 });
+
+test('Needs you: a card that blocks work says so and comes first; the rest keep their age order', () => {
+  const decision = (id, at, blocks) => ({ id, kind: 'decision', project: 'ops', title: id, asked_by: { name: 'Lark' },
+    ask_message_id: null, state: 'awaiting', updated_at: at, kill_state: 'unattacked', blocks });
+  const brief = { projects: [{ id: 'ops', display_name: 'Operations' }], open: [], decisions: [],
+    needs_me: [decision('D-1', NOW - 3 * HOUR, []), decision('D-2', NOW - HOUR, ['W-7', 'W-9']), decision('D-3', NOW - 2 * HOUR, undefined)] };
+  const { cards } = needsCards(brief, NOW, []);
+  assert.deepEqual(cards.map(card => [card.id, card.blocks]), [['D-2', ['W-7', 'W-9']], ['D-1', []], ['D-3', []]],
+    'the blocker first though newest; then oldest first; a row with no blocks field blocks nothing');
+});

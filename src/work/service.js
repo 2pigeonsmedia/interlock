@@ -375,6 +375,17 @@ function createWorkService(options) {
       .map(event => Object.assign(clone(event), { target_matches: event.target === item.target }));
   }
 
+  // What a waiting decision or request holds up (her ask, 2026-10-31): the
+  // open work linked to it either way, by id order. Derived on each read,
+  // never typed, so done work drops off by itself.
+  function blocksOf(draft, item) {
+    if (item.kind !== 'decision' && !item.approval) return [];
+    return draft.items.filter(other => other.id !== item.id && other.kind !== 'decision' && !other.approval &&
+      other.state !== 'done' && (other.links.includes(item.id) || item.links.includes(other.id) ||
+        item.parent === other.id || other.parent === item.id))
+      .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => other.id);
+  }
+
   function awaitingDecision(draft, item) {
     const linked = draft.items.filter(row => row.kind === 'decision' &&
       (item.links.includes(row.id) || row.parent === item.id || row.links.includes(item.id)));
@@ -1354,7 +1365,8 @@ function createWorkService(options) {
         withdrawn_count: draft.items.filter(item => item.project === project.id && item.kind === 'decision' &&
           item.withdrawn).length,
       })),
-      needs_me: mine.filter(item => needsMe(item, me)).map(item => row(draft, item)),
+      needs_me: mine.filter(item => needsMe(item, me))
+        .map(item => Object.assign(row(draft, item), { blocks: blocksOf(draft, item) })),
       reported_to_me: mine.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&
         item.answer.kind === 'reported' && item.answer.attributed_to.subject_id === me).map(item => row(draft, item)),
       open: items.filter(item => item.kind !== 'decision' && item.state !== 'done').map(item => row(draft, item)),
