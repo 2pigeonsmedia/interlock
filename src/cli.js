@@ -264,7 +264,7 @@ function commandOptions(command, args) {
   }
   if (options.connection === null || (command === 'say') !== (options.source !== null)) return null;
   // The project lens is for reading text; it never applies to a skip or to JSON.
-  if (options.project !== null && (options.json || options.skipToCurrent)) return null;
+  if (options.project !== null && options.skipToCurrent) return null;
   if ((options.means !== null || options.deliver !== null) && options.asksOf === null) return null;
   if (options.choice !== null && options.answers === null) return null;
   if (options.discusses !== null && options.answers !== null) return null;
@@ -831,6 +831,15 @@ async function projectView(fetcher, profile, messages, project) {
   return { shown, hidden: messages.length - shown.length };
 }
 
+/* The same lens for --json: the page with only the messages the text lens
+ * would print, saying which project and how many it hid (null when the
+ * stamps could not be read and every message is kept). */
+async function lensPage(fetcher, profile, page, project) {
+  if (project === null || project === undefined || !page || !Array.isArray(page.messages)) return page;
+  const view = await projectView(fetcher, profile, page.messages, project);
+  return Object.assign({}, page, { messages: view.shown, project, hidden: view.hidden });
+}
+
 async function renderAnnotated(stdout, fetcher, profile, messages, project = null) {
   if (project === null) {
     renderMessages(stdout, messages, await annotationNotes(fetcher, profile, messages));
@@ -1031,7 +1040,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
         throw new Error('malformed receipt');
       }
     } catch (_) {
-      if (parsed.json) line(io.stdout, JSON.stringify(page));
+      if (parsed.json) line(io.stdout, JSON.stringify(await lensPage(fetcher, profile, page, parsed.project)));
       else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
       line(io.stderr, 'interlock: messages were received, but delivery could not be confirmed; run the command again.');
       return EXIT_RUNTIME;
@@ -1040,14 +1049,14 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
   try {
     profiles.updateCursor(profile.name, profile.request_id, page.cursor);
   } catch (_) {
-    if (parsed.json) line(io.stdout, JSON.stringify(page));
+    if (parsed.json) line(io.stdout, JSON.stringify(await lensPage(fetcher, profile, page, parsed.project)));
     else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
     line(io.stderr, 'interlock: messages were received, but the local cursor could not be saved; run the command again.');
     return EXIT_RUNTIME;
   }
 
   if (parsed.json) {
-    line(io.stdout, JSON.stringify(page));
+    line(io.stdout, JSON.stringify(await lensPage(fetcher, profile, page, parsed.project)));
   } else if (page.messages.length > 0) {
     await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
   } else if (wait) {
@@ -1075,7 +1084,7 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
   }
 
   async function output(page) {
-    if (parsed.json) writeReadOutput(io.stdout, parsed, page);
+    if (parsed.json) writeReadOutput(io.stdout, parsed, await lensPage(fetcher, profile, page, parsed.project));
     else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
   }
 
@@ -1260,7 +1269,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
         throw new Error('malformed receipt');
       }
     } catch (_) {
-      if (parsed.json) line(io.stdout, JSON.stringify(page));
+      if (parsed.json) line(io.stdout, JSON.stringify(await lensPage(fetcher, profile, page, parsed.project)));
       else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
       line(io.stderr, 'interlock: messages were received, but delivery could not be confirmed; run the command again.');
       return EXIT_RUNTIME;
@@ -1268,7 +1277,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
   }
 
   if (parsed.json) {
-    line(io.stdout, JSON.stringify(page));
+    line(io.stdout, JSON.stringify(await lensPage(fetcher, profile, page, parsed.project)));
     return EXIT_OK;
   }
   if (page.messages.length > 0) await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);

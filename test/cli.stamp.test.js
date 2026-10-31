@@ -107,8 +107,22 @@ test('history --project prints that project, what addresses this AI and unstampe
   assert.match(other.stdout, /\n2 messages stamped for other projects not shown\.\n$/);
 });
 
-test('history --project takes a project id and refuses --json and --skip-to-current', async () => {
-  for (const argv of [['--project'], ['--project', 'Orchard'], ['--project', 'orchard', '--json'],
+test('history --project --json prints the same lens as JSON, saying what it hid', async () => {
+  for (const argv of [['--drain', '--project', 'orchard', '--json'], ['--project', 'orchard', '--json', '--drain'],
+    ['--project', 'orchard', '--json']]) {
+    const lens = await history(argv);
+    assert.equal(lens.code, EXIT_OK, argv.join(' ') + ': ' + lens.stderr);
+    const page = JSON.parse(lens.stdout.trim().split('\n').pop());
+    const text = await history(argv.filter(arg => arg !== '--json'));
+    assert.equal(text.code, EXIT_OK, text.stderr);
+    assert.deepEqual(page.messages.map(message => message.id), text.printed, argv.join(' ') + ': the same messages the text lens prints');
+    assert.equal(page.project, 'orchard', argv.join(' ') + ' => ' + lens.stdout.slice(0, 160));
+    assert.ok(Number.isSafeInteger(page.hidden), 'and how many it hid');
+  }
+});
+
+test('history --project takes a project id and refuses --skip-to-current', async () => {
+  for (const argv of [['--project'], ['--project', 'Orchard'],
     ['--project', 'orchard', '--skip-to-current'], ['--project', 'a', '--project', 'b']]) {
     const result = await history(argv);
     assert.equal(result.code, EXIT_USAGE, argv.join(' '));
