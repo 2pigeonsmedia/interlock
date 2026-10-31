@@ -263,6 +263,29 @@ test('a filed decision is asked in the room, and every answer on the record reac
       Object.assign({}, filing, { operation_id: uuid(), ask_message_id: 3 }), scout.token);
     assert.equal(extra.status, 400, extra.text);
     assert.equal((await messages()).length, n2, 'no phantom ask');
+    const said2 = await post(runtime, '/api/messages', { text: 'Archive it after April.' }, ana);
+    const n3 = (await messages()).length;
+    for (const [what, change] of [
+      ['no project', { project: undefined }],
+      ['an unknown link', { links: ['W-999'] }],
+      ['an unknown holder', { responsible: 'Nobody' }],
+      ['a citation that misquotes', { source_message: { message_id: said2.json.message.id, quote: 'not what was said' } }],
+    ]) {
+      const body = Object.assign({}, filing, { operation_id: uuid() }, change);
+      if (change.project === undefined && 'project' in change) delete body.project;
+      const refused = await aiPost(runtime, '/api/ai/work/items/create', body, scout.token);
+      assert.ok(refused.status >= 400, what + ' is refused: ' + refused.text);
+      assert.equal((await messages()).length, n3, what + ' posts nothing');
+    }
+
+    // A retry naming the addressee in another case is the same filing.
+    const lowerOp = uuid();
+    const lower = { operation_id: lowerOp, kind: 'decision', project: 'ops', title: 'Close Q3?', body: 'b', asked_of: 'ana' };
+    const lowerFirst = await aiPost(runtime, '/api/ai/work/items/create', lower, scout.token);
+    assert.equal(lowerFirst.status, 201, lowerFirst.text);
+    assert.equal(lowerFirst.json.item.asked_of.name, 'Ana', 'the room resolved the name');
+    const lowerAgain = await aiPost(runtime, '/api/ai/work/items/create', lower, scout.token);
+    assert.deepEqual([lowerAgain.status, lowerAgain.json.item.id], [200, lowerFirst.json.item.id], 'an identical retry replays');
 
     // A decision of one's own is recorded with no room ask: nobody to ask or ring.
     const count = (await messages()).length;

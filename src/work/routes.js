@@ -144,7 +144,7 @@ function createWorkRoutes(options) {
     return { subject_id: hits[0].subject_id, name: hits[0].name, kind: hits[0].kind, session: hits[0].session ?? null };
   }
 
-  async function mutate(op, actor, body, now = Date.now()) {
+  async function mutate(op, actor, body, now = Date.now(), dryRun = false) {
     const entry = MUTATIONS[op];
     if (!entry) return refusal(404, 'not-found');
     if (!plainObject(body)) return refusal(400, 'invalid-request');
@@ -176,7 +176,9 @@ function createWorkRoutes(options) {
       for (const key of REF_KEYS) {
         if (Object.prototype.hasOwnProperty.call(input, key)) input[key] = resolveRef(input[key], now);
       }
-      const result = work[entry[0]](actor, Object.assign(input, { raw_digest: rawDigest }));
+      const call = () => work[entry[0]](actor, Object.assign(input, { raw_digest: rawDigest }));
+      // A dry run resolves and validates exactly as the write would, then writes nothing.
+      const result = dryRun ? work.checkOnly(call) : call();
       return Object.freeze({ status: result.replayed === true ? 200 : entry[1], body: stripIds(result) });
     } catch (error) {
       return errorResponse(error);
