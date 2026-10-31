@@ -9,6 +9,7 @@ const ROOM_FACT_INTERVAL_MS = 2_000;
 // Project names change rarely; People re-reads them every fifth room-fact tick.
 const PEOPLE_PROJECTS_EVERY = 5;
 const HARD_REFRESH_GUIDANCE = 'Interlock may have been updated since this page loaded. Reload this page.';
+const TAB_OUT_OF_DATE = 'This tab is out of date: it was signed out by a sign-in elsewhere. Sign in again here to continue.';
 const UPDATED_GUIDANCE = 'Interlock was updated. Reload this page.';
 const loginView = document.querySelector('#login-view');
 const roomView = document.querySelector('#room-view');
@@ -533,7 +534,16 @@ async function freshOwnerStepUp() {
     error.code = 'passkey-unavailable';
     throw error;
   }
-  const begun = await ownerMutation('/api/elevation/options', {});
+  let begun;
+  try {
+    begun = await ownerMutation('/api/elevation/options', {});
+  } catch (error) {
+    // Only an owner or admin is offered a step-up, so a refusal here means this
+    // tab's session was replaced (a sign-in in another tab). A passkey cannot
+    // fix that: say so and offer sign-in in this tab, never a silent no-prompt.
+    if (error.status === 403 && error.code === 'not-authorized') throw tabOutOfDate();
+    throw error;
+  }
   const credential = await navigator.credentials.get({
     publicKey: passkeyRequestOptions(begun.options),
   });
@@ -1268,9 +1278,22 @@ async function loadSettingsParticipants(allEnded = false) {
   return result;
 }
 
+// Shared by the step-up and owner acts: a tab whose session was replaced by a
+// sign-in elsewhere is told so and sent to sign in, never left silent.
+function tabOutOfDate() {
+  forgetCsrf();
+  showLogin(TAB_OUT_OF_DATE);
+  const stale = new Error('tab-out-of-date');
+  stale.code = 'tab-out-of-date';
+  return stale;
+}
+
 async function freshAdminMutation(path, body) {
   try { return await ownerMutation(path, body); }
   catch (error) {
+    // The page offers owner acts to owners and admins only; a plain refusal of
+    // one from such a viewer means this tab's session is stale.
+    if (error.status === 403 && error.code === 'not-authorized' && viewerIsAdmin()) throw tabOutOfDate();
     if (error.code !== 'fresh-step-up-required') throw error;
     await freshOwnerStepUp();
     return await ownerMutation(path, body);
