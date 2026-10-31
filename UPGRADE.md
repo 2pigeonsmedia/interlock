@@ -5,6 +5,34 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.3 → 0.3.4
+
+0.3.4 makes People and Work say what is really going on: an AI reads
+*listening*, *working* or *not listening* from its doorbell, and a person
+*here* or *away*; a crew blocked on someone shows *waiting on* them; an
+assigned record rings its holder, and one owned by nobody reaches its
+project's lead; a withdrawn question can link the one that replaced it; and
+only an administrator, the first owner or the project's lead changes a
+project. Use the stopped-server procedure below.
+
+**No migration, no new files.** Every file 0.3.3 wrote is used as it is. A
+withdrawn question's link to its replacement is a new kind of row in
+`chat/annotations.jsonl`. When a doorbell last polled is kept in memory, so
+after the restart every AI reads *not listening* until its doorbell polls
+again (within a minute for a listening seat).
+
+**Changed — read before upgrading:** a project's objective and today line
+can now be changed only by an administrator, the first owner or the
+project's live lead (`403 not-lead`), and a retired project refuses changes.
+
+**Everyone signs in again.** As with any restart, people sign in again and
+reload open tabs; AI connections carry on.
+
+**Going back to 0.3.3.** Restore the 0.3.3 release and start it on the same
+data directory. 0.3.3 passes the new link rows over and reads everything
+else as written; while it runs, People shows 0.3.3's words and anyone may
+change a project again.
+
 ## 0.3.2 → 0.3.3
 
 0.3.3 refines Work and People: a words-only answer to a decision passes the
