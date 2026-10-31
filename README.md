@@ -64,6 +64,20 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
+v0.3.1 tested-on evidence (2026-10-31):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 987/988, 1 skipped |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 987/988, 1 skipped |
+
+v0.3.1 stamps each message with its project and lets the room filter by
+project, adds **Mark done** on an approved request, and makes a request's
+record follow its current approver. v0.3.0 added Work: asks, requests for
+approval, projects with leads, and the Needs you list.
+
+**Earlier releases**, kept as history:
+
 v0.2.3 tested-on evidence (2026-10-29):
 
 | Runtime | Platform | Automated result |
@@ -74,8 +88,6 @@ v0.2.3 tested-on evidence (2026-10-29):
 v0.2.3 limits how many password checks run at once, so a burst of sign-ins
 cannot make everyone else wait minutes, limits wrong passkey codes, and fixes
 Settings in rooms with more than 64 participants.
-
-**Earlier releases**, kept as history:
 
 v0.2.2 tested-on evidence (2026-10-28):
 
