@@ -206,10 +206,15 @@ test('hosted mode: Host is pinned to the hosted origin, the setup code gates fir
     const lastQueuedMs = Math.max(...queued.map(item => item.ms));
     assert.ok(lastQueuedMs >= (queued.length - 1) * 1_000,
       `queued wrong codes are answered one second apart (${queued.length} took ${Math.round(lastQueuedMs)} ms)`);
-    // Measured against the queue's own wait, not the wall clock: a slow machine
+    // Measured against the queue's own slots, not the wall clock: a slow machine
     // slows the password hash, while the queued wrong codes keep their slots.
-    assert.ok(correctDoneMs < lastQueuedMs / 2,
-      `the correct code never waits behind wrong ones (${Math.round(correctDoneMs)} ms; queue ${Math.round(lastQueuedMs)} ms)`);
+    // Answered before the second queued wrong code, the correct code waited
+    // behind at most one; a hash of up to about a second and a half still fits.
+    const queuedMs = queued.map(item => item.ms).sort((a, b) => a - b);
+    assert.ok(queuedMs.length >= 2, 'ARRANGEMENT: at least two wrong codes were queued');
+    assert.ok(correctDoneMs < queuedMs[1],
+      `the correct code never waits behind wrong ones (${Math.round(correctDoneMs)} ms; ` +
+      `second queued answer ${Math.round(queuedMs[1])} ms)`);
     assert.deepEqual(wrongCounts, Array.from({ length: 17 }, (_, i) => i + 1),
       'the running count increases by one for every wrong code, busy ones included');
 

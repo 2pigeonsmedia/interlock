@@ -696,6 +696,10 @@ function createFirstOwnerHandler(options) {
     });
     if (!signedIn || signedIn.ok !== true || typeof signedIn.set_cookie !== 'string' ||
         typeof signedIn.csrf_token !== 'string') {
+      if (hostedMode && typeof hostedMode.signInBusy === 'function' &&
+          typeof house.login.busyRefusals === 'function') {
+        hostedMode.signInBusy(house.login.busyRefusals());
+      }
       return sendJson(request, response, 401, { ok: false, error: 'sign-in-failed' });
     }
     const user = publicUser(house.whoami({
@@ -897,7 +901,7 @@ function createFirstOwnerHandler(options) {
   // The member, signed in, redeems that code; it begins their first passkey.
   // Without a valid code no ceremony begins.
   const CODE_REFUSALS = Object.freeze(['code-invalid', 'code-used', 'code-expired', 'passkey-exists',
-    'sign-in-required']);
+    'sign-in-required', 'code-limited']);
   async function accountPasskeyBegin(request, response, body) {
     if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
     const input = closedObject(body, ['code']);

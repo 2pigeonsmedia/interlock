@@ -9,6 +9,7 @@ const Annotations = require('./annotations.js');
 
 const MAX_WAIT_MS = 45_000;
 const DEFAULT_ASK_PROJECT = 'ops';
+const PARTICIPANT_STATE_BATCH = 64;   // the store's per-call limit
 const AI_PRESENCE_WINDOW_MS = 5 * 60 * 1000;
 const OPTION_KEYS = Object.freeze(['store', 'participants']);
 const WAIT_OPTION_KEYS = Object.freeze(['signal', 'timeoutMs']);
@@ -117,12 +118,23 @@ function createChatService(options) {
     if (closed) throw fail('service-closed');
   }
 
+  // The store reads at most 64 participants per call; a room can have more,
+  // so state is read in batches.
+  async function stateOf(subjectIds) {
+    if (!Array.isArray(subjectIds)) return await store.participantState(subjectIds);
+    const states = [];
+    for (let start = 0; start < subjectIds.length; start += PARTICIPANT_STATE_BATCH) {
+      states.push(...await store.participantState(subjectIds.slice(start, start + PARTICIPANT_STATE_BATCH)));
+    }
+    return states;
+  }
+
   async function participantSnapshot(now) {
     const roster = input.participants({ now });
     if (!Array.isArray(roster) || roster.some(row => !validParticipantRow(row))) {
       throw fail('invalid-participants');
     }
-    const states = await store.participantState(roster.map(row => row.subject_id));
+    const states = await stateOf(roster.map(row => row.subject_id));
     const stateById = new Map(states.map(row => [row.subject_id, row]));
     return Object.freeze(roster.map(row => {
       const state = stateById.get(row.subject_id);
@@ -586,7 +598,7 @@ function createChatService(options) {
 
   async function participantState(subjectIds) {
     requireOpen();
-    return await store.participantState(subjectIds);
+    return await stateOf(subjectIds);
   }
 
   async function readDeliveryChanges(query) {

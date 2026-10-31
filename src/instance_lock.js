@@ -89,10 +89,11 @@ function readRecord(lockPath) {
 // Windows refuses to open a file that another process is deleting or renaming,
 // with EPERM, EBUSY or EACCES rather than ENOENT or EEXIST. On the lock path
 // that is a contender mid-release, not a fault: it surfaces as 'lock-busy' so a
-// caller that already waits for a held lock waits for this too.
+// caller that already waits for a held lock waits for this too. Other systems
+// have no such refusal, so there these codes are real faults, thrown as they are.
 function sharingViolation(error) {
   const code = error && error.code;
-  return code === 'EPERM' || code === 'EBUSY' || (code === 'EACCES' && process.platform === 'win32');
+  return process.platform === 'win32' && (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES');
 }
 
 function lockBusy(cause) {

@@ -172,3 +172,15 @@ test('a member whose sign-in is too old is told to sign in again, and offered it
   el('#add-passkey-signin').click(); // the sign-out it starts never answers here
   assert.ok(page.fetched.includes('/api/logout'), 'which signs out first, so the next sign-in is fresh');
 });
+
+test('a member past the code limit is told to wait, and not offered to sign in again', async () => {
+  const { page, el } = loadPage();
+  page.ownerMutation = async () => {
+    throw Object.assign(new Error('code-limited'), { code: 'code-limited', status: 409 });
+  };
+  await el('#add-passkey-button').click();
+  await el('#add-passkey-form').dispatch('submit', { preventDefault() {} });
+  assert.equal(el('#add-passkey-status').textContent,
+    'Too many codes were not accepted. Wait 15 minutes, then try again.');
+  assert.equal(el('#add-passkey-signin').hidden, true, 'signing in again would not help');
+});

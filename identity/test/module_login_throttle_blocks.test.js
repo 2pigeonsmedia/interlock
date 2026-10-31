@@ -14,6 +14,11 @@ const NOW = 1_000_000;
 const BLOCK_THRESHOLD = 25;     // failures per /48 while under pressure
 const MAP_CAP = 4096;           // a primary map is full at this many entries
 
+// The in-flight caps stop a held burst long before a map could fill. These
+// tests hold bursts of thousands to prove the layer underneath them, so they
+// lift the caps out of the way.
+const UNCAPPED = Object.freeze({ blockInflight: 1_000_000, maxInflight: 1_000_000 });
+
 function attempt(throttle, source, account, now = NOW) {
   const args = { source, account, now };
   const decision = throttle.check(args);
@@ -66,7 +71,7 @@ test('without pressure the block limit never applies', () => {
 
 test('under pressure, sign-ins still in their password check count against their block', () => {
   const { createLoginThrottle } = F.load('login.js');
-  const throttle = createLoginThrottle({});
+  const throttle = createLoginThrottle(UNCAPPED);
   for (let i = 0; i < 4096; i += 1) attempt(throttle, ownBlock(i), `filler-${i}`);
   assert.equal(throttle.health().account_entries, MAP_CAP, 'ARRANGEMENT: the account map is full');
   const releases = [];
@@ -84,7 +89,7 @@ test('under pressure, sign-ins still in their password check count against their
 
 test('a burst from one /48 held in its password checks cannot fill the throttle before it records', () => {
   const { createLoginThrottle } = F.load('login.js');
-  const throttle = createLoginThrottle({});
+  const throttle = createLoginThrottle(UNCAPPED);
   const BURST = 20_480;
   const admitted = [];
   let refused = 0;
@@ -126,7 +131,7 @@ for (const [label, sourceOf, accountOf] of [
 ]) {
   test(`a held burst from one /48 with ${label} stops at the map's size`, () => {
     const { createLoginThrottle } = F.load('login.js');
-    const throttle = createLoginThrottle({});
+    const throttle = createLoginThrottle(UNCAPPED);
     const BURST = 15_000;
     const releases = [];
     for (let i = 0; i < BURST; i += 1) {

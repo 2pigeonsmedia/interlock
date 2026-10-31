@@ -519,3 +519,18 @@ test('the doorbell wait strictly below the floor of a cleared transcript is answ
   assert.equal(result.first_id, 4);
   await chat.close();
 });
+
+test('a room with more than 64 participants lists them all and still delivers', async () => {
+  const many = [ROSTER[0]];
+  for (let i = 1; i <= 70; i += 1) {
+    many.push(Object.freeze({
+      subject_id: `44444444-4444-4444-8444-${String(i).padStart(12, '0')}`,
+      name: `Seat${i}`, kind: 'seat', created_at: Date.now(),
+    }));
+  }
+  const chat = service(many);
+  const listed = await chat.listParticipants();
+  assert.equal(listed.length, 71, 'every participant is listed');
+  const saved = await chat.append({ text: 'hello everyone' }, ACTOR);
+  assert.ok(saved, 'a message is still delivered in a room this size');
+});

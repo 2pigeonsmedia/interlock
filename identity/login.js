@@ -51,6 +51,16 @@ const THROTTLE_OVERFLOW_KEYS = 16384;
 // Failed sign-ins counted per IPv6 /48, the block one site or tunnel account is
 // routinely given. The limit applies only while a primary map is full.
 const THROTTLE_BLOCK_THRESHOLD = 25;
+// Password checks are expensive and share a small thread pool. At most 16 run
+// or wait at once for one IPv6 /48; past that a sign-in from the block is
+// refused at once. At most 32 run at once in total; past that a sign-in waits
+// its turn in a short line instead of being refused, so a few blocks holding
+// every check cannot keep everyone else out. The line is bounded in length
+// and in time. These apply always, not only under pressure, and record nothing.
+const THROTTLE_BLOCK_INFLIGHT = 16;
+const THROTTLE_MAX_INFLIGHT = 32;
+const THROTTLE_MAX_WAITING = 256;
+const THROTTLE_QUEUE_WAIT_MS = 10_000;
 
 function isPlainObject(o) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
@@ -108,6 +118,14 @@ function createLoginThrottle(opts) {
   const decayMs = Number.isSafeInteger(o.decayMs) && o.decayMs > 0 ? o.decayMs : THROTTLE_DECAY_MS;
   const blockThreshold = Number.isSafeInteger(o.blockThreshold) && o.blockThreshold > 0
     ? o.blockThreshold : THROTTLE_BLOCK_THRESHOLD;
+  const blockInflight = Number.isSafeInteger(o.blockInflight) && o.blockInflight > 0
+    ? o.blockInflight : THROTTLE_BLOCK_INFLIGHT;
+  const maxInflight = Number.isSafeInteger(o.maxInflight) && o.maxInflight > 0
+    ? o.maxInflight : THROTTLE_MAX_INFLIGHT;
+  const maxWaiting = Number.isSafeInteger(o.maxWaiting) && o.maxWaiting > 0
+    ? o.maxWaiting : THROTTLE_MAX_WAITING;
+  const queueWaitMs = Number.isSafeInteger(o.queueWaitMs) && o.queueWaitMs > 0
+    ? o.queueWaitMs : THROTTLE_QUEUE_WAIT_MS;
 
   // Fresh per process, never persisted, never exposed. Its whole job is to make
   // the stored keys unusable to anyone who reads the map.
@@ -137,6 +155,11 @@ function createLoginThrottle(opts) {
   // unseen block is not counted, which leaves the other dimensions as they are.
   const blocks = new Map();
   const inflightBlock = new Map();
+  // Password checks running now, and the attempts waiting for one, oldest
+  // first. A waiting attempt already counts against its address, name and
+  // block, so waiting is no way around those limits.
+  let inflightTotal = 0;
+  const waiting = [];
 
   function keyOf(value) {
     return crypto.createHmac('sha256', HMAC_KEY).update(String(value)).digest('hex');
@@ -221,35 +244,83 @@ function createLoginThrottle(opts) {
     const ds = delayFor(countFor(source, sk, now) + (inflightSource.get(sk) || 0));
     const da = delayFor(countFor(account, ak, now) + (inflightAccount.get(ak) || 0));
     const db = blockDelay(bk, now);
-    return { now, sk, ak, bk, ds, da, db };
+    // Capacity, not a failure. A block at its cap, or a full line, is refused
+    // after the base delay, and recordThrottled() records nothing for it. When
+    // every check is taken, or others are already waiting, the attempt waits.
+    const busy = inflightTotal >= maxInflight || waiting.length > 0;
+    const full = (bk !== null && (inflightBlock.get(bk) || 0) >= blockInflight) ||
+      (busy && waiting.length >= maxWaiting);
+    const dc = full ? baseDelayMs : 0;
+    return { now, sk, ak, bk, ds, da, db, dc, busy };
   }
 
-  return Object.freeze({
-    check(args) {
-      const { ds, da, db } = delays(isPlainObject(args) ? args : {});
-      const delay_ms = Math.max(ds, da, db);  // all checked; the largest controls
-      return Object.freeze({ allowed: delay_ms === 0, delay_ms, retry_after_ms: delay_ms });
-    },
-    // Marks one attempt as in flight. Returns the release function; calling it
-    // more than once releases once.
-    begin(args) {
-      const a = isPlainObject(args) ? args : {};
-      const sk = sourceKey(a.source);
-      const ak = accountKey(a.account);
-      const bk = blockKey(a.source);
-      inflightSource.set(sk, (inflightSource.get(sk) || 0) + 1);
-      inflightAccount.set(ak, (inflightAccount.get(ak) || 0) + 1);
-      if (bk !== null) inflightBlock.set(bk, (inflightBlock.get(bk) || 0) + 1);
-      let released = false;
-      return function release() {
+  // Counts one attempt against its address, name and block, and against the
+  // running checks once it holds one. release() undoes both and hands a freed
+  // check to the oldest waiting attempt.
+  function track(a, holdsCheck) {
+    const sk = sourceKey(a.source);
+    const ak = accountKey(a.account);
+    const bk = blockKey(a.source);
+    inflightSource.set(sk, (inflightSource.get(sk) || 0) + 1);
+    inflightAccount.set(ak, (inflightAccount.get(ak) || 0) + 1);
+    if (bk !== null) inflightBlock.set(bk, (inflightBlock.get(bk) || 0) + 1);
+    let holds = holdsCheck;
+    if (holds) inflightTotal += 1;
+    let released = false;
+    return {
+      take() { if (!holds && !released) { holds = true; inflightTotal += 1; } },
+      release() {
         if (released) return;
         released = true;
+        if (holds) inflightTotal -= 1;
         for (const [map, k] of [[inflightSource, sk], [inflightAccount, ak], [inflightBlock, bk]]) {
           if (k === null) continue;
           const n = (map.get(k) || 0) - 1;
           if (n > 0) map.set(k, n); else map.delete(k);
         }
-      };
+        admitWaiting();
+      },
+    };
+  }
+  function admitWaiting() {
+    while (inflightTotal < maxInflight && waiting.length > 0) {
+      const next = waiting.shift();
+      clearTimeout(next.timer);
+      next.handle.take();
+      next.resolve(next.handle.release);
+    }
+  }
+
+  return Object.freeze({
+    check(args) {
+      const { ds, da, db, dc, busy } = delays(isPlainObject(args) ? args : {});
+      const delay_ms = Math.max(ds, da, db, dc);  // all checked; the largest controls
+      const wait = delay_ms === 0 && busy;
+      return Object.freeze({
+        allowed: delay_ms === 0 && !wait, delay_ms, retry_after_ms: delay_ms, wait, capacity: dc > 0,
+      });
+    },
+    // Marks one attempt as in flight. Returns the release function; calling it
+    // more than once releases once.
+    begin(args) {
+      return track(isPlainObject(args) ? args : {}, true).release;
+    },
+    // For an attempt check() told to wait: it joins the line, counted against
+    // its address, name and block at once. Resolves to its release function
+    // when a check is free, or to null after the bounded wait.
+    wait(args) {
+      const handle = track(isPlainObject(args) ? args : {}, false);
+      return new Promise(resolve => {
+        const entry = { handle, resolve, timer: null };
+        entry.timer = setTimeout(() => {
+          const at = waiting.indexOf(entry);
+          if (at >= 0) waiting.splice(at, 1);
+          handle.release();
+          resolve(null);
+        }, queueWaitMs);
+        waiting.push(entry);
+        admitWaiting();
+      });
     },
     recordFailure(args) {
       const a = isPlainObject(args) ? args : {};
@@ -287,6 +358,11 @@ function createLoginThrottle(opts) {
         cap_overflow_keys: THROTTLE_OVERFLOW_KEYS,
         inflight_source_entries: inflightSource.size,
         inflight_account_entries: inflightAccount.size,
+        inflight_total: inflightTotal,
+        waiting: waiting.length,
+        cap_inflight: maxInflight,
+        cap_block_inflight: blockInflight,
+        cap_waiting: maxWaiting,
         block_entries: blocks.size,
         block_threshold: blockThreshold,
         under_pressure: underPressure(),
@@ -333,6 +409,7 @@ function createLoginService(opts) {
   }
   const throttle = harness && opts.throttle ? opts.throttle : createLoginThrottle({});
   const sleep = harness && typeof opts.sleep === 'function' ? opts.sleep : defaultSleep;
+  let busyRefusals = 0;
 
   // An operation-local snapshot of the exact raw verifier, taken immediately
   // before the async KDF and compared immediately after. Never logged, returned
@@ -396,15 +473,25 @@ function createLoginService(opts) {
     // recorded only against what throttled it: its name was never checked.
     const decision = throttle.check({ source, account: name, now });
     if (decision && decision.delay_ms > 0) {
+      if (decision.capacity === true) busyRefusals += 1;
       await sleep(decision.delay_ms);
       if (typeof throttle.recordThrottled === 'function') throttle.recordThrottled({ source, account: name, now });
       return INVALID;
     }
 
     // Counted as in flight from here until this attempt returns, synchronously
-    // after the passing check and before the first await.
-    const release = typeof throttle.begin === 'function'
-      ? throttle.begin({ source, account: name, now }) : null;
+    // after the passing check and before the first await. When every password
+    // check is taken it waits its turn first, already counted.
+    let release = null;
+    if (decision && decision.wait === true && typeof throttle.wait === 'function') {
+      release = await throttle.wait({ source, account: name, now });
+      if (release === null) {
+        busyRefusals += 1;
+        return INVALID;
+      }
+    } else if (typeof throttle.begin === 'function') {
+      release = throttle.begin({ source, account: name, now });
+    }
     try {
       return await verifiedLogin(name, password, source, prior_cookie_header, now);
     } finally {
@@ -480,7 +567,11 @@ function createLoginService(opts) {
     });
   }
 
-  return Object.freeze({ login });
+  // Sign-ins refused because every password check was taken, for the host to
+  // report. A count only: nothing about who was refused.
+  function busyRefusalCount() { return busyRefusals; }
+
+  return Object.freeze({ login, busyRefusals: busyRefusalCount });
 }
 
 module.exports = { createLoginService, createLoginThrottle, INPUT_LIMITS };

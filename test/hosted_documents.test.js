@@ -129,14 +129,15 @@ test('HOSTING.md says what throttled sign-in looks like and what clears it', () 
   assertSentence(HOSTING,
     'IPv6 is counted per /48 block as well, so failures arriving over time take several hundred separate /48 blocks.');
   assertSentence(HOSTING,
-    'A very large burst from one /48 can still fill them: tens of thousands of attempts in flight at once, ' +
-    'before their failures are recorded.');
-  assertSentence(HOSTING, 'A later release will count attempts in flight.');
+    'At most 32 run at once in total; past that, a sign-in waits its turn for up to ten seconds.');
+  assert.match(HOSTING, /interlock: sign-in refused, too many sign-ins at once \(N so far\)/);
+  assert.doesNotMatch(HOSTING, /works on retry/);
+  assert.doesNotMatch(HOSTING, /later release will count attempts in flight/);
   assertSentence(HOSTING,
     'To keep a guessing crowd from reaching Interlock at all, add a rate limiting rule for the path `/api/login` ' +
     'in Cloudflare\'s WAF settings; Interlock\'s own throttle stays in place behind it.');
   assertSentence(HOSTING,
-    'The throttle then fails closed: nearly every sign-in waits 30 seconds and is refused.');
+    'When the tables do fill, the throttle fails closed: nearly every sign-in waits 30 seconds and is refused.');
   assertSentence(HOSTING,
     'It clears once fifteen minutes pass with no attempt, or when you restart the service.');
 });

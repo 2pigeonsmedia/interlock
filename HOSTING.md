@@ -277,11 +277,13 @@ If everyone, the owner included, is refused at once, many addresses are probably
 guessing together. One address cannot cause this, but the throttle's tables are
 bounded, and a few thousand distinct IPv4 addresses failing within fifteen
 minutes can fill them. IPv6 is counted per /48 block as well, so failures
-arriving over time take several hundred separate /48 blocks. A very large burst
-from one /48 can still fill them: tens of thousands of attempts in flight at
-once, before their failures are recorded. A later release will count attempts in
-flight. The throttle then fails
-closed: nearly every sign-in waits 30 seconds and is refused. Sessions already
+arriving over time take several hundred separate /48 blocks. At most 16
+password checks run or wait at once for one /48, and a sign-in past that is
+refused at once. At most 32 run at once in total; past that, a sign-in waits its
+turn for up to ten seconds. A flood from many blocks can still fill that line,
+and then most sign-ins are refused while it lasts; the console then shows
+`interlock: sign-in refused, too many sign-ins at once (N so far)`. When the
+tables do fill, the throttle fails closed: nearly every sign-in waits 30 seconds and is refused. Sessions already
 signed in keep working. It clears once fifteen minutes pass with no attempt, or
 when you restart the service. To keep a guessing crowd from reaching Interlock
 at all, add a rate limiting rule for the path `/api/login` in Cloudflare's WAF

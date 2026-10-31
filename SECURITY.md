@@ -82,10 +82,17 @@ no others.
   IPv6 failures are also counted per /48 block. While a table is full, a block
   with 25 failures waits and is refused as a whole, so failures arriving over
   time fill the tables only from several hundred separate /48 blocks (about
-  660, measured). A very large burst from one /48 can still fill them: tens of
-  thousands of attempts in flight at once, before their failures are recorded,
-  are not held back by that limit. A later release will count attempts in
-  flight. The throttle then cannot tell a
+  660, measured). Attempts still being checked count toward a full table. At
+  most 16 password checks run or wait at once for one /48; past that, a
+  sign-in from the block is refused at once and counted against nothing. At
+  most 32 run at once in total; past that, a sign-in waits its turn in a line
+  of at most 256, for at most ten seconds, and is refused if its turn does not
+  come. A few blocks holding every check therefore delay other sign-ins by
+  about the time those checks take, rather than refusing them. A flood from
+  many blocks at once can still fill the line: then most sign-ins, the
+  owner's included, are refused and look like a wrong password until the
+  flood stops, and the server prints a line saying so at most once a second.
+  When the tables do fill, the throttle cannot tell a
   new address or account from the attackers' and fails closed: nearly every
   sign-in, the owner's included, waits 30 seconds and is refused. Sessions
   already signed in keep working. Sign-in recovers once fifteen minutes pass
@@ -152,7 +159,9 @@ no others.
   member who has none; it is stored as a digest, works once within 24 hours,
   and is redeemed only from that member's own session, signed in with their
   password in the last ten minutes, so it needs both the code and the
-  member's password. An administrator can do everything the owner can,
+  member's password. A refused code changes nothing on disk. After five
+  refused codes, no code is checked for that member, the right one included,
+  until fifteen minutes after the first of them. An administrator can do everything the owner can,
   except grant or remove administrator rights. Nobody, the first owner
   included, can remove, demote or suspend the first owner, or reset or revoke
   their password or passkeys. Interlock identifies the first owner from the

@@ -251,82 +251,101 @@ function refuseOnLockPath(lockPath, method, code, times, before = null) {
   return state;
 }
 
+// Runs fn as if on the named platform: the lock code asks process.platform at
+// the moment it classifies an error, so both answers are testable anywhere.
+function asPlatform(platform, fn) {
+  const real = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(process, 'platform', real);
+  }
+}
+
+function outcomeOf(fn) {
+  try { return fn(); } catch (error) { return error; }
+}
+
 // A refused read happens once, before the lock is taken: after that the owner
 // reads its own lock file, which no contender is deleting.
 for (const [label, method, code, times, viaExisting] of [
   ['open refused with EPERM', 'openSync', 'EPERM', 3, false],
   ['open refused with EBUSY', 'openSync', 'EBUSY', 3, false],
+  ['open refused with EACCES', 'openSync', 'EACCES', 3, false],
   ['read of a held lock refused with EPERM', 'readFileSync', 'EPERM', 1, true],
 ]) {
-  test(`a lock another process is releasing is waited for (${label})`, () => {
-    const world = fixture();
-    world.store.createUnadmitted(world.body);
-    admit(world);
-    const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'instance.lock');
-    const fault = refuseOnLockPath(lockPath, method, code, times, viaExisting);
-    let updated;
-    try {
-      updated = world.store.updateCursor('Marlow', world.body.request_id, 7);
-    } finally {
-      fault.restore();
+  test(`on Windows a lock another process is releasing is waited for; elsewhere it is an error (${label})`, () => {
+    for (const platform of ['win32', 'linux']) {
+      const world = fixture();
+      world.store.createUnadmitted(world.body);
+      admit(world);
+      const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'instance.lock');
+      const fault = refuseOnLockPath(lockPath, method, code, times, viaExisting);
+      let outcome;
+      try {
+        outcome = asPlatform(platform, () => outcomeOf(() =>
+          world.store.updateCursor('Marlow', world.body.request_id, 7)));
+      } finally {
+        fault.restore();
+      }
+      if (platform === 'win32') {
+        assert.equal(fault.refused, times, `ARRANGEMENT: the lock path refused ${times} time(s) with ${code}`);
+        assert.equal(outcome.cursor, 7, 'on Windows the cursor commit waited and then succeeded');
+        assert.equal(fs.existsSync(lockPath), false, 'and released its lock');
+      } else {
+        assert.equal(fault.refused, 1, 'ARRANGEMENT: the first attempt was refused');
+        assert.equal(outcome.code, code, 'elsewhere the error is reported at once, as it is');
+      }
     }
-    assert.equal(fault.refused, times, `ARRANGEMENT: the lock path refused ${times} time(s) with ${code}`);
-    assert.equal(updated.cursor, 7, 'the cursor commit waited and then succeeded');
-    assert.equal(fs.existsSync(lockPath), false, 'and released its lock');
   });
 }
 
-test('a reader lease waits for a reader lock another process is releasing', () => {
-  const world = fixture();
-  const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'reader', 'instance.lock');
-  const fault = refuseOnLockPath(lockPath, 'openSync', 'EPERM', 3);
-  let lease;
-  try {
-    lease = world.store.acquireReadLease('Marlow');
-  } finally {
-    fault.restore();
-  }
-  assert.equal(fault.refused, 3, 'ARRANGEMENT: the reader lock path refused three times');
-  assert.equal(lease.owner.pid, process.pid);
-  lease.release();
-});
-
-test('EACCES on the lock path is a wait only on Windows; elsewhere it is a permission error', () => {
-  const world = fixture();
-  world.store.createUnadmitted(world.body);
-  admit(world);
-  const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'instance.lock');
-  const fault = refuseOnLockPath(lockPath, 'openSync', 'EACCES', 3);
-  let outcome;
-  try {
-    outcome = world.store.updateCursor('Marlow', world.body.request_id, 7);
-  } catch (error) {
-    outcome = error;
-  } finally {
-    fault.restore();
-  }
-  if (process.platform === 'win32') {
-    assert.equal(fault.refused, 3, 'ARRANGEMENT: the lock path refused three times');
-    assert.equal(outcome.cursor, 7, 'on Windows the commit waited and succeeded');
-  } else {
-    assert.equal(fault.refused, 1, 'ARRANGEMENT: the first open was refused');
-    assert.equal(outcome.code, 'EACCES', 'elsewhere the permission error is reported at once');
+test('on Windows a reader lease waits for a reader lock being released; elsewhere it is an error', () => {
+  for (const platform of ['win32', 'linux']) {
+    const world = fixture();
+    const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'reader', 'instance.lock');
+    const fault = refuseOnLockPath(lockPath, 'openSync', 'EPERM', 3);
+    let outcome;
+    try {
+      outcome = asPlatform(platform, () => outcomeOf(() => world.store.acquireReadLease('Marlow')));
+    } finally {
+      fault.restore();
+    }
+    if (platform === 'win32') {
+      assert.equal(fault.refused, 3, 'ARRANGEMENT: the reader lock path refused three times');
+      assert.equal(outcome.owner.pid, process.pid, 'on Windows the lease waited and was granted');
+      outcome.release();
+    } else {
+      assert.equal(fault.refused, 1, 'ARRANGEMENT: the first attempt was refused');
+      assert.equal(outcome.code, 'EPERM', 'elsewhere the error is reported at once');
+    }
   }
 });
 
-test('a sharing violation that outlasts the wait is reported as busy with its cause', () => {
+test('a sharing violation that outlasts the wait is reported as busy with its cause, for both locks', () => {
   const world = fixture();
   world.store.createUnadmitted(world.body);
   admit(world);
-  const lockPath = path.join(world.connectionDir, '.profile-locks', 'marlow', 'instance.lock');
-  const fault = refuseOnLockPath(lockPath, 'openSync', 'EPERM', Infinity);
+  const profileLock = path.join(world.connectionDir, '.profile-locks', 'marlow', 'instance.lock');
+  let fault = refuseOnLockPath(profileLock, 'openSync', 'EPERM', Infinity);
   try {
-    assert.throws(() => world.store.updateCursor('Marlow', world.body.request_id, 7), error =>
-      error && error.code === 'profile-busy' && error.cause && error.cause.code === 'EPERM');
+    asPlatform('win32', () => assert.throws(() => world.store.updateCursor('Marlow', world.body.request_id, 7),
+      error => error && error.code === 'profile-busy' && error.cause && error.cause.code === 'EPERM'));
   } finally {
     fault.restore();
   }
-  assert.ok(fault.refused > 1, `ARRANGEMENT: the wait retried (${fault.refused} refusals)`);
+  assert.ok(fault.refused > 1, `ARRANGEMENT: the profile lock wait retried (${fault.refused} refusals)`);
+
+  const readerLock = path.join(world.connectionDir, '.profile-locks', 'marlow', 'reader', 'instance.lock');
+  fault = refuseOnLockPath(readerLock, 'openSync', 'EBUSY', Infinity);
+  try {
+    asPlatform('win32', () => assert.throws(() => world.store.acquireReadLease('Marlow'),
+      error => error && error.code === 'reader-busy' && error.cause && error.cause.code === 'EBUSY'));
+  } finally {
+    fault.restore();
+  }
+  assert.ok(fault.refused > 1, `ARRANGEMENT: the reader lock wait retried (${fault.refused} refusals)`);
 });
 
 test('on Windows, a lock file another process holds exclusively is waited for', {

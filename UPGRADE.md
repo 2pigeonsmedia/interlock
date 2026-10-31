@@ -5,6 +5,24 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.2.2 → 0.2.3
+
+**No migration.** The data directory is used as it is; identity state stays at
+version 2 and no stored format changes, so going back to 0.2.2 needs nothing
+special. Use the stopped-server procedure below as for any release.
+
+**Sign-in under load.** At most 16 password checks run or wait at once for one
+IPv6 /48, and at most 32 run at once in total. Past the total, a sign-in waits
+its turn for up to ten seconds instead of being refused. A hosted room prints
+`interlock: sign-in refused, too many sign-ins at once (N so far)` while
+sign-ins are refused for capacity; see [`HOSTING.md`](HOSTING.md).
+
+**Passkey codes.** After five refused codes, no code is checked for that member
+until fifteen minutes after the first of them, and **Add a passkey** says to
+wait. A refused code no longer rewrites the identity state.
+
+**Reload open room tabs after upgrading.**
+
 ## 0.2.1 → 0.2.2
 
 **Passkey codes.** A member without a passkey can now add one. In Settings the
