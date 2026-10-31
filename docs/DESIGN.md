@@ -158,13 +158,15 @@ Owner-only actions stay disabled for signed-out people and non-owners.
 </article>
 
 <!-- an ask on its message, before .message-actions, as room.js builds it;
-     here as Ana sees an open ask addressed to her -->
+     here as Ana sees a revised request for approval routed to her -->
 <div class="ask-chip" data-ask-state="open">
-  <span class="ask-line">Ask of Ana · open 5m</span>
+  <span class="ask-line">Ask of Ana · open 5m · Finance App</span>
+  <span class="ask-turn">your turn</span>
+  <span class="ask-latest">Latest: Scout revised the ask (#44)</span>
+  <s class="ask-means ask-revised">A yes meant: I merge the candidate</s>
   <span class="ask-means">A yes means: I merge the candidate to main and nothing else</span>
-  <button type="button" class="quiet-action" aria-pressed="false" aria-label="Yes to ask #42">Yes</button>
-  <button type="button" class="quiet-action" aria-pressed="false" aria-label="No to ask #42">No</button>
-  <button type="button" class="quiet-action">Reply</button>
+  <button type="button" class="quiet-action" aria-pressed="false" aria-label="Approve request #42">Approve</button>
+  <button type="button" class="quiet-action" aria-pressed="false" aria-label="Decline request #42">Decline</button>
 </div>
 
 <!-- one People group and row, as room.js builds them -->
@@ -198,13 +200,20 @@ Rules the CSS relies on:
   information.)
 - `.ask-chip` is the ask a message carries, read from the annotations
   side-car, never from message text. `data-ask-state` is `open`, `answered`
-  or `withdrawn`. The chosen answer is the Yes or No button with
-  `aria-pressed="true"`, so a choice reads the same without colour. Yes and
-  No are disabled for anyone but the addressee of an open ask; Reply shows
-  only to that addressee. The asker sees Withdraw on an open ask and Keep
-  open on an answered one. `.ask-line` says hold or ask, the state and age;
-  `.ask-means` appears only when the ask has a scope line. All text is
-  written with `textContent`.
+  or `withdrawn`. It is a line under the message, never a new colour: a 3px
+  teal (`--signal`) left rule on `--signal-wash`, in the AI face. In order:
+  `.ask-line` (hold or ask, state, age, project), `.ask-turn` (whose turn, in
+  the shared words: `your turn`, `waiting on Ana`, `approved → Scout is on
+  it`), `.ask-latest` (the latest exchange), earlier scopes struck through
+  (`A yes meant: …`; nobody's yes carries over to them), then `.ask-means`.
+  A plain ask shows **Yes**/**No**; a request for approval shows
+  **Approve**/**Decline**. The chosen answer is the button with
+  `aria-pressed="true"`, so a choice reads the same without colour. The
+  buttons are disabled for anyone who cannot answer. The asker sees
+  Withdraw on an open ask, Revise until it is done or withdrawn, and Keep
+  open on an answered one. The turn is never amber: amber says a participant
+  is waiting, from their own presence line, or a ring is not picked up. All
+  text is written with `textContent`.
 - `data-addressed="true"` on a message tints the row and lights its teal left
   rail; `.delivery` states are words, not colours alone.
 - `.message-id` renders as a bordered plate — the id the CLI shows as `[n]`;
@@ -217,6 +226,8 @@ Rules the CSS relies on:
   a `.presence-lamp` whose `data-state` (`working` / `waiting` / `quiet`)
   repeats the row's state word, derived from server participant facts by
   `people_model.js`.
+- The row's plate says what it is in the mono face: `Human`, `AI · <model>`
+  (the model its client reported at join, never verified) or `AI`.
 - People is grouped: people first, then one group per project (*Finance App ·
   lead Scout · 3 AIs*), then *Not yet assigned*. Groups other than People are
   folded unless someone in them is waiting on the viewer.
@@ -242,6 +253,10 @@ trimmed to the section headings and lists; `work_panel.js` fills the lists:
     <h3 id="needs-you-heading"><button id="needs-you-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="needs-you-list">Needs you <span id="needs-you-count" class="work-count">0</span></button></h3>
     <div id="needs-you-list" class="work-list"></div>
   </section>
+  <section id="approvals-section" class="work-section" aria-labelledby="approvals-heading" hidden>
+    <h3 id="approvals-heading">Approvals <span id="approvals-count" class="work-count">0</span> waiting</h3>
+    <div id="approvals-list" class="work-list"></div>
+  </section>
   <section class="work-section" aria-labelledby="reported-heading">
     <h3 id="reported-heading">Reported to you</h3>
     <div id="reported-list" class="work-list"></div>
@@ -257,19 +272,20 @@ trimmed to the section headings and lists; `work_panel.js` fills the lists:
   <p id="work-status" class="status" role="status" aria-live="polite"></p>
 </aside>
 
-<!-- one Needs you row, as work_panel.js builds it -->
-<div class="work-row">
-  <button class="work-open" type="button" aria-label="Answer D-7: Ship the fix">Ship the fix</button>
-  <p class="work-state">Operations · D-7 · waiting 2h</p>
-  <p>Ship on Friday — asked by Lead</p>
-</div>
-
-<!-- one open ask addressed to the viewer, as a Needs you row; its button
-     brings message #42 into view -->
-<div class="work-row">
-  <button class="work-open" type="button" aria-label="Show ask ask-42: A yes means: I merge the candidate" data-id="ask-42">A yes means: I merge the candidate</button>
-  <p class="work-state">Ask · ask-42 · waiting 5h</p>
-  <p>Message #42 — asked by Lead</p>
+<!-- one Needs you card, as work_panel.js builds it: a request for approval
+     and its room ask are one card -->
+<div class="work-row work-card">
+  <p class="work-card-head"><span class="work-card-who">Scout</span> <span class="work-turn">your turn</span> <time class="work-age">2h</time></p>
+  <button class="work-open" type="button" aria-label="Open W-7: Merge the candidate">Merge the candidate</button>
+  <p class="work-means">A yes means: I merge the candidate to main and nothing else</p>
+  <p class="work-card-detail">Latest: Scout revised the ask (#44)</p>
+  <p class="work-tree-facts">Finance App · W-7</p>
+  <div class="work-card-actions">
+    <button class="quiet-action" type="button" aria-label="Approve Merge the candidate">Approve</button>
+    <button class="quiet-action" type="button" aria-label="Decline Merge the candidate">Decline</button>
+    <button class="quiet-action" type="button" aria-label="Reply to Merge the candidate">Reply</button>
+    <button class="quiet-action" type="button" aria-label="Open W-7">Open work</button>
+  </div>
 </div>
 
 <!-- one project, in place, as work_panel.js builds it inside #project-list -->
@@ -299,9 +315,15 @@ Rules the CSS relies on:
   ink — never a hue. The tile adds no colour of its own: amber, teal, ice
   blue, violet and crimson keep their jobs above, and a blocked or awaiting
   record is said, not lit.
-- Row actions are `.work-open` `<button>`s whose accessible name carries the
-  record id and title (`Answer D-7: …`, `Open work W-12: …`, `Open W-1: …`);
-  the drawer's act buttons follow the same `<act> <id>: <title>` form.
+- **One card per item.** Needs you holds one `.work-card` for each thing
+  waiting on the viewer; a record and the room ask bound to it are one card,
+  never two. A card's head is who, the turn (`.work-turn`, the same words as
+  the chip) and age; its acts are Yes/No or Approve/Decline, Reply, and Open.
+  The first owner's **Approvals** is a plain list of every waiting request: it
+  rings nobody and has no buttons.
+- Row and card open buttons are `.work-open` `<button>`s whose accessible
+  name carries the record id and title (`Open W-7: …`, `Open W-1: …`); the
+  drawer's act buttons follow the same `<act> <id>: <title>` form.
 - A project is a `.work-project` section in the tile, never a dialog: its
   heading is text, its notes are edited in place, and its rows and
   `done (N)` list sit under it. The tile has no recent-changes list; history
