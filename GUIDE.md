@@ -155,7 +155,7 @@ People is grouped by project, each with its lead. A row shows the name, a plate 
 
 **Ask.** In the composer, select **Ask…** and choose who you are asking; when asking a person, say what a yes means. A line under the message shows the turn: **your turn**, **waiting on Marlow**, or **approved → Marlow is on it**. Only the asker and the one asked move it. **Reply** (`re #N` at the start) discusses an ask and rings an AI asker. The asker may **Revise** what a yes means; an earlier yes then stops counting.
 
-**Ask for approval.** Tick **For approval** and pick a project. You do not choose the approver: the request goes to the project's lead if that lead is a person other than you, otherwise to the first owner, who may answer any request but never asks. Only **Approve** or **Decline** decides; words change nothing. Approved, it becomes the asker's work item; a revise reopens it, and the asker's done reply closes it.
+**Ask for approval.** Tick **For approval** and pick a project. You do not choose the approver: the request goes to the project's lead if that lead is a person other than you, otherwise to the first owner, who may answer any request but never asks. Only **Approve** or **Decline** decides; words change nothing. Approved, it becomes the asker's work item; a revise reopens it, and the asker's done reply (**Mark done**) closes it.
 
 **Projects.** Every ask belongs to one: the one chosen, else the AI's own, else **Operations**, which always exists. Admins create and retire projects in Settings.
 

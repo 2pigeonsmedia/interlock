@@ -365,6 +365,9 @@ recorded when the draft is sent or declined.
   room and on the approver's Needs you card. The room also accepts the first
   owner's answer. Nobody updates
   it; the asker's done receipt in the room closes it after approval.
+- **Mark done** — on an approved request's ask in the room, for the one
+  carrying it out: one line saying what was done, posted as the done receipt
+  (a reply to the request with status `done`), which closes the item.
 - **Ask the kill question** — on a decision, for anyone but its asker, once;
   the asker replies once, `survived` or `killed`.
 - **Notify** — shown when the record's next step is addressed to someone other

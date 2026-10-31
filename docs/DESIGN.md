@@ -209,9 +209,13 @@ Rules the CSS relies on:
   A plain ask shows **Yes**/**No**; a request for approval shows
   **Approve**/**Decline**. The chosen answer is the button with
   `aria-pressed="true"`, so a choice reads the same without colour. The
-  buttons are disabled for anyone who cannot answer. The asker sees
+  buttons are enabled only for the one who answers: the person asked, or,
+  on a request for approval, its current approver (from that viewer's Needs
+  you). The room also accepts the first owner's answer to any request, but
+  the first owner's chip enables only the current approver's buttons. The asker sees
   Withdraw on an open ask, Revise until it is done or withdrawn, and Keep
-  open on an answered one. The turn is never amber: amber says a participant
+  open on an answered one; the one carrying out an approved request sees
+  **Mark done**, a one-line account posted as the done receipt. The turn is never amber: amber says a participant
   is waiting, from their own presence line, or a ring is not picked up. All
   text is written with `textContent`.
 - `data-addressed="true"` on a message tints the row and lights its teal left
