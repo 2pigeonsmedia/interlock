@@ -198,7 +198,8 @@ test('a decision takes a bare Yes or No; with no choice it still needs words', a
     assert.deepEqual([empty.status, empty.json.error], [400, 'invalid-text'], 'no choice and no words is no answer');
     const words = await answer(d3, { text: 'Only if the CPA agrees.' });
     assert.equal(words.status, 200, words.text);
-    assert.equal((await item(runtime, ana, d3.id)).answer.choice, null, 'words alone are not a yes');
+    assert.equal(words.json.discussed, true, 'words alone are discussion');
+    assert.equal((await item(runtime, ana, d3.id)).answer, null, 'and decide nothing: the record stays unanswered');
   } finally {
     await runtime.close();
   }

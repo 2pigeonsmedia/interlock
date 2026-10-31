@@ -1836,6 +1836,13 @@ function createFirstOwnerHandler(options) {
       await askApproval(request, response, body, actor, ai);
       return;
     }
+    // Words with no Yes or No are discussion, on the record as in the room:
+    // the decision stays open and the turn goes back to its asker.
+    if (op === 'decisions/answer' && body && typeof body === 'object' && !Array.isArray(body) &&
+        (body.choice === undefined || body.choice === null)) {
+      await discussDecision(request, response, body, actor, ai);
+      return;
+    }
     // A decision asked of someone is asked in the room, so it reaches them.
     if (op === 'items/create' && body && typeof body === 'object' && body.kind === 'decision' &&
         typeof body.asked_of === 'string' && body.asked_of.trim() !== '') {
@@ -2444,6 +2451,54 @@ function createFirstOwnerHandler(options) {
     }
     await catchUpAnswer(saved.id);
     sendJson(request, response, result.status, Object.assign({}, result.body, { item: bound.body.item, message: saved }));
+  }
+
+  /* Words alone on a decision (her ruling, 2026-10-31): nothing is recorded;
+   * they go to the room as a reply to its ask (the turn passes back to the
+   * asker, who is rung), or, with no room ask, as a line naming the asker. */
+  async function discussDecision(request, response, body, workActor, ai) {
+    if (typeof body.id !== 'string' || typeof body.operation_id !== 'string' ||
+        typeof body.text !== 'string' || body.text.trim() === '') {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-text' });
+      return;
+    }
+    const read = work.read('get', workActor, { id: body.id }, workActor.now);
+    if (read.status !== 200) {
+      sendWorkResult(request, response, read);
+      return;
+    }
+    const item = read.body.item;
+    if (item.kind !== 'decision' || item.withdrawn) {
+      sendJson(request, response, 409, { ok: false, error: 'invalid-state' });
+      return;
+    }
+    let chatActor;
+    if (ai) {
+      chatActor = seatActor(seatAuthorization(request, 'write'), body.operation_id.toLowerCase());
+    } else {
+      const authorized = house.authorizeWrite(authorizationMeta(request, workActor.now), 'write', CHAT_RESOURCE);
+      chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
+    }
+    if (!chatActor) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return;
+    }
+    // Their own words, but only the asker is rung: an @name in them is quiet.
+    const words = body.text.trim().split('\n')[0].slice(0, 2000).replace(/@/g, '@\u2060');
+    const asker = item.asked_by && item.asked_by.name;
+    let saved;
+    try {
+      if (Number.isSafeInteger(item.ask_message_id)) {
+        saved = publicMessage(await chat.appendAnnotated({ text: `re #${item.ask_message_id} ${words}` }, chatActor,
+          { discusses: item.ask_message_id }));
+      } else if (asker && asker !== workActor.name) {
+        saved = publicMessage(await chat.append({ text: `@${asker} — ${item.id}: ${words}` }, chatActor));
+      }
+    } catch (error) {
+      annotationRefusal(request, response, error);
+      return;
+    }
+    sendJson(request, response, 200, { ok: true, discussed: true, item, message: saved || null });
   }
 
   /* An answer the addressee gave between the ask's post and its binding:

@@ -258,15 +258,15 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     }, scout.token);
     assert.equal(seatYes.status, 201, seatYes.text);
 
-    // Her "no" written on the record: the room's copy is an answer, never a yes.
+    // Her No on the record: the room's copy is that No, never a yes.
     let fresh = await item(runtime, owner, wipe.json.item.id);
     const no = await post(runtime, '/api/work/decisions/answer', {
-      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'No, do not wipe it.',
+      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'No, do not wipe it.', choice: 'no',
     }, owner);
     assert.equal(no.status, 200, no.text);
     const echo = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
       .find(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === wipe.json.message.id));
-    assert.deepEqual(echo.answers.map(entry => [entry.choice, entry.revision, entry.closes]), [[null, 1, true]],
+    assert.deepEqual(echo.answers.map(entry => [entry.choice, entry.revision, entry.closes]), [['no', 1, true]],
       'the arrangement: the room took her record answer as closing');
     assert.equal(await leadTurn(wipe.json.message.id), undefined, 'answered, a plain ask: nobody is on it');
 
@@ -275,7 +275,7 @@ test('a yes binds to the revision she saw, on both doors; the record\'s answer r
     fresh = await item(runtime, owner, drum.json.item.id);
     assert.equal(fresh.ask_revision, 2, 'the arrangement: the record follows revision 2');
     await post(runtime, '/api/work/decisions/answer', {
-      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'two is fine',
+      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'two is fine', choice: 'yes',
     }, owner);
     const drumEcho = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows
       .find(row => row.kind === 'post' && row.answers.some(entry => entry.ask_id === drum.json.message.id));

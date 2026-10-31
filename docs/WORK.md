@@ -79,8 +79,11 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
 `reported`, or `withdrawn`. A decision is a record, never an approval.
 
 - Only the person asked, or the owner giving a reason, records an answer here
-  (`answer.kind: "direct"`), with an optional `choice` of `yes` or `no`;
-  without one the answer is words only. "No" is an answer. An administrator
+  (`answer.kind: "direct"`), with a `choice` of `yes` or `no`; the words are
+  optional. Words with no choice record nothing: they are discussion, on the
+  record as in the room, posted as a reply to the decision's room ask (or, with
+  none, as `@Asker — D-n: …`), the turn passing back to the asker, who is
+  rung; the response says `discussed: true`. "No" is an answer. An administrator
   cannot replace an answer the first owner recorded (`first-owner-answer`).
 - Decisions earlier builds asked in the room keep their binding: a room answer
   from the person asked is recorded as theirs

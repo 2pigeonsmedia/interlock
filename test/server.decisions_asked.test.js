@@ -253,7 +253,7 @@ test('"Ask a decision" posts nothing now; a decision an earlier build asked in t
     // Answered on the record by the person asked: the room's ask closes too.
     const fresh = await item(runtime, owner, lanes.id);
     const recorded = await post(runtime, '/api/work/decisions/answer', {
-      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'yes, by priority',
+      operation_id: uuid(), id: fresh.id, expected_revision: fresh.revision, text: 'yes, by priority', choice: 'yes',
     }, owner);
     assert.equal(recorded.status, 200, recorded.text);
     const echoed = (await get(runtime, '/api/annotations?after=0&limit=100', owner)).json.rows

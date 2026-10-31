@@ -1507,6 +1507,12 @@ async function runSay(args, io, dependencies = {}) {
   }
   if (parsed.json) line(io.stdout, JSON.stringify(result));
   else line(io.stdout, `Sent as ${profile.name} (message ${result.message.id}).`);
+  // Words with no choice close a plain ask, but only discuss a decision or a
+  // request for approval: say so, so nobody takes them for a decision.
+  if (!parsed.json && Array.isArray(parsed.answers) && parsed.answers.length > 0 && parsed.choice === null) {
+    const ids = parsed.answers.map(entry => entry.ask_id).join(', ');
+    line(io.stdout, `If ask ${ids} is a decision or a request for approval, it stays open: words alone are discussion; add --choice yes|no to decide.`);
+  }
   return EXIT_OK;
 }
 

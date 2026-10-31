@@ -851,7 +851,7 @@
   // Yes or No is chosen, never defaulted: only an explicit yes is agreement.
   const ANSWER_CHOICES = Object.freeze([
     { value: '', text: 'Choose…' }, { value: 'yes', text: 'Yes' }, { value: 'no', text: 'No' },
-    { value: 'words', text: 'Neither: my words are the answer' },
+    { value: 'words', text: 'Neither: reply with my words (it stays open)' },
   ]);
 
   function answerFields(reasonLabel) {
