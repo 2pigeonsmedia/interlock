@@ -2468,6 +2468,7 @@ const ASK_REFUSALS = Object.freeze({
   'ask-target-unknown': 'That participant is not in the room.',
   'ask-of-self': 'You cannot ask yourself.',
   'ask-not-open': 'That ask was already answered or withdrawn.',
+  'decision-filing': 'A decision is being filed; try again in a moment.',
   'ask-revised': 'This ask changed while you were writing. Read the new "a yes means" line, then answer.',
   'ask-not-found': 'That ask is not in this room.',
   'ask-not-answered': 'Only an answered ask can be kept open.',
@@ -2988,6 +2989,11 @@ messageForm.addEventListener('submit', async event => {
     if (response.status === 403) {
       setRoomNotice('Interlock refused this message. Reload the page or sign in again before retrying.');
       failed(response.status, result.error || 'unavailable');
+      return;
+    }
+    if (response.status === 503 && result && result.error === 'decision-filing') {
+      setRoomNotice(ASK_REFUSALS['decision-filing']);
+      failed(response.status, result.error);
       return;
     }
     if (!response.ok || result.ok !== true || !validMessage(result.message)) {

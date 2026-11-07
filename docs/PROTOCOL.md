@@ -303,7 +303,9 @@ annotation are one write, because the ask decides who the message rings:
   `ask-target-unknown`, `means-required`, `unknown-project` · `404`
   `ask-not-found` · `403` `not-asker`, `not-approver` · `409` `ask-not-open`,
   `ask-not-answered`, `ask-not-withdrawn`, `ask-revised`, `unread-addressed` · `503`
-  `chat-unavailable`.
+  `chat-unavailable`, `decision-filing` (an answer to an ask whose decision is
+  still being filed waited 3 seconds for it; nothing was posted; retry after
+  `retry_after_ms`).
 - A row of a kind or version a later release adds is skipped, never refused,
   by the store and by readers.
 

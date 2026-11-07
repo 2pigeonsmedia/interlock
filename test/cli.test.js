@@ -3067,3 +3067,19 @@ test('history --through warns first when a message is longer than a host may sho
   assert.match(result.stdout.slice(0, 400), /message 1 is 29000 characters long; a host that cuts output may not show all of it\./,
     'the warning is printed ahead of the message');
 });
+
+test('an answer refused while a decision is being filed says so, not "could not reach"', async () => {
+  const world = admittedConnection();
+  world.dependencies.readFile = () => 'yes';
+  world.dependencies.fetch = async (url, options = {}) => {
+    if ((options.method || 'GET') === 'POST') {
+      return fakeResponse(503, { ok: false, error: 'decision-filing', retry_after_ms: 3000 });
+    }
+    return fakeResponse(404, { ok: false, error: 'not-found' });
+  };
+  const result = await captureCommand(['say', '--connection', 'Marlow', '--file', 'a.txt', '--answers', '5', '--choice', 'yes'],
+    world.dependencies);
+  assert.notEqual(result.code, EXIT_OK);
+  assert.match(result.stderr, /a decision is being filed; try again in a moment/);
+  assert.doesNotMatch(result.stderr, /could not reach|make sure Interlock is running/);
+});
