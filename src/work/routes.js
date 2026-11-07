@@ -354,6 +354,15 @@ function createWorkRoutes(options) {
     try { return typeof work.waitingOf === 'function' ? work.waitingOf(subjectId) : null; }
     catch (_) { return null; }
   }
+  // A words-only answer's kept post: its result, null, or a thrown
+  // operation-conflict; and keeping one after the room has the post.
+  function priorDiscussion(actor, input) {
+    return typeof work.priorDiscussion === 'function' ? work.priorDiscussion(actor, input) : null;
+  }
+  function recordDiscussion(actor, input, messageId) {
+    try { return typeof work.recordDiscussion === 'function' ? work.recordDiscussion(actor, input, messageId) : null; }
+    catch (_) { return null; }
+  }
   // What it works on when not every item is blocked: {item, title, blocked} or null.
   function workingOf(subjectId) {
     try { return typeof work.workingOf === 'function' ? work.workingOf(subjectId) : null; }
@@ -361,7 +370,7 @@ function createWorkRoutes(options) {
   }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

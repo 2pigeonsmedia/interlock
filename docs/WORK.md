@@ -98,7 +98,10 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   optional. Words with no choice record nothing: they are discussion, on the
   record as in the room, posted as a reply to the decision's room ask (or, with
   none, as `@Asker — D-n: …`), the turn passing back to the asker, who is
-  rung; the response says `discussed: true`. "No" is an answer. An administrator
+  rung; the response says `discussed: true`. The post is kept against its
+  `operation_id` in the Work record (its message id only), so a retry, even
+  after a restart, returns the first post with `replayed: true`, and the same
+  id with other words is refused `409 operation-conflict`. "No" is an answer. An administrator
   cannot replace an answer the first owner recorded (`first-owner-answer`).
 - Decisions earlier builds asked in the room keep their binding: a room answer
   from the person asked is recorded as theirs
@@ -220,7 +223,8 @@ recorded only.
 
 - `brief[?project=ID]` — projects (each with `done_count`, its work and
   findings in state `done`, and `withdrawn_count`, its withdrawn
-  decisions, work and findings), `needs_me` (each decision or request carrying `blocks`: the
+  decisions, work and findings, and `may_edit`, whether this viewer may change
+  its objective and today line), `needs_me` (each decision or request carrying `blocks`: the
   ids of open work linked to it, derived), `reported_to_me`, open work,
   decisions, `recently_decided` (the viewer's last five answers on the record,
   each with `decided`: `choice`, `text`, `at`), and the `cursor` a later

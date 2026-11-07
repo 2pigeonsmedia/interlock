@@ -541,6 +541,8 @@
       updatedBy: who(project.updated_by),
       updated_at: project.updated_at,
       doneCount: Number.isSafeInteger(project.done_count) ? project.done_count : 0,
+      // Offered Edit only when the room says this viewer may edit it.
+      mayEdit: project.may_edit === true,
       withdrawnCount: Number.isSafeInteger(project.withdrawn_count) ? project.withdrawn_count : 0,
       rows: nest(rowNodes(rows.filter(row => row.project === project.id))),
       waitingOnYou: (brief.needs_me || []).filter(row => row.project === project.id).length,

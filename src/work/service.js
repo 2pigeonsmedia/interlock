@@ -1429,6 +1429,30 @@ function createWorkService(options) {
       });
   }
 
+  /* Words alone on a decision go to the room as discussion; nothing is
+   * recorded on the decision (her ruling, 2026-10-31). The post is kept
+   * against its operation id beside every other operation, so a retry, even
+   * after a restart, is answered by the first post, and the same id with
+   * other words is refused. Only the message id is kept, never the words. */
+  function recordDiscussion(actor, rawInput, messageId) {
+    return operation(actor, 'decisions.discuss', rawInput, ['id', 'text'], (draft, body) => {
+      const item = findDecision(draft, body.id);
+      return { ok: true, discussed: true, id: item.id, message_id: Number.isSafeInteger(messageId) ? messageId : null };
+    });
+  }
+
+  // The kept post for this operation, null when there is none; a refusal
+  // when the id was used for anything else.
+  function priorDiscussion(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['operation_id', 'id', 'text']);
+    if (!body || typeof body.operation_id !== 'string' || !UUID.test(body.operation_id)) return null;
+    const prior = snapshot().operations[body.operation_id.toLowerCase()];
+    if (!prior) return null;
+    if (prior.digest !== digestOf(actor, 'decisions.discuss', { id: body.id, text: body.text })) fail('operation-conflict');
+    return clone(prior.result);
+  }
+
   /* A work or finding item that is no longer wanted (ruling,
    * 2026-11-07): withdrawn with a reason, never recorded as done. Done work
    * reopens first; a request for approval closes by its own path. The live
@@ -1548,6 +1572,9 @@ function createWorkService(options) {
           item.state === 'done').length,
         withdrawn_count: draft.items.filter(item => item.project === project.id &&
           (item.kind === 'decision' ? item.withdrawn : item.state === 'withdrawn')).length,
+        // Whether this viewer may change its objective and today line, so a
+        // page offers Edit only to them.
+        may_edit: project.retired_at === null && mayEditProject(actor, project, clock()),
       })),
       needs_me: mine.filter(item => needsMe(item, me))
         .map(item => Object.assign(row(draft, item), { blocks: blocksOf(draft, item) })),
@@ -1710,7 +1737,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
+    answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, recordDiscussion, priorDiscussion, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
     needsMe, replay,

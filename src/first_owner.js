@@ -2542,11 +2542,6 @@ function createFirstOwnerHandler(options) {
     }
   }
 
-  // Words alone already posted, by author and operation: a person's post
-  // carries no client id, so a retried answer is matched here and posted
-  // once. In memory; the newest entries are kept.
-  const discussedPosts = new Map();
-  const DISCUSSED_POSTS_KEPT = 1000;
 
   /* Words alone on a decision (her ruling, 2026-10-31): nothing is recorded;
    * they go to the room as a reply to its ask (the turn passes back to the
@@ -2578,14 +2573,29 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return;
     }
-    const key = `${chatActor.subject_id}\u0000${body.operation_id}`;
-    const prior = discussedPosts.get(key);
-    if (prior) {
-      if (prior.id !== item.id || prior.text !== body.text) {
+    // A retry, even after a restart, is answered by the first post: the
+    // post is kept against its operation id in the Work record.
+    const kept = { operation_id: body.operation_id, id: item.id, text: body.text };
+    let prior;
+    try { prior = work.priorDiscussion(workActor, kept); }
+    catch (error) {
+      if (error && error.code === 'operation-conflict') {
         sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
         return;
       }
-      sendJson(request, response, 200, { ok: true, discussed: true, item, message: prior.message, replayed: true });
+      sendJson(request, response, 503, { ok: false, error: 'work-unavailable' });
+      return;
+    }
+    if (prior) {
+      let message = null;
+      if (Number.isSafeInteger(prior.message_id)) {
+        try {
+          const page = await chat.read({ after: prior.message_id - 1, limit: 1 });
+          const found = page.messages[0];
+          message = found && found.id === prior.message_id ? publicMessage(found) : null;
+        } catch (_) { message = null; }
+      }
+      sendJson(request, response, 200, { ok: true, discussed: true, item, message, replayed: true });
       return;
     }
     // Their own words, every line, but only the asker is rung: an @name in
@@ -2604,8 +2614,9 @@ function createFirstOwnerHandler(options) {
       annotationRefusal(request, response, error);
       return;
     }
-    discussedPosts.set(key, { id: item.id, text: body.text, message: saved || null });
-    if (discussedPosts.size > DISCUSSED_POSTS_KEPT) discussedPosts.delete(discussedPosts.keys().next().value);
+    // Kept after the room has it: a crash between the two can repeat a post,
+    // never lose one.
+    work.recordDiscussion(workActor, kept, saved && Number.isSafeInteger(saved.id) ? saved.id : null);
     sendJson(request, response, 200, { ok: true, discussed: true, item, message: saved || null });
   }
 

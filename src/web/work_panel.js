@@ -403,6 +403,7 @@
       const view = projectView(state, section.id);
       const count = counts.get(section.id);
       view.project = section;
+      view.edit.hidden = !section.mayEdit;
       // Folded unless something in it is for the viewer; a fold the viewer
       // chose stays as chosen.
       if (!view.foldChosen) view.folded = !(count.needsYou > 0) && !view.editing;
