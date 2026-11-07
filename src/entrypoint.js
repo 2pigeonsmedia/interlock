@@ -59,6 +59,9 @@ async function runEntrypoint(options = {}) {
   const loadCli = options.loadCli || (() => require('./cli.js'));
   try {
     const { run, runRecover, runStart } = loadCli();
+    // --help or -h anywhere wins, start and recover included: run() prints
+    // the usage before any other check.
+    if (argv.includes('--help') || argv.includes('-h')) return await run(argv, io);
     if (argv[0] === 'start') return await runStart(argv.slice(1), io);
     if (argv[0] === 'recover') return await runRecover(argv.slice(1), io);
     return await run(argv, io);

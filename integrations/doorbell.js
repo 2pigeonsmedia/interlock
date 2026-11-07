@@ -700,9 +700,21 @@ function printGuide() {
   catch (error) { fail(`the installed adapter-authoring guide is unavailable (${error.code || 'unknown'})`); }
 }
 
+// --help or -h anywhere wins: the usage line of the subcommand named, else
+// the whole help. Nothing else is checked.
+function helpFor(argv) {
+  const sub = argv.find(arg => !arg.startsWith('-'));
+  const lines = HELP.split('\n').filter(line => sub && line.startsWith(`  interlock-doorbell ${sub}`));
+  return lines.length > 0 ? lines.join('\n') + '\n' : HELP;
+}
+
 function main(argv = process.argv.slice(2)) {
-  if (argv.length === 0 || (argv.length === 1 && ['--help', '-h', 'help'].includes(argv[0]))) {
+  if (argv.length === 0 || (argv.length === 1 && argv[0] === 'help')) {
     process.stdout.write(HELP);
+    return;
+  }
+  if (argv.includes('--help') || argv.includes('-h')) {
+    process.stdout.write(helpFor(argv));
     return;
   }
   if (argv[0] === 'run') {
