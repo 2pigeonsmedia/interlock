@@ -70,6 +70,13 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   in place); `done` requires a `done_account` and a declaration of evidence:
   either `done_evidence` (the `seq` of an evidence entry on this item) or
   `no_evidence: true`. Never blank, never derived. Leaving `done` clears both.
+- Putting **someone else** in `responsible` or `next_to` is for the item's
+  filer, its current holder, whoever is next, its project's live lead, the
+  first owner and administrators; anyone else gets `403 not-assigner` with
+  `can_assign`, the names to ask. Anyone may take a slot nobody holds or step
+  out of one, and taking an unheld item lets the same request name who is
+  next. Entering `blocked` drops whoever was next, so name the unblocker in
+  that same request.
 - `withdrawn` says the work was dropped, never that it was finished. Only
   `items/withdraw` sets it, with a required `reason`, by whoever filed the item,
   its project's live lead, the first owner or an administrator (anyone else,
@@ -254,7 +261,7 @@ operation takes), `not-for-this-kind` or `invalid-value`, or says
 `needs_one_of` when a required choice is missing), `invalid-participant`,
 `ambiguous-participant`, `invalid-query`, and the field-specific `invalid-*`
 codes · `401` `not-authenticated` (no usable session) or `invalid-connection`
-(no usable bearer) · `403` `not-authorized`, `not-answerer`, `not-asker`, `not-withdrawer`, `owner-only`,
+(no usable bearer) · `403` `not-authorized`, `not-answerer`, `not-asker`, `not-withdrawer`, `not-assigner`, `owner-only`,
 `not-a-relay`, `fresh-step-up-required`, `request-refused`, `first-owner-answer`,
 `kill-own-pick`, `owner-does-not-ask` · `404` `unknown-item`, `unknown-project` ·
 `405` (wrong method, with `allow`) · `409` `stale-revision`, `operation-conflict`,

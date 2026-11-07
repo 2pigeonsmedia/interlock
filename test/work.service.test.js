@@ -158,11 +158,15 @@ test('blocked requires a reason and clears the next actor unless the unblocking 
   });
   assert.equal(waiting.item.next_to, null);
   assert.deepEqual(work.list(builder, { needs_me: true }).items, []);
-  const named = work.updateWork(builder, {
-    operation_id: uuid(), id: item.id, expected_revision: 2, state: 'blocked',
+  // Dropped from next by entering Blocked, the builder no longer holds a
+  // slot, so naming the unblocker afterwards is for whoever may assign
+  // (ruling, 2026-11-07); the refusal says who.
+  const late = { operation_id: uuid(), id: item.id, expected_revision: 2, state: 'blocked',
     block_reason: 'Needs the candidate scope.', next_to: ref(reviewer),
-    next_action: 'Name the scope you will check.', note: 'asked the reviewer',
-  });
+    next_action: 'Name the scope you will check.', note: 'asked the reviewer' };
+  assert.throws(() => work.updateWork(builder, late),
+    error => error.code === 'not-assigner' && error.can_assign.includes('Lead'));
+  const named = work.updateWork(lead, Object.assign({}, late, { operation_id: uuid() }));
   assert.deepEqual(named.item.next_to, ref(reviewer));
   assert.deepEqual(work.list(reviewer, { needs_me: true }).items.map(row => row.id), [item.id]);
 });
@@ -716,9 +720,10 @@ test('retired projects drop out of the default list and brief but their records 
 test('an ordinary edit to a blocked item keeps its unblocker in the queue', () => {
   const { work } = fresh();
   const item = newWork(work, lead);
+  // The builder takes the unheld item and names the unblocker in one request.
   work.updateWork(builder, {
     operation_id: uuid(), id: item.id, expected_revision: 1, state: 'blocked', block_reason: 'Needs the scope.',
-    next_to: ref(reviewer), next_action: 'Name the scope you will check.', note: 'asked the reviewer',
+    responsible: ref(builder), next_to: ref(reviewer), next_action: 'Name the scope you will check.', note: 'asked the reviewer',
   });
   const edited = work.updateWork(lead, {
     operation_id: uuid(), id: item.id, expected_revision: 2, title: 'Import rows (typo fixed)', note: 'typo',

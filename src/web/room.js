@@ -522,6 +522,7 @@ async function ownerMutation(path, body) {
   const result = await readJson(response);
   if (!response.ok || result.ok !== true) {
     const error = new Error(result.error || 'unavailable');
+    if (result && Array.isArray(result.can_assign)) error.canAssign = result.can_assign.filter(name => typeof name === 'string');
     error.code = result.error || 'unavailable';
     error.status = response.status;
     throw error;

@@ -814,6 +814,15 @@
     return 'You answered: ' + (text.length > 80 ? text.slice(0, 79) + '…' : text);
   }
 
+  // Whom a refused assignment can ask, in words.
+  function assignerWords(names) {
+    const list = Array.isArray(names) ? names.filter(name => typeof name === 'string') : [];
+    const who = list.length === 0 ? 'the first owner or an administrator'
+      : (list.length > 1 ? list.slice(0, -1).join(', ') + ' or ' + list[list.length - 1] : list[0]) +
+        ' (or the first owner or an administrator)';
+    return 'Ask ' + who + ' to assign it.';
+  }
+
   function errorWords(code) {
     return Object.hasOwn(ERROR_WORDS, code) ? ERROR_WORDS[code] : 'That did not work (' + String(code) + ').';
   }
@@ -838,7 +847,7 @@
     who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou,
     ageText, firstLine, needsCards, trackedBy, projectLine, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine, approvalsList,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
-    errorWords, decidedWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
+    errorWords, assignerWords, decidedWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockWorkPanelModel', {

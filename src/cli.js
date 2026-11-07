@@ -3137,6 +3137,7 @@ async function workRequest(fetcher, profile, pathname, options = {}) {
       if (result && Array.isArray(result.accepted)) error.accepted = result.accepted.filter(name => typeof name === 'string');
       if (result && Array.isArray(result.needs_one_of)) error.needsOneOf = result.needs_one_of.filter(name => typeof name === 'string');
       if (result && typeof result.did_you_mean === 'string') error.didYouMean = result.did_you_mean;
+      if (result && Array.isArray(result.can_assign)) error.canAssign = result.can_assign.filter(name => typeof name === 'string');
       throw error;
     }
     return result;
@@ -3167,12 +3168,21 @@ function refusedFieldWords(error) {
   return ` ${field} is not one this command takes${takes}.`;
 }
 
+// Whom a refused assignment can ask, in words.
+function assignerAsk(names) {
+  const safe = Array.isArray(names) ? names.map(name => terminalSafe(name)) : [];
+  const who = safe.length === 0 ? 'the first owner or an administrator'
+    : `${safe.length > 1 ? safe.slice(0, -1).join(', ') + ' or ' + safe[safe.length - 1] : safe[0]} (or the first owner or an administrator)`;
+  return `Ask ${who} to assign it; you may take an item nobody holds, or step out of a slot yourself.`;
+}
+
 function reportWorkError(stderr, error, profile) {
   if (error && Number.isSafeInteger(error.status) && error.status !== 401 && typeof error.code === 'string') {
     const revision = Number.isSafeInteger(error.revision) ? ` (current revision ${error.revision})` : '';
     const hint = (Object.prototype.hasOwnProperty.call(WORK_REFUSAL_HINTS, error.code) ? ' ' + WORK_REFUSAL_HINTS[error.code] : '') +
       (error.code === 'invalid-request' ? refusedFieldWords(error) : '') +
-      (error.code === 'unknown-project' && typeof error.didYouMean === 'string' ? ` Did you mean ${terminalSafe(error.didYouMean)}?` : '');
+      (error.code === 'unknown-project' && typeof error.didYouMean === 'string' ? ` Did you mean ${terminalSafe(error.didYouMean)}?` : '') +
+      (error.code === 'not-assigner' ? ` ${assignerAsk(error.canAssign)}` : '');
     line(stderr, `interlock: ${roomLabel(profile)} refused the command: ${terminalSafe(error.code)}${revision}.${hint}`);
     return;
   }

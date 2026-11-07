@@ -260,6 +260,44 @@ function createWorkService(options) {
     try { lead = leadOf ? leadOf(item.project, now) : null; } catch (_) { lead = null; }
     return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
   }
+  /* Who may put someone else in an item's holder or next slot (ruling,
+   * 2026-11-07): its filer, its current holder, whoever is next, its
+   * project's live lead, the first owner and administrators. Anyone may
+   * claim a slot nobody holds or step out of one. */
+  function liveLead(project, now) {
+    let lead = null;
+    try { lead = leadOf ? leadOf(project, now) : null; } catch (_) { lead = null; }
+    return lead && typeof lead.subject_id === 'string' ? lead : null;
+  }
+  function mayAssign(actor, item, now) {
+    if (actor.owner === true || actor.first_owner === true) return true;
+    const lead = liveLead(item.project, now);
+    return [item.created_by, item.responsible, item.next_to, lead]
+      .some(ref => ref && ref.subject_id === actor.subject_id);
+  }
+  // The names a refused assignment can ask, in that order, once each.
+  function assignerNames(item, now) {
+    const names = [];
+    for (const ref of [item.created_by, item.responsible, item.next_to, liveLead(item.project, now)]) {
+      if (ref && typeof ref.name === 'string' && !names.includes(ref.name)) names.push(ref.name);
+    }
+    return names;
+  }
+  function checkAssignment(actor, item, next, body, now) {
+    const self = ref => Boolean(ref) && ref.subject_id === actor.subject_id;
+    // Taking an unheld item in this same request makes its taker the holder,
+    // who may then name who is next.
+    const claimsHolder = body.responsible !== undefined && item.responsible === null && self(next.responsible);
+    for (const field of ['responsible', 'next_to']) {
+      if (body[field] === undefined || canonical(item[field]) === canonical(next[field])) continue;
+      // Stepping out needs no clause: whoever is in a slot is its holder or
+      // next, and may assign.
+      const claim = item[field] === null && self(next[field]);
+      if (claim || mayAssign(actor, item, now) || (field === 'next_to' && claimsHolder)) continue;
+      fail('not-assigner', { can_assign: assignerNames(item, now) });
+    }
+  }
+
   function mayWithdraw(actor, item, now) {
     return item.kind !== 'decision' && !item.approval && LIVE_WORK_STATES.includes(item.state) &&
       mayWithdrawAs(actor, item, now);
@@ -762,6 +800,7 @@ function createWorkService(options) {
       apply('consequence', optionalText(body.consequence, BODY_BYTES, 'consequence'));
       apply('severity', validSeverity(body.severity));
       apply('state', body.state);
+      checkAssignment(actor, item, next, body, now);
       if (next.title.trim() === '') fail('invalid-title');
       if (next.body.trim() === '') fail('invalid-body');
       if (next.state === 'ready' && !next.next_to) fail('invalid-ready');
