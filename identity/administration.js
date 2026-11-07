@@ -15,6 +15,14 @@ const policy = require('./policy.js');
 const grants = require('./grants.js');
 const audit = require('./audit.js');
 
+// The reasons a step-up-gated act is refused. Only `fresh-step-up-required`
+// means another passkey confirmation would help; the others say what went
+// wrong. `refused-after-step-up` is the one that spent a step-up and admitted
+// nobody. Each describes the caller's own request, never the act's target.
+const STEP_UP_REFUSALS = Object.freeze(['request-invalid', 'no-session',
+  'not-administrator', 'fresh-step-up-required', 'step-up-subject-mismatch',
+  'refused-after-step-up']);
+
 const HUMAN_INVITE_TTL_MS = admission.HUMAN_INVITE_TTL_MS;
 const MEMBER_RESET_TTL_MS = 900_000;
 const PASSKEY_CODE_TTL_MS = admission.PASSKEY_CODE_TTL_MS;
@@ -339,13 +347,6 @@ function createService(opts) {
     if (repo.firstOwnerIdIn(state, TENANT()) === subjectId) throw new Error('first owner is protected');
   }
 
-  // The reasons a step-up-gated act is refused. Only `step-up-required` means
-  // another passkey confirmation would help; the others say what went wrong.
-  // `refused-after-step-up` is the one that spent a step-up and admitted nobody.
-  const STEP_UP_REFUSALS = Object.freeze(['request-invalid', 'no-session',
-    'not-administrator', 'step-up-required', 'step-up-subject-mismatch',
-    'refused-after-step-up']);
-
   // One authorization record per decision on a step-up-gated act: which act,
   // who, the outcome, why, and (when a step-up was spent) the id of the spend's
   // mutation row. Telemetry, not the outbox: an older release reads these rows
@@ -372,9 +373,14 @@ function createService(opts) {
     // only once it holds a live session, and every reason told describes the
     // caller's own state, never the act's target. Before that the answer stays
     // the bare FAIL: an unauthenticated caller learns nothing it could probe.
-    function refuse(reason, actorId, assurance, eventId) {
+    // `why` (a refusal after the step-up was spent) goes to the record only:
+    // it can describe the act's target, so the caller never sees it.
+    function refuse(reason, actorId, assurance, eventId, why) {
       if (!STEP_UP_REFUSALS.includes(reason)) reason = 'request-invalid';
-      recordStepUp(workflow, resource, actorId, assurance, 'deny', reason, eventId);
+      const detail = typeof why === 'string'
+        ? why.replace(/[^\x20-\x7e]/g, ' ').trim().slice(0, 200) : '';
+      recordStepUp(workflow, resource, actorId, assurance, 'deny',
+        detail ? reason + ': ' + detail : reason, eventId);
       return typeof actorId === 'string' ? Object.freeze({ ok: false, reason }) : FAIL;
     }
     if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn)) return refuse('request-invalid');
@@ -396,7 +402,7 @@ function createService(opts) {
       // can() checks assurance before role, so an ordinary session is refused
       // here for want of a step-up whoever holds it; the role is judged after.
       return refuse(preAllow && preAllow.reason === 'admin-l2-required'
-        ? 'step-up-required' : 'not-administrator', actorId, pre.session.assurance);
+        ? 'fresh-step-up-required' : 'not-administrator', actorId, pre.session.assurance);
     }
 
     // Step 4: consume one-use L2.
@@ -413,7 +419,7 @@ function createService(opts) {
       mark(step && step.lineage_id, workflow, 'refused');
       // Only a missing or stale step-up asks for another; a bad CSRF token or
       // envelope on a live session is a bad request.
-      return refuse(step && step.reason === 'fresh-stepup-required' ? 'step-up-required' : 'request-invalid',
+      return refuse(step && step.reason === 'fresh-stepup-required' ? 'fresh-step-up-required' : 'request-invalid',
         actorId, pre.session.assurance);
     }
     const spent = typeof step.consume_event_id === 'string' ? step.consume_event_id : undefined;
@@ -436,10 +442,12 @@ function createService(opts) {
         recordStepUp(workflow, resource, actorId, 2, 'allow', 'fresh-admin-stepup-consumed', spent);
         return result;
       }
-      return refuse('refused-after-step-up', actorId, 2, spent);
-    } catch (_) {
+      return refuse('refused-after-step-up', actorId, 2, spent,
+        result && typeof result.reason === 'string' ? result.reason : 'act returned no result');
+    } catch (e) {
       mark(step.lineage_id, workflow, 'refused');
-      return refuse('refused-after-step-up', actorId, 2, spent);
+      return refuse('refused-after-step-up', actorId, 2, spent,
+        e && typeof e.message === 'string' ? e.message : 'act failed');
     }
   }
 
@@ -841,9 +849,10 @@ function createService(opts) {
       });
     });
     if (result && result.ok === true) return result;
-    // Every check in the body names its refusal; without one, the fresh
-    // confirmation (or the session) is what was missing.
-    return Object.freeze({ ok: false, reason: refusal || 'fresh-step-up-required' });
+    // Every check in the body names its refusal; without one, the step-up
+    // path's own reason says what was missing.
+    return Object.freeze({ ok: false,
+      reason: refusal || (result && STEP_UP_REFUSALS.includes(result.reason) ? result.reason : 'not-authorized') });
   }
 
   // ── Role assignment ───────────────────────────────────────────────────────
@@ -1369,6 +1378,7 @@ function createService(opts) {
 
 module.exports = {
   createService,
+  STEP_UP_REFUSALS,
   // EXPORTED so a host adapter can refuse exactly what
   // this module refuses. The adapter must never carry its own copy of this rule
   // — a door that admits what the lock behind it rejects is the wrong way

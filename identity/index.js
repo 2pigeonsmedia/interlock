@@ -28,6 +28,17 @@
 const path = require('path');
 
 const administration = require('./administration.js');
+
+// A refusal from a step-up-gated act, as the host sees it. The reason passes
+// through when it is one of the step-up reasons (each describes the caller's
+// own request, never the target, and is given only to a caller with a live
+// session); anything else stays the one generic refusal.
+function stepUpRefusal(result, fallback = 'not-authorized') {
+  if (result && administration.STEP_UP_REFUSALS.includes(result.reason)) {
+    return Object.freeze({ ok: false, reason: result.reason });
+  }
+  return fallback === null ? Object.freeze({ ok: false }) : Object.freeze({ ok: false, reason: fallback });
+}
 const repo = require('./repo.js');
 const l1Sessions = require('./l1_sessions.js');
 const login = require('./login.js');
@@ -654,11 +665,10 @@ function create(config) {
       now: meta.now,
     });
     if (!result || result.ok !== true) {
-      // issueHumanInvite's FAIL carries no reason (administration.js's single-
-      // generic-failure discipline, same as changePassword above) — every
-      // refusal (no session, not an administrator, no fresh L2 step-up, wrong
-      // origin) reports identically rather than becoming an oracle.
-      return { ok: false, reason: 'not-authorized' };
+      // A caller without a live session still gets the one generic refusal.
+      // A caller with one is told which step-up reason applies; each is about
+      // the caller's own request, so none is an oracle for anyone else.
+      return stepUpRefusal(result);
     }
     return { ok: true, secret: result.secret, expires_at: result.expires_at };
   }
@@ -712,7 +722,7 @@ function create(config) {
       selector: b.selector,
       digest: b.digest,
     });
-    if (!result || result.ok !== true) return { ok: false, reason: 'not-authorized' };
+    if (!result || result.ok !== true) return stepUpRefusal(result);
     return {
       ok: true,
       subject_id: result.subject_id,
@@ -895,9 +905,7 @@ function create(config) {
       now: meta.now,
       name: b.name,
     });
-    if (!result || result.ok !== true) {
-      return Object.freeze({ ok: false, reason: 'not-authorized' });
-    }
+    if (!result || result.ok !== true) return stepUpRefusal(result);
     return Object.freeze({ ok: true, name: result.name, kind: result.kind });
   }
 
@@ -999,8 +1007,9 @@ function create(config) {
         { target_person_subject_id: target.id, slug: repo.ADMINISTRATOR_SLUG }))
       : service.revokeRoleAssignment(Object.assign(envelope,
         { assignment_id: target.admin_assignment_id }));
-    // Every check above passed, so a refusal here is the one-use step-up.
-    if (!result || result.ok !== true) return Object.freeze({ ok: false, reason: 'fresh-step-up-required' });
+    // Every check above passed, so a refusal here came from the step-up path,
+    // which names it.
+    if (!result || result.ok !== true) return stepUpRefusal(result);
     return Object.freeze({ ok: true, name: target.name });
   }
   // The first owner issues a one-time passkey code for a member without a
@@ -1062,7 +1071,7 @@ function create(config) {
       sec_fetch_site: meta.sec_fetch_site,
       now: meta.now,
     });
-    return Object.freeze({ ok: !!result && result.ok === true });
+    return result && result.ok === true ? Object.freeze({ ok: true }) : stepUpRefusal(result, null);
   }
 
   function confirmWorkProjectAct(meta) {
@@ -1076,7 +1085,7 @@ function create(config) {
       sec_fetch_site: meta.sec_fetch_site,
       now: meta.now,
     });
-    return Object.freeze({ ok: !!result && result.ok === true });
+    return result && result.ok === true ? Object.freeze({ ok: true }) : stepUpRefusal(result, null);
   }
 
   function confirmGrantAct(meta, workflow) {
@@ -1090,7 +1099,7 @@ function create(config) {
       sec_fetch_site: meta.sec_fetch_site,
       now: meta.now,
     }, workflow);
-    return Object.freeze({ ok: !!result && result.ok === true });
+    return result && result.ok === true ? Object.freeze({ ok: true }) : stepUpRefusal(result, null);
   }
 
   const firstOwner = Object.freeze({

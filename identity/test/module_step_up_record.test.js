@@ -63,18 +63,18 @@ test('the spend reasons older releases validate are unchanged', () => {
   assert.match(src, /'session\.stepup\.consume': Object\.freeze\(\['fresh-admin-stepup-consumed'\]\)/);
 });
 
-test('an act without a fresh step-up says step-up-required, and is recorded', async () => {
+test('an act without a fresh step-up says fresh-step-up-required, and is recorded', async () => {
   const { world, records } = await room();
   const plain = world.session_store.issue({ subject_id: world.person_id, now: world.T });
   assert.ok(plain.ok && plain.session.assurance === 1, 'ARRANGEMENT: an administrator with an ordinary session');
   const before = await records();
   const result = world.service.confirmTranscriptClear(world.env(plain, world.T + 5));
   assert.equal(result.ok, false);
-  assert.equal(result.reason, 'step-up-required');
+  assert.equal(result.reason, 'fresh-step-up-required');
   const { deny, consumes } = await records();
   const row = deny.find(r => r.capability === 'transcript.clear');
   assert.ok(row, 'a refusal record names the act: ' + JSON.stringify(deny));
-  assert.equal(row.reason, 'step-up-required');
+  assert.equal(row.reason, 'fresh-step-up-required');
   assert.equal(row.event_id, undefined, 'no step-up was spent, so the record points at none');
   assert.equal(consumes.length, before.consumes.length, 'ARRANGEMENT: nothing was spent');
 });
@@ -91,7 +91,9 @@ test('a step-up spent on an act that admits nobody says so, and points at the sp
   assert.equal(spent.length, 1, 'ARRANGEMENT: the step-up was spent before the refusal');
   const row = deny.find(r => r.capability === 'participant.revoke');
   assert.ok(row, 'a refusal record names the act: ' + JSON.stringify(deny));
-  assert.equal(row.reason, 'refused-after-step-up');
+  assert.equal(row.reason, 'refused-after-step-up: participant cannot be revoked',
+    'the record keeps the specific why; the caller was told only the one word');
+  assert.deepEqual(Object.keys(result).sort(), ['ok', 'reason'], 'the caller gets no detail field');
   assert.equal(row.event_id, spent[0].event_id, 'the refusal points at the spend it wasted');
 });
 
@@ -102,7 +104,7 @@ test('a member who is not an administrator is told so once they have stepped up'
   const plain = world.session_store.issue({ subject_id: memberId, now: world.T + 50 });
   assert.ok(plain.ok, 'ARRANGEMENT: the member has a session');
   const first = world.service.confirmTranscriptClear(world.env(plain, world.T + 51));
-  assert.equal(first.reason, 'step-up-required',
+  assert.equal(first.reason, 'fresh-step-up-required',
     'an ordinary session is asked for a step-up first, whoever holds it');
   const begin = await world.authenticator_service.beginElevation(world.env(plain, world.T + 52));
   assert.ok(begin.ok, 'ARRANGEMENT: the member can begin a step-up: ' + JSON.stringify(begin));

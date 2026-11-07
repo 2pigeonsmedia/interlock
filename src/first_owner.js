@@ -756,12 +756,9 @@ function createFirstOwnerHandler(options) {
     }
     if (!ownerSession(request, response, true)) return;
     const result = house.invite(requestMeta(request, Date.now()), {});
-    if (!result || result.ok !== true || typeof result.secret !== 'string' ||
-        !Number.isSafeInteger(result.expires_at)) {
-      return sendJson(request, response, 403, {
-        ok: false,
-        error: 'fresh-step-up-required',
-      });
+    if (!result || result.ok !== true) return sendStepUpRefusal(request, response, result);
+    if (typeof result.secret !== 'string' || !Number.isSafeInteger(result.expires_at)) {
+      return sendJson(request, response, 503, { ok: false, error: 'unavailable' });
     }
     return sendJson(request, response, 200, {
       ok: true,
@@ -834,17 +831,18 @@ function createFirstOwnerHandler(options) {
     }
     if (!ownerSession(request, response, true)) return;
     const result = house.revokeParticipant(requestMeta(request, Date.now()), input);
-    if (!result || result.ok !== true) {
-      return sendJson(request, response, 403, {
-        ok: false,
-        error: 'fresh-step-up-required',
-      });
-    }
+    if (!result || result.ok !== true) return sendStepUpRefusal(request, response, result);
     return sendJson(request, response, 200, result);
   }
 
+  function sendStepUpRefusal(request, response, result) {
+    const [status, error] = stepUpPageRefusal(result);
+    return sendJson(request, response, status, { ok: false, error });
+  }
+
   // The first owner makes a member an administrator, or takes it back. The
-  // identity module decides; this maps its refusal to a status.
+  // identity module decides; this maps its refusal to a status. A reason not
+  // listed here is a step-up refusal, mapped by the one step-up table.
   const ADMIN_REFUSALS = Object.freeze({
     'invalid-request': [400, 'invalid-participant'],
     'not-authorized': [403, 'not-authorized'],
@@ -852,7 +850,6 @@ function createFirstOwnerHandler(options) {
     'already-admin': [409, 'already-admin'],
     'not-admin': [409, 'not-admin'],
     'passkey-required': [409, 'passkey-required'],
-    'fresh-step-up-required': [403, 'fresh-step-up-required'],
   });
 
   function changeAdministrator(request, response, body, grant) {
@@ -868,7 +865,7 @@ function createFirstOwnerHandler(options) {
     const meta = requestMeta(request, Date.now());
     const result = grant ? house.grantAdministrator(meta, input) : house.revokeAdministrator(meta, input);
     if (!result || result.ok !== true) {
-      const [status, error] = ADMIN_REFUSALS[result && result.reason] || [403, 'not-authorized'];
+      const [status, error] = ADMIN_REFUSALS[result && result.reason] || stepUpPageRefusal(result);
       return sendJson(request, response, status, { ok: false, error });
     }
     return sendJson(request, response, 200, { ok: true, name: result.name });
@@ -880,7 +877,6 @@ function createFirstOwnerHandler(options) {
     'not-authorized': [403, 'not-authorized'],
     'not-found': [404, 'not-found'],
     'passkey-exists': [409, 'passkey-exists'],
-    'fresh-step-up-required': [403, 'fresh-step-up-required'],
   });
 
   function issuePasskeyCode(request, response, body) {
@@ -896,7 +892,7 @@ function createFirstOwnerHandler(options) {
     const result = house.issuePasskeyCode(requestMeta(request, Date.now()), input);
     if (!result || result.ok !== true || typeof result.secret !== 'string' ||
         !Number.isSafeInteger(result.expires_at)) {
-      const [status, error] = PASSKEY_CODE_REFUSALS[result && result.reason] || [403, 'not-authorized'];
+      const [status, error] = PASSKEY_CODE_REFUSALS[result && result.reason] || stepUpPageRefusal(result);
       return sendJson(request, response, status, { ok: false, error });
     }
     return sendJson(request, response, 200, {
@@ -1100,9 +1096,7 @@ function createFirstOwnerHandler(options) {
     }
     if (!ownerSession(request, response, true)) return;
     const confirmed = house.confirmTranscriptClear(requestMeta(request, Date.now()));
-    if (!confirmed || confirmed.ok !== true) {
-      return sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
-    }
+    if (!confirmed || confirmed.ok !== true) return sendStepUpRefusal(request, response, confirmed);
     try {
       const raw = await archive.clearTranscript();
       const result = publicArchive(raw);
@@ -1835,7 +1829,7 @@ function createFirstOwnerHandler(options) {
       }
       const stepped = house.confirmWorkProjectAct(requestMeta(request, actor.now));
       if (!stepped || stepped.ok !== true) {
-        sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
+        sendStepUpRefusal(request, response, stepped);
         return;
       }
     }
@@ -2999,9 +2993,7 @@ function createFirstOwnerHandler(options) {
       return sendGrantError(request, response, error);
     }
     const confirmed = house.confirmGrantAct(requestMeta(request, who.now), 'grant.create');
-    if (!confirmed || confirmed.ok !== true) {
-      return sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
-    }
+    if (!confirmed || confirmed.ok !== true) return sendStepUpRefusal(request, response, confirmed);
     try {
       const row = people.service.grant(who.actor, input, context);
       const made = people.service.grants(who.now).find(item => item.grant_id === row.grant_id);
@@ -3029,9 +3021,7 @@ function createFirstOwnerHandler(options) {
       return sendGrantError(request, response, error);
     }
     const confirmed = house.confirmGrantAct(requestMeta(request, who.now), 'grant.revoke');
-    if (!confirmed || confirmed.ok !== true) {
-      return sendJson(request, response, 403, { ok: false, error: 'fresh-step-up-required' });
-    }
+    if (!confirmed || confirmed.ok !== true) return sendStepUpRefusal(request, response, confirmed);
     try {
       people.service.revoke(who.actor, input, context);
       const revoked = people.service.grants(who.now).find(item => item.grant_id === body.grant_id);
@@ -3269,6 +3259,9 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // Refusals the admission record makes itself, before identity is asked.
+  const ADMISSION_OWN_REFUSALS = Object.freeze(['not-found', 'not-connected', 'reuse-disabled']);
+
   function mutateAdmission(request, response, body, requestId, action) {
     if (!closedObject(body, [])) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
@@ -3288,11 +3281,15 @@ function createFirstOwnerHandler(options) {
     }
     if (!result || result.ok !== true) {
       const reason = result && result.reason;
+      // The admission record's own refusals keep their codes; anything else on
+      // an Allow came from the step-up path and goes through its one table.
+      if (action === 'allow' && !ADMISSION_OWN_REFUSALS.includes(reason)) {
+        sendStepUpRefusal(request, response, result);
+        return;
+      }
       const status = reason === 'not-found' ? 404 :
         (reason === 'not-connected' ? 409 : 403);
-      const error = reason === 'not-authorized' && action === 'allow'
-        ? 'fresh-step-up-required'
-        : (typeof reason === 'string' ? reason : 'admission-refused');
+      const error = typeof reason === 'string' ? reason : 'admission-refused';
       sendJson(request, response, status, { ok: false, error });
       return;
     }
@@ -3782,8 +3779,29 @@ function createFirstOwnerHandler(options) {
   };
 }
 
+// The ONE mapping from an identity step-up refusal to the page. Only a missing
+// or stale step-up asks the page for another passkey confirmation; every other
+// refusal says what it is. No code here is `not-authorized`: the page reads a
+// 403 with that code as "this tab is out of date".
+const STEP_UP_PAGE = Object.freeze({
+  'fresh-step-up-required': Object.freeze([403, 'fresh-step-up-required']),
+  'not-administrator': Object.freeze([403, 'not-administrator']),
+  'refused-after-step-up': Object.freeze([403, 'refused-after-step-up']),
+  'request-invalid': Object.freeze([400, 'request-invalid']),
+  'step-up-subject-mismatch': Object.freeze([403, 'request-refused']),
+  'no-session': Object.freeze([401, 'not-authenticated']),
+});
+const STEP_UP_PAGE_DEFAULT = Object.freeze([403, 'request-refused']);
+
+function stepUpPageRefusal(result) {
+  const reason = result && typeof result.reason === 'string' ? result.reason : null;
+  return Object.prototype.hasOwnProperty.call(STEP_UP_PAGE, reason) ? STEP_UP_PAGE[reason] : STEP_UP_PAGE_DEFAULT;
+}
+
 module.exports = Object.freeze({
   AI_ADMISSION_WAIT_MS,
+  STEP_UP_PAGE,
+  stepUpPageRefusal,
   AI_MESSAGE_WAIT_MS,
   BROWSER_WAIT_MS,
   MAX_JSON_BYTES,

@@ -128,6 +128,25 @@ no others.
   deny and every mutation is still written. Because an allowed read is not an
   audit event, its authorization does not depend on the audit subsystem being
   healthy; writes, denies and every other capability still fail closed.
+- **Step-up acts are named in telemetry, not in the mutation record.** Every
+  act that needs a fresh passkey confirmation (removing a participant, clearing
+  the transcript, a grant, a project change, an invite, allowing an AI, and the
+  rest) writes one `authz` row naming the act and who did it, or one
+  `authz_deny` row saying why it was refused (`fresh-step-up-required`,
+  `not-administrator`, `request-invalid`, `refused-after-step-up`, …), with
+  `decision_source` set to `fresh-step-up`. A refusal that depends on the
+  act's target (a name already taken, the first owner protected) answers the
+  caller with the one word `refused-after-step-up`; the specific cause is
+  written only to the `authz_deny` row, as `refused-after-step-up: <cause>`. When a confirmation was spent, the
+  row's `event_id` is the id of the `session.stepup.consume` row in the
+  mutation record, so the two can be joined. The mutation row itself keeps the
+  shape every earlier release accepts, so a rollback never finds a pending
+  record it refuses. The limit: these rows are telemetry. They rotate out with
+  their stream like any telemetry row, and if the telemetry queue overflows
+  (10,000 rows waiting) a row can be dropped. A drop is counted and the
+  installation reports unhealthy, but the act it described has already
+  happened. The mutation record still proves a confirmation was spent; only
+  the name of the act would be missing.
 - **One shared readership.** Every admitted human and AI seat can read the one
   room. Mentions decide which AI doorbell rings; they are not message access
   controls.
