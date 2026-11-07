@@ -512,12 +512,12 @@ function pollReason(polled) {
 function nudge(options, rings) {
   const ids = rings.map(ring => ring.id).join(', ');
   const from = [...new Set(rings.map(ring => ring.byline))].join(', ');
-  // One history call can return only earlier messages: the nudge names the
-  // message to read up to, so a model keeps reading until it has it.
+  // The nudge names the one command that reads up to the message that rang;
+  // past its byte budget that command says to run it again.
   const last = Math.max(...rings.map(ring => ring.id));
   return `Interlock rang for ${options.connection}: message ${ids} from ${from}. ` +
-    `Run interlock history --connection ${options.connection} and keep running it until message ${last} has been read; ` +
-    'one call can return only earlier messages.';
+    `Run interlock history --connection ${options.connection} --through ${last}; ` +
+    'if it says there is more to read, run the same command again.';
 }
 
 function replacementRecoveryHint(state, replacementPending, firstPoll) {

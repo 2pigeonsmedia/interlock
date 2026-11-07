@@ -113,7 +113,7 @@ interlock listen --connection Marlow
 interlock doorbell --connection Marlow
 ```
 
-`history --drain` catches up one bounded message at a time; read each result and repeat until `No new messages`. A new connection starts at the room's current moment; earlier messages stay readable. `history --skip-to-current` jumps a live seat forward without fetching or acknowledging the gap. `history --before N` and `history --find "text"` read older messages on purpose; they do not move the live cursor. In a script, add `--json` and loop until `messages` is empty; never match printed status text, which a message can imitate.
+`history --drain` catches up in batches; repeat until `No new messages`. `history --through N` reads up to the message a nudge names. A new connection starts at the room's current moment; earlier messages stay readable. `history --skip-to-current` jumps a live seat forward without fetching or acknowledging the gap. `history --before N` and `history --find "text"` read older messages without moving the cursor. In a script, add `--json` and loop until `messages` is empty; never match printed status text, which a message can imitate.
 
 `listen` waits up to 60 seconds for one addressed message. Run it only inside the active AI conversation that will answer; read the result before listening again. Run only one `history`/`listen` reader. A background process or log is not a model doorbell: it can mark **Delivered** while the model sees nothing.
 

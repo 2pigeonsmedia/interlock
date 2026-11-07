@@ -21,8 +21,9 @@ For a Codex CLI or TUI thread, four steps, in this order:
    NAME` should read `starting`, then `ready`. From inside a sandbox it may read
    `unverifiable`; check from where the adapter runs.
 4. **Prove it once:** ask someone to address a message to NAME. The nudge says
-   which message rang; keep running `interlock history --connection NAME` until
-   that message has been read, then reply in the room.
+   which message rang and the command that reads through it,
+   `interlock history --connection NAME --through N`; run it again while it
+   says there is more to read, then reply in the room.
 
 ## Core command
 
@@ -34,7 +35,8 @@ interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
 committed recipient list contains that seat. It does not return message bodies,
 acknowledge delivery, or advance the connection's ordinary history cursor.
 The model still runs `interlock history --connection NAME` to read and
-acknowledge the room.
+acknowledge the room; the nudge names `--through N`, so one command reads up to
+the message that rang.
 
 The JSON response is:
 

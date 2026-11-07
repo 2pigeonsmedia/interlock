@@ -29,6 +29,12 @@ const LISTEN_FETCH_TIMEOUT_MS = 60_000;
 const HISTORY_LIMIT = 1;
 const HISTORY_DRAIN_BYTES = 12 * 1024;
 const HISTORY_DRAIN_MESSAGES = 100;
+// history --through N: one call reads up to N. 24 KiB, not more: the output
+// lands in an AI's tool window, and a common one cuts a command's output at
+// 30,000 characters. A message printed past that cut would be delivered yet
+// unseen. 24 KiB still holds two typical messages, and one message is always
+// whole, even at the room's 32 KiB maximum.
+const HISTORY_THROUGH_BYTES = 24 * 1024;
 const HISTORY_PEEK_LIMIT = 100;
 
 const HELP = `Interlock ${packageJson.version}
@@ -43,8 +49,8 @@ Usage:
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
   interlock join [--product LABEL] [--name NAME] [--url URL] [--project ID] [--model LABEL]
-  interlock history --connection NAME [--drain | --skip-to-current | --before N | --find TEXT] [--json]
-  interlock history --connection NAME --project ID [--drain | --before N | --find TEXT]
+  interlock history --connection NAME [--drain | --through N | --skip-to-current | --before N | --find TEXT] [--json]
+  interlock history --connection NAME --project ID [--drain | --through N | --before N | --find TEXT]
   interlock say --connection NAME --file PATH [--json]
   interlock say --connection NAME --stdin [--json]
       [--asks-of NAME [--means-file PATH | --means-stdin] [--deliver later]]
@@ -109,7 +115,7 @@ function sayValue(args, index) {
 
 function commandOptions(command, args) {
   const options = {
-    connection: null, drain: false, skipToCurrent: false, before: null, find: null, project: null,
+    connection: null, drain: false, skipToCurrent: false, before: null, find: null, project: null, through: null,
     after: null, json: false, source: null,
     asksOf: null, means: null, deliver: null, answers: null, choice: null, status: null, discusses: null,
   };
@@ -122,22 +128,31 @@ function commandOptions(command, args) {
       options.json = true;
       continue;
     }
+    if (command === 'history' && flag === '--through') {
+      if (seen.has(flag) || options.drain || options.skipToCurrent || options.before !== null ||
+          options.find !== null || typeof args[index + 1] !== 'string' || !/^[1-9][0-9]*$/.test(args[index + 1]) ||
+          !Number.isSafeInteger(Number(args[index + 1]))) return null;
+      seen.add(flag);
+      options.through = Number(args[index + 1]);
+      index += 1;
+      continue;
+    }
     if (command === 'history' && flag === '--drain') {
       if (seen.has(flag) || options.skipToCurrent || options.before !== null ||
-          options.find !== null) return null;
+          options.find !== null || options.through !== null) return null;
       seen.add(flag);
       options.drain = true;
       continue;
     }
     if (command === 'history' && flag === '--skip-to-current') {
       if (seen.has(flag) || options.drain || options.before !== null ||
-          options.find !== null) return null;
+          options.find !== null || options.through !== null) return null;
       seen.add(flag);
       options.skipToCurrent = true;
       continue;
     }
     if (command === 'history' && flag === '--before') {
-      if (seen.has(flag) || options.drain || options.skipToCurrent ||
+      if (seen.has(flag) || options.drain || options.skipToCurrent || options.through !== null ||
           typeof args[index + 1] !== 'string' || !/^[1-9][0-9]*$/.test(args[index + 1])) {
         return null;
       }
@@ -147,7 +162,7 @@ function commandOptions(command, args) {
       continue;
     }
     if (command === 'history' && flag === '--find') {
-      if (seen.has(flag) || options.drain || options.skipToCurrent ||
+      if (seen.has(flag) || options.drain || options.skipToCurrent || options.through !== null ||
           typeof args[index + 1] !== 'string' || args[index + 1].length < 1 ||
           args[index + 1].length > 200 || args[index + 1].startsWith('-')) {
         return null;
@@ -1107,28 +1122,78 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
   return EXIT_OK;
 }
 
-async function executeDrainHistory(parsed, profile, profiles, io, dependencies) {
+/* history --through N: every unread message up to and including N, whole and
+ * in order, delivered exactly as --drain delivers them, within its own budget.
+ * N must be in the room: checked first with a read that delivers nothing. */
+async function executeThroughHistory(parsed, profile, profiles, io, dependencies) {
+  const through = parsed.through;
+  if (profile.cursor >= through) {
+    if (parsed.json) writeReadOutput(io.stdout, parsed, { ok: true, messages: [], cursor: profile.cursor,
+      timed_out: false, connection_session: null, through_reached: true });
+    else line(io.stdout, `Already read through message ${through}.`);
+    return EXIT_OK;
+  }
+  const fetcher = dependencies.fetch || globalThis.fetch;
+  // The room refuses a read starting past its end, and a read starting at
+  // its end finds nothing: either way N is not in the room.
+  const notInRoom = () => {
+    line(io.stderr, `interlock: message ${through} is not in the room yet; nothing was read.`);
+    return EXIT_USAGE;
+  };
+  let probe;
+  try {
+    probe = await localRequest(fetcher, profile, `/api/ai/messages?after=${through - 1}&limit=1&wait=0`,
+      { timeoutMs: COMMAND_FETCH_TIMEOUT_MS, stderr: io.stderr });
+    if (!validPage(probe, through - 1)) throw incompatibleResponse();
+  } catch (error) {
+    if (error && error.status === 400 && error.code === 'invalid-message-query') return notInRoom();
+    reportRequestError(io.stderr, error, profile);
+    return EXIT_RUNTIME;
+  }
+  if (probe.messages.length === 0) return notInRoom();
+  return executeDrainHistory(parsed, profile, profiles, io, dependencies,
+    { bytes: HISTORY_THROUGH_BYTES, through });
+}
+
+// `limits.through`: stop after message N (history --through N), never
+// fetching past it for reading; `limits.bytes`: the rendered budget.
+async function executeDrainHistory(parsed, profile, profiles, io, dependencies,
+  limits = { bytes: HISTORY_DRAIN_BYTES, through: null }) {
   const fetcher = dependencies.fetch || globalThis.fetch;
   const messages = [];
   let cursor = profile.cursor;
   let connectionSession;
+  const through = limits.through;
 
-  function batch(extraMessages = [], nextCursor = cursor, nextSession = connectionSession) {
-    return Object.freeze({
+  function batch(extraMessages = [], nextCursor = cursor, nextSession = connectionSession, reached = undefined) {
+    return Object.freeze(Object.assign({
       ok: true,
       messages: Object.freeze([...messages, ...extraMessages]),
       cursor: nextCursor,
       timed_out: false,
       connection_session: nextSession === undefined ? null : nextSession,
-    });
+    }, through === null ? {} : { through_reached: reached === undefined ? nextCursor >= through : reached }));
   }
 
   async function output(page) {
-    if (parsed.json) writeReadOutput(io.stdout, parsed, await lensPage(fetcher, profile, page, parsed.project));
-    else await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
+    if (parsed.json) {
+      const lensed = await lensPage(fetcher, profile, page, parsed.project);
+      writeReadOutput(io.stdout, parsed, through === null ? lensed
+        : Object.assign({}, lensed, { through_reached: page.through_reached }));
+    } else {
+      await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
+      if (through !== null) {
+        line(io.stdout, page.through_reached ? `Read through message ${through}.`
+          : 'more to read: run the same command again.');
+      }
+    }
   }
 
   for (let index = 0; index < HISTORY_DRAIN_MESSAGES; index += 1) {
+    if (through !== null && cursor >= through) {
+      await output(batch([], cursor, connectionSession, true));
+      return EXIT_OK;
+    }
     let page;
     try {
       page = await localRequest(fetcher, profile,
@@ -1156,15 +1221,20 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
       }
       const completed = batch([], cursor,
         connectionSession === undefined ? page.connection_session : connectionSession);
-      if (completed.messages.length > 0 || parsed.json) await output(completed);
+      if (completed.messages.length > 0 || parsed.json || through !== null) await output(completed);
       else line(io.stdout, 'No new messages.');
       return EXIT_OK;
     }
 
+    // Past N: everything up to N is read; the later message stays unread.
+    if (through !== null && page.messages[0].id > through) {
+      await output(batch([], cursor, connectionSession, true));
+      return EXIT_OK;
+    }
     const candidate = batch(page.messages, page.cursor, page.connection_session);
     const candidateBytes = Buffer.byteLength(readOutput(parsed, candidate), 'utf8');
-    if (messages.length > 0 && candidateBytes > HISTORY_DRAIN_BYTES) {
-      await output(batch());
+    if (messages.length > 0 && candidateBytes > limits.bytes) {
+      await output(batch([], cursor, connectionSession, false));
       return EXIT_OK;
     }
 
@@ -1197,8 +1267,12 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies) 
     messages.push(...page.messages);
     cursor = page.cursor;
     connectionSession = page.connection_session;
-    if (candidateBytes >= HISTORY_DRAIN_BYTES) {
-      await output(batch());
+    if (through !== null && cursor >= through) {
+      await output(batch([], cursor, connectionSession, true));
+      return EXIT_OK;
+    }
+    if (candidateBytes >= limits.bytes) {
+      await output(batch([], cursor, connectionSession, through === null ? undefined : false));
       return EXIT_OK;
     }
   }
@@ -1330,7 +1404,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
 async function runReadCommand(command, args, io, dependencies = {}) {
   const parsed = commandOptions(command, args);
   if (!parsed) {
-    line(io.stderr, `interlock: usage: interlock ${command} --connection NAME${command === 'history' ? ' [--drain | --skip-to-current | --before N | --find TEXT] [--project ID]' : ''} [--json]`);
+    line(io.stderr, `interlock: usage: interlock ${command} --connection NAME${command === 'history' ? ' [--drain | --through N | --skip-to-current | --before N | --find TEXT] [--project ID]' : ''} [--json]`);
     return EXIT_USAGE;
   }
   let selected;
@@ -1361,7 +1435,9 @@ async function runReadCommand(command, args, io, dependencies = {}) {
   try {
     result = command === 'history' && parsed.skipToCurrent
       ? await executeSkipToCurrent(parsed, profile, profiles, io, dependencies)
-      : command === 'history' && parsed.drain
+      : command === 'history' && parsed.through !== null
+        ? await executeThroughHistory(parsed, profile, profiles, io, dependencies)
+        : command === 'history' && parsed.drain
         ? await executeDrainHistory(parsed, profile, profiles, io, dependencies)
         : command === 'history' && (parsed.before !== null || parsed.find !== null)
           ? await executePeekHistory(parsed, profile, profiles, io, dependencies)
@@ -1422,11 +1498,11 @@ async function runDoorbell(args, io, dependencies = {}) {
       line(io.stdout,
         `Interlock ring ${ring.id} from ${terminalSafe(ring.byline)}${session}.`);
     }
-    // One history call can return only earlier messages: say how far to read.
+    // Name the one command that reads up to the message that rang.
     const last = Math.max(...page.rings.map(ring => ring.id));
     line(io.stdout,
-      `Run \`interlock history --connection ${terminalSafe(profile.name)}\` and keep running it until message ${last} has been read; ` +
-      'one call can return only earlier messages.');
+      `Run \`interlock history --connection ${terminalSafe(profile.name)} --through ${last}\`; ` +
+      'if it says there is more to read, run the same command again.');
   }
   return EXIT_OK;
 }
@@ -3538,6 +3614,7 @@ module.exports = {
   EXIT_USAGE,
   HISTORY_DRAIN_BYTES,
   HISTORY_DRAIN_MESSAGES,
+  HISTORY_THROUGH_BYTES,
   run,
   runBackup,
   runJoin,

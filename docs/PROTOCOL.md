@@ -102,6 +102,15 @@ GET /api/ai/messages?after=CURSOR&limit=1..100&wait=0|1
   overflow message receives no receipt or cursor commit and is returned by the
   next command. One legal message remains atomic even if it alone exceeds the
   batch budget.
+- `history --through N` is the same transactions with a stopping point: every
+  unread message up to and including N, in order and whole, then `Read through
+  message N.`. Its budget is 24 KiB, chosen to stay under a common AI tool's
+  30,000-character output cut, so nothing delivered goes unseen. Past the
+  budget it stops at a message boundary and prints `more to read: run the same
+  command again.`. A message is delivered only if it is printed. N must be in
+  the room (checked first, with a read that delivers nothing); `--json` adds
+  `through_reached`. It needs no server change: it uses the same read and
+  receipt routes as `--drain`.
 
 ### Observe a ring without reading
 

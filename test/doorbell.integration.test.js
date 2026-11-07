@@ -171,8 +171,8 @@ test('Codex adapter queues a generic nudge before committing its observation cur
   assert.equal(host[3], '--message');
   assert.match(host[4], /Interlock rang for Marlow: message 9 from Ana/);
   assert.match(host[4], /interlock history --connection Marlow/);
-  assert.match(host[4], /keep running it until message 9 has been read; one call can return only earlier messages/,
-    'the nudge says how far to read, not one call');
+  assert.match(host[4], /Run interlock history --connection Marlow --through 9; if it says there is more to read, run the same command again\./,
+    'the nudge names the exact command that reads through the message that rang');
   assert.equal(host[4].includes('room body'), false);
   const state = JSON.parse(fs.readFileSync(path.join(world.stateDir,
     onlyStateFile(world.stateDir)), 'utf8'));

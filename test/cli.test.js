@@ -19,6 +19,7 @@ const {
   EXIT_USAGE,
   HISTORY_DRAIN_BYTES,
   HISTORY_DRAIN_MESSAGES,
+  HISTORY_THROUGH_BYTES,
   run,
   joinOptions,
   runRecover,
@@ -2494,8 +2495,8 @@ test('doorbell has an independent cursor and prints only a generic nudge', async
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /Interlock ring 13 from Ana/);
   assert.match(result.stdout, /interlock history --connection Marlow/);
-  assert.match(result.stdout, /keep running it until message 13 has been read; one call can return only earlier messages\./,
-    'the nudge says how far to read, not one call');
+  assert.match(result.stdout, /Run `interlock history --connection Marlow --through 13`; if it says there is more to read, run the same command again\./,
+    'the nudge names the exact command that reads through the message that rang');
   assert.equal(result.stdout.includes('private room body'), false);
   assert.deepEqual(world.events, [['load', 'Marlow']]);
 });
@@ -2919,4 +2920,139 @@ test('grants lists the room\'s grants with their state', async () => {
   assert.equal(listed.code, EXIT_OK, listed.stderr);
   assert.equal(listed.stdout, 'G-1 · active · Scout · finance · leads the map · by Ana · until revoked\n');
   assert.equal((await captureCommand(['grants', '--connection', 'Marlow', '--clear'], world.dependencies)).code, EXIT_USAGE);
+});
+
+// ── history --through N ─────────────────────────────────────────────────────
+
+// A room of `latest` messages; texts by id. Records every GET and receipt.
+function throughRoom(world, latest, textOf = id => `message ${id}`) {
+  const gets = [];
+  const receipts = [];
+  world.dependencies.fetch = async (url, options) => {
+    if (String(url).includes('/api/ai/annotations')) return fakeResponse(404, { ok: false, error: 'not-found' });
+    if (url.includes('/api/ai/receipts')) {
+      receipts.push(JSON.parse(options.body));
+      return fakeResponse(200, { ok: true, acknowledged: 1, added: 1 });
+    }
+    gets.push(url);
+    const after = Number(new URL(url).searchParams.get('after'));
+    // As the room does: a read starting past its end is refused; at its end, empty.
+    if (after > latest) return fakeResponse(400, { ok: false, error: 'invalid-message-query' });
+    if (after === latest) {
+      return fakeResponse(200, { ok: true, messages: [], cursor: latest, timed_out: false, connection_session: null });
+    }
+    const id = after + 1;
+    return fakeResponse(200, {
+      ok: true, messages: [publicMessage({ id, text: textOf(id) })], cursor: id, timed_out: false, connection_session: null,
+    });
+  };
+  return { gets, receipts };
+}
+
+test('history --through N reads every unread message up to and including N, whole, and acknowledges each', async () => {
+  const world = admittedConnection();
+  const room = throughRoom(world, 5);
+  const result = await captureCommand(['history', '--connection', 'Marlow', '--through', '3'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  for (const id of [1, 2, 3]) assert.match(result.stdout, new RegExp(`\\[${id}\\] Ana[^]*message ${id}`));
+  assert.doesNotMatch(result.stdout, /message 4/, 'nothing past N');
+  assert.match(result.stdout, /Read through message 3\.\n$/);
+  assert.deepEqual(room.receipts, [1, 2, 3].map(id => ({ message_ids: [id] })));
+  assert.deepEqual(world.events.filter(event => event[0] === 'cursor').map(event => event[3]), [1, 2, 3]);
+  assert.ok(!room.gets.some(url => url.includes('after=3&')), 'message 4 is never fetched for reading');
+});
+
+test('history --through N above the room\'s latest message is refused before anything is read', async () => {
+  const world = admittedConnection();
+  const room = throughRoom(world, 3);
+  const result = await captureCommand(['history', '--connection', 'Marlow', '--through', '9'], world.dependencies);
+  assert.notEqual(result.code, EXIT_OK);
+  assert.match(result.stderr, /message 9 is not in the room yet; nothing was read/);
+  const edge = admittedConnection();
+  const edgeRoom = throughRoom(edge, 3);
+  const justPast = await captureCommand(['history', '--connection', 'Marlow', '--through', '4'], edge.dependencies);
+  assert.notEqual(justPast.code, EXIT_OK, 'one past the end is refused too');
+  assert.match(justPast.stderr, /message 4 is not in the room yet; nothing was read/);
+  assert.deepEqual(edgeRoom.receipts, []);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(room.receipts, []);
+  assert.deepEqual(world.events.filter(event => event[0] === 'cursor'), []);
+});
+
+test('history --through stops at a message boundary at its byte budget and says there is more', async () => {
+  const world = admittedConnection();
+  const room = throughRoom(world, 5, id => `M${id} ${'x'.repeat(Math.ceil(HISTORY_THROUGH_BYTES * 0.6))}`);
+  const result = await captureCommand(['history', '--connection', 'Marlow', '--through', '4'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /M1 /);
+  assert.doesNotMatch(result.stdout, /M2 /, 'the message past the budget is not printed');
+  assert.match(result.stdout, /more to read: run the same command again\.\n$/);
+  assert.deepEqual(room.receipts, [{ message_ids: [1] }], 'only the printed message is delivered');
+  assert.deepEqual(world.events.filter(event => event[0] === 'cursor').map(event => event[3]), [1]);
+});
+
+test('history --through --json gives the messages and whether N was reached', async () => {
+  const done = admittedConnection();
+  throughRoom(done, 5);
+  const reached = await captureCommand(['history', '--connection', 'Marlow', '--through', '2', '--json'], done.dependencies);
+  assert.equal(reached.code, EXIT_OK, reached.stderr);
+  const page = JSON.parse(reached.stdout);
+  assert.deepEqual(page.messages.map(message => message.id), [1, 2]);
+  assert.equal(page.through_reached, true);
+  const more = admittedConnection();
+  throughRoom(more, 5, id => `M${id} ${'x'.repeat(Math.ceil(HISTORY_THROUGH_BYTES * 0.6))}`);
+  const partial = JSON.parse((await captureCommand(['history', '--connection', 'Marlow', '--through', '4', '--json'],
+    more.dependencies)).stdout);
+  assert.deepEqual([partial.messages.map(message => message.id), partial.through_reached], [[1], false]);
+});
+
+test('history --through N already read says so and reads nothing', async () => {
+  const world = admittedConnection();
+  world.profile.cursor = 4;
+  const room = throughRoom(world, 5);
+  const result = await captureCommand(['history', '--connection', 'Marlow', '--through', '3'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /^Already read through message 3\.\n$/);
+  assert.deepEqual([room.receipts, room.gets], [[], []]);
+});
+
+test('history --through takes one positive message id and no other read mode', async () => {
+  const world = admittedConnection();
+  const room = throughRoom(world, 5);
+  const code = async argv => (await captureCommand(argv, world.dependencies)).code;
+  for (const extra of [['--drain'], ['--skip-to-current'], ['--before', '2'], ['--find', 'x'], []]) {
+    for (const value of ['0', '-1', 'x', '1.5']) {
+      assert.equal(await code(['history', '--connection', 'Marlow', '--through', value, ...extra]), EXIT_USAGE, value);
+    }
+  }
+  for (const extra of [['--drain'], ['--skip-to-current'], ['--before', '2'], ['--find', 'x'], ['--through', '4']]) {
+    assert.equal(await code(['history', '--connection', 'Marlow', '--through', '3', ...extra]), EXIT_USAGE, extra.join(' '));
+    assert.equal(await code(['history', '--connection', 'Marlow', ...extra, '--through', '3']), EXIT_USAGE, 'before: ' + extra.join(' '));
+  }
+  assert.equal(await code(['listen', '--connection', 'Marlow', '--through', '3']), EXIT_USAGE);
+  assert.deepEqual([room.gets, room.receipts], [[], []], 'a refused command reads nothing');
+});
+
+test('history --through N where N itself is not in the stream stops before the next message past N', async () => {
+  const world = admittedConnection();
+  const ids = [1, 2, 5, 6];
+  const receipts = [];
+  world.dependencies.fetch = async (url, options) => {
+    if (String(url).includes('/api/ai/annotations')) return fakeResponse(404, { ok: false, error: 'not-found' });
+    if (url.includes('/api/ai/receipts')) {
+      receipts.push(JSON.parse(options.body));
+      return fakeResponse(200, { ok: true, acknowledged: 1, added: 1 });
+    }
+    const after = Number(new URL(url).searchParams.get('after'));
+    const next = ids.find(id => id > after);
+    if (next === undefined) return fakeResponse(200, { ok: true, messages: [], cursor: after, timed_out: false, connection_session: null });
+    return fakeResponse(200, { ok: true, messages: [publicMessage({ id: next, text: `message ${next}` })], cursor: next,
+      timed_out: false, connection_session: null });
+  };
+  const result = await captureCommand(['history', '--connection', 'Marlow', '--through', '3'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  assert.match(result.stdout, /message 2/);
+  assert.doesNotMatch(result.stdout, /message 5/, 'the first message past N is not read');
+  assert.deepEqual(receipts, [{ message_ids: [1] }, { message_ids: [2] }], 'nor delivered');
+  assert.match(result.stdout, /Read through message 3\.\n$/);
 });
