@@ -131,9 +131,16 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   is not revised. A decision asked in the room has its room ask revised with
   it, as its asker, so an answer given there to the old wording is refused
   (`409 ask-revised`); the new wording must be one the room accepts as what a
-  yes means (else `400 invalid-means`, and nothing is written). If the room
-  ask could not follow, the response carries `"room": "stale"` and the
-  record takes no room answer until the two agree.
+  yes means (else `400 invalid-means`, and nothing is written). Until the
+  room confirms it asks the revised words, the record carries
+  `ask_follow_pending: true` and takes no room answer, whatever revision the
+  answer names. If the room ask could not follow (a failure, or a stop
+  between the two), the response carries `"room": "stale"` and the mark stays
+  on the record. It clears when the room follows: retry the same revise
+  (same `operation_id`) and the room is revised again, or the asker revises
+  the room ask, and the record then takes the room's words as what a yes
+  means (any answer voided), so an answer binds only to the words the room
+  showed.
 - Anyone else may record that an answer was given elsewhere
   (`answer.kind: "reported"`) with the exact words and a source. The record
   shows who reported it and that it is not confirmed here. The response

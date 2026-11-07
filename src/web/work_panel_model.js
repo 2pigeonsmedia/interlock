@@ -613,6 +613,9 @@
       return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by) +
         (Number.isSafeInteger(item.question_revision) && item.question_revision > 1
           ? ' · question revision ' + item.question_revision : '')]
+        .concat(item.ask_follow_pending === true ? ['Its question in the room has not caught up with this revision ' +
+          '(message #' + item.ask_message_id + '): answers given there are not recorded until it does. ' +
+          'Revise the question in the room, or revise it here again.'] : [])
         .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.ask_message_id + ').'] : [])
         .concat(answerLines(item, history))
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])

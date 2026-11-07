@@ -1119,7 +1119,10 @@ function createWorkService(options) {
         // put to someone else.
         const unbound = askedOf !== undefined && item.ask_message_id &&
           (askedOf.subject_id !== previousAskedOf.subject_id) ? item.ask_message_id : null;
-        if (unbound !== null) item.ask_message_id = null;
+        if (unbound !== null) {
+          item.ask_message_id = null;
+          delete item.ask_follow_pending;
+        }
         touch(item, now);
         appendEvent(draft, now, actor, Object.assign({
           item: item.id, project: item.project, kind: 'reopened', reason,
@@ -1249,6 +1252,9 @@ function createWorkService(options) {
       // An answer stands on the record only for the scope it was given to:
       // the room ask's revision this decision's scope is.
       if (body.revision !== askRevision(item)) return { ok: true, recorded: null };
+      // Revised here, and the room has not confirmed it asks the same words:
+      // no room answer is taken until the two agree.
+      if (item.ask_follow_pending === true) return { ok: true, recorded: null };
       // A room answer never replaces the first owner's recorded answer unless
       // it is hers.
       if (protectedAnswer(item) && actor.first_owner !== true) return { ok: true, recorded: null };
@@ -1446,10 +1452,16 @@ function createWorkService(options) {
       const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
       if (!item || item.asked_by.subject_id !== actor.subject_id) return { ok: true, revised: null };
       // The scope follows the room's numbered revisions: an older one that
-      // arrives late never replaces a newer one.
-      if (body.revision <= askRevision(item)) return { ok: true, revised: null };
+      // arrives late never replaces a newer one. While the record waits for
+      // the room to follow its own revise, the room's revise at the number the
+      // record took (or later) is what the room now asks: the record takes it.
+      const pending = item.ask_follow_pending === true;
+      if (pending ? body.revision < askRevision(item) : body.revision <= askRevision(item)) {
+        return { ok: true, revised: null };
+      }
       const now = clock();
       item.ask_revision = body.revision;
+      delete item.ask_follow_pending;
       const before = item.scope;
       const voided = item.answer;
       item.scope = body.means === null ? '' : body.means;
@@ -1457,7 +1469,7 @@ function createWorkService(options) {
       touch(item, now);
       appendEvent(draft, now, actor, Object.assign({
         item: item.id, project: item.project, kind: 'scope-revised', before, after: item.scope,
-      }, voided ? { answer_superseded: clone(voided) } : {}));
+      }, voided ? { answer_superseded: clone(voided) } : {}, pending ? { room_caught_up: true } : {}));
       return { ok: true, revised: item.id };
     });
   }
@@ -1512,7 +1524,13 @@ function createWorkService(options) {
         // Bound to a room ask: the host revises that ask next, which gives it
         // the next number. The record moves to that number now, so a room
         // answer given to the old wording is refused here from this moment.
-        if (Number.isSafeInteger(item.ask_message_id)) item.ask_revision = askRevision(item) + 1;
+        // Until the room confirms it landed there, the two may disagree: the
+        // mark is durable, so a crash before the room revise leaves the record
+        // refusing room answers rather than binding one to words not shown.
+        if (Number.isSafeInteger(item.ask_message_id)) {
+          item.ask_revision = askRevision(item) + 1;
+          item.ask_follow_pending = true;
+        }
         touch(item, now);
         appendEvent(draft, now, actor, Object.assign({
           item: item.id, project: item.project, kind: 'revised', reason,
@@ -1535,9 +1553,18 @@ function createWorkService(options) {
     return store.commit(draft => {
       const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
       if (!item || item.asked_by.subject_id !== actor.subject_id) return { ok: false };
-      if (body.revision < askRevision(item)) return { ok: false };
-      if (body.revision > askRevision(item)) {
-        item.ask_revision = body.revision;
+      // Only the room landing on exactly the number the record took means the
+      // room asks the record's words. Anything else leaves them out of step,
+      // durably, until the asker's next room revise brings the record level.
+      if (body.revision !== askRevision(item)) {
+        if (item.ask_follow_pending !== true) {
+          item.ask_follow_pending = true;
+          touch(item, clock());
+        }
+        return { ok: false };
+      }
+      if (item.ask_follow_pending === true) {
+        delete item.ask_follow_pending;
         touch(item, clock());
       }
       return { ok: true };

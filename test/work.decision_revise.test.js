@@ -172,3 +172,66 @@ test('a bound decision refuses a room answer to the old wording from the moment 
   assert.equal(work.followAsk(Object.assign({}, owner, { session: null }), { ask_id: 140, revision: 3 }).ok, false,
     'only the asker');
 });
+
+// A revise whose room ask has not followed yet: the record and the room may
+// disagree, so the record takes no room answer until they agree again.
+function boundAndRevised(work, store, askId) {
+  const killed = killedDecision(work);
+  const bound = store.commit(draft => {
+    const row = draft.items.find(entry => entry.id === killed.id);
+    row.ask_message_id = askId;
+    row.ask_revision = 1;
+    row.revision += 1;
+    return Object.assign({}, row);
+  });
+  return revise(work, lead, bound, { proposal: 'Buy third-party rollers', scope: 'third-party rollers' }).item;
+}
+const ANA_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+const asOwner = Object.assign({}, owner, { session: null });
+const asLead = Object.assign({}, lead, { session: null });
+const yes = (work, askId, messageId, revision) => work.answerFromRoom(asOwner, {
+  ask_id: askId, revision, message_id: messageId, text: 'yes', choice: 'yes', by_addressee: true, of: ANA_OF,
+});
+
+test('until the room follows a revise, the record takes no room answer, at any revision', () => {
+  const { work, store } = fresh();
+  const item = boundAndRevised(work, store, 150);
+  assert.equal(item.ask_follow_pending, true, 'the record says its room ask has not followed');
+  assert.equal(yes(work, 150, 151, 2).recorded, null, 'a Yes at the number the record took is not recorded');
+  assert.equal(yes(work, 150, 152, 1).recorded, null);
+  assert.equal(work.get(owner, { id: item.id }).item.answer, null);
+});
+
+test('a room that never followed (crash), then the asker revising the room ask: the record takes the room\'s words', () => {
+  const { work, store } = fresh();
+  const item = boundAndRevised(work, store, 160);
+  // No followAsk: the host crashed. The asker revises the room ask by hand.
+  const caught = work.reviseScope(asLead, { ask_id: 160, means: 'I buy a whole new machine for $9,000', revision: 2 });
+  assert.equal(caught.revised, item.id, 'the room revise is taken, not ignored');
+  const now = work.get(owner, { id: item.id }).item;
+  assert.equal(now.scope, 'I buy a whole new machine for $9,000', 'the record now says what the room asked');
+  assert.equal(now.ask_follow_pending, undefined, 'the two agree again');
+  assert.equal(yes(work, 160, 161, 2).recorded, item.id);
+  const answered = work.get(owner, { id: item.id }).item;
+  assert.deepEqual([answered.state, answered.scope], ['answered', 'I buy a whole new machine for $9,000'],
+    'her Yes stands for the words she was shown');
+});
+
+test('a room that lands on another number than the record took leaves the record refusing room answers', () => {
+  const { work, store } = fresh();
+  const item = boundAndRevised(work, store, 170);
+  assert.equal(work.followAsk(asLead, { ask_id: 170, revision: 3 }).ok, false, 'not the number the record took');
+  assert.equal(work.get(owner, { id: item.id }).item.ask_follow_pending, true, 'still out of step, durably');
+  assert.equal(yes(work, 170, 171, 3).recorded, null);
+  assert.equal(yes(work, 170, 172, 2).recorded, null);
+  assert.equal(work.reviseScope(asLead, { ask_id: 170, means: 'third-party rollers, fitted', revision: 4 }).revised, item.id);
+  assert.equal(yes(work, 170, 173, 4).recorded, item.id, 'agreed again after the asker revises the room ask');
+});
+
+test('an exact follow clears the mark, and a room answer then binds to the revised words', () => {
+  const { work, store } = fresh();
+  const item = boundAndRevised(work, store, 180);
+  assert.equal(work.followAsk(asLead, { ask_id: 180, revision: 2 }).ok, true);
+  assert.equal(work.get(owner, { id: item.id }).item.ask_follow_pending, undefined);
+  assert.equal(yes(work, 180, 181, 2).recorded, item.id);
+});
