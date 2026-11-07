@@ -556,7 +556,9 @@ function openAdmissionService(optionsIn) {
       CANDIDATE_KEYS.map(key => [key, record[key]]),
     ));
     if (!result || result.ok !== true) {
-      return Object.freeze({ ok: false, reason: 'not-authorized' });
+      // Identity names the step-up reason; the host maps it to the page.
+      return Object.freeze({ ok: false,
+        reason: result && typeof result.reason === 'string' ? result.reason : 'not-authorized' });
     }
     const enrollment = Object.freeze({
       subject_id: result.subject_id,

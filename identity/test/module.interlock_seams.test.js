@@ -1,5 +1,29 @@
 'use strict';
 
+// The identity-to-host seam: what the host is told when identity refuses.
+//
+// The refusal contract for the administrator acts behind a fresh step-up that
+// this file exercises (allowing an AI, removing a participant, clearing the
+// transcript; grants, projects and invites follow the same path):
+//   - A malformed body, or a caller without a live session, gets the one
+//     generic refusal (`not-authorized`, or a bare `{ ok: false }` from the
+//     confirm-only acts), exactly as before.
+//   - An administrator WITH a live session is told one word about its own
+//     request: `fresh-step-up-required` (no fresh confirmation; the only word
+//     that asks for a passkey), `not-administrator`, `request-invalid`, or
+//     `refused-after-step-up`.
+//   - On these acts every failure that depends on the act's TARGET (a name
+//     collision, the first owner protected, a failure inside the act) answers
+//     the same one word, `refused-after-step-up`, whatever the cause. The
+//     specific cause is written only to the `authz_deny` record.
+// Not covered by that rule, and unchanged: issuing a passkey code, and making
+// or removing an administrator, name the target's state (`not-found`,
+// `passkey-exists`, `already-admin`, `not-admin`, `passkey-required`). Those
+// are administrator-only and show what Settings already shows them.
+// Until 0.3.5 every refusal here was `not-authorized`, which sent the page to
+// ask for a passkey that could not help; this file's expectations changed on
+// purpose.
+
 const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
@@ -108,7 +132,7 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
   const beforeL1 = JSON.stringify(world.repo.read());
   assert.deepStrictEqual(
     house.allowAiAdmission(world.env(l1, world.T + 2), body),
-    { ok: false, reason: 'not-authorized' },
+    { ok: false, reason: 'fresh-step-up-required' },
     'ordinary signed-in assurance must not admit an AI');
   assert.strictEqual(JSON.stringify(world.repo.read()), beforeL1,
     'an L1 refusal must create no seat, credential, grant or enrollment intent');
@@ -139,7 +163,7 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
     throw new Error('injected post-credential failure');
   };
   const injected = house.allowAiAdmission(world.env(elevated, world.T + 15), body);
-  assert.deepStrictEqual(injected, { ok: false, reason: 'not-authorized' });
+  assert.deepStrictEqual(injected, { ok: false, reason: 'refused-after-step-up' });
   assert.strictEqual(enrollmentState(world.repo.read()), beforeEnrollment,
     'a failure after credential draft mutation must commit none of the enrollment');
   credentials.issueInDraft = originalIssueInDraft;
@@ -292,7 +316,7 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
     house.allowAiAdmission(world.env(mismatchStep, world.T + 43), Object.assign({}, body, {
       name: 'Not-Marlow',
     })),
-    { ok: false, reason: 'not-authorized' },
+    { ok: false, reason: 'refused-after-step-up' },
     'a request id may not replay with changed enrollment semantics');
   assert.strictEqual(enrollmentState(world.repo.read()), afterFirstJoin);
 
@@ -379,7 +403,7 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
     house.allowAiAdmission(world.env(humanCollisionStep, world.T + 63), admission(humanCollisionCandidate, {
       name: 'owner',
     })),
-    { ok: false, reason: 'not-authorized' },
+    { ok: false, reason: 'refused-after-step-up' },
     'an AI name may not case-fold-match a human participant, past or present');
 
   const subjects = F.load('subjects.js');
@@ -398,7 +422,7 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
     house.allowAiAdmission(world.env(pastHumanStep, world.T + 73), admission(pastHumanCandidate, {
       name: 'OWNER',
     })),
-    { ok: false, reason: 'not-authorized' },
+    { ok: false, reason: 'refused-after-step-up' },
     'renaming a human must not release their prior name to an AI');
 
   await house.ready();
@@ -481,7 +505,7 @@ test('Interlock administration seams revoke non-owners and preserve only the cur
   const selfStep = await world.elevate(world.T + 70);
   assert.deepStrictEqual(
     house.revokeParticipant(world.env(selfStep, world.T + 73), { name: 'Owner' }),
-    { ok: false, reason: 'not-authorized' },
+    { ok: false, reason: 'refused-after-step-up' },
     'the only owner must never be removed through the participant door',
   );
   assert.strictEqual(world.repo.usableAdministrators('house'), 1,
@@ -499,7 +523,7 @@ test('Interlock administration seams revoke non-owners and preserve only the cur
   );
   assert.deepStrictEqual(
     house.confirmTranscriptClear(world.env(clearStep, world.T + 85)),
-    { ok: false },
+    { ok: false, reason: 'fresh-step-up-required' },
     'the transcript-clear confirmation must consume the fresh step-up',
   );
 

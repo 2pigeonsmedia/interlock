@@ -24,6 +24,7 @@ const {
 } = require('@simplewebauthn/server/helpers');
 
 const repo = require('./repo.js');
+const audit = require('./audit.js');
 const admission = require('./admission.js');
 
 const RP_ID = 'localhost';
@@ -891,7 +892,26 @@ function createService(opts) {
     });
   }
 
+  // A spent step-up always leaves one authorization record naming this act,
+  // joined to the spend, whatever the outcome after it.
   async function finishAdditionalRegistration(optsIn) {
+    let spent = null;
+    let result = FAIL_FAILED;
+    try {
+      result = await finishAdditionalRegistrationSpending(optsIn, step => { spent = step; });
+      return result;
+    } finally {
+      if (spent) {
+        const ok = !!result && result.ok === true;
+        audit.stepUpDecision({ tenant, workflow: 'authenticator.add', resource: 'authenticator',
+          actorId: spent.subject_id, assurance: 2, outcome: ok ? 'allow' : 'deny',
+          reason: ok ? 'fresh-admin-stepup-consumed' : 'refused-after-step-up: the passkey could not be added',
+          eventId: typeof spent.consume_event_id === 'string' ? spent.consume_event_id : undefined });
+      }
+    }
+  }
+
+  async function finishAdditionalRegistrationSpending(optsIn, onSpend) {
     if (refuseInput(optsIn)) return FAIL_FAILED;
     const env = envelopeArgs(optsIn);
     const ceremony_id = ownData(optsIn, 'ceremony_id').value;
@@ -966,6 +986,7 @@ function createService(opts) {
       workflow: 'authenticator.add',
     });
     if (!step || !step.ok) return FAIL_FAILED;
+    onSpend(step);
     if (step.subject_id !== taken.person_subject_id) return FAIL_FAILED;
 
     const personId = taken.person_subject_id;

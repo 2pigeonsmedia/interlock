@@ -17,7 +17,7 @@ test('one fresh step-up confirms exactly one grant act, and only a named grant w
   const plain = world.session_store.issue({ subject_id: world.person_id, now: world.T + 4 });
   assert.ok(plain.ok, 'ARRANGEMENT: an L1 session');
   const unelevated = world.env(plain, world.T + 5);
-  assert.deepStrictEqual(house.confirmGrantAct(unelevated, 'grant.create'), { ok: false },
+  assert.deepStrictEqual(house.confirmGrantAct(unelevated, 'grant.create'), { ok: false, reason: 'fresh-step-up-required' },
     'a session without a fresh step-up cannot confirm a grant');
 
   const create = await world.elevate(world.T + 10);
@@ -25,7 +25,7 @@ test('one fresh step-up confirms exactly one grant act, and only a named grant w
     'only grant.create and grant.revoke are grant workflows');
   assert.deepStrictEqual(house.confirmGrantAct(world.env(create, world.T + 14), 'grant.create'), { ok: true },
     'ARRANGEMENT: a fresh step-up confirms one grant');
-  assert.deepStrictEqual(house.confirmGrantAct(world.env(create, world.T + 15), 'grant.revoke'), { ok: false },
+  assert.deepStrictEqual(house.confirmGrantAct(world.env(create, world.T + 15), 'grant.revoke'), { ok: false, reason: 'fresh-step-up-required' },
     'the confirmation spends the step-up, whichever grant act comes next');
 
   const revoke = await world.elevate(world.T + 20);
