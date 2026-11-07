@@ -3460,11 +3460,39 @@ async function runWork(args, io, dependencies = {}) {
   return EXIT_OK;
 }
 
+// The usage entries of HELP: each `  interlock COMMAND ...` line with the
+// more-indented lines that continue it.
+function usageEntries() {
+  const entries = [];
+  for (const text of HELP.split('\n')) {
+    if (/^ {2}interlock [a-z-]/.test(text)) entries.push([text]);
+    else if (/^ {6}\S/.test(text) && entries.length > 0) entries[entries.length - 1].push(text);
+  }
+  return entries;
+}
+
+// `--help` or `-h` anywhere wins: the usage of the command named (narrowed to
+// its verb when one is named), else the whole help. Nothing else is checked.
+function helpFor(argv) {
+  const words = argv.filter(arg => !arg.startsWith('-'));
+  const command = words[0];
+  if (!command) return HELP;
+  const entries = usageEntries().filter(entry => entry[0] === '  interlock ' + command ||
+    entry[0].startsWith('  interlock ' + command + ' '));
+  if (entries.length === 0) return HELP;
+  const verb = words[1];
+  const named = verb === undefined ? [] : entries.filter(entry => {
+    const third = entry[0].split(' ')[4];
+    return typeof third === 'string' && !third.startsWith('-') && third.split('|').includes(verb);
+  });
+  return (named.length > 0 ? named : entries).map(entry => entry.join('\n')).join('\n') + '\n';
+}
+
 function run(argv, io, dependencies = {}) {
   const { stdout, stderr } = io;
 
-  if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
-    stdout.write(HELP);
+  if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
+    stdout.write(argv.length === 0 ? HELP : helpFor(argv));
     return EXIT_OK;
   }
 
