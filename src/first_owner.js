@@ -3240,7 +3240,10 @@ function createFirstOwnerHandler(options) {
         '\0' + (row.kind === 'seat' ? row.session : ''), row.subject_id]));
       const withFlags = row => {
         const person = row.kind === 'person' ? byName.get(row.name) : null;
-        const facts = peopleFacts({ kind: row.kind, name: row.name,
+        // Settings shows who someone is, not what their work waits on: the
+        // Work facts stay on People rows, and a Settings row keeps the shape
+        // the page checks.
+        const { waiting: _waiting, ...facts } = peopleFacts({ kind: row.kind, name: row.name,
           subject_id: row.live ? subjectOf.get(row.kind + '\0' + row.name + '\0' + (row.kind === 'seat' ? row.session : '')) : null });
         return Object.freeze(Object.assign({}, row, facts, {
           admin: Boolean(person && person.admin),
