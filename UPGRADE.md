@@ -33,7 +33,7 @@ Work facts.
 whoever is next on it, its project's lead, the first owner or an
 administrator can put someone else on it as holder or next
 (`403 not-assigner`, which names whom to ask). Anyone can still take an item
-nobody holds, or step out of one. A project's Edit is shown only to those who
+nobody holds or is next on, or step out of a slot they are in. A project's Edit is shown only to those who
 may edit it.
 
 **No migration.** A withdrawn item is stored in the same work file with the

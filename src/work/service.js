@@ -285,14 +285,17 @@ function createWorkService(options) {
   }
   function checkAssignment(actor, item, next, body, now) {
     const self = ref => Boolean(ref) && ref.subject_id === actor.subject_id;
+    // A claim is of an item nobody holds and nobody is next on; claiming a
+    // slot beside someone else's would make the claimer an assigner.
+    const unheld = item.responsible === null && item.next_to === null;
     // Taking an unheld item in this same request makes its taker the holder,
     // who may then name who is next.
-    const claimsHolder = body.responsible !== undefined && item.responsible === null && self(next.responsible);
+    const claimsHolder = unheld && body.responsible !== undefined && self(next.responsible);
     for (const field of ['responsible', 'next_to']) {
       if (body[field] === undefined || canonical(item[field]) === canonical(next[field])) continue;
       // Stepping out needs no clause: whoever is in a slot is its holder or
       // next, and may assign.
-      const claim = item[field] === null && self(next[field]);
+      const claim = unheld && self(next[field]);
       if (claim || mayAssign(actor, item, now) || (field === 'next_to' && claimsHolder)) continue;
       fail('not-assigner', { can_assign: assignerNames(item, now) });
     }

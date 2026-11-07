@@ -123,3 +123,14 @@ test('the route answers 403 with can_assign; the CLI and the page say whom to as
   assert.ok(PANEL.includes("else if (code === 'not-assigner') where.textContent = model().assignerWords(error.canAssign);"));
   assert.ok(ROOM.includes('if (result && Array.isArray(result.can_assign)) error.canAssign = result.can_assign.filter(name => typeof name === \'string\');'));
 });
+
+test('a claim is only of an item nobody holds or is next on, so it cannot be a step to assigning', () => {
+  const work = fresh();
+  const held = filed(work, { responsible: ref(holder) });
+  code(() => update(work, other, held, { next_to: ref(other), next_action: 'me next' }), 'not-assigner');
+  const queued = filed(work, { next_to: ref(holder), next_action: 'look' });
+  code(() => update(work, other, queued, { responsible: ref(other) }), 'not-assigner');
+  const loose = filed(work);
+  assert.equal(update(work, other, loose, { next_to: ref(other), next_action: 'mine' }).next_to.name, 'Other',
+    'an item nobody holds or is next on can be claimed in either slot');
+});

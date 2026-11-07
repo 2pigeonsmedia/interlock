@@ -73,9 +73,9 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
 - Putting **someone else** in `responsible` or `next_to` is for the item's
   filer, its current holder, whoever is next, its project's live lead, the
   first owner and administrators; anyone else gets `403 not-assigner` with
-  `can_assign`, the names to ask. Anyone may take a slot nobody holds or step
-  out of one, and taking an unheld item lets the same request name who is
-  next. Entering `blocked` drops whoever was next, so name the unblocker in
+  `can_assign`, the names to ask. Anyone may take an item nobody holds and
+  nobody is next on (in either slot), and taking it lets the same request
+  name who is next; whoever is in a slot may step out of it. Entering `blocked` drops whoever was next, so name the unblocker in
   that same request.
 - `withdrawn` says the work was dropped, never that it was finished. Only
   `items/withdraw` sets it, with a required `reason`, by whoever filed the item,
