@@ -354,7 +354,7 @@ to the first owner; an AI lead's requests go to the first owner. The approver
 is re-derived when an answer arrives, so a waiting request follows its
 project's lead. The first owner's own work needs no approval
 (`403 owner-does-not-ask`). The project is checked before anything is posted
-(`404 unknown-project`). The room ask (`Approval: <title>`, with `means` the
+(`404 unknown-project`, with `did_you_mean`, the closest live project). The room ask (`Approval: <title>`, with `means` the
 scope) is posted first, then its work item is filed awaiting approval; if
 filing fails, the ask is withdrawn. Only the current approver or the first
 owner may answer Yes or No (`403 not-approver`). Approve puts the item in
@@ -535,7 +535,9 @@ every signed-in person in the room.
 Every ask belongs to a project. An ask may name one (`ask.project`); one that
 names none takes the asker's own project when the asker is an AI assigned to
 one, and otherwise Operations (`ops`), the room's default project, which cannot
-be retired. A named project must be a live one (`400 unknown-project`).
+be retired. A named project must be a live one (`400 unknown-project`); the
+refusal carries `did_you_mean`, the live project whose id is fewest
+single-letter edits away, so a typo is caught rather than filed elsewhere.
 
 Every row of `GET /api/participants` and of the owner's
 `GET /api/settings/participants` carries four more keys, each `null` when

@@ -3116,6 +3116,7 @@ async function workRequest(fetcher, profile, pathname, options = {}) {
       if (result && typeof result.problem === 'string') error.problem = result.problem;
       if (result && Array.isArray(result.accepted)) error.accepted = result.accepted.filter(name => typeof name === 'string');
       if (result && Array.isArray(result.needs_one_of)) error.needsOneOf = result.needs_one_of.filter(name => typeof name === 'string');
+      if (result && typeof result.did_you_mean === 'string') error.didYouMean = result.did_you_mean;
       throw error;
     }
     return result;
@@ -3150,7 +3151,8 @@ function reportWorkError(stderr, error, profile) {
   if (error && Number.isSafeInteger(error.status) && error.status !== 401 && typeof error.code === 'string') {
     const revision = Number.isSafeInteger(error.revision) ? ` (current revision ${error.revision})` : '';
     const hint = (Object.prototype.hasOwnProperty.call(WORK_REFUSAL_HINTS, error.code) ? ' ' + WORK_REFUSAL_HINTS[error.code] : '') +
-      (error.code === 'invalid-request' ? refusedFieldWords(error) : '');
+      (error.code === 'invalid-request' ? refusedFieldWords(error) : '') +
+      (error.code === 'unknown-project' && typeof error.didYouMean === 'string' ? ` Did you mean ${terminalSafe(error.didYouMean)}?` : '');
     line(stderr, `interlock: ${roomLabel(profile)} refused the command: ${terminalSafe(error.code)}${revision}.${hint}`);
     return;
   }

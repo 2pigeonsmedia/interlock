@@ -249,7 +249,7 @@ function createWorkService(options) {
     try { lead = leadOf ? leadOf(project.id, now) : null; } catch (_) { lead = null; }
     return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
   }
-  // Who may withdraw a work or finding item (her lead's ruling, 2026-11-07):
+  // Who may withdraw a work or finding item (ruling, 2026-11-07):
   // whoever filed it, its project's live lead, the first owner, or an
   // administrator. Not its holder: a holder hands work back instead of
   // withdrawing someone else's item.
@@ -444,7 +444,7 @@ function createWorkService(options) {
     return a.id !== b.id && (a.links.includes(b.id) || b.links.includes(a.id) || a.parent === b.id || b.parent === a.id);
   }
 
-  /* The withdrawn work a live item is linked to (her lead's ruling,
+  /* The withdrawn work a live item is linked to (ruling,
    * 2026-11-07): its blocker was dropped, not finished, so it says so rather
    * than reading as clear. Derived on each read; unlinking clears it. */
   function blockerWithdrawn(draft, item) {
@@ -1401,7 +1401,7 @@ function createWorkService(options) {
       });
   }
 
-  /* A work or finding item that is no longer wanted (her lead's ruling,
+  /* A work or finding item that is no longer wanted (ruling,
    * 2026-11-07): withdrawn with a reason, never recorded as done. Done work
    * reopens first; a request for approval closes by its own path. The live
    * items linked to it are returned, so the host can ring their holders. */

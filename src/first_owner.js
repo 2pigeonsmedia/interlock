@@ -1881,7 +1881,7 @@ function createFirstOwnerHandler(options) {
       }
     }
     // Withdrawn work rings the holder of each live item linked to it, once:
-    // its blocker was dropped, not finished (her lead's ruling, 2026-11-07).
+    // its blocker was dropped, not finished (ruling, 2026-11-07).
     if (op === 'items/withdraw' && result.status < 400 && result.body.replayed !== true && result.body.item &&
         Array.isArray(result.body.left_waiting)) {
       const dropped = result.body.item.id;
@@ -2314,7 +2314,7 @@ function createFirstOwnerHandler(options) {
     }
     // The project first: nothing is posted or rung for a request that cannot be filed.
     if (!work.projectTakesWork(body.project)) {
-      sendJson(request, response, 404, { ok: false, error: 'unknown-project' });
+      sendJson(request, response, 404, unknownProject(body.project));
       return;
     }
     const live = await chat.listParticipants();
@@ -2713,6 +2713,35 @@ function createFirstOwnerHandler(options) {
   // Every ask belongs to a project: the asker's choice, else the asker's own
   // project, else Operations. A missing project is never refused; a named one
   // that is not a live project is (a typo should not be quietly replaced).
+  /* The live project closest to a mistyped one (Patti's ruling, 2026-11-01:
+   * refuse with "did you mean …?"): fewest single-letter edits, ignoring
+   * case; ties by id. Null when no project is live. */
+  function closestProject(name, live) {
+    const distance = (a, b) => {
+      let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+      for (let i = 1; i <= a.length; i += 1) {
+        const current = [i];
+        for (let j = 1; j <= b.length; j += 1) {
+          current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        }
+        previous = current;
+      }
+      return previous[b.length];
+    };
+    const typed = String(name).toLowerCase().slice(0, 64);
+    let best = null;
+    for (const id of [...live].sort()) {
+      const score = distance(typed, id);
+      if (best === null || score < best.score) best = { id, score };
+    }
+    return best ? best.id : null;
+  }
+
+  function unknownProject(name) {
+    const closest = people ? closestProject(name, people.liveProjects()) : null;
+    return closest ? { ok: false, error: 'unknown-project', did_you_mean: closest } : { ok: false, error: 'unknown-project' };
+  }
+
   function withAskProject(annotation, actor) {
     if (!people || annotation === null || typeof annotation !== 'object' || Array.isArray(annotation) ||
         annotation.ask === null || typeof annotation.ask !== 'object' || Array.isArray(annotation.ask)) {
@@ -2721,7 +2750,7 @@ function createFirstOwnerHandler(options) {
     const live = people.liveProjects();
     const chosen = Object.hasOwn(annotation.ask, 'project') ? annotation.ask.project : null;
     if (chosen !== null) {
-      return live.includes(chosen) ? { annotation } : { error: 'unknown-project' };
+      return live.includes(chosen) ? { annotation } : { error: 'unknown-project', refusal: unknownProject(chosen) };
     }
     const assignment = actor.kind === 'seat' ? people.service.assignmentOf(actor.name) : null;
     const project = assignment && assignment.project !== null && live.includes(assignment.project)
@@ -2747,7 +2776,7 @@ function createFirstOwnerHandler(options) {
     }
     const asked = withAskProject(input.annotation, actor);
     if (asked.error) {
-      sendJson(request, response, 400, { ok: false, error: asked.error });
+      sendJson(request, response, 400, asked.refusal || { ok: false, error: asked.error });
       return;
     }
     try {
@@ -2795,7 +2824,7 @@ function createFirstOwnerHandler(options) {
     }
     const asked = withAskProject(input.annotation, actor);
     if (asked.error) {
-      sendJson(request, response, 400, { ok: false, error: asked.error });
+      sendJson(request, response, 400, asked.refusal || { ok: false, error: asked.error });
       return;
     }
     try {
