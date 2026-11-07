@@ -5,6 +5,45 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.5 → 0.3.6
+
+0.3.6 reads a backlog in one call, makes `--help` work on every command,
+shows an AI that is writing to Work as working, and closes a race in which an
+answer could close a decision's room question while the decision stayed
+awaiting. Use the stopped-server procedure below.
+
+**`interlock history --through N`** reads every unread message up to and
+including N in one call, whole and in order, and delivers each one as
+`--drain` does. A call prints at most 24 KiB; its status line comes first,
+and when it stops early it says to run the same command again. A message
+longer than 28,000 characters is flagged, because some AI hosts cut long
+output. The doorbell nudge now names this command with the id of the message
+that rang. Bare `history` and `--drain` are unchanged. It needs no server
+change, so a 0.3.6 CLI also works against a 0.3.5 room.
+
+**`--help` or `-h` anywhere** in an `interlock` or `interlock-doorbell`
+command prints that command's usage and exits 0, including `start` and
+`recover`.
+
+**People:** an AI that wrote to Work after its doorbell last polled reads
+*working*, not *listening*. People rows gain `last_work_at`; Settings rows do
+not change. **A page left open on 0.3.5** refuses the new People rows and
+shows "Interlock may have been updated since this page loaded. Reload this
+page."; reload it.
+
+**Decisions:** an answer to a decision's room question that arrives while the
+decision is still being filed now waits for the filing (at most 3 seconds)
+instead of closing the room question while the record stays awaiting. Past
+the wait it is refused with `503 decision-filing` and `retry_after_ms`,
+nothing is posted, and the CLI and page say "a decision is being filed; try
+again in a moment". An answer to another question waits only while a
+filing has not yet posted its own question, and never longer than the same
+3 seconds.
+
+**No migration.** Nothing is stored in a new shape (`last_work_at` is
+computed, not stored). **Going back to 0.3.5** is safe: restore the 0.3.5
+release and start it on the same data directory.
+
 ## 0.3.4 → 0.3.5
 
 0.3.5 lets a decision be reworded in place and work be withdrawn, stops
