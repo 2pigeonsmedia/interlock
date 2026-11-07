@@ -351,8 +351,14 @@ async function verify(opts) {
   const state = repo.read();
   let subj = null;
   if (typeof name === 'string' && name !== '') {
+    // Only an ACTIVE person can hold a name: a removed member's subject keeps
+    // its old name, and a later person may take that name. Matching the first
+    // row regardless of status would pick the removed one and refuse the new
+    // person forever. A removed subject is simply not found (dummy KDF below).
     for (const s of state.subjects) {
-      if (s.tenant === tenant && s.name === name && s.kind === 'person') { subj = s; break; }
+      if (s.tenant === tenant && s.name === name && s.kind === 'person' && s.status === 'active') {
+        subj = s; break;
+      }
     }
   }
   const record = subj ? (state.passwords[subj.id] || null) : null;
