@@ -19,15 +19,10 @@ const HOST = 'app.example.test';
 // A refused passkey ceremony answers 409 passkey-failed, whatever the cause.
 const PASSKEY_REFUSED = { status: 409, error: 'passkey-failed' };
 
+const { reserveTestPort } = require('./helpers/reserve_port.js');
+
 function reservePort() {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once('error', reject);
-    probe.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
-      const { port } = probe.address();
-      probe.close(error => error ? reject(error) : resolve(port));
-    });
-  });
+  return reserveTestPort();
 }
 
 function call(runtime, options = {}) {

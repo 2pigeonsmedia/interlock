@@ -1361,7 +1361,7 @@ function createFirstOwnerHandler(options) {
   }
 
   function peopleFacts(row) {
-    const none = { model: null, project: null, assigned: null, presence: null, waiting: null };
+    const none = { model: null, project: null, assigned: null, presence: null, waiting: null, working_on: null };
     if (!people || !row) return none;
     const service = people.service;
     const assignment = row.kind === 'seat' ? service.assignmentOf(row.name) : null;
@@ -1373,6 +1373,9 @@ function createFirstOwnerHandler(options) {
       // Derived from the Work record: whose item this participant's work waits on.
       waiting: work && typeof row.subject_id === 'string' && typeof work.waitingOf === 'function'
         ? work.waitingOf(row.subject_id) : null,
+      // When not every item of theirs is blocked: the one they work on.
+      working_on: work && typeof row.subject_id === 'string' && typeof work.workingOf === 'function'
+        ? work.workingOf(row.subject_id) : null,
     };
   }
 
@@ -1884,6 +1887,18 @@ function createFirstOwnerHandler(options) {
           responsible: after.next_to, title: after.next_action || after.title }), ai, 'is next to you');
       }
     }
+    // Withdrawn work rings the holder of each live item linked to it, once:
+    // its blocker was dropped, not finished (ruling, 2026-11-07).
+    if (op === 'items/withdraw' && result.status < 400 && result.body.replayed !== true && result.body.item &&
+        Array.isArray(result.body.left_waiting)) {
+      const dropped = result.body.item.id;
+      for (const row of result.body.left_waiting) {
+        const holder = row.responsible || row.next_to;
+        if (!holder) continue;
+        await ringHolder(request, actor, { id: row.id, title: row.title, responsible: holder }, ai,
+          `is linked to ${dropped}, which was withdrawn`);
+      }
+    }
     // A withdrawn decision withdraws the ask it put in the room, so nothing
     // said there afterwards closes it as answered.
     if (op === 'decisions/withdraw' && result.status < 400 && result.body.replayed !== true) {
@@ -2316,7 +2331,7 @@ function createFirstOwnerHandler(options) {
     }
     // The project first: nothing is posted or rung for a request that cannot be filed.
     if (!work.projectTakesWork(body.project)) {
-      sendJson(request, response, 404, { ok: false, error: 'unknown-project' });
+      sendJson(request, response, 404, unknownProject(body.project));
       return;
     }
     const live = await chat.listParticipants();
@@ -2541,11 +2556,6 @@ function createFirstOwnerHandler(options) {
     }
   }
 
-  // Words alone already posted, by author and operation: a person's post
-  // carries no client id, so a retried answer is matched here and posted
-  // once. In memory; the newest entries are kept.
-  const discussedPosts = new Map();
-  const DISCUSSED_POSTS_KEPT = 1000;
 
   /* Words alone on a decision (her ruling, 2026-10-31): nothing is recorded;
    * they go to the room as a reply to its ask (the turn passes back to the
@@ -2577,14 +2587,29 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return;
     }
-    const key = `${chatActor.subject_id}\u0000${body.operation_id}`;
-    const prior = discussedPosts.get(key);
-    if (prior) {
-      if (prior.id !== item.id || prior.text !== body.text) {
+    // A retry, even after a restart, is answered by the first post: the
+    // post is kept against its operation id in the Work record.
+    const kept = { operation_id: body.operation_id, id: item.id, text: body.text };
+    let prior;
+    try { prior = work.priorDiscussion(workActor, kept); }
+    catch (error) {
+      if (error && error.code === 'operation-conflict') {
         sendJson(request, response, 409, { ok: false, error: 'operation-conflict' });
         return;
       }
-      sendJson(request, response, 200, { ok: true, discussed: true, item, message: prior.message, replayed: true });
+      sendJson(request, response, 503, { ok: false, error: 'work-unavailable' });
+      return;
+    }
+    if (prior) {
+      let message = null;
+      if (Number.isSafeInteger(prior.message_id)) {
+        try {
+          const page = await chat.read({ after: prior.message_id - 1, limit: 1 });
+          const found = page.messages[0];
+          message = found && found.id === prior.message_id ? publicMessage(found) : null;
+        } catch (_) { message = null; }
+      }
+      sendJson(request, response, 200, { ok: true, discussed: true, item, message, replayed: true });
       return;
     }
     // Their own words, every line, but only the asker is rung: an @name in
@@ -2603,8 +2628,9 @@ function createFirstOwnerHandler(options) {
       annotationRefusal(request, response, error);
       return;
     }
-    discussedPosts.set(key, { id: item.id, text: body.text, message: saved || null });
-    if (discussedPosts.size > DISCUSSED_POSTS_KEPT) discussedPosts.delete(discussedPosts.keys().next().value);
+    // Kept after the room has it: a crash between the two can repeat a post,
+    // never lose one.
+    work.recordDiscussion(workActor, kept, saved && Number.isSafeInteger(saved.id) ? saved.id : null);
     sendJson(request, response, 200, { ok: true, discussed: true, item, message: saved || null });
   }
 
@@ -2745,6 +2771,35 @@ function createFirstOwnerHandler(options) {
   // Every ask belongs to a project: the asker's choice, else the asker's own
   // project, else Operations. A missing project is never refused; a named one
   // that is not a live project is (a typo should not be quietly replaced).
+  /* The live project closest to a mistyped one (Patti's ruling, 2026-11-01:
+   * refuse with "did you mean …?"): fewest single-letter edits, ignoring
+   * case; ties by id. Null when no project is live. */
+  function closestProject(name, live) {
+    const distance = (a, b) => {
+      let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+      for (let i = 1; i <= a.length; i += 1) {
+        const current = [i];
+        for (let j = 1; j <= b.length; j += 1) {
+          current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        }
+        previous = current;
+      }
+      return previous[b.length];
+    };
+    const typed = String(name).toLowerCase().slice(0, 64);
+    let best = null;
+    for (const id of [...live].sort()) {
+      const score = distance(typed, id);
+      if (best === null || score < best.score) best = { id, score };
+    }
+    return best ? best.id : null;
+  }
+
+  function unknownProject(name) {
+    const closest = people ? closestProject(name, people.liveProjects()) : null;
+    return closest ? { ok: false, error: 'unknown-project', did_you_mean: closest } : { ok: false, error: 'unknown-project' };
+  }
+
   function withAskProject(annotation, actor) {
     if (!people || annotation === null || typeof annotation !== 'object' || Array.isArray(annotation) ||
         annotation.ask === null || typeof annotation.ask !== 'object' || Array.isArray(annotation.ask)) {
@@ -2753,7 +2808,7 @@ function createFirstOwnerHandler(options) {
     const live = people.liveProjects();
     const chosen = Object.hasOwn(annotation.ask, 'project') ? annotation.ask.project : null;
     if (chosen !== null) {
-      return live.includes(chosen) ? { annotation } : { error: 'unknown-project' };
+      return live.includes(chosen) ? { annotation } : { error: 'unknown-project', refusal: unknownProject(chosen) };
     }
     const assignment = actor.kind === 'seat' ? people.service.assignmentOf(actor.name) : null;
     const project = assignment && assignment.project !== null && live.includes(assignment.project)
@@ -2779,7 +2834,7 @@ function createFirstOwnerHandler(options) {
     }
     const asked = withAskProject(input.annotation, actor);
     if (asked.error) {
-      sendJson(request, response, 400, { ok: false, error: asked.error });
+      sendJson(request, response, 400, asked.refusal || { ok: false, error: asked.error });
       return;
     }
     try {
@@ -2827,7 +2882,7 @@ function createFirstOwnerHandler(options) {
     }
     const asked = withAskProject(input.annotation, actor);
     if (asked.error) {
-      sendJson(request, response, 400, { ok: false, error: asked.error });
+      sendJson(request, response, 400, asked.refusal || { ok: false, error: asked.error });
       return;
     }
     try {
@@ -3239,7 +3294,10 @@ function createFirstOwnerHandler(options) {
         '\0' + (row.kind === 'seat' ? row.session : ''), row.subject_id]));
       const withFlags = row => {
         const person = row.kind === 'person' ? byName.get(row.name) : null;
-        const facts = peopleFacts({ kind: row.kind, name: row.name,
+        // Settings shows who someone is, not what their work waits on: the
+        // Work facts stay on People rows, and a Settings row keeps the shape
+        // the page checks.
+        const { waiting: _waiting, working_on: _workingOn, ...facts } = peopleFacts({ kind: row.kind, name: row.name,
           subject_id: row.live ? subjectOf.get(row.kind + '\0' + row.name + '\0' + (row.kind === 'seat' ? row.session : '')) : null });
         return Object.freeze(Object.assign({}, row, facts, {
           admin: Boolean(person && person.admin),

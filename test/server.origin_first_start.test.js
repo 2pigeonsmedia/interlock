@@ -27,11 +27,10 @@ function holdPort() {
   });
 }
 
+const { reserveTestPort } = require('./helpers/reserve_port.js');
+
 function reservePort() {
-  return holdPort().then(holder => new Promise((resolve, reject) => {
-    const { port } = holder.address();
-    holder.close(error => error ? reject(error) : resolve(port));
-  }));
+  return reserveTestPort();
 }
 
 test('a first start that fails before serving records no origin, and the corrected start serves', async () => {

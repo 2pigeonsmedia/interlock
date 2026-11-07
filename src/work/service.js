@@ -15,6 +15,10 @@ const { DEFAULT_PROJECT } = require('./store.js');
 
 const KINDS = Object.freeze(['work', 'finding', 'decision']);
 const WORK_STATES = Object.freeze(['open', 'active', 'blocked', 'ready', 'done']);
+// Work that is still to be done. Done and withdrawn are the two ends: done
+// says it was finished, withdrawn says it was dropped. Only items/withdraw
+// sets withdrawn; an update back to open undoes it.
+const LIVE_WORK_STATES = Object.freeze(['open', 'active', 'blocked', 'ready']);
 const SEVERITIES = Object.freeze(['blocking', 'non-blocking']);
 const SHARE_PURPOSES = Object.freeze(['exposure', 'notify']);
 const SHARE_OUTCOMES = Object.freeze(['sent', 'declined', 'failed']);
@@ -80,6 +84,15 @@ function cleanText(text) {
     if (code === 0x7F || (code >= 0x80 && code <= 0x9F)) return false;
   }
   return true;
+}
+
+// What a closed body refused, for the writer: the first field it does not
+// take and the fields it does. The route caps the name before it leaves.
+function refusedField(value, keys) {
+  if (!plainObject(value)) return undefined;
+  const field = Reflect.ownKeys(value).find(key => typeof key === 'string' && !keys.includes(key));
+  if (field === undefined) return undefined;
+  return { field, problem: 'not-accepted', accepted: [...keys].sort() };
 }
 
 function textOk(value, maxBytes) {
@@ -242,6 +255,63 @@ function createWorkService(options) {
     try { lead = leadOf ? leadOf(project.id, now) : null; } catch (_) { lead = null; }
     return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
   }
+  // Who may withdraw a work or finding item (ruling, 2026-11-07):
+  // whoever filed it, its project's live lead, the first owner, or an
+  // administrator. Not its holder: a holder hands work back instead of
+  // withdrawing someone else's item.
+  function mayWithdrawAs(actor, item, now) {
+    if (actor.owner === true || actor.first_owner === true) return true;
+    if (item.created_by && item.created_by.subject_id === actor.subject_id) return true;
+    let lead = null;
+    try { lead = leadOf ? leadOf(item.project, now) : null; } catch (_) { lead = null; }
+    return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
+  }
+  /* Who may put someone else in an item's holder or next slot (ruling,
+   * 2026-11-07): its filer, its current holder, whoever is next, its
+   * project's live lead, the first owner and administrators. Anyone may
+   * claim a slot nobody holds or step out of one. */
+  function liveLead(project, now) {
+    let lead = null;
+    try { lead = leadOf ? leadOf(project, now) : null; } catch (_) { lead = null; }
+    return lead && typeof lead.subject_id === 'string' ? lead : null;
+  }
+  function mayAssign(actor, item, now) {
+    if (actor.owner === true || actor.first_owner === true) return true;
+    const lead = liveLead(item.project, now);
+    return [item.created_by, item.responsible, item.next_to, lead]
+      .some(ref => ref && ref.subject_id === actor.subject_id);
+  }
+  // The names a refused assignment can ask, in that order, once each.
+  function assignerNames(item, now) {
+    const names = [];
+    for (const ref of [item.created_by, item.responsible, item.next_to, liveLead(item.project, now)]) {
+      if (ref && typeof ref.name === 'string' && !names.includes(ref.name)) names.push(ref.name);
+    }
+    return names;
+  }
+  function checkAssignment(actor, item, next, body, now) {
+    const self = ref => Boolean(ref) && ref.subject_id === actor.subject_id;
+    // A claim is of an item nobody holds and nobody is next on; claiming a
+    // slot beside someone else's would make the claimer an assigner.
+    const unheld = item.responsible === null && item.next_to === null;
+    // Taking an unheld item in this same request makes its taker the holder,
+    // who may then name who is next.
+    const claimsHolder = unheld && body.responsible !== undefined && self(next.responsible);
+    for (const field of ['responsible', 'next_to']) {
+      if (body[field] === undefined || canonical(item[field]) === canonical(next[field])) continue;
+      // Stepping out needs no clause: whoever is in a slot is its holder or
+      // next, and may assign.
+      const claim = unheld && self(next[field]);
+      if (claim || mayAssign(actor, item, now) || (field === 'next_to' && claimsHolder)) continue;
+      fail('not-assigner', { can_assign: assignerNames(item, now) });
+    }
+  }
+
+  function mayWithdraw(actor, item, now) {
+    return item.kind !== 'decision' && !item.approval && LIVE_WORK_STATES.includes(item.state) &&
+      mayWithdrawAs(actor, item, now);
+  }
+
   // The approver rule (approver.js); without it a request waits on the
   // approver it was filed with.
   const approverFor = typeof input.approverFor === 'function' ? input.approverFor : null;
@@ -288,7 +358,7 @@ function createWorkService(options) {
       delete rawInput.raw_digest;
     }
     const body = closedObject(rawInput, ['operation_id', ...keys]);
-    if (!body) fail('invalid-input');
+    if (!body) fail('invalid-input', refusedField(rawInput, ['operation_id', ...keys]));
     if (typeof body.operation_id !== 'string' || !UUID.test(body.operation_id)) fail('invalid-operation');
     const operationId = body.operation_id.toLowerCase();
     const rest = Object.assign({}, body);
@@ -405,7 +475,7 @@ function createWorkService(options) {
   function blocksOf(draft, item) {
     if (item.kind !== 'decision' && !item.approval) return [];
     return draft.items.filter(other => other.id !== item.id && other.kind !== 'decision' && !other.approval &&
-      other.state !== 'done' && (other.links.includes(item.id) || item.links.includes(other.id) ||
+      LIVE_WORK_STATES.includes(other.state) && (other.links.includes(item.id) || item.links.includes(other.id) ||
         item.parent === other.id || other.parent === item.id))
       .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => other.id);
   }
@@ -415,6 +485,20 @@ function createWorkService(options) {
       (item.links.includes(row.id) || row.parent === item.id || row.links.includes(item.id)));
     const open = linked.find(row => decisionState(row) === 'awaiting');
     return open ? open.id : null;
+  }
+
+  // Linked either way, or parent and child: the relation blocksOf reads.
+  function related(a, b) {
+    return a.id !== b.id && (a.links.includes(b.id) || b.links.includes(a.id) || a.parent === b.id || b.parent === a.id);
+  }
+
+  /* The withdrawn work a live item is linked to (ruling,
+   * 2026-11-07): its blocker was dropped, not finished, so it says so rather
+   * than reading as clear. Derived on each read; unlinking clears it. */
+  function blockerWithdrawn(draft, item) {
+    if (item.kind === 'decision' || !LIVE_WORK_STATES.includes(item.state)) return [];
+    return draft.items.filter(other => other.kind !== 'decision' && other.state === 'withdrawn' && related(item, other))
+      .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => other.id);
   }
 
   function row(draft, item) {
@@ -446,6 +530,7 @@ function createWorkService(options) {
       target: item.target, block_reason: item.block_reason, created_by: clone(item.created_by), updated_at: item.updated_at,
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),
       awaiting: awaitingDecision(draft, item),
+      blocker_withdrawn: blockerWithdrawn(draft, item),
       source_message_id: item.source_message ? item.source_message.message_id : null,
       // A request for approval: its state, approver and scope, and the room
       // ask it is answered through, so the panel shows it once.
@@ -474,36 +559,61 @@ function createWorkService(options) {
     return route && route.owner ? route.owner.subject_id : null;
   }
 
-  /* What a participant's own open work waits on (her ask, 2026-10-31): the
-   * first of their open items (held or next) linked to an unfinished item
-   * someone else holds — a decision awaiting its addressee, a request
-   * awaiting its approver, or work in another's hands. Derived, never typed.
-   * Names only; no subject ids leave this function. */
-  function waitingOf(subjectId) {
+  /* A participant's own open work (held, or next to them), by id order, each
+   * with what holds it up: the first item it is linked to that someone else
+   * holds unfinished — a decision awaiting its addressee, a request awaiting
+   * its approver, or work in another's hands. Derived, never typed. */
+  function ownWork(subjectId) {
     if (typeof subjectId !== 'string') return null;
     const draft = store.read();
     if (!draft) return null;
-    const active = state => state === 'open' || state === 'active' || state === 'ready' || state === 'blocked';
-    const byIdOrder = (a, b) => idNumber(a.id) - idNumber(b.id);
     const holderOf = other => {
       if (other.kind === 'decision') return decisionState(other) === 'awaiting' ? other.asked_of : null;
       if (other.approval) return other.approval.state === 'awaiting' ? currentApproverRef(other) : null;
-      return active(other.state) ? (other.next_to || other.responsible) : null;
+      return LIVE_WORK_STATES.includes(other.state) ? (other.next_to || other.responsible) : null;
     };
-    const mine = draft.items.filter(item => item.kind !== 'decision' && active(item.state) &&
+    return draft.items.filter(item => item.kind !== 'decision' && LIVE_WORK_STATES.includes(item.state) &&
       ((item.responsible && item.responsible.subject_id === subjectId) ||
-        (item.next_to && item.next_to.subject_id === subjectId))).sort(byIdOrder);
-    for (const item of mine) {
-      const linked = item.links.concat(item.parent ? [item.parent] : []);
-      for (const id of linked) {
-        const other = draft.items.find(row => row.id === id);
-        const holder = other ? holderOf(other) : null;
-        if (holder && holder.subject_id && holder.subject_id !== subjectId) {
-          return { name: holder.name, item: other.id, since: item.updated_at };
+        (item.next_to && item.next_to.subject_id === subjectId)))
+      .sort((a, b) => idNumber(a.id) - idNumber(b.id))
+      .map(item => {
+        let blocker = null;
+        for (const id of item.links.concat(item.parent ? [item.parent] : [])) {
+          const other = draft.items.find(row => row.id === id);
+          const holder = other ? holderOf(other) : null;
+          if (holder && holder.subject_id && holder.subject_id !== subjectId) {
+            blocker = { name: holder.name, item: other.id, since: item.updated_at };
+            break;
+          }
         }
-      }
-    }
-    return null;
+        return { item, blocker };
+      });
+  }
+
+  /* Whom a participant waits on (her ask, 2026-10-31; narrowed the same
+   * day: "Pitta says waiting on Fruiteater but he is working on
+   * something"): only when every open item of theirs is blocked by someone
+   * else; then the first block. Names only; no subject ids leave. */
+  function waitingOf(subjectId) {
+    const mine = ownWork(subjectId);
+    if (!mine || mine.length === 0 || mine.some(entry => entry.blocker === null)) return null;
+    return mine[0].blocker;
+  }
+
+  /* What a participant is working on when not every item of theirs is
+   * blocked: their first active free item, else their first free one, with
+   * the first block on their other items kept for the detail. */
+  function workingOf(subjectId) {
+    const mine = ownWork(subjectId);
+    if (!mine) return null;
+    const free = mine.filter(entry => entry.blocker === null);
+    if (free.length === 0) return null;
+    const pick = free.find(entry => entry.item.state === 'active') || free[0];
+    const blocked = mine.find(entry => entry.blocker !== null);
+    return {
+      item: pick.item.id, title: pick.item.title,
+      blocked: blocked ? { name: blocked.blocker.name, item: blocked.blocker.item } : null,
+    };
   }
 
   function needsMe(item, subjectId) {
@@ -565,7 +675,7 @@ function createWorkService(options) {
         checkRevision(project, body.expected_revision);
         const objective = optionalText(body.objective, SHORT_BYTES, 'objective');
         const today = optionalText(body.today, SHORT_BYTES, 'today');
-        if (objective === undefined && today === undefined) fail('invalid-input');
+        if (objective === undefined && today === undefined) fail('invalid-input', { needs_one_of: ['objective', 'today'] });
         const data = {};
         if (objective !== undefined) { project.objective = objective; data.objective = objective; }
         if (today !== undefined) { project.today = today; data.today = today; }
@@ -586,7 +696,8 @@ function createWorkService(options) {
       if (project.retired_at !== null) fail('project-retired');
       const decision = body.kind === 'decision';
       const forbidden = decision ? WORK_ONLY_KEYS : DECISION_ONLY_KEYS;
-      if (forbidden.some(key => body[key] !== undefined)) fail('invalid-input');
+      const misplaced = forbidden.find(key => body[key] !== undefined);
+      if (misplaced) fail('invalid-input', { field: misplaced, problem: 'not-for-this-kind' });
       const captured = sourceMessage(body.source_message);
       const id = store.nextId(draft, decision ? 'D' : 'W');
       const item = {
@@ -684,6 +795,9 @@ function createWorkService(options) {
         next[field] = value;
       };
       if (body.state !== undefined && !WORK_STATES.includes(body.state)) fail('invalid-state');
+      // Undoing a withdraw is the withdrawer's act too (ruling, 2026-11-07):
+      // a holder cannot bring back what its filer or lead dropped.
+      if (item.state === 'withdrawn' && body.state !== undefined && !mayWithdrawAs(actor, item, now)) fail('not-withdrawer');
       apply('title', optionalText(body.title, TITLE_BYTES, 'title'));
       apply('body', optionalText(body.body, BODY_BYTES, 'body'));
       apply('links', validLinks(draft, body.links));
@@ -697,6 +811,7 @@ function createWorkService(options) {
       apply('consequence', optionalText(body.consequence, BODY_BYTES, 'consequence'));
       apply('severity', validSeverity(body.severity));
       apply('state', body.state);
+      checkAssignment(actor, item, next, body, now);
       if (next.title.trim() === '') fail('invalid-title');
       if (next.body.trim() === '') fail('invalid-body');
       if (next.state === 'ready' && !next.next_to) fail('invalid-ready');
@@ -1434,6 +1549,57 @@ function createWorkService(options) {
       });
   }
 
+  /* Words alone on a decision go to the room as discussion; nothing is
+   * recorded on the decision (her ruling, 2026-10-31). The post is kept
+   * against its operation id beside every other operation, so a retry, even
+   * after a restart, is answered by the first post, and the same id with
+   * other words is refused. Only the message id is kept, never the words. */
+  function recordDiscussion(actor, rawInput, messageId) {
+    return operation(actor, 'decisions.discuss', rawInput, ['id', 'text'], (draft, body) => {
+      const item = findDecision(draft, body.id);
+      return { ok: true, discussed: true, id: item.id, message_id: Number.isSafeInteger(messageId) ? messageId : null };
+    });
+  }
+
+  // The kept post for this operation, null when there is none; a refusal
+  // when the id was used for anything else.
+  function priorDiscussion(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['operation_id', 'id', 'text']);
+    if (!body || typeof body.operation_id !== 'string' || !UUID.test(body.operation_id)) return null;
+    const prior = snapshot().operations[body.operation_id.toLowerCase()];
+    if (!prior) return null;
+    if (prior.digest !== digestOf(actor, 'decisions.discuss', { id: body.id, text: body.text })) fail('operation-conflict');
+    return clone(prior.result);
+  }
+
+  /* A work or finding item that is no longer wanted (ruling,
+   * 2026-11-07): withdrawn with a reason, never recorded as done. Done work
+   * reopens first; a request for approval closes by its own path. The live
+   * items linked to it are returned, so the host can ring their holders. */
+  function withdrawItem(actor, rawInput) {
+    return operation(actor, 'items.withdraw', rawInput, ['id', 'expected_revision', 'reason'],
+      (draft, body, now) => {
+        const item = findItem(draft, body.id);
+        if (item.kind === 'decision' || item.approval) fail('invalid-kind');
+        if (!mayWithdrawAs(actor, item, now)) fail('not-withdrawer');
+        checkRevision(item, body.expected_revision);
+        const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
+        if (!LIVE_WORK_STATES.includes(item.state)) fail('invalid-state');
+        const before = { state: item.state };
+        const after = { state: 'withdrawn' };
+        if (item.next_to !== null) { before.next_to = clone(item.next_to); after.next_to = null; }
+        item.state = 'withdrawn';
+        item.next_to = null;
+        touch(item, now);
+        appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'withdrawn', reason, before, after });
+        const leftWaiting = draft.items.filter(other => other.kind !== 'decision' &&
+          LIVE_WORK_STATES.includes(other.state) && related(item, other))
+          .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => row(draft, other));
+        return { ok: true, item: publicItem(item), left_waiting: leftWaiting };
+      });
+  }
+
   // ── reads ─────────────────────────────────────────────────────────────────
 
   function list(actor, rawQuery) {
@@ -1473,6 +1639,9 @@ function createWorkService(options) {
       history: draft.events.filter(event => event.item === item.id).map(clone),
       // Whether this reader may move it, so a page offers Move only to them.
       may_move: mayMove(actor, item, clock()),
+      // Whether this reader may withdraw it, so a page offers Withdraw only to them.
+      may_withdraw: mayWithdraw(actor, item, clock()),
+      blocker_withdrawn: blockerWithdrawn(draft, item),
     };
   }
 
@@ -1521,14 +1690,17 @@ function createWorkService(options) {
       projects: projects.map(project => Object.assign(publicProject(project), {
         done_count: draft.items.filter(item => item.project === project.id && item.kind !== 'decision' &&
           item.state === 'done').length,
-        withdrawn_count: draft.items.filter(item => item.project === project.id && item.kind === 'decision' &&
-          item.withdrawn).length,
+        withdrawn_count: draft.items.filter(item => item.project === project.id &&
+          (item.kind === 'decision' ? item.withdrawn : item.state === 'withdrawn')).length,
+        // Whether this viewer may change its objective and today line, so a
+        // page offers Edit only to them.
+        may_edit: project.retired_at === null && mayEditProject(actor, project, clock()),
       })),
       needs_me: mine.filter(item => needsMe(item, me))
         .map(item => Object.assign(row(draft, item), { blocks: blocksOf(draft, item) })),
       reported_to_me: mine.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&
         item.answer.kind === 'reported' && item.answer.attributed_to.subject_id === me).map(item => row(draft, item)),
-      open: items.filter(item => item.kind !== 'decision' && item.state !== 'done').map(item => row(draft, item)),
+      open: items.filter(item => item.kind !== 'decision' && LIVE_WORK_STATES.includes(item.state)).map(item => row(draft, item)),
       decisions: items.filter(item => item.kind === 'decision' && !item.withdrawn).map(item => row(draft, item)),
       recently_decided: mine.map(item => ({ item, decided: decidedBy(item, me) }))
         .filter(entry => entry.decided !== null)
@@ -1684,12 +1856,12 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, moveItem, checkOnly, waitingOf, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, revise, followAsk, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
+    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, attachEvidence, addNote, share,
+    answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, revise, followAsk, recordDiscussion, priorDiscussion, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });
 }
 
-module.exports = Object.freeze({ KINDS, WORK_STATES, SEVERITIES, CREATE_KEYS, canonical, createWorkService, stripIds });
+module.exports = Object.freeze({ KINDS, WORK_STATES, LIVE_WORK_STATES, SEVERITIES, CREATE_KEYS, canonical, createWorkService, stripIds });

@@ -34,7 +34,7 @@
   }
 
   const WORK_STATES = Object.freeze({
-    open: 'Open', active: 'Active', blocked: 'Blocked', ready: 'Ready', done: 'Done',
+    open: 'Open', active: 'Active', blocked: 'Blocked', ready: 'Ready', done: 'Done', withdrawn: 'Withdrawn',
   });
   const DECISION_STATES = Object.freeze({
     awaiting: 'Awaiting answer', answered: 'Answered', reported: 'Answer reported', withdrawn: 'Withdrawn',
@@ -327,6 +327,8 @@
         blocks: Array.isArray(row.blocks) ? row.blocks.filter(id => typeof id === 'string') : [],
         // Owned by nobody: it is here because this viewer leads its project.
         unassigned: row.unassigned === true,
+        // Linked to work that was withdrawn: its blocker was dropped, not finished.
+        blockerWithdrawn: Array.isArray(row.blocker_withdrawn) ? row.blocker_withdrawn.filter(id => typeof id === 'string') : [],
       };
       if (bound) Object.assign(card, storyFields(bound, viewer));
       if (decision && killWord(row)) card.kill = killWord(row);
@@ -452,6 +454,8 @@
       }
       return parts.join(' · ');
     }
+    // A withdrawn row was dropped, not finished: it says only that.
+    if (row.state === 'withdrawn') return 'withdrawn';
     // A done row names no next step: only that it is done, whether evidence
     // is attached, and a question it still waits on.
     if (row.state === 'done') {
@@ -470,6 +474,9 @@
     if (row.responsible) parts.push('responsible: ' + who(row.responsible));
     if (row.target) parts.push('target: ' + oneLine(row.target));
     if (row.awaiting) parts.push('awaiting ' + row.awaiting);
+    if (Array.isArray(row.blocker_withdrawn) && row.blocker_withdrawn.length) {
+      parts.push('blocker withdrawn: ' + row.blocker_withdrawn.filter(id => typeof id === 'string').join(', '));
+    }
     if (row.evidence_attached) parts.push('evidence attached');
     return parts.join(' · ');
   }
@@ -534,6 +541,8 @@
       updatedBy: who(project.updated_by),
       updated_at: project.updated_at,
       doneCount: Number.isSafeInteger(project.done_count) ? project.done_count : 0,
+      // Offered Edit only when the room says this viewer may edit it.
+      mayEdit: project.may_edit === true,
       withdrawnCount: Number.isSafeInteger(project.withdrawn_count) ? project.withdrawn_count : 0,
       rows: nest(rowNodes(rows.filter(row => row.project === project.id))),
       waitingOnYou: (brief.needs_me || []).filter(row => row.project === project.id).length,
@@ -541,7 +550,7 @@
   }
 
   function isOpenFollowUp(row) {
-    return row.kind === 'decision' ? row.state === 'awaiting' : row.state !== 'done';
+    return row.kind === 'decision' ? row.state === 'awaiting' : row.state !== 'done' && row.state !== 'withdrawn';
   }
 
   // The closer is resolved by the caller from the item's history: the `by` of
@@ -784,6 +793,7 @@
     'owner-only': 'Only the owner of this room can do that.',
     'same-project': 'It is already in that project.',
     'not-mover': 'Only the owner, its holder or its project\'s lead can move it.',
+    'not-withdrawer': 'Only whoever filed it, its project\'s lead, the first owner or an administrator can withdraw it or undo a withdraw. A holder can hand it back instead.',
     'not-lead': 'Only an administrator, the owner or this project\'s lead can change it.',
     'not-a-relay': 'An answer can be reported only on behalf of someone else; answer it directly instead.',
     'stale-revision': 'This record changed since you opened it. Review it and try again.',
@@ -819,6 +829,15 @@
     return 'You answered: ' + (text.length > 80 ? text.slice(0, 79) + '…' : text);
   }
 
+  // Whom a refused assignment can ask, in words.
+  function assignerWords(names) {
+    const list = Array.isArray(names) ? names.filter(name => typeof name === 'string') : [];
+    const who = list.length === 0 ? 'the first owner or an administrator'
+      : (list.length > 1 ? list.slice(0, -1).join(', ') + ' or ' + list[list.length - 1] : list[0]) +
+        ' (or the first owner or an administrator)';
+    return 'Ask ' + who + ' to assign it.';
+  }
+
   function errorWords(code) {
     return Object.hasOwn(ERROR_WORDS, code) ? ERROR_WORDS[code] : 'That did not work (' + String(code) + ').';
   }
@@ -843,7 +862,7 @@
     who, waitingLabel, stateLabel, killWord, killLines, createAnswerTracker, changedSince, needsYou,
     ageText, firstLine, needsCards, trackedBy, projectLine, actionsByPerson, reportedToYou, projectSummaries, projectTree, projectRowLine, projectSections, doneLine, approvalsList,
     reportedLabel, historyLines, messagePrefill, exposureText, notifyText, shareLine,
-    errorWords, decidedWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
+    errorWords, assignerWords, decidedWords, sourceLine, evidenceSourceLine, answerLines, drawerLines,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockWorkPanelModel', {

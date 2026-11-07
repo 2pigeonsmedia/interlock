@@ -2494,6 +2494,8 @@ test('doorbell has an independent cursor and prints only a generic nudge', async
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /Interlock ring 13 from Ana/);
   assert.match(result.stdout, /interlock history --connection Marlow/);
+  assert.match(result.stdout, /keep running it until message 13 has been read; one call can return only earlier messages\./,
+    'the nudge says how far to read, not one call');
   assert.equal(result.stdout.includes('private room body'), false);
   assert.deepEqual(world.events, [['load', 'Marlow']]);
 });

@@ -58,6 +58,7 @@ Usage:
   interlock leave --connection NAME [--json]
   interlock presence --connection NAME --file PATH | --clear [--json]
   interlock presence --connection NAME --project ID|none [--assign NAME] [--json]
+  interlock presence --connection NAME --middle-stdin [--json]
   interlock grants --connection NAME [--json]
   interlock codex-policy install --connection NAME --mode receive|participate
   interlock codex-policy check --connection NAME [--json]
@@ -67,7 +68,9 @@ Usage:
   interlock work get ID --connection NAME [--json]
   interlock work changes --connection NAME --after N [--limit N] [--json]
   interlock work create --connection NAME --file PATH [--json]
-  interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw|revise ID --connection NAME --file PATH [--json]
+  interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|revise ID --connection NAME --file PATH [--json]
+  interlock work withdraw ID --connection NAME --file PATH [--json]
+      ID is W-n work or finding, or D-n decision; the file holds expected_revision and reason
   interlock work project-update PROJECT --connection NAME --file PATH [--json]
   interlock work ask-approval --connection NAME --file PATH [--json]
   interlock work kill ID --connection NAME --file PATH|--stdin [--json]
@@ -469,9 +472,18 @@ function joinOptions(args) {
     if (!['--name', '--product', '--url', '--project', '--model'].includes(flag) || seen.has(flag) ||
         typeof value !== 'string' || value.length === 0) return null;
     seen.add(flag);
-    options[flag.slice(2)] = value;
+    options[flag.slice(2)] = flag === '--url' ? rootSlashDropped(value) : value;
   }
   return args.length % 2 === 0 ? Object.freeze(options) : null;
+}
+
+// A room address copied with its root slash (`https://host/`) names the same
+// origin; one trailing slash after the host is dropped. Anything more (a
+// path, a query, a fragment, a second slash) is left for the origin check
+// to refuse.
+function rootSlashDropped(value) {
+  const bare = value.endsWith('/') ? value.slice(0, -1) : value;
+  return /^https?:\/\/[^/?#]+$/.test(bare) ? bare : value;
 }
 
 function waitMs(milliseconds) {
@@ -945,7 +957,26 @@ function selectedConnection(name, dependencies = {}) {
   return Object.freeze({ profile, profiles });
 }
 
+// The file system refused to let this process secure the connection
+// directory: a read-only mount, a sandbox, a permission. Named apart from a
+// damaged or unsafe profile; the error code only, never a path or credential.
+const DIRECTORY_REFUSALS = Object.freeze({
+  EROFS: 'read-only file system', EACCES: 'permission denied', EPERM: 'operation not permitted',
+});
+function directoryRefusal(error) {
+  const code = error && typeof error.code === 'string' ? error.code : null;
+  if (!code || !Object.prototype.hasOwnProperty.call(DIRECTORY_REFUSALS, code)) return null;
+  return `interlock: the local connection directory could not be secured here (${code}: ${DIRECTORY_REFUSALS[code]}). ` +
+    'A sandbox or file permission is blocking it, so the profile was not read. ' +
+    'Run the command where that directory is writable.';
+}
+
 function reportConnectionError(stderr, error, name) {
+  const refusal = directoryRefusal(error);
+  if (refusal) {
+    line(stderr, refusal);
+    return;
+  }
   if (error && error.code === 'profile-not-found') {
     line(stderr, `interlock: no local connection named ${terminalSafe(name)}; run "interlock join" for a new AI session.`);
   } else if (error && error.code === 'not-admitted') {
@@ -1391,8 +1422,11 @@ async function runDoorbell(args, io, dependencies = {}) {
       line(io.stdout,
         `Interlock ring ${ring.id} from ${terminalSafe(ring.byline)}${session}.`);
     }
+    // One history call can return only earlier messages: say how far to read.
+    const last = Math.max(...page.rings.map(ring => ring.id));
     line(io.stdout,
-      `Run \`interlock history --connection ${terminalSafe(profile.name)}\` to read and acknowledge the room.`);
+      `Run \`interlock history --connection ${terminalSafe(profile.name)}\` and keep running it until message ${last} has been read; ` +
+      'one call can return only earlier messages.');
   }
   return EXIT_OK;
 }
@@ -1770,10 +1804,15 @@ async function runAsk(args, io, dependencies = {}) {
     }
     return EXIT_RUNTIME;
   }
-  if (parsed.json) line(io.stdout, JSON.stringify(result));
-  else if (verb === 'revise') line(io.stdout, `Revised ask ${id}: a yes now means: ${terminalSafe(body.means)}. It is their turn again.`);
-  if (!parsed.json && result.decision === 'stale') line(io.stderr, STALE_DECISION_WORDS);
-  else line(io.stdout, verb === 'withdraw' ? `Withdrew ask ${id}.` : `Ask ${id} is open again.`);
+  // One line for one act: --json prints the result alone; a revise says it
+  // was revised, not that it reopened.
+  if (parsed.json) {
+    line(io.stdout, JSON.stringify(result));
+    return EXIT_OK;
+  }
+  if (verb === 'revise') line(io.stdout, `Revised ask ${id}: a yes now means: ${terminalSafe(body.means)}. It is their turn again.`);
+  if (result.decision === 'stale') line(io.stderr, STALE_DECISION_WORDS);
+  else if (verb !== 'revise') line(io.stdout, verb === 'withdraw' ? `Withdrew ask ${id}.` : `Ask ${id} is open again.`);
   return EXIT_OK;
 }
 
@@ -1782,7 +1821,7 @@ async function runAsk(args, io, dependencies = {}) {
 // project (this AI's own, or with --assign another seat's, which only the
 // project's lead may set).
 function presenceOptions(args) {
-  const options = { connection: null, file: null, clear: false, project: undefined, assign: null, json: false };
+  const options = { connection: null, file: null, middle: false, clear: false, project: undefined, assign: null, json: false };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
@@ -1790,6 +1829,7 @@ function presenceOptions(args) {
     seen.add(flag);
     if (flag === '--json') { options.json = true; continue; }
     if (flag === '--clear') { options.clear = true; continue; }
+    if (flag === '--middle-stdin') { options.middle = true; continue; }
     const value = args[index + 1];
     if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) return null;
     index += 1;
@@ -1799,7 +1839,7 @@ function presenceOptions(args) {
     else if (flag === '--assign') options.assign = value;
     else return null;
   }
-  const actions = [options.file !== null, options.clear, options.project !== undefined].filter(Boolean).length;
+  const actions = [options.file !== null, options.middle, options.clear, options.project !== undefined].filter(Boolean).length;
   if (options.connection === null || actions !== 1) return null;
   if (options.assign !== null && options.project === undefined) return null;
   return Object.freeze(options);
@@ -1808,7 +1848,7 @@ function presenceOptions(args) {
 async function runPresence(args, io, dependencies = {}) {
   const parsed = presenceOptions(args);
   if (!parsed) {
-    line(io.stderr, 'interlock: usage: interlock presence --connection NAME --file PATH | --clear | --project ID|none [--assign NAME] [--json]');
+    line(io.stderr, 'interlock: usage: interlock presence --connection NAME --file PATH | --middle-stdin | --clear | --project ID|none [--assign NAME] [--json]');
     return EXIT_USAGE;
   }
   let body;
@@ -1818,6 +1858,21 @@ async function runPresence(args, io, dependencies = {}) {
     body = parsed.assign === null ? { project: parsed.project } : { seat_name: parsed.assign, project: parsed.project };
   } else if (parsed.clear) {
     body = { middle: null, waiting_on: null, need: null };
+  } else if (parsed.middle) {
+    // One command for "in the middle of": one piped line, replacing the
+    // presence line; the seat's next post clears it from People.
+    let piped;
+    try { piped = await (dependencies.readStdin || readStdin)(io.stdin || process.stdin); }
+    catch (_) {
+      line(io.stderr, 'interlock: could not read the piped line safely.');
+      return EXIT_RUNTIME;
+    }
+    const middle = String(piped).replace(/\r?\n$/, '');
+    if (middle.trim() === '' || /[\r\n]/.test(middle)) {
+      line(io.stderr, 'interlock: --middle-stdin takes one line: what you are in the middle of.');
+      return EXIT_USAGE;
+    }
+    body = { middle, waiting_on: null, need: null };
   } else {
     let text;
     try { text = (dependencies.readFile || fs.readFileSync)(parsed.file, 'utf8'); }
@@ -2078,6 +2133,12 @@ function joinedOutput(stdout, profile, start = 'tip') {
   line(stdout, '  recipe only when its tested CLI/TUI surface matches this session.');
   line(stdout, '  The shared GUIDE.md is served at /help; host recipes are in');
   line(stdout, '  docs/DOORBELL.md in this installed release.');
+  // Admission and the doorbell are two steps: the join ends with the second.
+  line(stdout, 'Next, before you say hello: start your doorbell, keep it running, and check it.');
+  line(stdout, `  interlock-doorbell run --adapter codex|stdout --connection ${profile.name} --session HOST_SESSION`);
+  line(stdout, `  interlock-doorbell status --connection ${profile.name}`);
+  line(stdout, '  codex for a Codex session (HOST_SESSION is its session id); stdout under a Monitor-class host.');
+  line(stdout, '  Run it as a managed long-running command; see `interlock-doorbell guide`.');
 }
 
 async function applyAdmissionHead(fetcher, profile, profiles) {
@@ -2226,8 +2287,8 @@ async function runJoin(args, io, dependencies = {}) {
   }
   let profiles;
   try { profiles = profileModule.openProfiles({ connectionDir }); }
-  catch (_) {
-    line(stderr, 'interlock: could not open the protected local connection directory.');
+  catch (error) {
+    line(stderr, directoryRefusal(error) || 'interlock: could not open the protected local connection directory.');
     return EXIT_RUNTIME;
   }
 
@@ -2960,7 +3021,8 @@ const WORK_VERBS = Object.freeze({
   'report-answer': Object.freeze({ path: '/api/ai/work/decisions/report', method: 'POST', id: true }),
   confirm: Object.freeze({ path: '/api/ai/work/decisions/confirm', method: 'POST', id: true }),
   reopen: Object.freeze({ path: '/api/ai/work/decisions/reopen', method: 'POST', id: true }),
-  withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', method: 'POST', id: true }),
+  // A W-n work or finding item by the items route, a D-n decision by its own.
+  withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', workPath: '/api/ai/work/items/withdraw', method: 'POST', id: true }),
   revise: Object.freeze({ path: '/api/ai/work/decisions/revise', method: 'POST', id: true }),
   // A request for approval: {project, title, scope, body?}; routed by the room.
   'ask-approval': Object.freeze({ path: '/api/ai/work/approvals/ask', method: 'POST', id: false }),
@@ -3075,6 +3137,13 @@ async function workRequest(fetcher, profile, pathname, options = {}) {
       error.status = response.status;
       error.code = result && typeof result.error === 'string' ? result.error : 'unavailable';
       if (result && Number.isSafeInteger(result.revision)) error.revision = result.revision;
+      // What a refused request got wrong, when the room names it.
+      if (result && typeof result.field === 'string') error.field = result.field;
+      if (result && typeof result.problem === 'string') error.problem = result.problem;
+      if (result && Array.isArray(result.accepted)) error.accepted = result.accepted.filter(name => typeof name === 'string');
+      if (result && Array.isArray(result.needs_one_of)) error.needsOneOf = result.needs_one_of.filter(name => typeof name === 'string');
+      if (result && typeof result.did_you_mean === 'string') error.didYouMean = result.did_you_mean;
+      if (result && Array.isArray(result.can_assign)) error.canAssign = result.can_assign.filter(name => typeof name === 'string');
       throw error;
     }
     return result;
@@ -3089,13 +3158,37 @@ const WORK_REFUSAL_HINTS = Object.freeze({
   'invalid-links': 'links are ids of records in this room (W-n, D-n); put an outside reference in source.',
   'scope-too-long': 'What a yes means (scope) is at most 300 characters; put the rest in body.',
   'not-lead': 'Only an administrator, the first owner or the project\'s lead changes its objective or today line.',
+  'not-withdrawer': 'Work is withdrawn, and a withdraw undone, by whoever filed it, its project\'s lead, the first owner or an administrator; a holder can hand it back instead (update responsible).',
   'project-retired': 'That project is retired; nothing in it changes.',
 });
+
+// The field a refused request got wrong, in words, when the room named it.
+function refusedFieldWords(error) {
+  const list = names => names.map(name => terminalSafe(name)).join(', ');
+  if (Array.isArray(error.needsOneOf) && error.needsOneOf.length) return ` It needs one of: ${list(error.needsOneOf)}.`;
+  if (typeof error.field !== 'string') return '';
+  const field = `The field "${terminalSafe(error.field)}"`;
+  if (error.problem === 'not-for-this-kind') return ` ${field} does not apply to this kind of record.`;
+  if (error.problem === 'invalid-value') return ` ${field} has a value the command does not accept.`;
+  const takes = Array.isArray(error.accepted) && error.accepted.length ? `; it takes ${list(error.accepted)}` : '';
+  return ` ${field} is not one this command takes${takes}.`;
+}
+
+// Whom a refused assignment can ask, in words.
+function assignerAsk(names) {
+  const safe = Array.isArray(names) ? names.map(name => terminalSafe(name)) : [];
+  const who = safe.length === 0 ? 'the first owner or an administrator'
+    : `${safe.length > 1 ? safe.slice(0, -1).join(', ') + ' or ' + safe[safe.length - 1] : safe[0]} (or the first owner or an administrator)`;
+  return `Ask ${who} to assign it; you may take an item nobody holds, or step out of a slot yourself.`;
+}
 
 function reportWorkError(stderr, error, profile) {
   if (error && Number.isSafeInteger(error.status) && error.status !== 401 && typeof error.code === 'string') {
     const revision = Number.isSafeInteger(error.revision) ? ` (current revision ${error.revision})` : '';
-    const hint = Object.prototype.hasOwnProperty.call(WORK_REFUSAL_HINTS, error.code) ? ' ' + WORK_REFUSAL_HINTS[error.code] : '';
+    const hint = (Object.prototype.hasOwnProperty.call(WORK_REFUSAL_HINTS, error.code) ? ' ' + WORK_REFUSAL_HINTS[error.code] : '') +
+      (error.code === 'invalid-request' ? refusedFieldWords(error) : '') +
+      (error.code === 'unknown-project' && typeof error.didYouMean === 'string' ? ` Did you mean ${terminalSafe(error.didYouMean)}?` : '') +
+      (error.code === 'not-assigner' ? ` ${assignerAsk(error.canAssign)}` : '');
     line(stderr, `interlock: ${roomLabel(profile)} refused the command: ${terminalSafe(error.code)}${revision}.${hint}`);
     return;
   }
@@ -3130,12 +3223,18 @@ function killSuffix(row) {
   return word === null ? '' : ` · ${word}`;
 }
 
+// A live item linked to withdrawn work: its blocker was dropped, not finished.
+function blockerWithdrawn(row, separator) {
+  const ids = Array.isArray(row.blocker_withdrawn) ? row.blocker_withdrawn.filter(id => typeof id === 'string') : [];
+  return ids.length ? `${separator}blocker withdrawn: ${ids.map(id => terminalSafe(id)).join(', ')}` : '';
+}
+
 function workRow(row) {
   if (row.kind === 'decision') {
     return `${row.id} · ${row.state}${killSuffix(row)} · asked of ${who(row.asked_of)} by ${who(row.asked_by)} · ${terminalSafe(row.title)}`;
   }
   const next = row.next_to ? `${who(row.next_to)} — ${terminalSafe(row.next_action || '')}` : 'nobody';
-  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}`;
+  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}${blockerWithdrawn(row, ' · ')}`;
 }
 
 function needsRow(row) {
@@ -3143,7 +3242,7 @@ function needsRow(row) {
     return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.proposal || '')} (${row.state}${killSuffix(row)}, asked by ${who(row.asked_by)})`;
   }
   const awaiting = row.awaiting ? `, awaiting ${row.awaiting}` : '';
-  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting})`;
+  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting}${blockerWithdrawn(row, ', ')})`;
 }
 
 function renderBrief(stdout, brief, connection) {
@@ -3157,10 +3256,17 @@ function renderBrief(stdout, brief, connection) {
   for (const project of brief.projects) {
     line(stdout, `  ${terminalSafe(project.display_name)} — ${terminalSafe(project.objective || 'no objective yet')} · Today: ${terminalSafe(project.today || 'nothing recorded')} (${who(project.updated_by)})`);
   }
-  line(stdout, `Open work (${brief.open.length})`);
-  for (const row of brief.open) line(stdout, '  ' + workRow(row));
-  line(stdout, `Decisions (${brief.decisions.length})`);
-  for (const row of brief.decisions) line(stdout, '  ' + workRow(row));
+  // A record that needs you is listed once, under Needs you; the lists below
+  // count it and say so.
+  const listedAbove = new Set(brief.needs_me.map(row => row.id));
+  const rest = (title, rows) => {
+    const shown = rows.filter(row => !listedAbove.has(row.id));
+    const above = rows.length - shown.length;
+    line(stdout, `${title} (${rows.length}${above ? `; ${above} listed under Needs you` : ''})`);
+    for (const row of shown) line(stdout, '  ' + workRow(row));
+  };
+  rest('Open work', brief.open);
+  rest('Decisions', brief.decisions);
   line(stdout, `Cursor ${brief.cursor} · continue with: interlock work changes --connection ${terminalSafe(connection)} --after ${brief.cursor}`);
 }
 
@@ -3228,7 +3334,11 @@ function renderWrite(stdout, verb, result, connection) {
     else line(stdout, `Recorded a reported answer on ${item.id} (reported, not confirmed by ${who(item.answer && item.answer.attributed_to) === 'nobody' && exposure ? terminalSafe(exposure.to) : who(item.answer && item.answer.attributed_to)}).`);
   } else if (verb === 'confirm') line(stdout, `Confirmed the reported answer on ${item.id} (${item.state}).`);
   else if (verb === 'reopen') line(stdout, `Reopened ${item.id} (${item.state}, asked of ${who(item.asked_of)}).`);
-  else if (verb === 'withdraw') line(stdout, `Withdrew ${item.id} (${item.state}).`);
+  else if (verb === 'withdraw') {
+    line(stdout, `Withdrew ${item.id} (${terminalSafe(String(item.state))}).`);
+    const left = Array.isArray(result.left_waiting) ? result.left_waiting.filter(row => row && typeof row.id === 'string') : [];
+    if (left.length) line(stdout, `Still linked to it: ${left.map(row => terminalSafe(row.id)).join(', ')}. Each shows its blocker as withdrawn, and its holder was told.`);
+  }
   else if (verb === 'revise') {
     line(stdout, `Revised ${item.id} to question revision ${item.question_revision}; it is ${terminalSafe(String(item.state))}, and no earlier answer carries over.`);
     if (result.room === 'stale') line(stdout, 'The room ask could not follow the revise: answers in the room are not recorded until it does.');
@@ -3266,7 +3376,8 @@ async function runWork(args, io, dependencies = {}) {
   }
   const fetcher = dependencies.fetch || globalThis.fetch;
   const { spec } = parsed;
-  let pathname = spec.path + (spec.method === 'GET' && spec.id ? parsed.id : '');
+  const base = spec.workPath && typeof parsed.id === 'string' && parsed.id.startsWith('W-') ? spec.workPath : spec.path;
+  let pathname = base + (spec.method === 'GET' && spec.id ? parsed.id : '');
   let requestOptions = { method: spec.method, raw: spec.raw === true };
   if (spec.method === 'POST' && spec.words) {
     let words;

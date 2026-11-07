@@ -119,6 +119,16 @@
         return { word: head + ' · ' + base.word, light: 'amber',
           age_since: declared ? row.presence.since : derived.since, notPickedUp };
       }
+      // What it is doing, ahead of the state word (her ask, 2026-10-31): its
+      // own "in the middle of" line until it posts again (the room cannot see
+      // a background job), else the item the room says it is working on.
+      const middle = row.presence && row.presence.middle &&
+        !(Number.isSafeInteger(row.last_posted_at) && Number.isSafeInteger(row.presence.since) &&
+          row.last_posted_at > row.presence.since) ? row.presence.middle : null;
+      if (middle) return Object.assign({}, base, { word: middle + ' · ' + base.word, age_since: row.presence.since });
+      if (row.working_on && typeof row.working_on.item === 'string') {
+        return Object.assign({}, base, { word: 'working on ' + row.working_on.item + ' · ' + base.word });
+      }
       return base;
     }
     if (row.presence && row.presence.waiting_on) {

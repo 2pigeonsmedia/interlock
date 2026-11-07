@@ -12,15 +12,10 @@ const audit = require('../identity/audit.js');
 const { startInterlockServer } = require('../src/server.js');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
 
+const { reserveTestPort } = require('./helpers/reserve_port.js');
+
 function reservePort() {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once('error', reject);
-    probe.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
-      const { port } = probe.address();
-      probe.close(error => error ? reject(error) : resolve(port));
-    });
-  });
+  return reserveTestPort();
 }
 
 function call(runtime, options = {}) {

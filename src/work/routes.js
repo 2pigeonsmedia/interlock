@@ -16,6 +16,7 @@ const MUTATIONS = Object.freeze({
   'items/evidence': Object.freeze(['attachEvidence', 201]),
   'items/note': Object.freeze(['addNote', 201]),
   'items/share': Object.freeze(['share', 201]),
+  'items/withdraw': Object.freeze(['withdrawItem', 200]),
   'decisions/answer': Object.freeze(['answer', 200]),
   'decisions/report': Object.freeze(['reportAnswer', 200]),
   'decisions/confirm': Object.freeze(['confirmReported', 200]),
@@ -35,7 +36,7 @@ const READS = Object.freeze(['brief', 'list', 'get', 'changes', 'export']);
 const CITING_OPS = Object.freeze(['items/create', 'items/evidence']);
 const QUOTE_BYTES = 4 * 1024;
 const STATUS = Object.freeze({
-  'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-mover': 403, 'not-lead': 403, 'not-a-relay': 403,
+  'not-authorized': 403, 'not-answerer': 403, 'not-asker': 403, 'owner-only': 403, 'not-mover': 403, 'not-withdrawer': 403, 'not-assigner': 403, 'not-lead': 403, 'not-a-relay': 403,
   'ambiguous-participant': 400,
   'unknown-item': 404, 'unknown-project': 404,
   'kill-own-pick': 403, 'first-owner-answer': 403,
@@ -55,10 +56,32 @@ function refusal(status, error, extra) {
   return Object.freeze({ status, body: Object.freeze(Object.assign({ ok: false, error }, extra)) });
 }
 
+// What a refused request got wrong, as the service named it: only these
+// fields, only in these shapes, and never more of a field name than 64
+// characters.
+const REFUSAL_PROBLEMS = Object.freeze(['not-accepted', 'not-for-this-kind', 'invalid-value']);
+function names(value) {
+  return Array.isArray(value) && value.length > 0 && value.length <= 64 &&
+    value.every(name => typeof name === 'string' && name.length > 0 && name.length <= 64);
+}
+function inputDetail(error) {
+  const detail = {};
+  if (typeof error.field === 'string' && error.field.length > 0) detail.field = error.field.slice(0, 64);
+  if (REFUSAL_PROBLEMS.includes(error.problem)) detail.problem = error.problem;
+  if (names(error.accepted)) detail.accepted = [...error.accepted];
+  if (names(error.needs_one_of)) detail.needs_one_of = [...error.needs_one_of];
+  return Object.keys(detail).length ? detail : undefined;
+}
+
 function errorResponse(error) {
   const code = error && typeof error.code === 'string' ? error.code : null;
   if (code === null) return refusal(503, 'work-unavailable');
-  if (code === 'invalid-input' || code === 'invalid-query') return refusal(400, code === 'invalid-input' ? 'invalid-request' : 'invalid-query');
+  if (code === 'invalid-input') return refusal(400, 'invalid-request', inputDetail(error));
+  if (code === 'invalid-query') return refusal(400, 'invalid-query');
+  if (code === 'not-assigner') {
+    // Who can assign it, so a blocked hand-off knows whom to ask.
+    return refusal(403, code, names(error.can_assign) ? { can_assign: [...error.can_assign] } : undefined);
+  }
   if (STATUS[code]) {
     return refusal(STATUS[code], code, code === 'stale-revision' ? { revision: error.revision } : undefined);
   }
@@ -150,7 +173,9 @@ function createWorkRoutes(options) {
     if (!entry) return refusal(404, 'not-found');
     if (!plainObject(body)) return refusal(400, 'invalid-request');
     // raw_digest is the route's own field; a body may never carry it.
-    if (Object.prototype.hasOwnProperty.call(body, 'raw_digest')) return refusal(400, 'invalid-request');
+    if (Object.prototype.hasOwnProperty.call(body, 'raw_digest')) {
+      return refusal(400, 'invalid-request', { field: 'raw_digest', problem: 'not-accepted' });
+    }
     const input = Object.assign({}, body);
     try {
       // Recognise a retry from the request as sent, before names resolve, so
@@ -164,8 +189,9 @@ function createWorkRoutes(options) {
       // Verified after replay, so a retry whose message was since archived
       // still returns its original result.
       if (Object.prototype.hasOwnProperty.call(body, 'source_message')) {
-        const cited = CITING_OPS.includes(op) ? citation(body.source_message) : null;
-        if (!cited) return refusal(400, 'invalid-request');
+        if (!CITING_OPS.includes(op)) return refusal(400, 'invalid-request', { field: 'source_message', problem: 'not-accepted' });
+        const cited = citation(body.source_message);
+        if (!cited) return refusal(400, 'invalid-request', { field: 'source_message', problem: 'invalid-value' });
         const captured = await verifiedSource(cited);
         if (!captured) return refusal(400, 'invalid-source');
         input.source_message = captured;
@@ -343,9 +369,23 @@ function createWorkRoutes(options) {
     try { return typeof work.waitingOf === 'function' ? work.waitingOf(subjectId) : null; }
     catch (_) { return null; }
   }
+  // A words-only answer's kept post: its result, null, or a thrown
+  // operation-conflict; and keeping one after the room has the post.
+  function priorDiscussion(actor, input) {
+    return typeof work.priorDiscussion === 'function' ? work.priorDiscussion(actor, input) : null;
+  }
+  function recordDiscussion(actor, input, messageId) {
+    try { return typeof work.recordDiscussion === 'function' ? work.recordDiscussion(actor, input, messageId) : null; }
+    catch (_) { return null; }
+  }
+  // What it works on when not every item is blocked: {item, title, blocked} or null.
+  function workingOf(subjectId) {
+    try { return typeof work.workingOf === 'function' ? work.workingOf(subjectId) : null; }
+    catch (_) { return null; }
+  }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

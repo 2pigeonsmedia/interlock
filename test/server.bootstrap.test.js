@@ -23,16 +23,10 @@ function assertServedAsOnDisk(served, expected, label) {
   assert.equal(Number(served.headers['content-length']), expected.length, label + ' content-length');
 }
 
+const { reserveTestPort } = require('./helpers/reserve_port.js');
+
 function reservePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen({ host: LOOPBACK_HOST, port: 0, exclusive: true }, () => {
-      const address = server.address();
-      const port = address && typeof address === 'object' ? address.port : null;
-      server.close(error => error ? reject(error) : resolve(port));
-    });
-  });
+  return reserveTestPort();
 }
 
 function call(runtime, options = {}) {

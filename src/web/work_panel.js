@@ -223,6 +223,7 @@
       const facts = [card.who, card.project];
       if (card.blocks && card.blocks.length) facts.push('blocks ' + card.blocks.join(', '));
       if (card.unassigned) facts.push('unassigned');
+      if (card.blockerWithdrawn && card.blockerWithdrawn.length) facts.push('blocker withdrawn: ' + card.blockerWithdrawn.join(', '));
       if (card.kill) facts.push(card.kill);
       node.append(make('p', 'work-tree-facts', facts.join(' · ')));
       if (card.note) node.append(make('p', 'work-tree-facts', card.note));
@@ -402,6 +403,7 @@
       const view = projectView(state, section.id);
       const count = counts.get(section.id);
       view.project = section;
+      view.edit.hidden = !section.mayEdit;
       // Folded unless something in it is for the viewer; a fold the viewer
       // chose stays as chosen.
       if (!view.foldChosen) view.folded = !(count.needsYou > 0) && !view.editing;
@@ -731,6 +733,7 @@
       const code = error && typeof error.code === 'string' ? error.code : 'unavailable';
       if ((error && error.status === 401) || code === 'not-authenticated') state.deps.onSessionEnded();
       else if (code === 'stale-revision' && typeof body.id === 'string') await staleNotice(op, body.id, where);
+      else if (code === 'not-assigner') where.textContent = model().assignerWords(error.canAssign);
       else where.textContent = model().errorWords(code);
       return null;
     }
@@ -1141,6 +1144,16 @@
     })];
   }
 
+  // Whoever filed it, its project's lead, the first owner or an administrator
+  // withdraws work that is no longer wanted; withdrawn is never done.
+  function withdrawWorkForm(item) {
+    const reason = control('input', 'reason', 'Reason', { required: true });
+    return [actionForm('work-withdraw', [reason], 'Withdraw', async operation => {
+      const result = await write('items/withdraw', { id: item.id, expected_revision: item.revision, reason: reason.node.value }, null, operation);
+      if (result) await openItem(item.id);
+    })];
+  }
+
   function renderWorkActions(buttons, slot, item, evidence) {
     actionButton(buttons, slot, 'Update', item, () => updateForm(item, evidence));
     actionButton(buttons, slot, 'Attach evidence', item, () => evidenceForm(item));
@@ -1167,6 +1180,7 @@
     }
     if (item.kind === 'decision') actionButton(buttons, slot, 'Add note', item, () => noteForm(item));
     if (result.may_move === true) actionButton(buttons, slot, 'Move to project', item, () => moveForm(item));
+    if (result.may_withdraw === true) actionButton(buttons, slot, 'Withdraw', item, () => withdrawWorkForm(item));
     const recipient = item.kind === 'decision' ? (item.state === 'awaiting' ? item.asked_of : null) : item.next_to;
     if (recipient && !isMe(recipient)) {
       const notify = make('button', 'quiet-action', 'Notify');

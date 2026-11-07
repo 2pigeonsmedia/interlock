@@ -18,15 +18,10 @@ const identity = require('identity');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
 const { LOOPBACK_HOST, startInterlockServer } = require('../src/server.js');
 
+const { reserveTestPort } = require('./helpers/reserve_port.js');
+
 function reservePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen({ host: LOOPBACK_HOST, port: 0, exclusive: true }, () => {
-      const { port } = server.address();
-      server.close(error => error ? reject(error) : resolve(port));
-    });
-  });
+  return reserveTestPort();
 }
 
 function call(runtime, options = {}) {
@@ -161,7 +156,7 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     const people = await call(runtime, { path: '/api/participants', headers: { cookie: owner.cookie } });
     assert.equal(people.status, 200, people.text);
     const row = name => people.json.participants.find(item => item.name === name);
-    assert.equal(Object.keys(row('Scout')).length, 17);
+    assert.equal(Object.keys(row('Scout')).length, 18, 'People rows carry waiting and working_on');
     assert.deepEqual([row('Scout').model, row('Scout').project, row('Scout').assigned.how, row('Scout').presence],
       ['Opus 5.5', 'ops', 'join', null]);
     assert.deepEqual([row('Wren').model, row('Wren').project, row('Wren').assigned], [null, null, null]);
@@ -171,7 +166,8 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     const settings = await call(runtime, { path: '/api/settings/participants', headers: { cookie: owner.cookie } });
     assert.equal(settings.status, 200, settings.text);
     const scout = settings.json.participants.find(item => item.name === 'Scout');
-    assert.equal(Object.keys(scout).length, 16);
+    assert.equal(Object.keys(scout).length, 15, 'Settings rows carry no Work facts');
+    assert.equal(Object.hasOwn(scout, 'waiting'), false);
     assert.deepEqual([scout.model, scout.project, scout.assigned.how], ['Opus 5.5', 'ops', 'join']);
 
     // Presence, own project, a lead assigning, the owner assigning, a post clearing.

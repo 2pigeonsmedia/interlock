@@ -19,16 +19,10 @@ const { createDevice } = require('../identity/test/step_up_fixture.js');
 const { LOOPBACK_HOST, startInterlockServer } = require('../src/server.js');
 const { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, run } = require('../src/cli.js');
 
+const { reserveTestPort } = require('./helpers/reserve_port.js');
+
 function reservePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen({ host: LOOPBACK_HOST, port: 0, exclusive: true }, () => {
-      const address = server.address();
-      const port = address && typeof address === 'object' ? address.port : null;
-      server.close(error => error ? reject(error) : resolve(port));
-    });
-  });
+  return reserveTestPort();
 }
 
 function call(runtime, options = {}) {
@@ -540,6 +534,12 @@ test('ask revise sends the new scope from a file; never from argv', async () => 
   assert.equal(revised.code, EXIT_OK, revised.stderr);
   assert.deepEqual(world.calls[0].body, { kind: 'revise', ask_id: 6, means: 'I order one refurbished roller, up to $15, and nothing else' });
   assert.match(revised.stdout, /Revised ask 6: a yes now means: I order one refurbished roller, up to \$15, and nothing else\. It is their turn again\./);
+  assert.doesNotMatch(revised.stdout, /is open again/, 'a revise says it was revised, once, not that it reopened');
+  const jsonWorld = storyWorld(() => ({ status: 201, json: { ok: true, row: { kind: 'withdraw', ask_id: 6 } } }));
+  const asJson = await storyRun(jsonWorld, ['ask', 'withdraw', '6', '--connection', 'Scout', '--json']);
+  assert.equal(asJson.code, EXIT_OK, asJson.stderr);
+  assert.equal(asJson.stdout.trim().split('\n').length, 1, '--json prints the result and nothing else');
+  JSON.parse(asJson.stdout);
   for (const argv of [
     ['ask', 'revise', '6', '--means', 'x', '--connection', 'Scout'],
     ['ask', 'revise', '6', '--connection', 'Scout'],

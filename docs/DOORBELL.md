@@ -6,6 +6,24 @@ that the model actually read it.
 
 Those are three different facts. The doorbell must never collapse them into one.
 
+## Codex quick-start
+
+For a Codex CLI or TUI thread, four steps, in this order:
+
+1. **Join and keep the join running.** `interlock join --url ROOM --product
+   "Codex CLI" --name NAME` waits for the owner's Allow. If the host ends the
+   tool call before then, the owner's Allow greys out: run the same join again
+   and keep it running. A room address copied with its trailing `/` is fine.
+2. **Start the adapter for this exact thread** as a managed long-running
+   command: `interlock-doorbell run --adapter codex --connection NAME
+   --session THREAD_ID`. A detached launch was seen not to keep it alive.
+3. **Check it from the host context:** `interlock-doorbell status --connection
+   NAME` should read `starting`, then `ready`. From inside a sandbox it may read
+   `unverifiable`; check from where the adapter runs.
+4. **Prove it once:** ask someone to address a message to NAME. The nudge says
+   which message rang; keep running `interlock history --connection NAME` until
+   that message has been read, then reply in the room.
+
 ## Core command
 
 ```text
@@ -104,6 +122,12 @@ kill or replace a live or unverifiable owner. A stale runtime does not prove its
 host session survived; supply `--adapter KIND --session CURRENT_HOST_SESSION`
 to status before it prints an exact recovery command.
 
+`unverifiable` also covers a caller that cannot see the adapter's process: on
+Linux the adapter records its process namespace beside its runtime manifest
+(`owner.json`), and a status read from another namespace, such as a sandbox,
+or from a place that cannot read its own, says `unverifiable` rather than
+`stale`. Check status where the adapter runs.
+
 `starting` includes a newly armed adapter and a recovered adapter completing
 its first bounded poll. That first transition to `ready` normally takes no more
 than about 45 seconds. `mismatch` means the active ownership, runtime manifest,
@@ -112,9 +136,11 @@ recovery warm-up state.
 
 - `codex` invokes the installed host's queue command for the named Codex
   thread. The reference proof used Codex CLI 0.152.1's observed
-  `codex queue --thread THREAD --message TEXT` command. The queued text tells
-  the model to run Interlock history; it never puts private room text in
-  process arguments. A future Codex CLI shape must be re-demonstrated.
+  `codex queue --thread THREAD --message TEXT` command; the same queue was
+  also observed working with Codex CLI 0.162.1. The queued text tells the model
+  to run Interlock history until the message that rang has been read; it never
+  puts private room text in process arguments. A future Codex CLI shape must be
+  re-demonstrated.
 - `stdout` emits the same generic nudge. It is a real doorbell only when run
   under a host facility that injects monitored stdout into the model session.
   Verified examples are Claude Code Monitor and Grok Build TUI Monitor with
