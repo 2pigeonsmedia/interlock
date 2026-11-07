@@ -601,7 +601,9 @@
   function drawerLines(item, history, answered = new Set()) {
     if (item.kind === 'decision') {
       const answer = item.answer;
-      return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by)]
+      return ['Asked of ' + who(item.asked_of) + ' by ' + who(item.asked_by) +
+        (Number.isSafeInteger(item.question_revision) && item.question_revision > 1
+          ? ' · question revision ' + item.question_revision : '')]
         .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.ask_message_id + ').'] : [])
         .concat(answerLines(item, history))
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])
@@ -653,6 +655,18 @@
     if (event.previous) {
       parts.push('previous (' + event.previous.kind +
         (event.previous.kind === 'reported' ? ', reported by ' + who(event.previous.by) : '') + '): ' + oneLine(event.previous.text));
+    }
+    if (event.kind === 'revised' && Number.isSafeInteger(event.question_revision)) {
+      parts.push('question revision ' + event.question_revision);
+    }
+    if (event.kill_cleared) {
+      const reply = event.kill_cleared.reply;
+      parts.push('kill question moved here from the record: ' + oneLine(event.kill_cleared.question) +
+        (reply ? ' (' + reply.outcome + ': ' + oneLine(reply.words) + ')' : ' (no reply)'));
+    }
+    if (event.answer_superseded) {
+      parts.push('earlier answer no longer stands (' + event.answer_superseded.kind + '): ' +
+        oneLine(event.answer_superseded.text));
     }
     if (event.before && event.after) {
       for (const field of Object.keys(event.before)) {
@@ -784,6 +798,7 @@
     'kill-slot-filled': 'Someone has already asked this decision\'s kill question.',
     'kill-slot-replied': 'The kill question already has its reply.',
     'means-required': 'Asking a person needs a line saying what a yes means.',
+    'invalid-means': 'The room cannot ask that: what a yes means must be one line of at most 300 characters.',
     'ask-target-unknown': 'That name is not anyone in the room.',
     'owner-does-not-ask': 'Your own work needs no approval.',
     'unknown-project': 'That project is not taking work.',

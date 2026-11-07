@@ -922,6 +922,35 @@
     })];
   }
 
+  // The asker rewrites the question in place: same id, a new question
+  // revision. No earlier answer carries over, and the kill slot opens again.
+  function reviseForm(item) {
+    const title = control('input', 'title', 'Question', { required: true, value: item.title });
+    const body = control('textarea', 'body', 'Details', { required: true, value: item.body });
+    const proposal = control('textarea', 'proposal', 'Proposal (optional)', { value: item.proposal || '' });
+    const rationale = control('textarea', 'rationale', 'Rationale (optional)', { value: item.rationale || '' });
+    const scope = control('input', 'scope', 'What a yes means', { value: item.scope || '' });
+    const reason = control('input', 'reason', 'Why it changed', { required: true });
+    const fields = { title, body, proposal, rationale, scope };
+    return [
+      make('p', '', 'Revising keeps this id. Any answer reported so far, and the kill question with its reply, ' +
+        'move to the history; the new wording needs a new answer.'),
+      actionForm('work-revise', [title, body, proposal, rationale, scope, reason], 'Revise question', async operation => {
+        const change = { id: item.id, expected_revision: item.revision, reason: reason.node.value };
+        for (const [key, field] of Object.entries(fields)) {
+          if (field.node.value !== (item[key] || '')) change[key] = field.node.value;
+        }
+        const result = await write('decisions/revise', change, null, operation);
+        if (!result) return;
+        await afterDecisionWrite(result, item);
+        if (result.room === 'stale') {
+          setStatus('Revised ' + item.id + ', but its question in the room could not follow: ' +
+            'answers given there are not recorded until it does.');
+        }
+      }),
+    ];
+  }
+
   function reopenForm(item) {
     const reason = control('input', 'reason', 'Reason', { required: true });
     const askedOf = choice('asked_of', 'Ask', participantOptions({ value: '', text: 'Keep ' + model().who(item.asked_of) }), '');
@@ -985,6 +1014,7 @@
     }
     if (isMe(item.asked_by) || isOwner()) {
       if (item.state === 'awaiting' || item.state === 'reported') {
+        if (isMe(item.asked_by)) actionButton(buttons, slot, 'Revise', item, () => reviseForm(item));
         actionButton(buttons, slot, 'Withdraw', item, () => withdrawForm(item));
       }
       if (item.state !== 'awaiting') actionButton(buttons, slot, 'Reopen', item, () => reopenForm(item));
