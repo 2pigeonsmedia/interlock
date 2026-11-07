@@ -1906,9 +1906,15 @@ function createFirstOwnerHandler(options) {
     }
     // A revised decision revises the ask it put in the room, so no answer given
     // there to the old wording can stand for the new one.
-    if (op === 'decisions/revise' && result.status < 400 && result.body.replayed !== true &&
-        Number.isSafeInteger(result.body.item.ask_message_id)) {
-      const room = await reviseRoomAsk(result.body.item, revising.body.item.asked_by.kind);
+    // A retried revise (same operation) whose room ask never followed, say
+    // after a crash, tries the room again.
+    if (op === 'decisions/revise' && result.status < 400 && result.body.item &&
+        Number.isSafeInteger(result.body.item.ask_message_id) &&
+        (result.body.replayed !== true || (revising && revising.status === 200 &&
+          revising.body.item.ask_follow_pending === true))) {
+      const current = work.read('get', actor, { id: result.body.item.id }, actor.now);
+      const room = await reviseRoomAsk(current.status === 200 ? current.body.item : result.body.item,
+        revising.body.item.asked_by.kind);
       const fresh = work.read('get', actor, { id: result.body.item.id }, actor.now);
       sendWorkResult(request, response, { status: result.status, body: Object.assign({}, result.body,
         fresh.status === 200 ? { item: fresh.body.item } : {}, room ? {} : { room: 'stale' }) });
