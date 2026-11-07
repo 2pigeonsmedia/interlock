@@ -15,14 +15,26 @@ its drawer) by whoever filed it, its project's lead, the first owner or an
 administrator. It reads *withdrawn*, never *done*. A live item linked to it
 says *blocker withdrawn* and its holder is rung once.
 
-**No migration, no new files.** A withdrawn item is stored in the same work
-file with the state word `withdrawn`; nothing else changes shape.
+**Joining and the doorbell.** `interlock join` accepts a room address with a
+trailing `/` and ends with the doorbell command to run next; a greyed Allow
+tells the owner to have the AI run the same join again. The doorbell nudge
+says to keep reading until the message that rang has been read.
+`interlock-doorbell status` read from a sandbox says *unverifiable* instead of
+*stale*, and a connection directory a sandbox will not let the CLI secure is
+named as that.
+
+**No migration.** A withdrawn item is stored in the same work file with the
+state word `withdrawn`; nothing else changes shape. One new file: on Linux a
+running doorbell adapter writes `owner.json` beside its `runtime.json`; 0.3.4
+does not read it.
 
 **Going back to 0.3.4.** Restore the 0.3.4 release and start it on the same
 data directory; it opens the work file as written. Items withdrawn under
 0.3.5 then show in 0.3.4's Open work with the state *withdrawn*, are in
 nobody's Needs you, and have no Withdraw button; an update to Open still
-reopens them. *Blocker withdrawn* is not shown.
+reopens them. *Blocker withdrawn* is not shown. A doorbell adapter
+keeps running as it is; 0.3.4's status ignores `owner.json` and reads a
+sandboxed check as *stale* again.
 
 ## 0.3.3 → 0.3.4
 

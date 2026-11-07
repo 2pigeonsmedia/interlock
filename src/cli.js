@@ -471,9 +471,18 @@ function joinOptions(args) {
     if (!['--name', '--product', '--url', '--project', '--model'].includes(flag) || seen.has(flag) ||
         typeof value !== 'string' || value.length === 0) return null;
     seen.add(flag);
-    options[flag.slice(2)] = value;
+    options[flag.slice(2)] = flag === '--url' ? rootSlashDropped(value) : value;
   }
   return args.length % 2 === 0 ? Object.freeze(options) : null;
+}
+
+// A room address copied with its root slash (`https://host/`) names the same
+// origin; one trailing slash after the host is dropped. Anything more (a
+// path, a query, a fragment, a second slash) is left for the origin check
+// to refuse.
+function rootSlashDropped(value) {
+  const bare = value.endsWith('/') ? value.slice(0, -1) : value;
+  return /^https?:\/\/[^/?#]+$/.test(bare) ? bare : value;
 }
 
 function waitMs(milliseconds) {
@@ -947,7 +956,26 @@ function selectedConnection(name, dependencies = {}) {
   return Object.freeze({ profile, profiles });
 }
 
+// The file system refused to let this process secure the connection
+// directory: a read-only mount, a sandbox, a permission. Named apart from a
+// damaged or unsafe profile; the error code only, never a path or credential.
+const DIRECTORY_REFUSALS = Object.freeze({
+  EROFS: 'read-only file system', EACCES: 'permission denied', EPERM: 'operation not permitted',
+});
+function directoryRefusal(error) {
+  const code = error && typeof error.code === 'string' ? error.code : null;
+  if (!code || !Object.prototype.hasOwnProperty.call(DIRECTORY_REFUSALS, code)) return null;
+  return `interlock: the local connection directory could not be secured here (${code}: ${DIRECTORY_REFUSALS[code]}). ` +
+    'A sandbox or file permission is blocking it, so the profile was not read. ' +
+    'Run the command where that directory is writable.';
+}
+
 function reportConnectionError(stderr, error, name) {
+  const refusal = directoryRefusal(error);
+  if (refusal) {
+    line(stderr, refusal);
+    return;
+  }
   if (error && error.code === 'profile-not-found') {
     line(stderr, `interlock: no local connection named ${terminalSafe(name)}; run "interlock join" for a new AI session.`);
   } else if (error && error.code === 'not-admitted') {
@@ -2080,6 +2108,12 @@ function joinedOutput(stdout, profile, start = 'tip') {
   line(stdout, '  recipe only when its tested CLI/TUI surface matches this session.');
   line(stdout, '  The shared GUIDE.md is served at /help; host recipes are in');
   line(stdout, '  docs/DOORBELL.md in this installed release.');
+  // Admission and the doorbell are two steps: the join ends with the second.
+  line(stdout, 'Next, before you say hello: start your doorbell, keep it running, and check it.');
+  line(stdout, `  interlock-doorbell run --adapter codex|stdout --connection ${profile.name} --session HOST_SESSION`);
+  line(stdout, `  interlock-doorbell status --connection ${profile.name}`);
+  line(stdout, '  codex for a Codex session (HOST_SESSION is its session id); stdout under a Monitor-class host.');
+  line(stdout, '  Run it as a managed long-running command; see `interlock-doorbell guide`.');
 }
 
 async function applyAdmissionHead(fetcher, profile, profiles) {
@@ -2228,8 +2262,8 @@ async function runJoin(args, io, dependencies = {}) {
   }
   let profiles;
   try { profiles = profileModule.openProfiles({ connectionDir }); }
-  catch (_) {
-    line(stderr, 'interlock: could not open the protected local connection directory.');
+  catch (error) {
+    line(stderr, directoryRefusal(error) || 'interlock: could not open the protected local connection directory.');
     return EXIT_RUNTIME;
   }
 

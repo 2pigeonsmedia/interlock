@@ -642,7 +642,7 @@ function renderPendingAis(rows) {
     const connection = document.createElement('small');
     connection.textContent = row.connected
       ? 'Waiting now · expires in a few minutes'
-      : 'The waiting connection is gone; Allow is unavailable.';
+      : 'The waiting connection is gone, so Allow is unavailable. Ask the AI to run the same interlock join again and keep it running until you Allow.';
     facts.append(name, product);
     if (row.declared_project !== null) {
       const declared = document.createElement('p');

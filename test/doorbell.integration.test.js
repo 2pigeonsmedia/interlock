@@ -171,6 +171,8 @@ test('Codex adapter queues a generic nudge before committing its observation cur
   assert.equal(host[3], '--message');
   assert.match(host[4], /Interlock rang for Marlow: message 9 from Ana/);
   assert.match(host[4], /interlock history --connection Marlow/);
+  assert.match(host[4], /keep running it until message 9 has been read; one call can return only earlier messages/,
+    'the nudge says how far to read, not one call');
   assert.equal(host[4].includes('room body'), false);
   const state = JSON.parse(fs.readFileSync(path.join(world.stateDir,
     onlyStateFile(world.stateDir)), 'utf8'));
@@ -303,6 +305,48 @@ test('status reports absent, starting, ready, then stale without private hooks',
   assert.equal(recoverable.recovery[recoverable.recovery.indexOf('--session') + 1],
     'host-session-after-restart',
     'recovery must use the operator-supplied current session, never the stale manifest session');
+});
+
+test('status from a caller that cannot see the adapter process says unverifiable, never stale', async t => {
+  if (process.platform !== 'linux') {
+    t.skip('the adapter records its process namespace on Linux only');
+    return;
+  }
+  const { inspectStatus, parseStatusArgs } = require('../integrations/doorbell.js');
+  const world = fixture(ringPage());
+  world.delay = 500;
+  const child = childProcess.spawn(process.execPath, [
+    RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
+    '--session', 'host-session-1', '--state-dir', world.stateDir,
+  ], { cwd: ROOT, env: runnerEnv(world), stdio: ['ignore', 'pipe', 'pipe'] });
+  const exited = once(child, 'exit');
+  let owner;
+  try {
+    await waitForAdapterLock(world.stateDir);
+    assert.ok(await waitUntil(() => runtimeFile(world.stateDir) !== null), 'ARRANGEMENT: the adapter wrote its runtime');
+    const ownerPath = path.join(path.dirname(runtimeFile(world.stateDir)), 'owner.json');
+    assert.ok(await waitUntil(() => fs.existsSync(ownerPath)), 'the adapter records its owner beside its runtime');
+    owner = { path: ownerPath, value: JSON.parse(fs.readFileSync(ownerPath, 'utf8')) };
+    const runtime = JSON.parse(fs.readFileSync(runtimeFile(world.stateDir), 'utf8'));
+    assert.equal(owner.value.pid, runtime.pid, 'the owner record names the adapter that wrote the runtime');
+    assert.equal(owner.value.started_at, runtime.started_at);
+    assert.match(owner.value.pid_namespace, /^pid:\[[0-9]+\]$/);
+  } finally {
+    child.kill();
+    await exited;
+  }
+  const options = parseStatusArgs(['--connection', 'Marlow', '--state-dir', world.stateDir]);
+  assert.equal(inspectStatus(options, Date.now, () => owner.value.pid_namespace).state, 'stale',
+    'ARRANGEMENT: from the adapter\'s own namespace a killed adapter is stale');
+  const hidden = inspectStatus(options, Date.now, () => 'pid:[1]');
+  assert.equal(hidden.state, 'unverifiable', 'a caller in another namespace cannot tell stale from alive');
+  assert.match(hidden.detail, /cannot see/);
+  assert.equal(hidden.recovery, null);
+  assert.equal(inspectStatus(options, Date.now, () => null).state, 'unverifiable',
+    'a caller that cannot read its own namespace cannot compare');
+  // An owner record from an earlier run does not speak for this runtime.
+  fs.writeFileSync(owner.path, JSON.stringify(Object.assign({}, owner.value, { started_at: owner.value.started_at - 1 })) + '\n');
+  assert.equal(inspectStatus(options, Date.now, () => 'pid:[1]').state, 'stale');
 });
 
 test('status reports immediate and aged recovery as starting during the first poll', async () => {

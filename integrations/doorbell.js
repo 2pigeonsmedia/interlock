@@ -202,6 +202,38 @@ function runtimeFile(options, stateDir) {
   return path.join(lockDirectory(options, stateDir), 'runtime.json');
 }
 
+// Where the running adapter says which process namespace it runs in, beside
+// its runtime manifest. A separate file, so a release that does not know it
+// reads the manifest exactly as before.
+function ownerFile(options, stateDir) {
+  return path.join(lockDirectory(options, stateDir), 'owner.json');
+}
+
+// The process namespace this process sees its peers in: on Linux the PID
+// namespace link; null elsewhere, or when it cannot be read (a sandbox
+// without /proc).
+function processNamespace() {
+  if (process.platform !== 'linux') return null;
+  try {
+    const link = fs.readlinkSync('/proc/self/ns/pid');
+    return /^pid:\[[0-9]+\]$/.test(link) ? link : null;
+  } catch (_) { return null; }
+}
+
+/* True when the recorded owner may be alive where this caller cannot see:
+ * this runtime's adapter recorded its namespace, and the caller's differs
+ * or cannot be read. A sandboxed caller then cannot tell a stopped adapter
+ * from a running one. Without a matching record, the lock decides alone. */
+function ownerHidden(options, stateDir, runtime, namespaceOf) {
+  let read;
+  try { read = readStatusJson(ownerFile(options, stateDir)); } catch (_) { return false; }
+  const owner = read.kind === 'value' ? exactObject(read.value, ['schema', 'pid', 'started_at', 'pid_namespace']) : null;
+  if (!owner || owner.schema !== 1 || owner.pid !== runtime.pid || owner.started_at !== runtime.started_at ||
+      typeof owner.pid_namespace !== 'string') return false;
+  const mine = namespaceOf();
+  return mine === null || mine !== owner.pid_namespace;
+}
+
 function loadState(file, options) {
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); }
@@ -291,7 +323,7 @@ function statusResult(options, overrides) {
   }, overrides);
 }
 
-function inspectStatus(options, clock = Date.now) {
+function inspectStatus(options, clock = Date.now, namespaceOf = processNamespace) {
   const stateDir = options.stateDir || defaultStateDir();
   const lockDir = lockDirectory(options, stateDir);
   const runtimeRead = readStatusJson(runtimeFile(options, stateDir));
@@ -333,6 +365,13 @@ function inspectStatus(options, clock = Date.now) {
   if (lock.state === 'unverifiable') {
     return statusResult(options, Object.assign(common, {
       state: 'unverifiable', detail: 'the current platform cannot verify the recorded owner',
+      recovery: null,
+    }));
+  }
+  if (lock.state === 'stale' && ownerHidden(options, stateDir, runtime, namespaceOf)) {
+    return statusResult(options, Object.assign(common, {
+      state: 'unverifiable',
+      detail: 'the adapter runs in another process namespace (a sandbox or container) that this caller cannot see; check status where the adapter runs',
       recovery: null,
     }));
   }
@@ -473,8 +512,12 @@ function pollReason(polled) {
 function nudge(options, rings) {
   const ids = rings.map(ring => ring.id).join(', ');
   const from = [...new Set(rings.map(ring => ring.byline))].join(', ');
+  // One history call can return only earlier messages: the nudge names the
+  // message to read up to, so a model keeps reading until it has it.
+  const last = Math.max(...rings.map(ring => ring.id));
   return `Interlock rang for ${options.connection}: message ${ids} from ${from}. ` +
-    `Run interlock history --connection ${options.connection} to read and acknowledge the room.`;
+    `Run interlock history --connection ${options.connection} and keep running it until message ${last} has been read; ` +
+    'one call can return only earlier messages.';
 }
 
 function replacementRecoveryHint(state, replacementPending, firstPoll) {
@@ -533,6 +576,15 @@ function runAdapter(argv) {
     catch (error) {
       fail(`runtime manifest could not be committed: ${error.message}`);
       return;
+    }
+    // Evidence for a status read from another namespace; without it status
+    // reads the lock alone, as before.
+    const namespace = processNamespace();
+    if (namespace !== null) {
+      try {
+        atomicJson(ownerFile(options, stateDir),
+          { schema: 1, pid: runtime.pid, started_at: runtime.started_at, pid_namespace: namespace });
+      } catch (_) { /* optional evidence */ }
     }
     let outageStarted = null;
     let retries = 0;
