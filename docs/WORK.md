@@ -75,8 +75,8 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
 
 **Decision** (`kind: "decision"`, `id` `D-7`) — `title`, `body`, `project`,
 `asked_of`, `asked_by`, `proposal`, `rationale`, `scope`, `conditions`,
-`answer`, `withdrawn`, `kill`, `kill_state`, `links`, `parent`, `source`,
-`revision`. The displayed `state` is derived: `awaiting`, `answered`,
+`answer`, `withdrawn`, `kill`, `kill_state`, `question_revision`, `links`,
+`parent`, `source`, `revision`. The displayed `state` is derived: `awaiting`, `answered`,
 `reported`, or `withdrawn`. A decision is a record, never an approval.
 
 - Only the person asked, or the owner giving a reason, records an answer here
@@ -94,6 +94,20 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   (`decisions/kill`, once); the asker replies once (`decisions/kill-reply`,
   `survived` or `killed`). `kill_state` is `unattacked`, `attacked`,
   `survived` or `killed`; killed withdraws nothing.
+- Its asker may revise the question in place (`decisions/revise`): the
+  title, details, proposal, rationale or what a yes means, with a reason.
+  The id stays, so every reference to it stays good, and `question_revision`
+  goes up by one (a decision never revised reads 1). No earlier answer
+  carries over to a new revision: a reported answer leaves the record, and
+  the kill question with its reply leaves the kill slot, both whole onto the
+  trail in the `revised` event, so the new wording can be attacked once again.
+  A direct answer stands until the decision is reopened; a withdrawn decision
+  is not revised. A decision asked in the room has its room ask revised with
+  it, as its asker, so an answer given there to the old wording is refused
+  (`409 ask-revised`); the new wording must be one the room accepts as what a
+  yes means (else `400 invalid-means`, and nothing is written). If the room
+  ask could not follow, the response carries `"room": "stale"` and the
+  record takes no room answer until the two agree.
 - Anyone else may record that an answer was given elsewhere
   (`answer.kind: "reported"`) with the exact words and a source. The record
   shows who reported it and that it is not confirmed here. The response
@@ -181,6 +195,7 @@ in the first owner's Needs you.
 | `decisions/confirm` | `id`, `expected_revision`, optional `reason` |
 | `decisions/reopen` | `id`, `expected_revision`, `reason`, optional `asked_of` |
 | `decisions/withdraw` | `id`, `expected_revision`, `reason`; its room ask is withdrawn with it (as its asker's, whoever withdrew the record) |
+| `decisions/revise` | `id`, `expected_revision`, `reason`, and at least one of `title`, `body`, `proposal`, `rationale`, `scope` (its asker only, else `403 not-asker`; refused `409 answer-recorded` while a direct answer stands; its room ask is revised with it) |
 | `decisions/kill` | `id`, `expected_revision`, `question` (anyone but the asker, once) |
 | `decisions/kill-reply` | `id`, `expected_revision`, `words`, `outcome` (`survived` or `killed`; the asker, once) |
 | `approvals/ask` | `project`, `title`, `scope` (what a yes means, at most 300 characters, else `400 scope-too-long`), optional `body`; posts the room ask first (see PROTOCOL.md) |
@@ -248,7 +263,7 @@ interlock work list --connection NAME [--project ID] [--needs-me] [--after N] [-
 interlock work get ID --connection NAME [--json]
 interlock work changes --connection NAME --after N [--limit N] [--json]
 interlock work create --connection NAME --file PATH [--json]
-interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw|revise ID --connection NAME --file PATH [--json]
 interlock work project-update PROJECT --connection NAME --file PATH [--json]
 interlock work ask-approval --connection NAME --file PATH [--json]
 interlock work kill ID --connection NAME --file PATH|--stdin [--json]

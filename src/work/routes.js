@@ -21,6 +21,7 @@ const MUTATIONS = Object.freeze({
   'decisions/confirm': Object.freeze(['confirmReported', 200]),
   'decisions/reopen': Object.freeze(['reopen', 200]),
   'decisions/withdraw': Object.freeze(['withdraw', 200]),
+  'decisions/revise': Object.freeze(['revise', 200]),
   'decisions/kill': Object.freeze(['killAsk', 201]),
   'decisions/kill-reply': Object.freeze(['killReply', 200]),
   'projects/create': Object.freeze(['createProject', 201]),
@@ -260,6 +261,16 @@ function createWorkRoutes(options) {
     }
   }
 
+  // The host revised the room ask of a decision revised on the record. A
+  // failure is reported to the host as not followed, never passed off as done.
+  function followAsk(actor, body) {
+    try {
+      return work.followAsk(actor, body);
+    } catch (error) {
+      return Object.freeze({ ok: false, error: error && typeof error.code === 'string' ? error.code : 'work-unavailable' });
+    }
+  }
+
   // "Ask for approval" only: a completed request for this operation id, or null.
   function priorResult(actor, operationId) {
     try {
@@ -334,7 +345,7 @@ function createWorkRoutes(options) {
   }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

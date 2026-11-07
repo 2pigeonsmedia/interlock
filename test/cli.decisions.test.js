@@ -275,6 +275,22 @@ test('the CLI records a decision, fills its kill slot and replies, through the r
     assert.match(got.stdout, /  kill reply \(survived\) by Lead: No: the hosted room runs the release, not main\.\n/);
     const listed = await cli(scout, ['work', 'list']);
     assert.match(listed.stdout, new RegExp(`^${id} · awaiting · attacked, survived · asked of Ana by Lead · Merge the candidate$`, 'm'));
+
+    // The asker revises it in place: same id, a new question revision, the kill slot open again.
+    const current = await cli(lead, ['work', 'get', id, '--json']);
+    assert.equal(current.code, EXIT_OK, current.stderr);
+    lead.files.set('revise.json', JSON.stringify({ expected_revision: JSON.parse(current.stdout).item.revision,
+      reason: 'merge only the candidate tag', scope: 'I merge the candidate tag to main and nothing else' }));
+    scout.files.set('revise.json', lead.files.get('revise.json'));
+    const byScout = await cli(scout, ['work', 'revise', id, '--file', 'revise.json']);
+    assert.equal(byScout.code, EXIT_RUNTIME, 'only the asker revises');
+    assert.match(byScout.stderr, /not-asker/);
+    const revised = await cli(lead, ['work', 'revise', id, '--file', 'revise.json']);
+    assert.equal(revised.code, EXIT_OK, revised.stderr);
+    assert.match(revised.stdout, new RegExp(`Revised ${id} to question revision 2; it is awaiting, and no earlier answer carries over\\.`));
+    assert.doesNotMatch(revised.stdout, /could not follow/);
+    const relisted = await cli(scout, ['work', 'list']);
+    assert.match(relisted.stdout, new RegExp(`^${id} · awaiting · unattacked · asked of Ana by Lead · Merge the candidate$`, 'm'));
   } finally {
     await runtime.close();
   }

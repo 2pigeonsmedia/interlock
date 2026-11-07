@@ -1,7 +1,7 @@
 'use strict';
 const { createApproverRule } = require('./work/approver.js');
 const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
-const { MAX_MEANS_CHARS } = require('./chat/annotations.js');
+const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -1856,6 +1856,16 @@ function createFirstOwnerHandler(options) {
       await fileDecision(request, response, body, actor, ai);
       return;
     }
+    // A revise of a decision asked in the room revises that ask too. Its new
+    // wording must be one the room accepts, checked before anything is written,
+    // so the record and the room never disagree over a refused ask.
+    const revising = op === 'decisions/revise' && body && typeof body.id === 'string'
+      ? work.read('get', actor, { id: body.id }, actor.now) : null;
+    if (revising && revising.status === 200 && Number.isSafeInteger(revising.body.item.ask_message_id) &&
+        revisedMeans(revising.body.item, body) === null) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-means' });
+      return;
+    }
     // Who held it and who was next before an update, so only a change rings.
     const prior = op === 'items/update' && body && typeof body.id === 'string'
       ? work.read('get', actor, { id: body.id }, actor.now) : null;
@@ -1884,6 +1894,16 @@ function createFirstOwnerHandler(options) {
     // said there afterwards closes it as answered.
     if (op === 'decisions/withdraw' && result.status < 400 && result.body.replayed !== true) {
       await withdrawRoomAsk(result.body.item);
+    }
+    // A revised decision revises the ask it put in the room, so no answer given
+    // there to the old wording can stand for the new one.
+    if (op === 'decisions/revise' && result.status < 400 && result.body.replayed !== true &&
+        Number.isSafeInteger(result.body.item.ask_message_id)) {
+      const room = await reviseRoomAsk(result.body.item, revising.body.item.asked_by.kind);
+      const fresh = work.read('get', actor, { id: result.body.item.id }, actor.now);
+      sendWorkResult(request, response, { status: result.status, body: Object.assign({}, result.body,
+        fresh.status === 200 ? { item: fresh.body.item } : {}, room ? {} : { room: 'stale' }) });
+      return;
     }
     // A retried answer is already in the room: it is not posted or rung again.
     if (op === 'decisions/answer' && result.status < 400 && result.body.replayed !== true) {
@@ -2629,6 +2649,36 @@ function createFirstOwnerHandler(options) {
       if (asker) await chat.annotate(asker, 'withdraw', item.ask_message_id);
     } catch (_) {
       // Already closed in the room, or the room is not reachable: the record holds the withdraw.
+    }
+  }
+
+  /* What a yes means for a decision's room ask, as filing chose it: the stated
+   * scope, else the proposal, else the question; null when the room would
+   * refuse it. `changes` are the fields a revise is about to write. */
+  function revisedMeans(item, changes) {
+    const field = key => (changes && typeof changes[key] === 'string' ? changes[key] : item[key]);
+    const chosen = [field('scope'), field('proposal')].find(value => typeof value === 'string' && value.trim() !== '');
+    const means = typeof (chosen || field('title')) === 'string' ? (chosen || field('title')).trim() : '';
+    return validMeans(means) ? means : null;
+  }
+
+  /* The room ask of a decision its asker just revised on the record, revised
+   * as the asker with the new wording. True when the room landed on the
+   * revision the record already moved to. */
+  async function reviseRoomAsk(item, askerKind) {
+    try {
+      const asker = await chat.askerOf(item.ask_message_id);
+      if (!asker) return false;
+      const means = revisedMeans(item, null);
+      if (means === null) return false;
+      const row = await chat.annotate(asker, 'revise', item.ask_message_id, means);
+      const revision = await chat.revisionOf(row);
+      if (!Number.isSafeInteger(revision)) return false;
+      const followed = work.followAsk({ subject_id: asker.subject_id, name: asker.name, kind: askerKind,
+        session: null, owner: false }, { ask_id: item.ask_message_id, revision });
+      return Boolean(followed && followed.ok === true);
+    } catch (_) {
+      return false;
     }
   }
 

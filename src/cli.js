@@ -67,7 +67,7 @@ Usage:
   interlock work get ID --connection NAME [--json]
   interlock work changes --connection NAME --after N [--limit N] [--json]
   interlock work create --connection NAME --file PATH [--json]
-  interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+  interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw|revise ID --connection NAME --file PATH [--json]
   interlock work project-update PROJECT --connection NAME --file PATH [--json]
   interlock work ask-approval --connection NAME --file PATH [--json]
   interlock work kill ID --connection NAME --file PATH|--stdin [--json]
@@ -2961,6 +2961,7 @@ const WORK_VERBS = Object.freeze({
   confirm: Object.freeze({ path: '/api/ai/work/decisions/confirm', method: 'POST', id: true }),
   reopen: Object.freeze({ path: '/api/ai/work/decisions/reopen', method: 'POST', id: true }),
   withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', method: 'POST', id: true }),
+  revise: Object.freeze({ path: '/api/ai/work/decisions/revise', method: 'POST', id: true }),
   // A request for approval: {project, title, scope, body?}; routed by the room.
   'ask-approval': Object.freeze({ path: '/api/ai/work/approvals/ask', method: 'POST', id: false }),
   // The kill slot's words are text, not a JSON body: from a file or stdin,
@@ -3228,6 +3229,10 @@ function renderWrite(stdout, verb, result, connection) {
   } else if (verb === 'confirm') line(stdout, `Confirmed the reported answer on ${item.id} (${item.state}).`);
   else if (verb === 'reopen') line(stdout, `Reopened ${item.id} (${item.state}, asked of ${who(item.asked_of)}).`);
   else if (verb === 'withdraw') line(stdout, `Withdrew ${item.id} (${item.state}).`);
+  else if (verb === 'revise') {
+    line(stdout, `Revised ${item.id} to question revision ${item.question_revision}; it is ${terminalSafe(String(item.state))}, and no earlier answer carries over.`);
+    if (result.room === 'stale') line(stdout, 'The room ask could not follow the revise: answers in the room are not recorded until it does.');
+  }
   else if (verb === 'ask-approval') {
     const message = result.message && Number.isSafeInteger(result.message.id) ? ` as message #${result.message.id}` : '';
     const approver = item.approval && item.approval.approver ? who(item.approval.approver) : 'the owner';

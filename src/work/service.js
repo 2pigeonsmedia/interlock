@@ -179,6 +179,12 @@ function killState(item) {
   return item.kill.reply.outcome === 'killed' ? 'killed' : 'survived';
 }
 
+// The question's own revision: 1 until its asker first revises it. A record
+// that was never revised stores nothing for it.
+function questionRevision(item) {
+  return Number.isSafeInteger(item.question_revision) ? item.question_revision : 1;
+}
+
 function decisionState(item) {
   if (item.withdrawn) return 'withdrawn';
   if (!item.answer) return 'awaiting';
@@ -383,6 +389,7 @@ function createWorkService(options) {
       copy.state = decisionState(item);
       copy.kill = item.kill ? clone(item.kill) : null;
       copy.kill_state = killState(item);
+      copy.question_revision = questionRevision(item);
     }
     return copy;
   }
@@ -416,6 +423,7 @@ function createWorkService(options) {
         id: item.id, kind: item.kind, project: item.project, parent: item.parent, title: item.title, state: decisionState(item),
         asked_of: clone(item.asked_of), asked_by: clone(item.asked_by), proposal: item.proposal,
         kill_state: killState(item),
+        question_revision: questionRevision(item),
         source_message: item.source_message ? clone(item.source_message) : null,
         source_message_id: item.source_message ? item.source_message.message_id : null,
         ask_message_id: item.ask_message_id ?? null,
@@ -1340,6 +1348,76 @@ function createWorkService(options) {
     return Object.assign({}, clone(result), { replayed: true });
   }
 
+  /* The asker rewrites the question in place: same id, so every reference to
+   * it stays good. A new revision of the question never inherits an earlier
+   * answer, and its kill slot opens again; the reported answer and the kill
+   * question with its reply move whole onto the trail. A direct answer stands
+   * until it is reopened: rewording never undoes a recorded answer. */
+  const REVISE_FIELDS = Object.freeze({
+    title: [TITLE_BYTES, true], body: [BODY_BYTES, true],
+    proposal: [BODY_BYTES, false], rationale: [BODY_BYTES, false], scope: [SHORT_BYTES, false],
+  });
+  function revise(actor, rawInput) {
+    return operation(actor, 'decisions.revise', rawInput, ['id', 'expected_revision', 'reason', ...Object.keys(REVISE_FIELDS)],
+      (draft, body, now) => {
+        const item = findDecision(draft, body.id);
+        if (actor.subject_id !== item.asked_by.subject_id) fail('not-asker');
+        checkRevision(item, body.expected_revision);
+        const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
+        if (item.withdrawn) fail('invalid-state');
+        if (item.answer && item.answer.kind === 'direct') fail('answer-recorded');
+        const before = {};
+        const after = {};
+        for (const [field, [limit, required]] of Object.entries(REVISE_FIELDS)) {
+          if (body[field] === undefined) continue;
+          const value = required ? requiredText(body[field], limit, field) : optionalText(body[field], limit, field);
+          if (value !== item[field]) {
+            before[field] = item[field];
+            after[field] = value;
+          }
+        }
+        if (Object.keys(after).length === 0) fail('invalid-input');
+        const voided = item.answer;
+        const cleared = item.kill;
+        Object.assign(item, after);
+        item.answer = null;
+        item.kill = null;
+        item.question_revision = questionRevision(item) + 1;
+        // Bound to a room ask: the host revises that ask next, which gives it
+        // the next number. The record moves to that number now, so a room
+        // answer given to the old wording is refused here from this moment.
+        if (Number.isSafeInteger(item.ask_message_id)) item.ask_revision = askRevision(item) + 1;
+        touch(item, now);
+        appendEvent(draft, now, actor, Object.assign({
+          item: item.id, project: item.project, kind: 'revised', reason,
+          question_revision: item.question_revision, before, after,
+        }, voided ? { answer_superseded: clone(voided) } : {}, cleared ? { kill_cleared: clone(cleared) } : {}));
+        return { ok: true, item: publicItem(item) };
+      });
+  }
+
+  /* The host revised the room ask of a decision its asker just revised here.
+   * The record already moved to the next number; this confirms the room landed
+   * on it. A room behind the record is stale: the record then takes no room
+   * answer until they agree, because every room answer names a revision. */
+  function followAsk(actor, rawInput) {
+    requireActor(actor);
+    const body = closedObject(rawInput, ['ask_id', 'revision']);
+    if (!body || !Number.isSafeInteger(body.ask_id) || !Number.isSafeInteger(body.revision) || body.revision < 2) {
+      fail('invalid-input');
+    }
+    return store.commit(draft => {
+      const item = draft.items.find(row => row.kind === 'decision' && row.ask_message_id === body.ask_id);
+      if (!item || item.asked_by.subject_id !== actor.subject_id) return { ok: false };
+      if (body.revision < askRevision(item)) return { ok: false };
+      if (body.revision > askRevision(item)) {
+        item.ask_revision = body.revision;
+        touch(item, clock());
+      }
+      return { ok: true };
+    });
+  }
+
   function withdraw(actor, rawInput) {
     return operation(actor, 'decisions.withdraw', rawInput, ['id', 'expected_revision', 'reason'],
       (draft, body, now) => {
@@ -1607,7 +1685,7 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, moveItem, checkOnly, waitingOf, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
+    answer, reportAnswer, confirmReported, reopen, withdraw, revise, followAsk, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
