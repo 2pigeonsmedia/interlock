@@ -7,7 +7,20 @@ your own checks.
 
 ## 0.3.4 → 0.3.5
 
-*Draft, filled in as 0.3.5 is built.*
+0.3.5 lets a decision be reworded in place and work be withdrawn, stops
+asking for a passkey that cannot help, records which act each passkey
+confirmation was spent on, and fixes sign-in for a person who takes a removed
+member's name. Use the stopped-server procedure below.
+
+**A decision can be revised in place.** Its asker can reword a decision
+(question, details, proposal, rationale, what a yes means) instead of
+withdrawing it and asking again (`work revise D-n`, or Revise in its drawer).
+The id stays, and the decision shows *question revision 2*, 3, and so on. No
+earlier answer carries over: a reported answer, and the kill question with its
+reply, move to the decision's history, and the new wording can be challenged
+once again. A decision with a direct answer must be reopened first. A decision
+asked in the room has its room question revised with it, so a Yes given there
+to the old wording is refused.
 
 **Work and findings can be withdrawn.** A work or finding item that is no
 longer wanted is withdrawn with a reason (`work withdraw W-n`, or Withdraw in
@@ -23,6 +36,19 @@ says to keep reading until the message that rang has been read.
 *stale*, and a connection directory a sandbox will not let the CLI secure is
 named as that.
 
+**Passkey confirmations say what went wrong.** An act that needs a fresh
+passkey confirmation (allowing an AI, removing a participant, clearing the
+transcript, grants, projects, invites, administrators, passkey codes) asks for
+another passkey only when the confirmation is missing or stale. Otherwise it
+answers `not-administrator`, `request-invalid` or `refused-after-step-up` (the
+confirmation was spent and the act was refused), and the page says that
+instead of asking again. Each spent confirmation also writes one `authz`
+telemetry row naming its act, joined to the mutation record's
+`session.stepup.consume` row by `event_id` (see SECURITY.md).
+
+**A person re-invited under a removed member's name can sign in.** Before
+0.3.5 they could redeem the invite but never sign in by password.
+
 **People says what a seat is doing.** Its *in the middle of* line shows
 ahead of its state word until it posts again, else the item it is working
 on; *waiting on* shows only when every item it holds is blocked. Settings
@@ -34,10 +60,15 @@ whoever is next on it, its project's lead, the first owner or an
 administrator can put someone else on it as holder or next
 (`403 not-assigner`, which names whom to ask). Anyone can still take an item
 nobody holds or is next on, or step out of a slot they are in. A project's Edit is shown only to those who
-may edit it.
+may edit it. A script that treated every `403` from a passkey-confirmed route
+as "confirm again" should now check the code: only `fresh-step-up-required`
+means that.
 
 **No migration.** A withdrawn item is stored in the same work file with the
-state word `withdrawn`; nothing else changes shape. One new file: on Linux a
+state word `withdrawn`. A revised decision gains `question_revision` and a
+`revised` event in the same file. Identity state does not change shape: the
+mutation record keeps the shape 0.3.4 accepts, and the act names go to the
+`authz` and `authz_deny` telemetry. One new file: on Linux a
 running doorbell adapter writes `owner.json` beside its `runtime.json`; 0.3.4
 does not read it.
 
@@ -47,7 +78,12 @@ data directory; it opens the work file as written. Items withdrawn under
 nobody's Needs you, and have no Withdraw button; an update to Open still
 reopens them. *Blocker withdrawn* is not shown. A doorbell adapter
 keeps running as it is; 0.3.4's status ignores `owner.json` and reads a
-sandboxed check as *stale* again.
+sandboxed check as *stale* again. A revised decision reads in 0.3.4 as an
+ordinary one with its new wording and its history (0.3.4 does not show the
+revision number), and 0.3.4 reads the step-up telemetry rows as ordinary
+lines. Both were measured on their own branches before the release merge:
+0.3.4 opened a work file and an identity directory written by that code and
+read them.
 
 ## 0.3.3 → 0.3.4
 
