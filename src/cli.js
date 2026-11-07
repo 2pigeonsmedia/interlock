@@ -1804,10 +1804,15 @@ async function runAsk(args, io, dependencies = {}) {
     }
     return EXIT_RUNTIME;
   }
-  if (parsed.json) line(io.stdout, JSON.stringify(result));
-  else if (verb === 'revise') line(io.stdout, `Revised ask ${id}: a yes now means: ${terminalSafe(body.means)}. It is their turn again.`);
-  if (!parsed.json && result.decision === 'stale') line(io.stderr, STALE_DECISION_WORDS);
-  else line(io.stdout, verb === 'withdraw' ? `Withdrew ask ${id}.` : `Ask ${id} is open again.`);
+  // One line for one act: --json prints the result alone; a revise says it
+  // was revised, not that it reopened.
+  if (parsed.json) {
+    line(io.stdout, JSON.stringify(result));
+    return EXIT_OK;
+  }
+  if (verb === 'revise') line(io.stdout, `Revised ask ${id}: a yes now means: ${terminalSafe(body.means)}. It is their turn again.`);
+  if (result.decision === 'stale') line(io.stderr, STALE_DECISION_WORDS);
+  else if (verb !== 'revise') line(io.stdout, verb === 'withdraw' ? `Withdrew ask ${id}.` : `Ask ${id} is open again.`);
   return EXIT_OK;
 }
 
