@@ -18,15 +18,10 @@ const { runStart, EXIT_RUNTIME } = require('../src/cli.js');
 
 const HOSTED = 'https://app.example.test';
 
+const { reserveTestPort } = require('./helpers/reserve_port.js');
+
 function reservePort() {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once('error', reject);
-    probe.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
-      const { port } = probe.address();
-      probe.close(error => error ? reject(error) : resolve(port));
-    });
-  });
+  return reserveTestPort();
 }
 
 // A start that must be refused. If it starts anyway, the runtime is closed

@@ -14,15 +14,10 @@ const test = require('node:test');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
 const { LOOPBACK_HOST, startInterlockServer } = require('../src/server.js');
 
+const { reserveTestPort } = require('./helpers/reserve_port.js');
+
 function reservePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen({ host: LOOPBACK_HOST, port: 0, exclusive: true }, () => {
-      const { port } = server.address();
-      server.close(error => error ? reject(error) : resolve(port));
-    });
-  });
+  return reserveTestPort();
 }
 
 function call(runtime, options = {}) {
