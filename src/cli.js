@@ -1421,8 +1421,11 @@ async function runDoorbell(args, io, dependencies = {}) {
       line(io.stdout,
         `Interlock ring ${ring.id} from ${terminalSafe(ring.byline)}${session}.`);
     }
+    // One history call can return only earlier messages: say how far to read.
+    const last = Math.max(...page.rings.map(ring => ring.id));
     line(io.stdout,
-      `Run \`interlock history --connection ${terminalSafe(profile.name)}\` to read and acknowledge the room.`);
+      `Run \`interlock history --connection ${terminalSafe(profile.name)}\` and keep running it until message ${last} has been read; ` +
+      'one call can return only earlier messages.');
   }
   return EXIT_OK;
 }
