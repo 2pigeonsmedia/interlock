@@ -855,9 +855,10 @@ function createWorkService(options) {
       }
       // A state change that drops someone else from next (entering Blocked,
       // or Done) is an assignment too: only whoever may assign drops them,
-      // so it cannot clear the way to a claim. (Whoever is next is among
-      // them, so may drop themselves.)
-      if (body.next_to === undefined && item.next_to && next.next_to === null && !mayAssign(actor, item, now)) {
+      // so it cannot clear the way to a claim. Decided on the outcome, not on
+      // what the request named. (Whoever is next is among them, so may drop
+      // themselves.)
+      if (item.next_to && next.next_to === null && !mayAssign(actor, item, now)) {
         fail('not-assigner', { can_assign: assignerNames(item, now) });
       }
       if (next.next_to && next.next_action.trim() === '') fail('invalid-next-action');

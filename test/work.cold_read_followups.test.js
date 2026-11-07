@@ -61,6 +61,15 @@ test('M1: Blocked or Done that would drop someone else from next is an assignmen
   }
 });
 
+test('M1: naming the same next person does not get around it; the outcome decides', () => {
+  const work = fresh();
+  const blocked = filed(work, { next_to: ref(next), next_action: 'check it' });
+  refused(() => update(work, other, blocked, Object.assign({ next_to: ref(next), next_action: '' }, BLOCK)), 'not-assigner');
+  const done = filed(work, { next_to: ref(next), next_action: 'check it' });
+  refused(() => update(work, other, done, Object.assign({ next_to: ref(next), next_action: 'check it' }, DONE)), 'not-assigner');
+  assert.equal(work.get(filer, { id: done.id }).item.next_to.name, 'Next', 'nobody was dropped');
+});
+
 test('M1: whoever is next may drop themselves, and an assigner may drop them', () => {
   const work = fresh();
   assert.equal(update(work, next, filed(work, { next_to: ref(next), next_action: 'x' }), BLOCK).next_to, null, 'its own next slot');
