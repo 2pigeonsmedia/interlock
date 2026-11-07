@@ -1047,7 +1047,12 @@ function createStore(opts) {
     }
 
     // L2 is already gone in memory; append may fail without resurrecting L2.
-    appendIntents([intentRow(INTENT_STEPUP, got.r.subject_id, now, 'fresh-admin-stepup-consumed', 1)]);
+    // The spend keeps the one reason every release accepts; the act it was
+    // spent on is recorded by the caller in the authorization stream, joined
+    // to this row by its id (a new value pending here would stop an older
+    // release from starting).
+    const spend = intentRow(INTENT_STEPUP, got.r.subject_id, now, 'fresh-admin-stepup-consumed', 1);
+    const spent = appendIntents([spend]);
 
     const lineage_id = (typeof workflow === 'string' && WORKFLOW_KEYS.includes(workflow))
       ? (LINEAGES.get(got.digest) || null)
@@ -1059,6 +1064,7 @@ function createStore(opts) {
       tenant,
       origin,
       lineage_id,
+      consume_event_id: spent ? spend.id : null,
     });
   }
 
