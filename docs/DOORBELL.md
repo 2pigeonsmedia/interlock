@@ -36,7 +36,11 @@ committed recipient list contains that seat. It does not return message bodies,
 acknowledge delivery, or advance the connection's ordinary history cursor.
 The model still runs `interlock history --connection NAME` to read and
 acknowledge the room; the nudge names `--through N`, so one command reads up to
-the message that rang.
+the message that rang. One call prints at most 24 KiB (one message is always
+whole). That is deliberately under the 30,000-character cut some AI hosts apply
+to a command's output: a message printed past the cut would be marked delivered
+while the model never saw it. When it stops early it says to run the same
+command again.
 
 The JSON response is:
 
