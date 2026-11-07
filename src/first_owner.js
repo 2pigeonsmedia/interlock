@@ -2287,8 +2287,20 @@ function createFirstOwnerHandler(options) {
    * author answers as their approver, the project's current lead or the
    * first owner. Anyone else's Yes or No is refused before the room stores
    * it, so the room never reads "approved" while the record refuses it. */
+  // Decisions being filed: each has posted its room ask, or is about to, and
+  // has not yet bound its record to it. An answer waits for them (below).
+  const decisionFilings = new Set();
+
   async function approverAnswers(actor, annotation) {
     const answers = annotation && Array.isArray(annotation.answers) ? annotation.answers : [];
+    // Whether an ask is a decision's is read from the record, which binds the
+    // ask only after posting it. An answer sent in between would read "not a
+    // decision" and its words alone would close the room ask while the record
+    // stayed awaiting. So an answer waits until every filing in flight has
+    // bound (or failed); filings take milliseconds.
+    if (answers.length > 0 && decisionFilings.size > 0) {
+      await Promise.allSettled([...decisionFilings]);
+    }
     const approverOf = new Set();
     const decisionOf = new Set();
     let live = null;
@@ -2488,6 +2500,19 @@ function createFirstOwnerHandler(options) {
     const means = [body.scope, body.proposal].find(value => typeof value === 'string' && value.trim() !== '');
     const ask = { of: body.asked_of, means: (means || body.title).trim() };
     if (typeof body.project === 'string') ask.project = body.project;
+    // Registered before the ask exists, so no answer can name it unwaited.
+    let filed;
+    const filing = new Promise(resolve => { filed = resolve; });
+    decisionFilings.add(filing);
+    try {
+      await postAndBindDecision(request, response, body, workActor, chatActor, text, ask, cited);
+    } finally {
+      decisionFilings.delete(filing);
+      filed();
+    }
+  }
+
+  async function postAndBindDecision(request, response, body, workActor, chatActor, text, ask, cited) {
     let saved;
     try {
       saved = publicMessage(await chat.appendAnnotated({ text }, chatActor, { ask }, true));
