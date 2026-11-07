@@ -2287,9 +2287,12 @@ function createFirstOwnerHandler(options) {
    * author answers as their approver, the project's current lead or the
    * first owner. Anyone else's Yes or No is refused before the room stores
    * it, so the room never reads "approved" while the record refuses it. */
-  // Decisions being filed: each has posted its room ask, or is about to, and
-  // has not yet bound its record to it. An answer waits for them (below).
+  // Decisions being filed: each has posted its room ask (askId set), or is
+  // about to (askId null), and has not yet bound its record to it.
   const decisionFilings = new Set();
+  // How long an answer waits for such a filing before it is refused,
+  // retryably. Filings take milliseconds; this only bounds a stuck one.
+  const FILING_WAIT_MS = 3_000;
 
   async function approverAnswers(actor, annotation) {
     const answers = annotation && Array.isArray(annotation.answers) ? annotation.answers : [];
@@ -2299,7 +2302,18 @@ function createFirstOwnerHandler(options) {
     // stayed awaiting. So an answer waits until every filing in flight has
     // bound (or failed); filings take milliseconds.
     if (answers.length > 0 && decisionFilings.size > 0) {
-      await Promise.allSettled([...decisionFilings]);
+      // Only filings that could own an ask this answer names: one still
+      // posting (its ask id is not known yet) or one whose ask it names.
+      const named = new Set(answers.map(answer => answer && answer.ask_id));
+      const owning = [...decisionFilings].filter(entry => entry.askId === null || named.has(entry.askId));
+      if (owning.length > 0) {
+        let timer;
+        const bound = new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), FILING_WAIT_MS); });
+        const settled = await Promise.race([Promise.allSettled(owning.map(entry => entry.done)).then(() => 'bound'), bound]);
+        clearTimeout(timer);
+        // Never fall through to reading the ask as a plain one: refuse, retryably.
+        if (settled === 'timeout') return { refusal: 'decision-filing' };
+      }
     }
     const approverOf = new Set();
     const decisionOf = new Set();
@@ -2502,20 +2516,21 @@ function createFirstOwnerHandler(options) {
     if (typeof body.project === 'string') ask.project = body.project;
     // Registered before the ask exists, so no answer can name it unwaited.
     let filed;
-    const filing = new Promise(resolve => { filed = resolve; });
-    decisionFilings.add(filing);
+    const entry = { askId: null, done: new Promise(resolve => { filed = resolve; }) };
+    decisionFilings.add(entry);
     try {
-      await postAndBindDecision(request, response, body, workActor, chatActor, text, ask, cited);
+      await postAndBindDecision(request, response, body, workActor, chatActor, text, ask, cited, entry);
     } finally {
-      decisionFilings.delete(filing);
+      decisionFilings.delete(entry);
       filed();
     }
   }
 
-  async function postAndBindDecision(request, response, body, workActor, chatActor, text, ask, cited) {
+  async function postAndBindDecision(request, response, body, workActor, chatActor, text, ask, cited, entry) {
     let saved;
     try {
       saved = publicMessage(await chat.appendAnnotated({ text }, chatActor, { ask }, true));
+      if (saved && Number.isSafeInteger(saved.id)) entry.askId = saved.id;
       if (!saved) throw new Error('invalid chat result');
     } catch (error) {
       if (error && error.code === 'already-posted') {
@@ -2876,7 +2891,8 @@ function createFirstOwnerHandler(options) {
     try {
       const gate = await approverAnswers(actor, asked.annotation);
       if (gate.refusal) {
-        sendJson(request, response, 403, { ok: false, error: gate.refusal });
+        sendJson(request, response, gate.refusal === 'decision-filing' ? 503 : 403, Object.assign({ ok: false, error: gate.refusal },
+          gate.refusal === 'decision-filing' ? { retry_after_ms: FILING_WAIT_MS } : {}));
         return;
       }
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf, gate.decisionOf));
@@ -2924,7 +2940,8 @@ function createFirstOwnerHandler(options) {
     try {
       const gate = await approverAnswers(actor, asked.annotation);
       if (gate.refusal) {
-        sendJson(request, response, 403, { ok: false, error: gate.refusal });
+        sendJson(request, response, gate.refusal === 'decision-filing' ? 503 : 403, Object.assign({ ok: false, error: gate.refusal },
+          gate.refusal === 'decision-filing' ? { retry_after_ms: FILING_WAIT_MS } : {}));
         return;
       }
       const saved = publicMessage(await chat.appendAnnotated({ text: input.text }, actor, asked.annotation, false, gate.approverOf, gate.decisionOf));
