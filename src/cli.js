@@ -35,6 +35,9 @@ const HISTORY_DRAIN_MESSAGES = 100;
 // unseen. 24 KiB still holds two typical messages, and one message is always
 // whole, even at the room's 32 KiB maximum.
 const HISTORY_THROUGH_BYTES = 24 * 1024;
+// A single message is printed whole even past the budget; past this many
+// characters it may run into that cut, so --through says so first.
+const HISTORY_THROUGH_WARN_CHARS = 28_000;
 const HISTORY_PEEK_LIMIT = 100;
 
 const HELP = `Interlock ${packageJson.version}
@@ -1150,7 +1153,10 @@ async function executeThroughHistory(parsed, profile, profiles, io, dependencies
     reportRequestError(io.stderr, error, profile);
     return EXIT_RUNTIME;
   }
-  if (probe.messages.length === 0) return notInRoom();
+  // A seat's reads skip its own posts, so N may be its own message: the read
+  // then comes back empty with its cursor at or past N. Only a cursor short
+  // of N means N is not in the room.
+  if (probe.messages.length === 0 && probe.cursor < through) return notInRoom();
   return executeDrainHistory(parsed, profile, profiles, io, dependencies,
     { bytes: HISTORY_THROUGH_BYTES, through });
 }
@@ -1181,11 +1187,19 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies,
       writeReadOutput(io.stdout, parsed, through === null ? lensed
         : Object.assign({}, lensed, { through_reached: page.through_reached }));
     } else {
-      await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
+      // The status, and a warning for any message a host may cut, come first:
+      // a host that cuts long output keeps the start.
       if (through !== null) {
         line(io.stdout, page.through_reached ? `Read through message ${through}.`
           : 'more to read: run the same command again.');
+        for (const message of page.messages) {
+          if (typeof message.text === 'string' && message.text.length > HISTORY_THROUGH_WARN_CHARS) {
+            line(io.stdout, `message ${message.id} is ${message.text.length} characters long; ` +
+              'a host that cuts output may not show all of it.');
+          }
+        }
       }
+      await renderAnnotated(io.stdout, fetcher, profile, page.messages, parsed.project);
     }
   }
 

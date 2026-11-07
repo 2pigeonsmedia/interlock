@@ -2956,7 +2956,7 @@ test('history --through N reads every unread message up to and including N, whol
   assert.equal(result.code, EXIT_OK, result.stderr);
   for (const id of [1, 2, 3]) assert.match(result.stdout, new RegExp(`\\[${id}\\] Ana[^]*message ${id}`));
   assert.doesNotMatch(result.stdout, /message 4/, 'nothing past N');
-  assert.match(result.stdout, /Read through message 3\.\n$/);
+  assert.match(result.stdout, /^Read through message 3\.\n/, 'the status comes first, before any message a host could cut');
   assert.deepEqual(room.receipts, [1, 2, 3].map(id => ({ message_ids: [id] })));
   assert.deepEqual(world.events.filter(event => event[0] === 'cursor').map(event => event[3]), [1, 2, 3]);
   assert.ok(!room.gets.some(url => url.includes('after=3&')), 'message 4 is never fetched for reading');
@@ -2986,7 +2986,7 @@ test('history --through stops at a message boundary at its byte budget and says 
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /M1 /);
   assert.doesNotMatch(result.stdout, /M2 /, 'the message past the budget is not printed');
-  assert.match(result.stdout, /more to read: run the same command again\.\n$/);
+  assert.match(result.stdout, /^more to read: run the same command again\.\n/);
   assert.deepEqual(room.receipts, [{ message_ids: [1] }], 'only the printed message is delivered');
   assert.deepEqual(world.events.filter(event => event[0] === 'cursor').map(event => event[3]), [1]);
 });
@@ -3054,5 +3054,16 @@ test('history --through N where N itself is not in the stream stops before the n
   assert.match(result.stdout, /message 2/);
   assert.doesNotMatch(result.stdout, /message 5/, 'the first message past N is not read');
   assert.deepEqual(receipts, [{ message_ids: [1] }, { message_ids: [2] }], 'nor delivered');
-  assert.match(result.stdout, /Read through message 3\.\n$/);
+  assert.match(result.stdout, /^Read through message 3\.\n/);
+});
+
+test('history --through warns first when a message is longer than a host may show', async () => {
+  const world = admittedConnection();
+  throughRoom(world, 2, id => id === 1 ? 'L'.repeat(29_000) : 'short');
+  const result = await captureCommand(['history', '--connection', 'Marlow', '--through', '2'], world.dependencies);
+  assert.equal(result.code, EXIT_OK, result.stderr);
+  const lines = result.stdout.split('\n');
+  assert.match(lines[0], /^more to read|^Read through/, 'the status is the first line');
+  assert.match(result.stdout.slice(0, 400), /message 1 is 29000 characters long; a host that cuts output may not show all of it\./,
+    'the warning is printed ahead of the message');
 });

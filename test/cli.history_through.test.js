@@ -234,7 +234,7 @@ test('history --through N reads up to N in a real room, acknowledges exactly wha
     assert.equal(read.code, EXIT_OK, read.stderr);
     for (const word of ['first', 'second', 'third']) assert.match(read.stdout, new RegExp(word + ' @Scout'));
     assert.doesNotMatch(read.stdout, /fourth/);
-    assert.match(read.stdout, new RegExp(`Read through message ${ids[2]}\\.\\n$`));
+    assert.match(read.stdout, new RegExp(`^Read through message ${ids[2]}\\.\\n`));
     const page = (await aiGet(runtime, messageQuery(ids[0] - 1), scout.profile.token)).json;
     const acked = Object.fromEntries(page.messages.map(message => [message.id,
       message.delivery.find(entry => entry.name === 'Scout').acknowledged_at !== null]));
@@ -249,6 +249,14 @@ test('history --through N reads up to N in a real room, acknowledges exactly wha
     assert.equal(rest.code, EXIT_OK, rest.stderr);
     assert.match(rest.stdout, /fourth @Scout/);
     assert.doesNotMatch(rest.stdout, /third/);
+    // Its own last message: in the room, though a seat's reads skip its own posts.
+    scout.files.set('note.txt', 'my own note');
+    const said = await cli(scout, ['say', '--file', 'note.txt']);
+    const ownId = Number((/\(message (\d+)\)/.exec(said.stdout) || [])[1]);
+    assert.ok(said.code === EXIT_OK && Number.isSafeInteger(ownId), 'ARRANGEMENT: Scout posts last: ' + said.stdout + said.stderr);
+    const own = await cli(scout, ['history', '--through', String(ownId)]);
+    assert.equal(own.code, EXIT_OK, own.stderr);
+    assert.match(own.stdout, new RegExp(`^Read through message ${ownId}\\.`));
   } finally {
     await runtime.close();
   }
