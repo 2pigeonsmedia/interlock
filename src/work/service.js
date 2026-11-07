@@ -86,6 +86,15 @@ function cleanText(text) {
   return true;
 }
 
+// What a closed body refused, for the writer: the first field it does not
+// take and the fields it does. The route caps the name before it leaves.
+function refusedField(value, keys) {
+  if (!plainObject(value)) return undefined;
+  const field = Reflect.ownKeys(value).find(key => typeof key === 'string' && !keys.includes(key));
+  if (field === undefined) return undefined;
+  return { field, problem: 'not-accepted', accepted: [...keys].sort() };
+}
+
 function textOk(value, maxBytes) {
   return typeof value === 'string' && Buffer.byteLength(value, 'utf8') <= maxBytes && cleanText(value);
 }
@@ -302,7 +311,7 @@ function createWorkService(options) {
       delete rawInput.raw_digest;
     }
     const body = closedObject(rawInput, ['operation_id', ...keys]);
-    if (!body) fail('invalid-input');
+    if (!body) fail('invalid-input', refusedField(rawInput, ['operation_id', ...keys]));
     if (typeof body.operation_id !== 'string' || !UUID.test(body.operation_id)) fail('invalid-operation');
     const operationId = body.operation_id.toLowerCase();
     const rest = Object.assign({}, body);
@@ -592,7 +601,7 @@ function createWorkService(options) {
         checkRevision(project, body.expected_revision);
         const objective = optionalText(body.objective, SHORT_BYTES, 'objective');
         const today = optionalText(body.today, SHORT_BYTES, 'today');
-        if (objective === undefined && today === undefined) fail('invalid-input');
+        if (objective === undefined && today === undefined) fail('invalid-input', { needs_one_of: ['objective', 'today'] });
         const data = {};
         if (objective !== undefined) { project.objective = objective; data.objective = objective; }
         if (today !== undefined) { project.today = today; data.today = today; }
@@ -613,7 +622,8 @@ function createWorkService(options) {
       if (project.retired_at !== null) fail('project-retired');
       const decision = body.kind === 'decision';
       const forbidden = decision ? WORK_ONLY_KEYS : DECISION_ONLY_KEYS;
-      if (forbidden.some(key => body[key] !== undefined)) fail('invalid-input');
+      const misplaced = forbidden.find(key => body[key] !== undefined);
+      if (misplaced) fail('invalid-input', { field: misplaced, problem: 'not-for-this-kind' });
       const captured = sourceMessage(body.source_message);
       const id = store.nextId(draft, decision ? 'D' : 'W');
       const item = {

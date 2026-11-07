@@ -243,7 +243,10 @@ while the state is `blocked`.
 
 ## Refusals
 
-`400` `invalid-request` (unknown or malformed field), `invalid-participant`,
+`400` `invalid-request` (unknown or malformed field; the response names it as
+`field` with a `problem`: `not-accepted` (with `accepted`, the fields the
+operation takes), `not-for-this-kind` or `invalid-value`, or says
+`needs_one_of` when a required choice is missing), `invalid-participant`,
 `ambiguous-participant`, `invalid-query`, and the field-specific `invalid-*`
 codes · `401` `not-authenticated` (no usable session) or `invalid-connection`
 (no usable bearer) · `403` `not-authorized`, `not-answerer`, `not-asker`, `not-withdrawer`, `owner-only`,
@@ -279,7 +282,11 @@ replays the original result. `report-answer` prints the exposure draft and the
 `interlock say` command that sends it. `withdraw` takes a W-n work or finding
 item (`items/withdraw`) or a D-n decision (`decisions/withdraw`); its file holds
 `expected_revision` and `reason`, and it lists the live items still linked to
-withdrawn work. Rows show `blocker withdrawn: W-n` when their blocker was.
+withdrawn work. Rows show `blocker withdrawn: W-n` when their blocker was. `brief` lists a record
+that needs you once, under Needs you; Open work and Decisions count it and
+say how many are listed there (`Open work (9; 2 listed under Needs you)`).
+`--json` prints the room's brief whole. A refused request names the field it
+refused and what the command takes, or what it is missing.
 
 ## In the browser
 

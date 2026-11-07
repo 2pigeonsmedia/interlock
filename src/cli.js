@@ -3077,6 +3077,11 @@ async function workRequest(fetcher, profile, pathname, options = {}) {
       error.status = response.status;
       error.code = result && typeof result.error === 'string' ? result.error : 'unavailable';
       if (result && Number.isSafeInteger(result.revision)) error.revision = result.revision;
+      // What a refused request got wrong, when the room names it.
+      if (result && typeof result.field === 'string') error.field = result.field;
+      if (result && typeof result.problem === 'string') error.problem = result.problem;
+      if (result && Array.isArray(result.accepted)) error.accepted = result.accepted.filter(name => typeof name === 'string');
+      if (result && Array.isArray(result.needs_one_of)) error.needsOneOf = result.needs_one_of.filter(name => typeof name === 'string');
       throw error;
     }
     return result;
@@ -3095,10 +3100,23 @@ const WORK_REFUSAL_HINTS = Object.freeze({
   'project-retired': 'That project is retired; nothing in it changes.',
 });
 
+// The field a refused request got wrong, in words, when the room named it.
+function refusedFieldWords(error) {
+  const list = names => names.map(name => terminalSafe(name)).join(', ');
+  if (Array.isArray(error.needsOneOf) && error.needsOneOf.length) return ` It needs one of: ${list(error.needsOneOf)}.`;
+  if (typeof error.field !== 'string') return '';
+  const field = `The field "${terminalSafe(error.field)}"`;
+  if (error.problem === 'not-for-this-kind') return ` ${field} does not apply to this kind of record.`;
+  if (error.problem === 'invalid-value') return ` ${field} has a value the command does not accept.`;
+  const takes = Array.isArray(error.accepted) && error.accepted.length ? `; it takes ${list(error.accepted)}` : '';
+  return ` ${field} is not one this command takes${takes}.`;
+}
+
 function reportWorkError(stderr, error, profile) {
   if (error && Number.isSafeInteger(error.status) && error.status !== 401 && typeof error.code === 'string') {
     const revision = Number.isSafeInteger(error.revision) ? ` (current revision ${error.revision})` : '';
-    const hint = Object.prototype.hasOwnProperty.call(WORK_REFUSAL_HINTS, error.code) ? ' ' + WORK_REFUSAL_HINTS[error.code] : '';
+    const hint = (Object.prototype.hasOwnProperty.call(WORK_REFUSAL_HINTS, error.code) ? ' ' + WORK_REFUSAL_HINTS[error.code] : '') +
+      (error.code === 'invalid-request' ? refusedFieldWords(error) : '');
     line(stderr, `interlock: ${roomLabel(profile)} refused the command: ${terminalSafe(error.code)}${revision}.${hint}`);
     return;
   }
@@ -3166,10 +3184,17 @@ function renderBrief(stdout, brief, connection) {
   for (const project of brief.projects) {
     line(stdout, `  ${terminalSafe(project.display_name)} — ${terminalSafe(project.objective || 'no objective yet')} · Today: ${terminalSafe(project.today || 'nothing recorded')} (${who(project.updated_by)})`);
   }
-  line(stdout, `Open work (${brief.open.length})`);
-  for (const row of brief.open) line(stdout, '  ' + workRow(row));
-  line(stdout, `Decisions (${brief.decisions.length})`);
-  for (const row of brief.decisions) line(stdout, '  ' + workRow(row));
+  // A record that needs you is listed once, under Needs you; the lists below
+  // count it and say so.
+  const listedAbove = new Set(brief.needs_me.map(row => row.id));
+  const rest = (title, rows) => {
+    const shown = rows.filter(row => !listedAbove.has(row.id));
+    const above = rows.length - shown.length;
+    line(stdout, `${title} (${rows.length}${above ? `; ${above} listed under Needs you` : ''})`);
+    for (const row of shown) line(stdout, '  ' + workRow(row));
+  };
+  rest('Open work', brief.open);
+  rest('Decisions', brief.decisions);
   line(stdout, `Cursor ${brief.cursor} · continue with: interlock work changes --connection ${terminalSafe(connection)} --after ${brief.cursor}`);
 }
 
