@@ -85,6 +85,12 @@
     }
     const polled = Number.isSafeInteger(row.last_polled_at) ? row.last_polled_at : null;
     const since = polled === null ? null : now - polled;
+    // A Work write after its last poll means it is mid-turn: it picks up after
+    // its current task. Posts do not count (her definition, 2026-10-31).
+    const wrote = Number.isSafeInteger(row.last_work_at) ? row.last_work_at : null;
+    if (polled !== null && wrote !== null && wrote > polled && now - wrote >= 0 && now - wrote < WORKING_MS) {
+      return { word: 'working', light: 'grey', age_since: polled, notPickedUp };
+    }
     if (since !== null && since >= 0 && since < LISTENING_MS) {
       return { word: 'listening', light: 'teal', age_since: polled, notPickedUp };
     }

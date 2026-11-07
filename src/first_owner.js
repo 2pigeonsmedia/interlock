@@ -1361,7 +1361,8 @@ function createFirstOwnerHandler(options) {
   }
 
   function peopleFacts(row) {
-    const none = { model: null, project: null, assigned: null, presence: null, waiting: null, working_on: null };
+    const none = { model: null, project: null, assigned: null, presence: null, waiting: null, working_on: null,
+      last_work_at: null };
     if (!people || !row) return none;
     const service = people.service;
     const assignment = row.kind === 'seat' ? service.assignmentOf(row.name) : null;
@@ -1376,6 +1377,10 @@ function createFirstOwnerHandler(options) {
       // When not every item of theirs is blocked: the one they work on.
       working_on: work && typeof row.subject_id === 'string' && typeof work.workingOf === 'function'
         ? work.workingOf(row.subject_id) : null,
+      // When they last wrote to Work: read against their last poll, a write
+      // after it means they are mid-turn (People says working).
+      last_work_at: work && typeof row.subject_id === 'string' && typeof work.lastWriteOf === 'function'
+        ? work.lastWriteOf(row.subject_id) : null,
     };
   }
 
@@ -3303,7 +3308,7 @@ function createFirstOwnerHandler(options) {
         // Settings shows who someone is, not what their work waits on: the
         // Work facts stay on People rows, and a Settings row keeps the shape
         // the page checks.
-        const { waiting: _waiting, working_on: _workingOn, ...facts } = peopleFacts({ kind: row.kind, name: row.name,
+        const { waiting: _waiting, working_on: _workingOn, last_work_at: _lastWorkAt, ...facts } = peopleFacts({ kind: row.kind, name: row.name,
           subject_id: row.live ? subjectOf.get(row.kind + '\0' + row.name + '\0' + (row.kind === 'seat' ? row.session : '')) : null });
         return Object.freeze(Object.assign({}, row, facts, {
           admin: Boolean(person && person.admin),

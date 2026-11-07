@@ -285,6 +285,12 @@ test('Settings and People rows from a running room pass the page\'s row checks',
     for (const row of people.json.participants) {
       assert.equal(page.validParticipant(row), true, `People row for ${row.name}: ${Object.keys(row).join(',')}`);
     }
+    // When a seat last wrote to Work is on People rows only, never on Settings.
+    const cuePeople = people.json.participants.find(row => row.name === 'Cue');
+    assert.ok(Number.isSafeInteger(cuePeople.last_work_at), 'People says when Cue last wrote to Work');
+    const cueSettings = settings.json.participants.find(row => row.name === 'Cue');
+    assert.equal(Object.hasOwn(cueSettings, 'last_work_at'), false, 'Settings does not');
+    assert.equal(Object.keys(cueSettings).length, 15, 'Settings rows keep the 15 keys the page checks');
   } finally {
     await runtime.close();
   }

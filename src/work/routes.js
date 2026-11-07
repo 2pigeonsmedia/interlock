@@ -379,13 +379,18 @@ function createWorkRoutes(options) {
     catch (_) { return null; }
   }
   // What it works on when not every item is blocked: {item, title, blocked} or null.
+  function lastWriteOf(subjectId) {
+    try { return typeof work.lastWriteOf === 'function' ? work.lastWriteOf(subjectId) : null; }
+    catch (_) { return null; }
+  }
+
   function workingOf(subjectId) {
     try { return typeof work.workingOf === 'function' ? work.workingOf(subjectId) : null; }
     catch (_) { return null; }
   }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, lastWriteOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

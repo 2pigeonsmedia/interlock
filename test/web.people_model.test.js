@@ -216,3 +216,19 @@ test('waiting on: declared or derived from a blocked item, shown ahead of the st
   assert.deepEqual([declared.word, declared.light], ['waiting on Patti · listening', 'amber'], 'a declared wait, ahead of the state word');
   assert.equal(ai({ waiting: null }).word, 'listening');
 });
+
+test('a Work write newer than the last doorbell poll reads working, not listening; posts still do not count', () => {
+  const ai = extra => model.stateOf(seat('Cue', Object.assign({ last_posted_at: null, last_polled_at: null }, extra)), NOW);
+  assert.equal(ai({ last_polled_at: NOW - 30_000, last_work_at: NOW - 10_000 }).word, 'working',
+    'it polled, then wrote to Work: mid-turn, it picks up after its current task');
+  assert.equal(ai({ last_polled_at: NOW - 10_000, last_work_at: NOW - 30_000 }).word, 'listening',
+    'it wrote, then polled again: it picks up now');
+  assert.equal(ai({ last_polled_at: NOW - 30_000, last_work_at: null }).word, 'listening');
+  assert.equal(ai({ last_polled_at: NOW - 30_000 }).word, 'listening', 'a server that does not say is read as before');
+  assert.equal(ai({ last_polled_at: NOW - 30_000, last_posted_at: NOW - 10_000 }).word, 'listening',
+    'a post newer than the poll still does not count (her 10-31 definition)');
+  assert.equal(ai({ last_polled_at: null, last_work_at: NOW - 10_000 }).word, 'not listening',
+    'never polled: an @mention will not wake it, whatever it writes');
+  assert.equal(ai({ last_polled_at: NOW - 4 * 60 * MINUTE, last_work_at: NOW - 3.5 * 60 * MINUTE }).word, 'not listening',
+    'a write long ago does not keep it working');
+});

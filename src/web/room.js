@@ -934,7 +934,9 @@ function validParticipant(value) {
   const waits = keys.includes('waiting');
   // `working_on` (0.3.5): {item, title, blocked: null | {name, item}}, or null.
   const works = keys.includes('working_on');
-  if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) + (works ? 1 : 0) || ![
+  // `last_work_at` (0.3.6): when they last wrote to Work, or null.
+  const wrote = keys.includes('last_work_at');
+  if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) + (works ? 1 : 0) + (wrote ? 1 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
@@ -944,7 +946,8 @@ function validParticipant(value) {
     (waits && !(value.waiting === null || (value.waiting && typeof value.waiting === 'object' &&
       Object.keys(value.waiting).length === 3 && typeof value.waiting.name === 'string' &&
       typeof value.waiting.item === 'string' && Number.isSafeInteger(value.waiting.since)))) ||
-    (works && !validWorkingOn(value.working_on))) return false;
+    (works && !validWorkingOn(value.working_on)) ||
+    (wrote && !(value.last_work_at === null || Number.isSafeInteger(value.last_work_at)))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'

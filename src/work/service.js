@@ -604,6 +604,17 @@ function createWorkService(options) {
   /* What a participant is working on when not every item of theirs is
    * blocked: their first active free item, else their first free one, with
    * the first block on their other items kept for the detail. */
+  /* When this participant last wrote to the Work record (any event of
+   * theirs), or null. People reads it against their last doorbell poll. */
+  function lastWriteOf(subjectId) {
+    const events = snapshot().events;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const by = events[index].by;
+      if (by && by.subject_id === subjectId && Number.isSafeInteger(events[index].at)) return events[index].at;
+    }
+    return null;
+  }
+
   function workingOf(subjectId) {
     const mine = ownWork(subjectId);
     if (!mine) return null;
@@ -1894,7 +1905,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, attachEvidence, addNote, share,
+    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, lastWriteOf, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, revise, followAsk, recordDiscussion, priorDiscussion, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,

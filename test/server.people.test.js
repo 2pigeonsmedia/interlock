@@ -156,7 +156,7 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     const people = await call(runtime, { path: '/api/participants', headers: { cookie: owner.cookie } });
     assert.equal(people.status, 200, people.text);
     const row = name => people.json.participants.find(item => item.name === name);
-    assert.equal(Object.keys(row('Scout')).length, 18, 'People rows carry waiting and working_on');
+    assert.equal(Object.keys(row('Scout')).length, 19, 'People rows carry waiting, working_on and last_work_at');
     assert.deepEqual([row('Scout').model, row('Scout').project, row('Scout').assigned.how, row('Scout').presence],
       ['Opus 5.5', 'ops', 'join', null]);
     assert.deepEqual([row('Wren').model, row('Wren').project, row('Wren').assigned], [null, null, null]);
@@ -168,6 +168,7 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     const scout = settings.json.participants.find(item => item.name === 'Scout');
     assert.equal(Object.keys(scout).length, 15, 'Settings rows carry no Work facts');
     assert.equal(Object.hasOwn(scout, 'waiting'), false);
+    assert.equal(Object.hasOwn(scout, 'last_work_at'), false, 'when someone last wrote to Work stays off Settings');
     assert.deepEqual([scout.model, scout.project, scout.assigned.how], ['Opus 5.5', 'ops', 'join']);
 
     // Presence, own project, a lead assigning, the owner assigning, a post clearing.
