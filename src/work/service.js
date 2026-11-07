@@ -510,36 +510,61 @@ function createWorkService(options) {
     return route && route.owner ? route.owner.subject_id : null;
   }
 
-  /* What a participant's own open work waits on (her ask, 2026-10-31): the
-   * first of their open items (held or next) linked to an unfinished item
-   * someone else holds — a decision awaiting its addressee, a request
-   * awaiting its approver, or work in another's hands. Derived, never typed.
-   * Names only; no subject ids leave this function. */
-  function waitingOf(subjectId) {
+  /* A participant's own open work (held, or next to them), by id order, each
+   * with what holds it up: the first item it is linked to that someone else
+   * holds unfinished — a decision awaiting its addressee, a request awaiting
+   * its approver, or work in another's hands. Derived, never typed. */
+  function ownWork(subjectId) {
     if (typeof subjectId !== 'string') return null;
     const draft = store.read();
     if (!draft) return null;
-    const active = state => state === 'open' || state === 'active' || state === 'ready' || state === 'blocked';
-    const byIdOrder = (a, b) => idNumber(a.id) - idNumber(b.id);
     const holderOf = other => {
       if (other.kind === 'decision') return decisionState(other) === 'awaiting' ? other.asked_of : null;
       if (other.approval) return other.approval.state === 'awaiting' ? currentApproverRef(other) : null;
-      return active(other.state) ? (other.next_to || other.responsible) : null;
+      return LIVE_WORK_STATES.includes(other.state) ? (other.next_to || other.responsible) : null;
     };
-    const mine = draft.items.filter(item => item.kind !== 'decision' && active(item.state) &&
+    return draft.items.filter(item => item.kind !== 'decision' && LIVE_WORK_STATES.includes(item.state) &&
       ((item.responsible && item.responsible.subject_id === subjectId) ||
-        (item.next_to && item.next_to.subject_id === subjectId))).sort(byIdOrder);
-    for (const item of mine) {
-      const linked = item.links.concat(item.parent ? [item.parent] : []);
-      for (const id of linked) {
-        const other = draft.items.find(row => row.id === id);
-        const holder = other ? holderOf(other) : null;
-        if (holder && holder.subject_id && holder.subject_id !== subjectId) {
-          return { name: holder.name, item: other.id, since: item.updated_at };
+        (item.next_to && item.next_to.subject_id === subjectId)))
+      .sort((a, b) => idNumber(a.id) - idNumber(b.id))
+      .map(item => {
+        let blocker = null;
+        for (const id of item.links.concat(item.parent ? [item.parent] : [])) {
+          const other = draft.items.find(row => row.id === id);
+          const holder = other ? holderOf(other) : null;
+          if (holder && holder.subject_id && holder.subject_id !== subjectId) {
+            blocker = { name: holder.name, item: other.id, since: item.updated_at };
+            break;
+          }
         }
-      }
-    }
-    return null;
+        return { item, blocker };
+      });
+  }
+
+  /* Whom a participant waits on (her ask, 2026-10-31; narrowed the same
+   * day: "Pitta says waiting on Fruiteater but he is working on
+   * something"): only when every open item of theirs is blocked by someone
+   * else; then the first block. Names only; no subject ids leave. */
+  function waitingOf(subjectId) {
+    const mine = ownWork(subjectId);
+    if (!mine || mine.length === 0 || mine.some(entry => entry.blocker === null)) return null;
+    return mine[0].blocker;
+  }
+
+  /* What a participant is working on when not every item of theirs is
+   * blocked: their first active free item, else their first free one, with
+   * the first block on their other items kept for the detail. */
+  function workingOf(subjectId) {
+    const mine = ownWork(subjectId);
+    if (!mine) return null;
+    const free = mine.filter(entry => entry.blocker === null);
+    if (free.length === 0) return null;
+    const pick = free.find(entry => entry.item.state === 'active') || free[0];
+    const blocked = mine.find(entry => entry.blocker !== null);
+    return {
+      item: pick.item.id, title: pick.item.title,
+      blocked: blocked ? { name: blocked.blocker.name, item: blocked.blocker.item } : null,
+    };
   }
 
   function needsMe(item, subjectId) {
@@ -1684,7 +1709,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, moveItem, checkOnly, waitingOf, attachEvidence, addNote, share,
+    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,

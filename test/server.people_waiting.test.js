@@ -187,6 +187,16 @@ test('a seat whose item is linked to an open item someone else holds is waiting 
     assert.deepEqual([w && w.name, w && w.item], ['Plant', seal.id], 'Pitta waits on Plant for the seal');
     assert.ok(Number.isSafeInteger(w.since), 'since its own item last changed');
     assert.equal(await waiting('Plant'), null, 'Plant waits on nobody');
+    // Something of Pitta's that is free: working on it, not waiting; the block stays in the detail.
+    const row = async name => (await get(runtime, '/api/participants', ana)).json.participants.find(item => item.name === name);
+    assert.equal((await row('Pitta')).working_on, null, 'ARRANGEMENT: every item of Pitta\'s is blocked, so nothing free');
+    const docs = await make(pitta.token, { kind: 'work', title: 'Write the import docs', responsible: 'Pitta' });
+    assert.equal(await waiting('Pitta'), null, 'not waiting while something of theirs is free');
+    assert.deepEqual((await row('Pitta')).working_on, { item: docs.id, title: 'Write the import docs', blocked: { name: 'Plant', item: seal.id } });
+    const docsDone = await aiPost(runtime, '/api/ai/work/items/update', { operation_id: uuid(), id: docs.id, expected_revision: docs.revision,
+      state: 'done', done_account: 'Written.', no_evidence: true, note: 'done' }, pitta.token);
+    assert.equal(docsDone.status, 200, docsDone.text);
+    assert.equal((await waiting('Pitta')).item, seal.id, 'with the free item done, Pitta is waiting on Plant again');
     const sealNow = (await aiGet(runtime, `/api/ai/work/items/${seal.id}`, plant.token)).json.item;
     const done = await aiPost(runtime, '/api/ai/work/items/update', { operation_id: uuid(), id: seal.id, expected_revision: sealNow.revision,
       state: 'done', done_account: 'Sealed.', no_evidence: true, note: 'sealed' }, plant.token);

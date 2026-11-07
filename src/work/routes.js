@@ -354,9 +354,14 @@ function createWorkRoutes(options) {
     try { return typeof work.waitingOf === 'function' ? work.waitingOf(subjectId) : null; }
     catch (_) { return null; }
   }
+  // What it works on when not every item is blocked: {item, title, blocked} or null.
+  function workingOf(subjectId) {
+    try { return typeof work.workingOf === 'function' ? work.workingOf(subjectId) : null; }
+    catch (_) { return null; }
+  }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, priorResult, reviseScope, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

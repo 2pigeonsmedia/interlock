@@ -913,6 +913,15 @@ function validPeopleFacts(value) {
       textOrNull(value.presence.need) && Number.isSafeInteger(value.presence.since)));
 }
 
+function validWorkingOn(value) {
+  if (value === null) return true;
+  const exact = (item, keys) => item !== null && typeof item === 'object' && !Array.isArray(item) &&
+    Object.keys(item).length === keys.length && keys.every(key => Object.hasOwn(item, key));
+  return exact(value, ['item', 'title', 'blocked']) && typeof value.item === 'string' && typeof value.title === 'string' &&
+    (value.blocked === null || (exact(value.blocked, ['name', 'item']) &&
+      typeof value.blocked.name === 'string' && typeof value.blocked.item === 'string'));
+}
+
 function validParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
@@ -922,7 +931,9 @@ function validParticipant(value) {
   const polled = keys.includes('last_polled_at');
   // `waiting` (0.3.4): {name, item, since} derived from Work, or null.
   const waits = keys.includes('waiting');
-  if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) || ![
+  // `working_on` (0.3.5): {item, title, blocked: null | {name, item}}, or null.
+  const works = keys.includes('working_on');
+  if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) + (works ? 1 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
@@ -931,7 +942,8 @@ function validParticipant(value) {
     (polled && !(value.last_polled_at === null || Number.isSafeInteger(value.last_polled_at))) ||
     (waits && !(value.waiting === null || (value.waiting && typeof value.waiting === 'object' &&
       Object.keys(value.waiting).length === 3 && typeof value.waiting.name === 'string' &&
-      typeof value.waiting.item === 'string' && Number.isSafeInteger(value.waiting.since))))) return false;
+      typeof value.waiting.item === 'string' && Number.isSafeInteger(value.waiting.since)))) ||
+    (works && !validWorkingOn(value.working_on))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'
@@ -1112,6 +1124,11 @@ function rosterDetail(participant, now, toggle) {
     if (presence.middle) detail.append(participantFact(`In the middle of: ${presence.middle}`));
     if (presence.waiting_on) detail.append(participantFact(`Waiting on: ${presence.waiting_on}`));
     if (presence.need) detail.append(participantFact(`Will need: ${presence.need}`));
+  }
+  if (participant.working_on) {
+    detail.append(participantFact(`Working on: ${participant.working_on.item} · ${participant.working_on.title}`));
+    const blocked = participant.working_on.blocked;
+    if (blocked) detail.append(participantFact(`Also waiting on: ${blocked.name} · ${blocked.item}`));
   }
   if (participant.kind === 'seat' && viewerIsAdmin()) detail.append(assignControl(participant, toggle));
   return detail;

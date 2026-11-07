@@ -58,6 +58,7 @@ Usage:
   interlock leave --connection NAME [--json]
   interlock presence --connection NAME --file PATH | --clear [--json]
   interlock presence --connection NAME --project ID|none [--assign NAME] [--json]
+  interlock presence --connection NAME --middle-stdin [--json]
   interlock grants --connection NAME [--json]
   interlock codex-policy install --connection NAME --mode receive|participate
   interlock codex-policy check --connection NAME [--json]
@@ -1815,7 +1816,7 @@ async function runAsk(args, io, dependencies = {}) {
 // project (this AI's own, or with --assign another seat's, which only the
 // project's lead may set).
 function presenceOptions(args) {
-  const options = { connection: null, file: null, clear: false, project: undefined, assign: null, json: false };
+  const options = { connection: null, file: null, middle: false, clear: false, project: undefined, assign: null, json: false };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index];
@@ -1823,6 +1824,7 @@ function presenceOptions(args) {
     seen.add(flag);
     if (flag === '--json') { options.json = true; continue; }
     if (flag === '--clear') { options.clear = true; continue; }
+    if (flag === '--middle-stdin') { options.middle = true; continue; }
     const value = args[index + 1];
     if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) return null;
     index += 1;
@@ -1832,7 +1834,7 @@ function presenceOptions(args) {
     else if (flag === '--assign') options.assign = value;
     else return null;
   }
-  const actions = [options.file !== null, options.clear, options.project !== undefined].filter(Boolean).length;
+  const actions = [options.file !== null, options.middle, options.clear, options.project !== undefined].filter(Boolean).length;
   if (options.connection === null || actions !== 1) return null;
   if (options.assign !== null && options.project === undefined) return null;
   return Object.freeze(options);
@@ -1841,7 +1843,7 @@ function presenceOptions(args) {
 async function runPresence(args, io, dependencies = {}) {
   const parsed = presenceOptions(args);
   if (!parsed) {
-    line(io.stderr, 'interlock: usage: interlock presence --connection NAME --file PATH | --clear | --project ID|none [--assign NAME] [--json]');
+    line(io.stderr, 'interlock: usage: interlock presence --connection NAME --file PATH | --middle-stdin | --clear | --project ID|none [--assign NAME] [--json]');
     return EXIT_USAGE;
   }
   let body;
@@ -1851,6 +1853,21 @@ async function runPresence(args, io, dependencies = {}) {
     body = parsed.assign === null ? { project: parsed.project } : { seat_name: parsed.assign, project: parsed.project };
   } else if (parsed.clear) {
     body = { middle: null, waiting_on: null, need: null };
+  } else if (parsed.middle) {
+    // One command for "in the middle of": one piped line, replacing the
+    // presence line; the seat's next post clears it from People.
+    let piped;
+    try { piped = await (dependencies.readStdin || readStdin)(io.stdin || process.stdin); }
+    catch (_) {
+      line(io.stderr, 'interlock: could not read the piped line safely.');
+      return EXIT_RUNTIME;
+    }
+    const middle = String(piped).replace(/\r?\n$/, '');
+    if (middle.trim() === '' || /[\r\n]/.test(middle)) {
+      line(io.stderr, 'interlock: --middle-stdin takes one line: what you are in the middle of.');
+      return EXIT_USAGE;
+    }
+    body = { middle, waiting_on: null, need: null };
   } else {
     let text;
     try { text = (dependencies.readFile || fs.readFileSync)(parsed.file, 'utf8'); }

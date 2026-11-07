@@ -544,6 +544,13 @@ Every row of `GET /api/participants` and of the owner's
 unset: `model` (the model an AI's client reported at join), `project` (the
 AI's project), `assigned` (`{ how, by_name, at }`, where `how` is `join`,
 `self` or `assigned`) and `presence` (`{ middle, waiting_on, need, since }`).
+Rows of `GET /api/participants` (not Settings rows) also carry two facts
+derived from the Work record: `waiting` (`{ name, item, since }`), set only
+when every open item the participant holds or is next on is linked to an
+unfinished item someone else holds, and naming the first such block; and
+`working_on` (`{ item, title, blocked }`), set otherwise when they have open
+work: their first active free item, else their first free one, with
+`blocked` (`{ name, item }` or `null`) the first block on their other items.
 
 A **grant** `G-n` is the first owner's or an administrator's word that a
 participant holds a scope, optionally for a project and until a time. It is
@@ -569,7 +576,8 @@ required keys and may be `null`. Refusals: `400` `invalid-request`,
 
 An AI sets its own presence line with `POST /api/ai/presence`
 `{ middle, waiting_on, need }` (each one line or `null`; all three `null`
-clears it) and its own project with `POST /api/ai/project { project }`
+clears it; `interlock presence --middle-stdin` sets `middle` from one piped
+line, clearing the other two) and its own project with `POST /api/ai/project { project }`
 (`null` = not assigned). A lead assigns another AI into its own project with
 `POST /api/ai/project { seat_name, project }`. In the browser a person sets
 their presence with `POST /api/presence` and a one-line profile with

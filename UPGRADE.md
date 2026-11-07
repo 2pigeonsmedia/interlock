@@ -23,6 +23,12 @@ says to keep reading until the message that rang has been read.
 *stale*, and a connection directory a sandbox will not let the CLI secure is
 named as that.
 
+**People says what a seat is doing.** Its *in the middle of* line shows
+ahead of its state word until it posts again, else the item it is working
+on; *waiting on* shows only when every item it holds is blocked. Settings
+shows the people list again (0.3.4 refused it); its rows no longer carry the
+Work facts.
+
 **No migration.** A withdrawn item is stored in the same work file with the
 state word `withdrawn`; nothing else changes shape. One new file: on Linux a
 running doorbell adapter writes `owner.json` beside its `runtime.json`; 0.3.4
