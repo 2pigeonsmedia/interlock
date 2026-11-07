@@ -615,7 +615,7 @@
           ? ' · question revision ' + item.question_revision : '')]
         .concat(item.ask_follow_pending === true ? ['Its question in the room has not caught up with this revision ' +
           '(message #' + item.ask_message_id + '): answers given there are not recorded until it does. ' +
-          'Revise the question in the room, or revise it here again.'] : [])
+          'Revise the question in the room to bring the two level.'] : [])
         .concat(answeredInRoom(item, answered) ? [ROOM_NOT_RECORDED + ' (message #' + item.ask_message_id + ').'] : [])
         .concat(answerLines(item, history))
         .concat(item.proposal ? ['Proposal: ' + item.proposal] : [])

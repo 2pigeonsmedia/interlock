@@ -59,8 +59,10 @@ Work facts.
 whoever is next on it, its project's lead, the first owner or an
 administrator can put someone else on it as holder or next
 (`403 not-assigner`, which names whom to ask). Anyone can still take an item
-nobody holds or is next on, or step out of a slot they are in. A project's Edit is shown only to those who
-may edit it. A script that treated every `403` from a passkey-confirmed route
+nobody holds or is next on, or step out of a slot they are in. Setting an
+item Blocked or Done when someone else is next on it is that kind of change
+too, since it drops them: the same people only, else `403 not-assigner`. A
+project's Edit is shown only to those who may edit it. A script that treated every `403` from a passkey-confirmed route
 as "confirm again" should now check the code: only `fresh-step-up-required`
 means that.
 
@@ -68,7 +70,11 @@ means that.
 state word `withdrawn`. A revised decision gains `question_revision` and a
 `revised` event in the same file. Identity state does not change shape: the
 mutation record keeps the shape 0.3.4 accepts, and the act names go to the
-`authz` and `authz_deny` telemetry. One new file: on Linux a
+`authz` and `authz_deny` telemetry. A decision revised while asked in the
+room carries `ask_follow_pending: true` until its room question asks the
+revised words, and the work file keeps an operation record for each
+words-only answer (`decisions.discuss`), so a retry after a restart is not
+posted twice. One new file: on Linux a
 running doorbell adapter writes `owner.json` beside its `runtime.json`; 0.3.4
 does not read it.
 
@@ -83,7 +89,10 @@ ordinary one with its new wording and its history (0.3.4 does not show the
 revision number), and 0.3.4 reads the step-up telemetry rows as ordinary
 lines. Both were measured on their own branches before the release merge:
 0.3.4 opened a work file and an identity directory written by that code and
-read them.
+read them. **0.3.4 ignores `ask_follow_pending`.** Before going back, open
+each decision whose drawer says its room question has not caught up, and
+revise that question in the room, so the two agree; under 0.3.4 a marked
+decision would take a room answer again.
 
 ## 0.3.3 → 0.3.4
 

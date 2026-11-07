@@ -136,11 +136,12 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   `ask_follow_pending: true` and takes no room answer, whatever revision the
   answer names. If the room ask could not follow (a failure, or a stop
   between the two), the response carries `"room": "stale"` and the mark stays
-  on the record. It clears when the room follows: retry the same revise
-  (same `operation_id`) and the room is revised again, or the asker revises
-  the room ask, and the record then takes the room's words as what a yes
+  on the record. The sure way to clear it is for the asker to revise the
+  question in the room: the record then takes the room's words as what a yes
   means (any answer voided), so an answer binds only to the words the room
-  showed.
+  showed. Retrying the same revise (same `operation_id`) after a stop also
+  clears it when the room is still behind; once the room is ahead of the
+  record, only a revise in the room does.
 - Anyone else may record that an answer was given elsewhere
   (`answer.kind: "reported"`) with the exact words and a source. The record
   shows who reported it and that it is not confirmed here. The response
