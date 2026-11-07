@@ -1188,11 +1188,11 @@ test('an expired join deletes only its unadmitted candidate and says it expired'
   assert.equal(fs.existsSync(path.join(connectionDir, 'beacon.json')), false);
 });
 
-test('the CLI reports the candidate v0.3.4 package version', () => {
+test('the CLI reports the candidate v0.3.5 package version', () => {
   const result = capture(['--version']);
 
   assert.equal(result.code, EXIT_OK);
-  assert.equal(result.stdout, '0.3.4\n');
+  assert.equal(result.stdout, '0.3.5\n');
   assert.equal(result.stderr, '');
 });
 
