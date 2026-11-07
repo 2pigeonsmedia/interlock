@@ -148,3 +148,29 @@ test('a caller without a session is told nothing beyond the refusal, and the rea
   assert.ok(fresh.some(r => r.capability === 'transcript.clear' && r.reason === 'no-session' &&
     r.subject_id === null), 'the record keeps the reason, with no subject: ' + JSON.stringify(fresh));
 });
+
+test('every spent step-up joins exactly one act record: setup, a second passkey, and an act', async () => {
+  const { world, records } = await room();
+  const elevated = await world.elevate(world.T);
+  const begin = await world.authenticator_service.beginAdditionalRegistration(world.env(elevated, world.T + 5));
+  assert.ok(begin.ok, 'ARRANGEMENT: a second passkey can begin: ' + JSON.stringify(begin));
+  const second = Step.createDevice();
+  const added = await world.authenticator_service.finishAdditionalRegistration(Object.assign(
+    world.env(elevated, world.T + 6), { ceremony_id: begin.ceremony_id, response: second.registration(begin.options.challenge) }));
+  assert.equal(added.ok, true, 'ARRANGEMENT: the second passkey is added: ' + JSON.stringify(added));
+  const again = await world.elevate(world.T + 20);
+  assert.equal(world.service.confirmTranscriptClear(world.env(again, world.T + 25)).ok, true,
+    'ARRANGEMENT: an ordinary act spends one more');
+
+  const { allow, deny, consumes } = await records();
+  const acts = [...allow, ...deny];
+  assert.ok(consumes.length >= 3, 'ARRANGEMENT: setup, the passkey and the act each spent one: ' + consumes.length);
+  for (const spend of consumes) {
+    const joined = acts.filter(r => r.event_id === spend.event_id);
+    assert.equal(joined.length, 1, `spend ${spend.event_id} joins exactly one act record: ` + JSON.stringify(joined));
+  }
+  const named = new Set(acts.map(r => r.capability));
+  for (const act of ['bootstrap.complete', 'authenticator.add', 'transcript.clear']) {
+    assert.ok(named.has(act), `${act} is named: ` + JSON.stringify([...named]));
+  }
+});

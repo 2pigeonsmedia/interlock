@@ -589,6 +589,31 @@ function authz(row) {
   return enqueue('authz', row);
 }
 
+// The one record of a decision on an act behind a fresh administrator step-up:
+// which act, who, allow or deny and why, and (when a step-up was spent) the id
+// of the spend's `session.stepup.consume` mutation row, so the two join.
+// Telemetry, not the outbox: an older release reads these rows as plain lines
+// and never validates them at start-up. Never throws into the act.
+const STEP_UP_DECISION_SOURCE = 'fresh-step-up';
+function stepUpDecision(input) {
+  const o = input || {};
+  const actor = typeof o.actorId === 'string' ? o.actorId : null;
+  const row = {
+    tenant: o.tenant,
+    subject_id: actor,
+    kind: actor ? 'person' : null,
+    capability: o.workflow,
+    resource: o.resource,
+    origin: typeof o.origin === 'string' ? o.origin : null,
+    assurance: o.assurance === 1 || o.assurance === 2 ? String(o.assurance) : null,
+    result: o.outcome,
+    reason: o.reason,
+    decision_source: STEP_UP_DECISION_SOURCE,
+  };
+  if (typeof o.eventId === 'string') row.event_id = o.eventId;
+  try { return authz(row); } catch (_) { return { accepted: false, reason: 'fault' }; }
+}
+
 function segmentParts(name, stream) {
   const match = SEGMENT_RE.exec(name);
   if (!match || match[1] !== stream) return null;
@@ -1275,6 +1300,8 @@ module.exports = {
   start,
   authn,
   authz,
+  stepUpDecision,
+  STEP_UP_DECISION_SOURCE,
   flushOutbox,
   startOutboxFlusher,
   repairTail,

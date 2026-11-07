@@ -2,23 +2,27 @@
 
 // The identity-to-host seam: what the host is told when identity refuses.
 //
-// The refusal contract for acts behind a fresh administrator step-up (Allow an
-// AI, remove a participant, clear the transcript, grants, projects, invites):
+// The refusal contract for the administrator acts behind a fresh step-up that
+// this file exercises (allowing an AI, removing a participant, clearing the
+// transcript; grants, projects and invites follow the same path):
 //   - A malformed body, or a caller without a live session, gets the one
 //     generic refusal (`not-authorized`, or a bare `{ ok: false }` from the
 //     confirm-only acts), exactly as before.
-//   - A caller WITH a live session is told one word about its own request:
-//     `fresh-step-up-required` (no fresh confirmation; the only word that asks
-//     for a passkey), `not-administrator`, `request-invalid`, or
+//   - An administrator WITH a live session is told one word about its own
+//     request: `fresh-step-up-required` (no fresh confirmation; the only word
+//     that asks for a passkey), `not-administrator`, `request-invalid`, or
 //     `refused-after-step-up`.
-//   - Every failure that depends on the act's TARGET (a name collision, the
-//     first owner protected, a failure inside the act) answers the same one
-//     word, `refused-after-step-up`, whatever the cause. The specific cause is
-//     written only to the `authz_deny` record, never to the response.
-// So no answer tells a caller anything about a target it could not already
-// see: the words describe the caller's own session and request. Until 0.3.5
-// every refusal here was `not-authorized`, which sent the page to ask for a
-// passkey that could not help; this file's expectations changed on purpose.
+//   - On these acts every failure that depends on the act's TARGET (a name
+//     collision, the first owner protected, a failure inside the act) answers
+//     the same one word, `refused-after-step-up`, whatever the cause. The
+//     specific cause is written only to the `authz_deny` record.
+// Not covered by that rule, and unchanged: issuing a passkey code, and making
+// or removing an administrator, name the target's state (`not-found`,
+// `passkey-exists`, `already-admin`, `not-admin`, `passkey-required`). Those
+// are administrator-only and show what Settings already shows them.
+// Until 0.3.5 every refusal here was `not-authorized`, which sent the page to
+// ask for a passkey that could not help; this file's expectations changed on
+// purpose.
 
 const test = require('node:test');
 const assert = require('node:assert');

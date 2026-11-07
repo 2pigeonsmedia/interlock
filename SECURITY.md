@@ -129,24 +129,42 @@ no others.
   audit event, its authorization does not depend on the audit subsystem being
   healthy; writes, denies and every other capability still fail closed.
 - **Step-up acts are named in telemetry, not in the mutation record.** Every
-  act that needs a fresh passkey confirmation (removing a participant, clearing
-  the transcript, a grant, a project change, an invite, allowing an AI, and the
-  rest) writes one `authz` row naming the act and who did it, or one
-  `authz_deny` row saying why it was refused (`fresh-step-up-required`,
-  `not-administrator`, `request-invalid`, `refused-after-step-up`, …), with
-  `decision_source` set to `fresh-step-up`. A refusal that depends on the
-  act's target (a name already taken, the first owner protected) answers the
-  caller with the one word `refused-after-step-up`; the specific cause is
-  written only to the `authz_deny` row, as `refused-after-step-up: <cause>`. When a confirmation was spent, the
-  row's `event_id` is the id of the `session.stepup.consume` row in the
-  mutation record, so the two can be joined. The mutation row itself keeps the
-  shape every earlier release accepts, so a rollback never finds a pending
-  record it refuses. The limit: these rows are telemetry. They rotate out with
-  their stream like any telemetry row, and if the telemetry queue overflows
-  (10,000 rows waiting) a row can be dropped. A drop is counted and the
-  installation reports unhealthy, but the act it described has already
-  happened. The mutation record still proves a confirmation was spent; only
-  the name of the act would be missing.
+  spent passkey confirmation leaves one `authz` row (the act went through) or
+  one `authz_deny` row (it was refused after the spend), with
+  `decision_source` set to `fresh-step-up`, naming the act and who did it.
+  The row's `event_id` is the id of the spend's `session.stepup.consume` row in
+  the mutation record, so every spend can be joined to its act. This covers
+  first-owner setup (`bootstrap.complete`) and adding a passkey
+  (`authenticator.add`) as well as the administrator acts (removing a
+  participant, clearing the transcript, grants, projects, invites,
+  administrators, passkey codes, allowing an AI). The administrator acts also
+  record refusals that spend nothing (`fresh-step-up-required`,
+  `not-administrator`, `request-invalid`, `no-session`); setup and adding a
+  passkey record only spends. The mutation row itself keeps the shape every
+  earlier release accepts, so a rollback never finds a pending record it
+  refuses. The limit: these rows are telemetry. They rotate out with their
+  stream like any telemetry row, and if the telemetry queue overflows (10,000
+  rows waiting) a row can be dropped. A drop is counted and the installation
+  reports unhealthy, but the act it described has already happened. The
+  mutation record still proves a confirmation was spent; only the name of the
+  act would be missing. A spend whose own mutation append failed (reported as
+  an audit fault) leaves an act row with no `event_id`.
+- **What a refused administrator act tells the caller.** Every one of these
+  routes checks that the caller is a signed-in administrator before identity
+  is asked, so only an administrator ever sees these answers; a caller without
+  a live session gets the one generic refusal. For removing a participant, clearing the transcript, grants,
+  projects, invites and allowing an AI, the answer is one word about the
+  caller's own request (`fresh-step-up-required`, `not-administrator`,
+  `request-invalid`), and every refusal that depends on the act's target (a
+  name already taken, the first owner protected, a failure inside the act)
+  is the same word, `refused-after-step-up`; its specific cause is written
+  only to the `authz_deny` row, as `refused-after-step-up: <cause>`. Two
+  administrator acts do name a target's state, and did before: issuing a
+  passkey code answers `not-found` or `passkey-exists`, and making or
+  removing an administrator answers `not-found`, `already-admin`, `not-admin`
+  or `passkey-required`. Administrators can already see who is an
+  administrator and who has a passkey in Settings, so these answers reveal
+  nothing new to them.
 - **One shared readership.** Every admitted human and AI seat can read the one
   room. Mentions decide which AI doorbell rings; they are not message access
   controls.

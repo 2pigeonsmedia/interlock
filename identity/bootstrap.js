@@ -8,6 +8,7 @@
 'use strict';
 const crypto = require('crypto');
 const repo = require('./repo.js');
+const audit = require('./audit.js');
 const subjects = require('./subjects.js');
 const memberships = require('./memberships.js');
 const admission = require('./admission.js');
@@ -147,7 +148,26 @@ function createService(opts) {
     }
   }
 
+  // A spent step-up always leaves one authorization record naming this act,
+  // joined to the spend, whatever the outcome after it.
   function completeBootstrap(optsIn) {
+    let spent = null;
+    let result = FAIL;
+    try {
+      result = completeBootstrapSpending(optsIn, step => { spent = step; });
+      return result;
+    } finally {
+      if (spent) {
+        const ok = !!result && result.ok === true;
+        audit.stepUpDecision({ tenant: TENANT(), workflow: 'bootstrap.complete', resource: 'membership',
+          actorId: spent.subject_id, assurance: 2, outcome: ok ? 'allow' : 'deny',
+          reason: ok ? 'fresh-admin-stepup-consumed' : 'refused-after-step-up: setup could not complete',
+          eventId: typeof spent.consume_event_id === 'string' ? spent.consume_event_id : undefined });
+      }
+    }
+  }
+
+  function completeBootstrapSpending(optsIn, onSpend) {
     if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn)) return FAIL;
     const cookie_header = ownData(optsIn, 'cookie_header').value;
     const csrf_token = ownData(optsIn, 'csrf_token').value;
@@ -169,6 +189,7 @@ function createService(opts) {
       mark('bootstrap.complete', 'refused');
       return FAIL;
     }
+    onSpend(step);
     const actorId = step.subject_id;
 
     // Pre-check durable conditions; transaction re-proves them.

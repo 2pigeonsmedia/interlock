@@ -347,25 +347,9 @@ function createService(opts) {
     if (repo.firstOwnerIdIn(state, TENANT()) === subjectId) throw new Error('first owner is protected');
   }
 
-  // One authorization record per decision on a step-up-gated act: which act,
-  // who, the outcome, why, and (when a step-up was spent) the id of the spend's
-  // mutation row. Telemetry, not the outbox: an older release reads these rows
-  // as plain lines and never validates them at start-up.
   function recordStepUp(workflow, resource, actorId, assurance, outcome, reason, eventId) {
-    const row = {
-      tenant: TENANT(),
-      subject_id: typeof actorId === 'string' ? actorId : null,
-      kind: typeof actorId === 'string' ? 'person' : null,
-      capability: workflow,
-      resource,
-      origin: observed_origin,
-      assurance: assurance === 1 || assurance === 2 ? String(assurance) : null,
-      result: outcome,
-      reason,
-      decision_source: 'fresh-step-up',
-    };
-    if (typeof eventId === 'string') row.event_id = eventId;
-    try { audit.authz(row); } catch (_) { /* audit health reports a fault; never fail the act on it */ }
+    audit.stepUpDecision({ tenant: TENANT(), workflow, resource, actorId, assurance,
+      outcome, reason, eventId, origin: observed_origin });
   }
 
   function withFreshAdmin(optsIn, workflow, resource, body) {
