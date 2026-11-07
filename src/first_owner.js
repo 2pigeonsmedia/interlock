@@ -1880,6 +1880,18 @@ function createFirstOwnerHandler(options) {
           responsible: after.next_to, title: after.next_action || after.title }), ai, 'is next to you');
       }
     }
+    // Withdrawn work rings the holder of each live item linked to it, once:
+    // its blocker was dropped, not finished (her lead's ruling, 2026-11-07).
+    if (op === 'items/withdraw' && result.status < 400 && result.body.replayed !== true && result.body.item &&
+        Array.isArray(result.body.left_waiting)) {
+      const dropped = result.body.item.id;
+      for (const row of result.body.left_waiting) {
+        const holder = row.responsible || row.next_to;
+        if (!holder) continue;
+        await ringHolder(request, actor, { id: row.id, title: row.title, responsible: holder }, ai,
+          `is linked to ${dropped}, which was withdrawn`);
+      }
+    }
     // A withdrawn decision withdraws the ask it put in the room, so nothing
     // said there afterwards closes it as answered.
     if (op === 'decisions/withdraw' && result.status < 400 && result.body.replayed !== true) {

@@ -48,7 +48,7 @@ today's-focus note is an attributed write by an administrator, the first owner,
 or the project's live lead (anyone else: `403 not-lead`; a retired project: `409 project-retired`).
 
 **Work item** (`kind: "work"` or `"finding"`) — `id` (`W-12`), `title`, `body`,
-`project`, `state` (`open`, `active`, `blocked`, `ready`, `done`),
+`project`, `state` (`open`, `active`, `blocked`, `ready`, `done`, `withdrawn`),
 `responsible`, `next_to`, `next_action`, `target`, `block_reason`,
 `done_account`, `consequence`, `severity` (`blocking`, `non-blocking`, or
 null), `links`, `parent`, `source`, `source_message`, `done_evidence`,
@@ -70,6 +70,19 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   in place); `done` requires a `done_account` and a declaration of evidence:
   either `done_evidence` (the `seq` of an evidence entry on this item) or
   `no_evidence: true`. Never blank, never derived. Leaving `done` clears both.
+- `withdrawn` says the work was dropped, never that it was finished. Only
+  `items/withdraw` sets it, with a required `reason`, by whoever filed the item,
+  its project's live lead, the first owner or an administrator (anyone else,
+  its holder included: `403 not-withdrawer`; a holder hands work back by
+  changing `responsible`). Done work is reopened first and a request for
+  approval closes by its own path (`409 invalid-state`, `400 invalid-kind`).
+  Withdrawing clears `next_to` and is kept as a `withdrawn` event with the
+  reason and `before`/`after`. `items/update` with `state: "open"` (or any
+  live state) and a `note` undoes it; `items/update` never sets `withdrawn`.
+- A live item linked to withdrawn work (by `links` either way, or as its
+  parent or child) carries `blocker_withdrawn`, the ids of that withdrawn
+  work, in `list`, `brief` and `items/<id>` reads: its blocker was dropped,
+  not finished. Derived on each read; unlinking clears it.
 - Changing `target` records the change; earlier evidence stays pinned to the
   target it examined and is reported as not matching the current one.
 
@@ -165,6 +178,7 @@ envelope (origin, same-origin fetch metadata, CSRF token). AI connections:
 | `items/update` | `id`, `expected_revision`, `note` (required: a change without one is refused with `invalid-note`), any work field above, `state`, `block_reason`, `done_account`, `done_evidence` or `no_evidence`, `title`, `body` |
 | `items/evidence` | `id`, `target`, `observed`, `limits`, `reference` (optional when `source_message` is given), optional `relates_to`, `source_message` (`{ message_id, quote }`) |
 | `items/note` | `id`, `text` |
+| `items/withdraw` | `id`, `expected_revision`, `reason` (whoever filed it, its project's live lead, the first owner or an administrator, else `403 not-withdrawer`; `get` says `may_withdraw` for its reader); answers the item and `left_waiting`, the live items linked to it, each of whose holder (else whoever is next) is rung once: `@Holder — W-n is linked to W-m, which was withdrawn: <title>` |
 | `items/move` | `id`, `expected_revision`, `project` (the first owner, the record's holder or the lead of its current project, else `403 not-mover`; `get` says `may_move` for its reader; a live project other than its own, else `404 unknown-project`, `409 project-retired` or `409 same-project`); kept as a `moved` event with `from` and `to` |
 
 Making someone else `responsible` (at `items/create` or `items/update`) posts
@@ -205,7 +219,7 @@ recorded only.
 
 - `brief[?project=ID]` — projects (each with `done_count`, its work and
   findings in state `done`, and `withdrawn_count`, its withdrawn
-  decisions), `needs_me` (each decision or request carrying `blocks`: the
+  decisions, work and findings), `needs_me` (each decision or request carrying `blocks`: the
   ids of open work linked to it, derived), `reported_to_me`, open work,
   decisions, `recently_decided` (the viewer's last five answers on the record,
   each with `decided`: `choice`, `text`, `at`), and the `cursor` a later
@@ -232,7 +246,7 @@ while the state is `blocked`.
 `400` `invalid-request` (unknown or malformed field), `invalid-participant`,
 `ambiguous-participant`, `invalid-query`, and the field-specific `invalid-*`
 codes · `401` `not-authenticated` (no usable session) or `invalid-connection`
-(no usable bearer) · `403` `not-authorized`, `not-answerer`, `not-asker`, `owner-only`,
+(no usable bearer) · `403` `not-authorized`, `not-answerer`, `not-asker`, `not-withdrawer`, `owner-only`,
 `not-a-relay`, `fresh-step-up-required`, `request-refused`, `first-owner-answer`,
 `kill-own-pick`, `owner-does-not-ask` · `404` `unknown-item`, `unknown-project` ·
 `405` (wrong method, with `allow`) · `409` `stale-revision`, `operation-conflict`,
@@ -248,7 +262,8 @@ interlock work list --connection NAME [--project ID] [--needs-me] [--after N] [-
 interlock work get ID --connection NAME [--json]
 interlock work changes --connection NAME --after N [--limit N] [--json]
 interlock work create --connection NAME --file PATH [--json]
-interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen ID --connection NAME --file PATH [--json]
+interlock work withdraw ID --connection NAME --file PATH [--json]
 interlock work project-update PROJECT --connection NAME --file PATH [--json]
 interlock work ask-approval --connection NAME --file PATH [--json]
 interlock work kill ID --connection NAME --file PATH|--stdin [--json]
@@ -261,7 +276,10 @@ Request bodies travel in a JSON file, never in arguments. The CLI adds an
 the file as it is sends a *new* operation; to retry the exact request after a
 timeout, put the printed id in the file as `operation_id`, then the server
 replays the original result. `report-answer` prints the exposure draft and the
-`interlock say` command that sends it.
+`interlock say` command that sends it. `withdraw` takes a W-n work or finding
+item (`items/withdraw`) or a D-n decision (`decisions/withdraw`); its file holds
+`expected_revision` and `reason`, and it lists the live items still linked to
+withdrawn work. Rows show `blocker withdrawn: W-n` when their blocker was.
 
 ## In the browser
 
@@ -315,15 +333,16 @@ Five sections, in this order:
   row's own facts: for work, `blocked: <reason>` while it is blocked,
   `next: <name> — <action>` (`unassigned` when no one is named, as in
   Actions; a blocked item shows it only when it names someone),
-  `responsible: <name>`, `target: …`, `awaiting D-n` and `evidence attached`,
-  each only when set; for a done item only `done · evidence attached` or
+  `responsible: <name>`, `target: …`, `awaiting D-n`, `blocker withdrawn: W-n`
+  and `evidence attached`, each only when set; for a withdrawn item only
+  `withdrawn`; for a done item only `done · evidence attached` or
   `done · no evidence attached`, and `awaiting D-n` if a question is still
   open; for a decision, `asked of <name> by <name>` and, once answered,
   `answered by <name>` or `reported by <name> · attributed to <name>`. Last,
   `done (N)`, collapsed: N is the brief's `done_count` (followed by
-  `· withdrawn (M)` when the project has withdrawn decisions), and opening it
+  `· withdrawn (M)` when the project has withdrawn decisions or work), and opening it
   reads the project's list, every page of it, and shows the done rows and the
-  withdrawn decisions the same way, so a withdrawn question can be opened and
+  withdrawn records the same way, so a withdrawn question or item can be opened and
   reopened.
 
 The tile does not show the record's changes. Each record's history is in its
@@ -389,6 +408,10 @@ recorded when the draft is sent or declined.
 - **Move to project** — on any record, offered to the first owner, its
   holder and the lead of its current project: pick another live project; the move is a bylined `moved` event, and a
   request for approval then routes by its new project's lead.
+- **Withdraw** — on a live work or finding record, offered to whoever filed
+  it, its project's lead, the first owner and an administrator, with a
+  required reason: the record reads **Withdrawn**, never Done, and moves to
+  the project's collapsed list. Updating it back to Open undoes it.
 - **Attach evidence** — on work and finding records, offered to any
   signed-in participant: target examined, what was observed, a reference, and
   what it does not show. **Add note** — on any record, offered to any

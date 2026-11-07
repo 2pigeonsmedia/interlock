@@ -5,6 +5,25 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.4 → 0.3.5
+
+*Draft, filled in as 0.3.5 is built.*
+
+**Work and findings can be withdrawn.** A work or finding item that is no
+longer wanted is withdrawn with a reason (`work withdraw W-n`, or Withdraw in
+its drawer) by whoever filed it, its project's lead, the first owner or an
+administrator. It reads *withdrawn*, never *done*. A live item linked to it
+says *blocker withdrawn* and its holder is rung once.
+
+**No migration, no new files.** A withdrawn item is stored in the same work
+file with the state word `withdrawn`; nothing else changes shape.
+
+**Going back to 0.3.4.** Restore the 0.3.4 release and start it on the same
+data directory; it opens the work file as written. Items withdrawn under
+0.3.5 then show in 0.3.4's Open work with the state *withdrawn*, are in
+nobody's Needs you, and have no Withdraw button; an update to Open still
+reopens them. *Blocker withdrawn* is not shown.
+
 ## 0.3.3 → 0.3.4
 
 0.3.4 makes People and Work say what is really going on: an AI reads

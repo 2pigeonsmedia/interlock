@@ -15,6 +15,10 @@ const { DEFAULT_PROJECT } = require('./store.js');
 
 const KINDS = Object.freeze(['work', 'finding', 'decision']);
 const WORK_STATES = Object.freeze(['open', 'active', 'blocked', 'ready', 'done']);
+// Work that is still to be done. Done and withdrawn are the two ends: done
+// says it was finished, withdrawn says it was dropped. Only items/withdraw
+// sets withdrawn; an update back to open undoes it.
+const LIVE_WORK_STATES = Object.freeze(['open', 'active', 'blocked', 'ready']);
 const SEVERITIES = Object.freeze(['blocking', 'non-blocking']);
 const SHARE_PURPOSES = Object.freeze(['exposure', 'notify']);
 const SHARE_OUTCOMES = Object.freeze(['sent', 'declined', 'failed']);
@@ -236,6 +240,22 @@ function createWorkService(options) {
     try { lead = leadOf ? leadOf(project.id, now) : null; } catch (_) { lead = null; }
     return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
   }
+  // Who may withdraw a work or finding item (her lead's ruling, 2026-11-07):
+  // whoever filed it, its project's live lead, the first owner, or an
+  // administrator. Not its holder: a holder hands work back instead of
+  // withdrawing someone else's item.
+  function mayWithdrawAs(actor, item, now) {
+    if (actor.owner === true || actor.first_owner === true) return true;
+    if (item.created_by && item.created_by.subject_id === actor.subject_id) return true;
+    let lead = null;
+    try { lead = leadOf ? leadOf(item.project, now) : null; } catch (_) { lead = null; }
+    return Boolean(lead && typeof lead.subject_id === 'string' && lead.subject_id === actor.subject_id);
+  }
+  function mayWithdraw(actor, item, now) {
+    return item.kind !== 'decision' && !item.approval && LIVE_WORK_STATES.includes(item.state) &&
+      mayWithdrawAs(actor, item, now);
+  }
+
   // The approver rule (approver.js); without it a request waits on the
   // approver it was filed with.
   const approverFor = typeof input.approverFor === 'function' ? input.approverFor : null;
@@ -398,7 +418,7 @@ function createWorkService(options) {
   function blocksOf(draft, item) {
     if (item.kind !== 'decision' && !item.approval) return [];
     return draft.items.filter(other => other.id !== item.id && other.kind !== 'decision' && !other.approval &&
-      other.state !== 'done' && (other.links.includes(item.id) || item.links.includes(other.id) ||
+      LIVE_WORK_STATES.includes(other.state) && (other.links.includes(item.id) || item.links.includes(other.id) ||
         item.parent === other.id || other.parent === item.id))
       .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => other.id);
   }
@@ -408,6 +428,20 @@ function createWorkService(options) {
       (item.links.includes(row.id) || row.parent === item.id || row.links.includes(item.id)));
     const open = linked.find(row => decisionState(row) === 'awaiting');
     return open ? open.id : null;
+  }
+
+  // Linked either way, or parent and child: the relation blocksOf reads.
+  function related(a, b) {
+    return a.id !== b.id && (a.links.includes(b.id) || b.links.includes(a.id) || a.parent === b.id || b.parent === a.id);
+  }
+
+  /* The withdrawn work a live item is linked to (her lead's ruling,
+   * 2026-11-07): its blocker was dropped, not finished, so it says so rather
+   * than reading as clear. Derived on each read; unlinking clears it. */
+  function blockerWithdrawn(draft, item) {
+    if (item.kind === 'decision' || !LIVE_WORK_STATES.includes(item.state)) return [];
+    return draft.items.filter(other => other.kind !== 'decision' && other.state === 'withdrawn' && related(item, other))
+      .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => other.id);
   }
 
   function row(draft, item) {
@@ -438,6 +472,7 @@ function createWorkService(options) {
       target: item.target, block_reason: item.block_reason, created_by: clone(item.created_by), updated_at: item.updated_at,
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),
       awaiting: awaitingDecision(draft, item),
+      blocker_withdrawn: blockerWithdrawn(draft, item),
       source_message_id: item.source_message ? item.source_message.message_id : null,
       // A request for approval: its state, approver and scope, and the room
       // ask it is answered through, so the panel shows it once.
@@ -1356,6 +1391,33 @@ function createWorkService(options) {
       });
   }
 
+  /* A work or finding item that is no longer wanted (her lead's ruling,
+   * 2026-11-07): withdrawn with a reason, never recorded as done. Done work
+   * reopens first; a request for approval closes by its own path. The live
+   * items linked to it are returned, so the host can ring their holders. */
+  function withdrawItem(actor, rawInput) {
+    return operation(actor, 'items.withdraw', rawInput, ['id', 'expected_revision', 'reason'],
+      (draft, body, now) => {
+        const item = findItem(draft, body.id);
+        if (item.kind === 'decision' || item.approval) fail('invalid-kind');
+        if (!mayWithdrawAs(actor, item, now)) fail('not-withdrawer');
+        checkRevision(item, body.expected_revision);
+        const reason = requiredText(body.reason, SHORT_BYTES, 'reason');
+        if (!LIVE_WORK_STATES.includes(item.state)) fail('invalid-state');
+        const before = { state: item.state };
+        const after = { state: 'withdrawn' };
+        if (item.next_to !== null) { before.next_to = clone(item.next_to); after.next_to = null; }
+        item.state = 'withdrawn';
+        item.next_to = null;
+        touch(item, now);
+        appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'withdrawn', reason, before, after });
+        const leftWaiting = draft.items.filter(other => other.kind !== 'decision' &&
+          LIVE_WORK_STATES.includes(other.state) && related(item, other))
+          .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => row(draft, other));
+        return { ok: true, item: publicItem(item), left_waiting: leftWaiting };
+      });
+  }
+
   // ── reads ─────────────────────────────────────────────────────────────────
 
   function list(actor, rawQuery) {
@@ -1395,6 +1457,9 @@ function createWorkService(options) {
       history: draft.events.filter(event => event.item === item.id).map(clone),
       // Whether this reader may move it, so a page offers Move only to them.
       may_move: mayMove(actor, item, clock()),
+      // Whether this reader may withdraw it, so a page offers Withdraw only to them.
+      may_withdraw: mayWithdraw(actor, item, clock()),
+      blocker_withdrawn: blockerWithdrawn(draft, item),
     };
   }
 
@@ -1443,14 +1508,14 @@ function createWorkService(options) {
       projects: projects.map(project => Object.assign(publicProject(project), {
         done_count: draft.items.filter(item => item.project === project.id && item.kind !== 'decision' &&
           item.state === 'done').length,
-        withdrawn_count: draft.items.filter(item => item.project === project.id && item.kind === 'decision' &&
-          item.withdrawn).length,
+        withdrawn_count: draft.items.filter(item => item.project === project.id &&
+          (item.kind === 'decision' ? item.withdrawn : item.state === 'withdrawn')).length,
       })),
       needs_me: mine.filter(item => needsMe(item, me))
         .map(item => Object.assign(row(draft, item), { blocks: blocksOf(draft, item) })),
       reported_to_me: mine.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&
         item.answer.kind === 'reported' && item.answer.attributed_to.subject_id === me).map(item => row(draft, item)),
-      open: items.filter(item => item.kind !== 'decision' && item.state !== 'done').map(item => row(draft, item)),
+      open: items.filter(item => item.kind !== 'decision' && LIVE_WORK_STATES.includes(item.state)).map(item => row(draft, item)),
       decisions: items.filter(item => item.kind === 'decision' && !item.withdrawn).map(item => row(draft, item)),
       recently_decided: mine.map(item => ({ item, decided: decidedBy(item, me) }))
         .filter(entry => entry.decided !== null)
@@ -1607,11 +1672,11 @@ function createWorkService(options) {
   return Object.freeze({
     createProject, retireProject, updateProject,
     createItem, updateWork, moveItem, checkOnly, waitingOf, attachEvidence, addNote, share,
-    answer, reportAnswer, confirmReported, reopen, withdraw, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
+    answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
     needsMe, replay,
   });
 }
 
-module.exports = Object.freeze({ KINDS, WORK_STATES, SEVERITIES, CREATE_KEYS, canonical, createWorkService, stripIds });
+module.exports = Object.freeze({ KINDS, WORK_STATES, LIVE_WORK_STATES, SEVERITIES, CREATE_KEYS, canonical, createWorkService, stripIds });

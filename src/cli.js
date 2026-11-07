@@ -67,7 +67,9 @@ Usage:
   interlock work get ID --connection NAME [--json]
   interlock work changes --connection NAME --after N [--limit N] [--json]
   interlock work create --connection NAME --file PATH [--json]
-  interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|withdraw ID --connection NAME --file PATH [--json]
+  interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen ID --connection NAME --file PATH [--json]
+  interlock work withdraw ID --connection NAME --file PATH [--json]
+      ID is W-n work or finding, or D-n decision; the file holds expected_revision and reason
   interlock work project-update PROJECT --connection NAME --file PATH [--json]
   interlock work ask-approval --connection NAME --file PATH [--json]
   interlock work kill ID --connection NAME --file PATH|--stdin [--json]
@@ -2960,7 +2962,8 @@ const WORK_VERBS = Object.freeze({
   'report-answer': Object.freeze({ path: '/api/ai/work/decisions/report', method: 'POST', id: true }),
   confirm: Object.freeze({ path: '/api/ai/work/decisions/confirm', method: 'POST', id: true }),
   reopen: Object.freeze({ path: '/api/ai/work/decisions/reopen', method: 'POST', id: true }),
-  withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', method: 'POST', id: true }),
+  // A W-n work or finding item by the items route, a D-n decision by its own.
+  withdraw: Object.freeze({ path: '/api/ai/work/decisions/withdraw', workPath: '/api/ai/work/items/withdraw', method: 'POST', id: true }),
   // A request for approval: {project, title, scope, body?}; routed by the room.
   'ask-approval': Object.freeze({ path: '/api/ai/work/approvals/ask', method: 'POST', id: false }),
   // The kill slot's words are text, not a JSON body: from a file or stdin,
@@ -3088,6 +3091,7 @@ const WORK_REFUSAL_HINTS = Object.freeze({
   'invalid-links': 'links are ids of records in this room (W-n, D-n); put an outside reference in source.',
   'scope-too-long': 'What a yes means (scope) is at most 300 characters; put the rest in body.',
   'not-lead': 'Only an administrator, the first owner or the project\'s lead changes its objective or today line.',
+  'not-withdrawer': 'Work is withdrawn by whoever filed it, its project\'s lead, the first owner or an administrator; a holder can hand it back instead (update responsible).',
   'project-retired': 'That project is retired; nothing in it changes.',
 });
 
@@ -3129,12 +3133,18 @@ function killSuffix(row) {
   return word === null ? '' : ` · ${word}`;
 }
 
+// A live item linked to withdrawn work: its blocker was dropped, not finished.
+function blockerWithdrawn(row, separator) {
+  const ids = Array.isArray(row.blocker_withdrawn) ? row.blocker_withdrawn.filter(id => typeof id === 'string') : [];
+  return ids.length ? `${separator}blocker withdrawn: ${ids.map(id => terminalSafe(id)).join(', ')}` : '';
+}
+
 function workRow(row) {
   if (row.kind === 'decision') {
     return `${row.id} · ${row.state}${killSuffix(row)} · asked of ${who(row.asked_of)} by ${who(row.asked_by)} · ${terminalSafe(row.title)}`;
   }
   const next = row.next_to ? `${who(row.next_to)} — ${terminalSafe(row.next_action || '')}` : 'nobody';
-  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}`;
+  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}${blockerWithdrawn(row, ' · ')}`;
 }
 
 function needsRow(row) {
@@ -3142,7 +3152,7 @@ function needsRow(row) {
     return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.proposal || '')} (${row.state}${killSuffix(row)}, asked by ${who(row.asked_by)})`;
   }
   const awaiting = row.awaiting ? `, awaiting ${row.awaiting}` : '';
-  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting})`;
+  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting}${blockerWithdrawn(row, ', ')})`;
 }
 
 function renderBrief(stdout, brief, connection) {
@@ -3227,7 +3237,11 @@ function renderWrite(stdout, verb, result, connection) {
     else line(stdout, `Recorded a reported answer on ${item.id} (reported, not confirmed by ${who(item.answer && item.answer.attributed_to) === 'nobody' && exposure ? terminalSafe(exposure.to) : who(item.answer && item.answer.attributed_to)}).`);
   } else if (verb === 'confirm') line(stdout, `Confirmed the reported answer on ${item.id} (${item.state}).`);
   else if (verb === 'reopen') line(stdout, `Reopened ${item.id} (${item.state}, asked of ${who(item.asked_of)}).`);
-  else if (verb === 'withdraw') line(stdout, `Withdrew ${item.id} (${item.state}).`);
+  else if (verb === 'withdraw') {
+    line(stdout, `Withdrew ${item.id} (${terminalSafe(String(item.state))}).`);
+    const left = Array.isArray(result.left_waiting) ? result.left_waiting.filter(row => row && typeof row.id === 'string') : [];
+    if (left.length) line(stdout, `Still linked to it: ${left.map(row => terminalSafe(row.id)).join(', ')}. Each shows its blocker as withdrawn, and its holder was told.`);
+  }
   else if (verb === 'ask-approval') {
     const message = result.message && Number.isSafeInteger(result.message.id) ? ` as message #${result.message.id}` : '';
     const approver = item.approval && item.approval.approver ? who(item.approval.approver) : 'the owner';
@@ -3261,7 +3275,8 @@ async function runWork(args, io, dependencies = {}) {
   }
   const fetcher = dependencies.fetch || globalThis.fetch;
   const { spec } = parsed;
-  let pathname = spec.path + (spec.method === 'GET' && spec.id ? parsed.id : '');
+  const base = spec.workPath && typeof parsed.id === 'string' && parsed.id.startsWith('W-') ? spec.workPath : spec.path;
+  let pathname = base + (spec.method === 'GET' && spec.id ? parsed.id : '');
   let requestOptions = { method: spec.method, raw: spec.raw === true };
   if (spec.method === 'POST' && spec.words) {
     let words;
