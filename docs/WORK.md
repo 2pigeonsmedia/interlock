@@ -75,7 +75,9 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   first owner and administrators; anyone else gets `403 not-assigner` with
   `can_assign`, the names to ask. Anyone may take an item nobody holds and
   nobody is next on (in either slot), and taking it lets the same request
-  name who is next; whoever is in a slot may step out of it. Entering `blocked` drops whoever was next, so name the unblocker in
+  name who is next; whoever is in a slot may step out of it. A state change
+  that drops someone else from `next_to` (entering `blocked`, or `done`) is
+  an assignment too: the same people only, else `403 not-assigner`. Entering `blocked` drops whoever was next, so name the unblocker in
   that same request.
 - `withdrawn` says the work was dropped, never that it was finished. Only
   `items/withdraw` sets it, with a required `reason`, by whoever filed the item,
@@ -84,11 +86,11 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   changing `responsible`). Done work is reopened first and a request for
   approval closes by its own path (`409 invalid-state`, `400 invalid-kind`).
   Withdrawing clears `next_to` and is kept as a `withdrawn` event with the
-  reason and `before`/`after`. `items/update` with `state: "open"` (or any
-  live state) and a `note` undoes it, by the same four (`403 not-withdrawer`
+  reason and `before`/`after`. `items/update` with `state: "open"` (and no
+  other state, else `409 invalid-state`) and a `note` undoes it, by the same four (`403 not-withdrawer`
   for anyone else, the holder included); `items/update` never sets `withdrawn`.
-- A live item linked to withdrawn work (by `links` either way, or as its
-  parent or child) carries `blocker_withdrawn`, the ids of that withdrawn
+- A live item that depends on withdrawn work (its own `links` name it, or it
+  is its child) carries `blocker_withdrawn`, the ids of that withdrawn
   work, in `list`, `brief` and `items/<id>` reads: its blocker was dropped,
   not finished. Derived on each read; unlinking clears it.
 - Changing `target` records the change; earlier evidence stays pinned to the

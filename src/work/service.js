@@ -487,9 +487,10 @@ function createWorkService(options) {
     return open ? open.id : null;
   }
 
-  // Linked either way, or parent and child: the relation blocksOf reads.
-  function related(a, b) {
-    return a.id !== b.id && (a.links.includes(b.id) || b.links.includes(a.id) || a.parent === b.id || b.parent === a.id);
+  // `dependent` waits on `base`: it links to it or is its child, the way
+  // waitingOf reads an item's own links and parent.
+  function dependsOn(dependent, base) {
+    return dependent.id !== base.id && (dependent.links.includes(base.id) || dependent.parent === base.id);
   }
 
   /* The withdrawn work a live item is linked to (ruling,
@@ -497,7 +498,7 @@ function createWorkService(options) {
    * than reading as clear. Derived on each read; unlinking clears it. */
   function blockerWithdrawn(draft, item) {
     if (item.kind === 'decision' || !LIVE_WORK_STATES.includes(item.state)) return [];
-    return draft.items.filter(other => other.kind !== 'decision' && other.state === 'withdrawn' && related(item, other))
+    return draft.items.filter(other => other.kind !== 'decision' && other.state === 'withdrawn' && dependsOn(item, other))
       .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => other.id);
   }
 
@@ -798,6 +799,8 @@ function createWorkService(options) {
       // Undoing a withdraw is the withdrawer's act too (ruling, 2026-11-07):
       // a holder cannot bring back what its filer or lead dropped.
       if (item.state === 'withdrawn' && body.state !== undefined && !mayWithdrawAs(actor, item, now)) fail('not-withdrawer');
+      // And it goes back to open, never straight to done or another state.
+      if (item.state === 'withdrawn' && body.state !== undefined && body.state !== 'open') fail('invalid-state');
       apply('title', optionalText(body.title, TITLE_BYTES, 'title'));
       apply('body', optionalText(body.body, BODY_BYTES, 'body'));
       apply('links', validLinks(draft, body.links));
@@ -849,6 +852,13 @@ function createWorkService(options) {
         next.done_evidence = null;
         next.done_without_evidence = false;
         changed.push('done_evidence', 'done_without_evidence');
+      }
+      // A state change that drops someone else from next (entering Blocked,
+      // or Done) is an assignment too: only whoever may assign drops them,
+      // so it cannot clear the way to a claim. (Whoever is next is among
+      // them, so may drop themselves.)
+      if (body.next_to === undefined && item.next_to && next.next_to === null && !mayAssign(actor, item, now)) {
+        fail('not-assigner', { can_assign: assignerNames(item, now) });
       }
       if (next.next_to && next.next_action.trim() === '') fail('invalid-next-action');
       next.revision = item.revision + 1;
@@ -1594,7 +1604,7 @@ function createWorkService(options) {
         touch(item, now);
         appendEvent(draft, now, actor, { item: item.id, project: item.project, kind: 'withdrawn', reason, before, after });
         const leftWaiting = draft.items.filter(other => other.kind !== 'decision' &&
-          LIVE_WORK_STATES.includes(other.state) && related(item, other))
+          LIVE_WORK_STATES.includes(other.state) && dependsOn(other, item))
           .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(other => row(draft, other));
         return { ok: true, item: publicItem(item), left_waiting: leftWaiting };
       });
