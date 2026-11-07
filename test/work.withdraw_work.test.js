@@ -233,3 +233,23 @@ test('the markdown export shows withdrawn work as withdrawn, never as done', () 
   assert.match(text, /Filer · withdrawn · reason: Not needed after the March close\./, 'the reason is in the event lines');
   assert.doesNotMatch(text, /no evidence attached/);
 });
+
+test('undoing a withdraw follows the same rule: filer, lead, first owner or administrator; never the holder', () => {
+  const { work } = fresh();
+  const item = newWork(work, filer, { responsible: ref(holder) });
+  const gone = withdraw(work, filer, item).item;
+  const reopen = (actor, current) => work.updateWork(actor, {
+    operation_id: uuid(), id: current.id, expected_revision: current.revision, note: 'back', state: 'open',
+  });
+  code(() => reopen(holder, gone), 'not-withdrawer');
+  code(() => reopen(other, gone), 'not-withdrawer');
+  assert.equal(work.get(filer, { id: item.id }).item.state, 'withdrawn', 'a refused undo changes nothing');
+  // A withdrawn item still takes an edit that leaves it withdrawn, as done work does.
+  const edited = work.updateWork(holder, { operation_id: uuid(), id: gone.id, expected_revision: gone.revision, note: 'typo', title: 'Reconcile March (dropped)' });
+  assert.equal(edited.item.state, 'withdrawn');
+  assert.equal(reopen(lead, edited.item).item.state, 'open', 'the project\'s live lead');
+  for (const actor of [filer, first, admin]) {
+    const again = withdraw(work, filer, work.get(filer, { id: item.id }).item).item;
+    assert.equal(reopen(actor, again).item.state, 'open', actor.name);
+  }
+});

@@ -12,7 +12,7 @@ your own checks.
 **Work and findings can be withdrawn.** A work or finding item that is no
 longer wanted is withdrawn with a reason (`work withdraw W-n`, or Withdraw in
 its drawer) by whoever filed it, its project's lead, the first owner or an
-administrator. It reads *withdrawn*, never *done*. A live item linked to it
+administrator, and only they can undo it. It reads *withdrawn*, never *done*. A live item linked to it
 says *blocker withdrawn* and its holder is rung once.
 
 **Joining and the doorbell.** `interlock join` accepts a room address with a

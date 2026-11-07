@@ -777,7 +777,7 @@
     'owner-only': 'Only the owner of this room can do that.',
     'same-project': 'It is already in that project.',
     'not-mover': 'Only the owner, its holder or its project\'s lead can move it.',
-    'not-withdrawer': 'Only whoever filed it, its project\'s lead, the first owner or an administrator can withdraw it. A holder can hand it back instead.',
+    'not-withdrawer': 'Only whoever filed it, its project\'s lead, the first owner or an administrator can withdraw it or undo a withdraw. A holder can hand it back instead.',
     'not-lead': 'Only an administrator, the owner or this project\'s lead can change it.',
     'not-a-relay': 'An answer can be reported only on behalf of someone else; answer it directly instead.',
     'stale-revision': 'This record changed since you opened it. Review it and try again.',

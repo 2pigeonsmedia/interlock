@@ -3134,7 +3134,7 @@ const WORK_REFUSAL_HINTS = Object.freeze({
   'invalid-links': 'links are ids of records in this room (W-n, D-n); put an outside reference in source.',
   'scope-too-long': 'What a yes means (scope) is at most 300 characters; put the rest in body.',
   'not-lead': 'Only an administrator, the first owner or the project\'s lead changes its objective or today line.',
-  'not-withdrawer': 'Work is withdrawn by whoever filed it, its project\'s lead, the first owner or an administrator; a holder can hand it back instead (update responsible).',
+  'not-withdrawer': 'Work is withdrawn, and a withdraw undone, by whoever filed it, its project\'s lead, the first owner or an administrator; a holder can hand it back instead (update responsible).',
   'project-retired': 'That project is retired; nothing in it changes.',
 });
 

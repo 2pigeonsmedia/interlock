@@ -721,6 +721,9 @@ function createWorkService(options) {
         next[field] = value;
       };
       if (body.state !== undefined && !WORK_STATES.includes(body.state)) fail('invalid-state');
+      // Undoing a withdraw is the withdrawer's act too (ruling, 2026-11-07):
+      // a holder cannot bring back what its filer or lead dropped.
+      if (item.state === 'withdrawn' && body.state !== undefined && !mayWithdrawAs(actor, item, now)) fail('not-withdrawer');
       apply('title', optionalText(body.title, TITLE_BYTES, 'title'));
       apply('body', optionalText(body.body, BODY_BYTES, 'body'));
       apply('links', validLinks(draft, body.links));

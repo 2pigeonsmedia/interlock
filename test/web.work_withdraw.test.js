@@ -40,7 +40,7 @@ test('a withdrawn follow-up is not an open one', () => {
 
 test('a refused withdraw reads as words', () => {
   assert.equal(MODEL.errorWords('not-withdrawer'),
-    'Only whoever filed it, its project\'s lead, the first owner or an administrator can withdraw it. A holder can hand it back instead.');
+    'Only whoever filed it, its project\'s lead, the first owner or an administrator can withdraw it or undo a withdraw. A holder can hand it back instead.');
 });
 
 test('Withdraw is offered only to who may withdraw the record, and it sends items/withdraw with a reason at the record revision', () => {

@@ -78,7 +78,8 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   approval closes by its own path (`409 invalid-state`, `400 invalid-kind`).
   Withdrawing clears `next_to` and is kept as a `withdrawn` event with the
   reason and `before`/`after`. `items/update` with `state: "open"` (or any
-  live state) and a `note` undoes it; `items/update` never sets `withdrawn`.
+  live state) and a `note` undoes it, by the same four (`403 not-withdrawer`
+  for anyone else, the holder included); `items/update` never sets `withdrawn`.
 - A live item linked to withdrawn work (by `links` either way, or as its
   parent or child) carries `blocker_withdrawn`, the ids of that withdrawn
   work, in `list`, `brief` and `items/<id>` reads: its blocker was dropped,
