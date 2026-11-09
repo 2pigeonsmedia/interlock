@@ -113,16 +113,19 @@
     // poll for hours, or none: an @mention will not wake it).
     if (row.last_polled_at !== undefined) {
       const base = pollWord(row, now, lastHeard, notPickedUp);
-      // Waiting on someone goes ahead of the state word, in amber: declared
-      // on the presence line, or derived from a blocked item (until the seat
-      // posts after the wait began).
+      // Waiting on someone shows in amber, after the state word: declared on
+      // the presence line, or derived from a blocked item (until the seat
+      // posts after the wait began). The state word goes first on every row
+      // that adds to it, because a narrow sidebar cuts the row at the right
+      // and the state word says whether an @mention reaches the seat.
+      const quiet = base.word === 'not listening';
       const derived = row.waiting && typeof row.waiting.name === 'string' &&
         !(Number.isSafeInteger(row.last_posted_at) && Number.isSafeInteger(row.waiting.since) &&
           row.last_posted_at > row.waiting.since) ? row.waiting : null;
       const declared = row.presence && row.presence.waiting_on ? row.presence.waiting_on : null;
       if (declared || derived) {
         const head = declared ? 'waiting on ' + declared : 'waiting on ' + derived.name + ' · ' + derived.item;
-        return { word: head + ' · ' + base.word, light: 'amber',
+        return { word: base.word + ' · ' + head, light: 'amber',
           age_since: declared ? row.presence.since : derived.since, notPickedUp };
       }
       // What it is doing, ahead of the state word (her ask, 2026-10-31): its
@@ -131,9 +134,15 @@
       const middle = row.presence && row.presence.middle &&
         !(Number.isSafeInteger(row.last_posted_at) && Number.isSafeInteger(row.presence.since) &&
           row.last_posted_at > row.presence.since) ? row.presence.middle : null;
-      if (middle) return Object.assign({}, base, { word: middle + ' · ' + base.word, age_since: row.presence.since });
+      // A seat that is not listening is doing nothing: its line reads after
+      // the state word, and an item it still has reads "holds".
+      if (middle) {
+        return Object.assign({}, base, { word: quiet ? base.word + ' · ' + middle : middle + ' · ' + base.word,
+          age_since: row.presence.since });
+      }
       if (row.working_on && typeof row.working_on.item === 'string') {
-        return Object.assign({}, base, { word: 'working on ' + row.working_on.item + ' · ' + base.word });
+        return Object.assign({}, base, { word: quiet ? base.word + ' · holds ' + row.working_on.item
+          : 'working on ' + row.working_on.item + ' · ' + base.word });
       }
       return base;
     }

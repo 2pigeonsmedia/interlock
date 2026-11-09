@@ -49,7 +49,7 @@ test('with no line, a seat working on an item says so ahead of the state word', 
 test('waiting on, sent only when every item is blocked, still outranks both', () => {
   const state = model.stateOf(seat({ presence: RUNNING, working_on: null,
     waiting: { name: 'Fruiteater', item: 'W-30', since: NOW - 2 * MINUTE } }), NOW);
-  assert.deepEqual([state.word, state.light], ['waiting on Fruiteater · W-30 · listening', 'amber']);
+  assert.deepEqual([state.word, state.light], ['listening · waiting on Fruiteater · W-30', 'amber']);
 });
 
 test('a People row may carry working_on; the detail names the item and any block on the others', () => {

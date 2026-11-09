@@ -199,21 +199,21 @@ test('state words by her definition: an AI listens, works or is not listening, b
   assert.equal(ai({ last_polled_at: NOW - 4 * 60 * MINUTE }).word, 'not listening', 'no poll for hours: a mention will not wake it');
   assert.equal(ai({ last_polled_at: null, last_posted_at: NOW - MINUTE }).word, 'not listening', 'posting is not a doorbell');
   assert.equal(ai({ last_polled_at: NOW - 30_000,
-    presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW } }).word, 'waiting on Patti · listening', 'waiting goes ahead of the state word');
+    presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW } }).word, 'listening · waiting on Patti', 'the state word, then the wait');
   const human = extra => model.stateOf(person('Ana', Object.assign({ last_polled_at: null }, extra)), NOW).word;
   assert.equal(human({ last_heard: NOW - MINUTE }), 'here', 'her page polled lately');
   assert.equal(human({ last_heard: NOW - 30 * MINUTE }), 'away');
   assert.equal(human({ last_heard: NOW - MINUTE, last_posted_at: NOW - MINUTE }), 'here', 'a person is never working');
 });
 
-test('waiting on: declared or derived from a blocked item, shown ahead of the state word, cleared when the seat posts', () => {
+test('waiting on: declared or derived from a blocked item, shown after the state word, cleared when the seat posts', () => {
   const ai = extra => model.stateOf(seat('Pitta', Object.assign({ last_posted_at: null, last_polled_at: NOW - 30_000 }, extra)), NOW);
   const derived = ai({ waiting: { name: 'Plantcutter', item: 'W-7', since: NOW - 20 * MINUTE } });
-  assert.deepEqual([derived.word, derived.light], ['waiting on Plantcutter · W-7 · listening', 'amber'], 'who, what, then the state word');
+  assert.deepEqual([derived.word, derived.light], ['listening · waiting on Plantcutter · W-7', 'amber'], 'the state word, then who and what');
   assert.equal(ai({ waiting: { name: 'Plantcutter', item: 'W-7', since: NOW - 20 * MINUTE }, last_posted_at: NOW - MINUTE }).word,
     'listening', 'it posted since: it is not just waiting');
   const declared = ai({ presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW - MINUTE } });
-  assert.deepEqual([declared.word, declared.light], ['waiting on Patti · listening', 'amber'], 'a declared wait, ahead of the state word');
+  assert.deepEqual([declared.word, declared.light], ['listening · waiting on Patti', 'amber'], 'a declared wait, after the state word');
   assert.equal(ai({ waiting: null }).word, 'listening');
 });
 
