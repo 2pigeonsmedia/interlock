@@ -45,6 +45,12 @@ function reservePort() {
   return reserveTestPort();
 }
 
+// Every request this file sends, until its response ends. A failed test can
+// leave one unanswered (the filing it was holding, or an answer waiting on
+// it); the test destroys those, so the file exits RED instead of hanging on
+// an open socket.
+const openRequests = new Set();
+
 function call(runtime, options = {}) {
   return new Promise((resolve, reject) => {
     const body = options.body === undefined ? null : Buffer.from(JSON.stringify(options.body));
@@ -60,12 +66,15 @@ function call(runtime, options = {}) {
       const chunks = [];
       response.on('data', chunk => chunks.push(chunk));
       response.on('end', () => {
+        openRequests.delete(request);
         const text = Buffer.concat(chunks).toString('utf8');
         let json = null;
         try { json = JSON.parse(text); } catch (_) { json = null; }
         resolve({ status: response.statusCode, headers: response.headers, text, json });
       });
     });
+    openRequests.add(request);
+    request.once('close', () => openRequests.delete(request));
     request.once('error', error => {
       error.message += ` (${options.method || 'GET'} ${options.path || '/'})`;
       reject(error);
@@ -251,5 +260,7 @@ test('a filing in flight holds only answers that could name its ask, and only fo
     let closeTimer;
     await Promise.race([runtime.close(), new Promise(resolve => { closeTimer = setTimeout(resolve, 5_000); closeTimer.unref(); })]);
     clearTimeout(closeTimer);
+    for (const request of openRequests) request.destroy();
+    openRequests.clear();
   }
 });

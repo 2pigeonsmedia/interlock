@@ -25,6 +25,6 @@
     "identity": "file:./identity"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.js\" \"identity/test/*.test.js\""
+    "test": "node --test --test-force-exit --test-timeout=180000 \"test/*.test.js\" \"identity/test/*.test.js\""
   }
 }

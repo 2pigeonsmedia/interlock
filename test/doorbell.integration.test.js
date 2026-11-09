@@ -12,6 +12,42 @@ const { once } = require('node:events');
 
 const profileModule = require('../src/client/profiles.js');
 
+// Every adapter process and fake room a test starts is tracked here. A test
+// that fails between starting one and stopping it would otherwise leave it
+// running (an armed adapter polls forever), and the file would never exit:
+// a hang, not a red line. After each test, whatever is still running is
+// killed and closed, within a bound.
+const liveChildren = new Set();
+const liveRooms = new Set();
+const STOP_BOUND_MS = 10_000;
+
+function spawnTracked(args, options) {
+  const child = childProcess.spawn(process.execPath, args, options);
+  liveChildren.add(child);
+  child.once('exit', () => liveChildren.delete(child));
+  return child;
+}
+
+// Stops a child and waits for it to exit. One that has already exited is
+// done: waiting for an 'exit' that already fired would never return.
+async function stopChild(child, signal = 'SIGTERM') {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = once(child, 'exit');
+  child.kill(signal);
+  let timer;
+  const bound = new Promise(resolve => { timer = setTimeout(resolve, STOP_BOUND_MS); });
+  await Promise.race([exited, bound]);
+  clearTimeout(timer);
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+}
+
+test.afterEach(async () => {
+  for (const child of [...liveChildren]) await stopChild(child, 'SIGKILL');
+  liveChildren.clear();
+  for (const room of [...liveRooms]) await room.close();
+  liveRooms.clear();
+});
+
 const ROOT = path.join(__dirname, '..');
 const RUNNER = path.join(ROOT, 'integrations', 'doorbell.js');
 const REQUEST_A = '11111111-1111-4111-8111-111111111111';
@@ -263,7 +299,7 @@ test('status reports absent, starting, ready, then stale without private hooks',
 
   const world = fixture(ringPage());
   world.delay = 500;
-  const child = childProcess.spawn(process.execPath, [
+  const child = spawnTracked([
     RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
     '--session', 'host-session-1', '--state-dir', world.stateDir,
   ], {
@@ -284,8 +320,7 @@ test('status reports absent, starting, ready, then stale without private hooks',
   assert.equal(ready.status, 0, ready.stderr);
   assert.equal(JSON.parse(ready.stdout).state, 'ready');
 
-  child.kill();
-  await once(child, 'exit');
+  await stopChild(child);
   const stale = runCommand(world, statusArgs(world));
   assert.equal(stale.status, 1);
   const staleStatus = JSON.parse(stale.stdout);
@@ -315,7 +350,7 @@ test('status from a caller that cannot see the adapter process says unverifiable
   const { inspectStatus, parseStatusArgs } = require('../integrations/doorbell.js');
   const world = fixture(ringPage());
   world.delay = 500;
-  const child = childProcess.spawn(process.execPath, [
+  const child = spawnTracked([
     RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
     '--session', 'host-session-1', '--state-dir', world.stateDir,
   ], { cwd: ROOT, env: runnerEnv(world), stdio: ['ignore', 'pipe', 'pipe'] });
@@ -332,7 +367,7 @@ test('status from a caller that cannot see the adapter process says unverifiable
     assert.equal(owner.value.started_at, runtime.started_at);
     assert.match(owner.value.pid_namespace, /^pid:\[[0-9]+\]$/);
   } finally {
-    child.kill();
+    await stopChild(child);
     await exited;
   }
   const options = parseStatusArgs(['--connection', 'Marlow', '--state-dir', world.stateDir]);
@@ -362,7 +397,7 @@ test('status reports immediate and aged recovery as starting during the first po
     // The first poll is held long enough for status to land inside it even on
     // a loaded machine; the adapter is killed as soon as status has answered.
     world.delay = 3000;
-    const child = childProcess.spawn(process.execPath, [
+    const child = spawnTracked([
       RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
       '--session', 'host-session-1', '--state-dir', world.stateDir,
     ], {
@@ -378,8 +413,7 @@ test('status reports immediate and aged recovery as starting during the first po
     assert.equal(JSON.parse(recovering.stdout).state, 'starting', label);
     assert.match(JSON.parse(recovering.stdout).detail, /after recovery/);
 
-    child.kill();
-    await once(child, 'exit');
+    await stopChild(child);
   }
 
   await proveStarting('fresh prior state');
@@ -396,7 +430,7 @@ test('status explains a live adapter with no recent successful poll', async () =
   ]);
   assert.equal(seeded.status, 0, seeded.stderr);
   world.delay = 500;
-  const child = childProcess.spawn(process.execPath, [
+  const child = spawnTracked([
     RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
     '--session', 'host-session-1', '--state-dir', world.stateDir,
   ], {
@@ -418,8 +452,7 @@ test('status explains a live adapter with no recent successful poll', async () =
     assert.match(status.detail, /no successful poll in the last 75 s/);
     assert.match(status.detail, /may be retrying an unreachable room/);
   } finally {
-    child.kill();
-    await once(child, 'exit');
+    await stopChild(child);
   }
 });
 
@@ -617,7 +650,7 @@ test('replacement guidance is limited to the first poll of retained state', () =
 test('a second live adapter cannot steal one connection from the first', async () => {
   const world = fixture(ringPage({ rings: [], cursor: 5 }));
   world.delay = 500;
-  const first = childProcess.spawn(process.execPath, runnerArgs(world, 'stdout'), {
+  const first = spawnTracked(runnerArgs(world, 'stdout'), {
     cwd: ROOT,
     env: runnerEnv(world),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -658,9 +691,12 @@ function fakeRoom() {
     });
     room.server.listen(port, '127.0.0.1');
     await once(room.server, 'listening');
+    liveRooms.add(room);
     room.port = room.server.address().port;
   };
   room.close = async () => {
+    liveRooms.delete(room);
+    if (!room.server || !room.server.listening) return;
     room.server.closeAllConnections();
     room.server.close();
     await once(room.server, 'close');
@@ -715,7 +751,7 @@ function roomWorld(port, schedule) {
 }
 
 function startAdapter(world, adapter = 'stdout', extraEnv = {}) {
-  const child = childProcess.spawn(process.execPath, [
+  const child = spawnTracked([
     RUNNER, 'run', '--adapter', adapter, '--connection', 'Marlow',
     '--session', 'host-session-1', '--state-dir', world.stateDir, '--once',
   ], { cwd: ROOT, env: Object.assign({}, world.env, extraEnv) });
@@ -865,7 +901,7 @@ test('a good poll restores the full retry budget for the next outage', async () 
     return null;
   };
   // No --once: this adapter keeps polling after a good page, as an armed one does.
-  const child = childProcess.spawn(process.execPath, [
+  const child = spawnTracked([
     RUNNER, 'run', '--adapter', 'stdout', '--connection', 'Marlow',
     '--session', 'host-session-1', '--state-dir', world.stateDir,
   ], { cwd: ROOT, env: world.env });
