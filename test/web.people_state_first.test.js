@@ -31,7 +31,7 @@ function seat(silentFor, extra = {}) {
 
 const HOLDING = { working_on: { item: 'W-50', title: 'Import the rules', blocked: null } };
 const WAITING = since => ({ waiting: { name: 'Fruiteater', item: 'W-30', since } });
-const DECLARED = since => ({ presence: { middle: null, waiting_on: 'Patti', need: null, since } });
+const DECLARED = since => ({ presence: { middle: null, waiting_on: 'Ana', need: null, since } });
 const MIDDLE = since => ({ presence: { middle: 'running the suite', waiting_on: null, need: null, since } });
 
 // Silence measured from the last doorbell poll. Each line was posted just
@@ -69,7 +69,7 @@ test('a waiting seat keeps its amber and puts the state word first, derived or d
     const derived = model.stateOf(seat(silent, WAITING(NOW - silent - 30_000)), NOW);
     assert.deepEqual([derived.word, derived.light], [word + ' · waiting on Fruiteater · W-30', 'amber'], label);
     const declared = model.stateOf(seat(silent, DECLARED(NOW - silent - 30_000)), NOW);
-    assert.deepEqual([declared.word, declared.light], [word + ' · waiting on Patti', 'amber'], label);
+    assert.deepEqual([declared.word, declared.light], [word + ' · waiting on Ana', 'amber'], label);
   }
   const live = model.stateOf(seat(30_000, WAITING(NOW - 50_000)), NOW);
   assert.deepEqual([live.word, live.light], ['listening · waiting on Fruiteater · W-30', 'amber'], 'listening too');
