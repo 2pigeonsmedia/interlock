@@ -32,23 +32,56 @@ function count(output, key) {
   return match ? Number(match[1]) : 0;
 }
 
+// Every file's process, so a timeout or an interrupted run stops the whole
+// tree: `node --test` starts the file in a process of its own, and killing
+// only the outer one would leave the test running.
+const running = new Set();
+
+function killTree(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32') {
+    childProcess.spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    return;
+  }
+  try {
+    process.kill(-child.pid, 'SIGKILL');
+  } catch (_) {
+    child.kill('SIGKILL');
+  }
+}
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    for (const child of running) killTree(child);
+    process.exit(130);
+  });
+}
+
 function runFile(file) {
   return new Promise(resolve => {
     const started = Date.now();
     const child = childProcess.spawn(process.execPath, ['--test', '--test-timeout=' + TEST_TIMEOUT_MS, file], {
       cwd: ROOT, env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
+      // Its own process group on POSIX, so the whole tree can be stopped.
+      detached: process.platform !== 'win32',
     });
+    running.add(child);
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      killTree(child);
     }, FILE_TIMEOUT_MS);
     // 'exit', not 'close': a process the file started may still hold the pipes.
     child.once('exit', code => {
       clearTimeout(timer);
+      running.delete(child);
+      // A file that ended on its own may still leave processes in its group.
+      if (process.platform !== 'win32') {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { /* the group is gone */ }
+      }
       child.stdout.destroy();
       child.stderr.destroy();
       resolve({ file, code, timedOut, output, ms: Date.now() - started });
