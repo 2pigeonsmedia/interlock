@@ -1057,19 +1057,25 @@ function createWorkService(options) {
       });
   }
 
-  // A report says the same thing as the recorded answer when its words, or
-  // the bare Yes or No, match the answer's (case, outer spaces and a closing
-  // full stop aside) and its conditions match too. Anything else is a
-  // different answer.
-  function sameWords(left, right) {
-    const plain = value => String(value ?? '').trim().replace(/[.!]+$/, '').replace(/\s+/g, ' ').toLowerCase();
-    return plain(left) === plain(right);
+  // A report says the same thing as the recorded answer only when its words
+  // match the answer's, with the same conditions, ignoring case, spaces at
+  // the ends, runs of spaces inside, and closing full stops or exclamation
+  // marks. A bare Yes or No matches only a bare recorded Yes or No, never a
+  // qualified one; a bare word against the opposite recorded choice never
+  // matches; and an answer recorded for someone else (on their behalf) is
+  // never matched by a report of the person's own word.
+  function plainWords(value) {
+    return String(value ?? '').trim().replace(/[.!]+$/, '').replace(/\s+/g, ' ').toLowerCase();
   }
 
-  function reportMatches(recorded, text, conditions) {
-    if (!sameWords(recorded.conditions, conditions)) return false;
-    if (sameWords(recorded.text, text)) return true;
-    return (recorded.choice === 'yes' || recorded.choice === 'no') && sameWords(recorded.choice, text);
+  function reportMatches(item, text, conditions) {
+    const recorded = item.answer;
+    if (!recorded.attributed_to || recorded.attributed_to.subject_id !== item.asked_of.subject_id) return false;
+    if (plainWords(recorded.conditions) !== plainWords(conditions)) return false;
+    const said = plainWords(text);
+    const choice = recorded.choice === 'yes' || recorded.choice === 'no' ? recorded.choice : null;
+    if (choice !== null && (said === 'yes' || said === 'no') && said !== choice) return false;
+    return plainWords(recorded.text) === said;
   }
 
   function reportAnswer(actor, rawInput) {
@@ -1085,10 +1091,12 @@ function createWorkService(options) {
         // Already answered the same way: nothing is written to the decision,
         // and no exposure is drafted. The recorded answer keeps its author,
         // its time and its source.
-        if (item.answer && reportMatches(item.answer, text, conditions)) {
+        if (item.answer && reportMatches(item, text, conditions)) {
           return { ok: true, item: publicItem(item), conflict: false, already: {
+            kind: item.answer.kind === 'reported' ? 'reported' : 'direct',
             choice: item.answer.choice === 'yes' || item.answer.choice === 'no' ? item.answer.choice : null,
             text: item.answer.text,
+            conditions: typeof item.answer.conditions === 'string' ? item.answer.conditions : '',
             room_message_id: Number.isSafeInteger(item.answer.room_message_id) ? item.answer.room_message_id : null,
           } };
         }

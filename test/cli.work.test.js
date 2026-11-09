@@ -136,8 +136,14 @@ test('work report-answer takes the id from argv, prints the exposure draft and h
 
 test('work report-answer on an answer already recorded prints one plain line and no exposure draft', async () => {
   const replies = [
-    [{ choice: 'yes', text: 'yes', room_message_id: 51 }, 'Already answered: yes, room #51 (D-4). Nothing recorded.'],
-    [{ choice: null, text: 'No guessing.', room_message_id: null }, 'Already answered: "No guessing." (D-4). Nothing recorded.'],
+    [{ kind: 'direct', choice: 'yes', text: 'yes', conditions: '', room_message_id: 51 },
+      'Already answered: yes, room #51 (D-4). Nothing recorded.'],
+    [{ kind: 'direct', choice: 'yes', text: 'Yes — NOT on prod', conditions: '', room_message_id: 51 },
+      'Already answered: yes, "Yes — NOT on prod", room #51 (D-4). Nothing recorded.'],
+    [{ kind: 'direct', choice: 'yes', text: 'Yes', conditions: 'March only', room_message_id: null },
+      'Already answered: yes, conditions "March only" (D-4). Nothing recorded.'],
+    [{ kind: 'reported', choice: null, text: 'No guessing.', conditions: '', room_message_id: null },
+      'Already reported, not confirmed: "No guessing." (D-4). Nothing recorded.'],
   ];
   for (const [already, expected] of replies) {
     const { dependencies } = world(({ body }) => ({

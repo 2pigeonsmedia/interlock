@@ -79,7 +79,7 @@ test('a report matching a room answer is a no-op that names the room message', (
     assert.equal(result.ok, true, words);
     assert.equal(result.conflict, false, words);
     assert.equal(result.exposure, undefined, words + ': no exposure draft');
-    assert.deepEqual(result.already, { choice: 'yes', text: 'yes', room_message_id: 51 }, words);
+    assert.deepEqual(result.already, { kind: 'direct', choice: 'yes', text: 'yes', conditions: '', room_message_id: 51 }, words);
     assert.deepEqual(recorded(work, id), before, words + ': nothing about the decision changed');
   }
 });
@@ -89,14 +89,12 @@ test('the room\'s own words match too, and a matching report never re-attributes
   const before = recorded(work, id);
   const result = report(work, id, 'yes, merge it.');
   assert.equal(result.conflict, false);
-  assert.deepEqual(result.already, { choice: 'yes', text: 'Yes, merge it', room_message_id: 51 });
+  assert.deepEqual(result.already, { kind: 'direct', choice: 'yes', text: 'Yes, merge it', conditions: '', room_message_id: 51 });
   const after = recorded(work, id);
   assert.deepEqual(after.item.answer.by, ref(Object.assign({}, owner, { session: null })));
   assert.equal(after.item.answer.at, before.item.answer.at);
   assert.equal(after.item.answer.source, 'answered in the room #51');
   assert.deepEqual(after, before);
-  assert.deepEqual(report(work, id, 'Yes').already, { choice: 'yes', text: 'Yes, merge it', room_message_id: 51 },
-    'a bare Yes matches a room Yes said in more words');
   assert.deepEqual(recorded(work, id), before);
 });
 
@@ -109,7 +107,7 @@ test('a report matching an answer recorded here is a no-op without a room messag
   const before = recorded(work, id);
   const result = report(work, id, 'no');
   assert.equal(result.conflict, false);
-  assert.deepEqual(result.already, { choice: null, text: 'No.', room_message_id: null });
+  assert.deepEqual(result.already, { kind: 'direct', choice: null, text: 'No.', conditions: '', room_message_id: null });
   assert.deepEqual(recorded(work, id), before);
 });
 
@@ -123,7 +121,7 @@ test('a report matching a reported answer is a no-op: the first reporter keeps t
   const result = report(work, id, 'no guessing');
   assert.equal(result.conflict, false);
   assert.equal(result.exposure, undefined);
-  assert.deepEqual(result.already, { choice: null, text: 'No guessing.', room_message_id: null });
+  assert.deepEqual(result.already, { kind: 'reported', choice: null, text: 'No guessing.', conditions: '', room_message_id: null });
   assert.deepEqual(recorded(work, id), before);
   assert.deepEqual(recorded(work, id).item.answer.by, ref(lead));
 });
@@ -146,4 +144,50 @@ test('a real conflict still records as before, with its exposure draft', () => {
     assert.equal(after.history.length, before.history.length + 1, label);
     assert.deepEqual(after.item.answer, before.item.answer, label + ': the recorded answer stands');
   }
+});
+
+// A qualified answer is not the same as a bare Yes or No: the relay's bare
+// word does not match it, so a dropped qualification is recorded, not lost.
+test('a bare yes against a qualified recorded yes is a conflict, not a match', () => {
+  for (const words of ['Yes — NOT on prod', 'yes, but only after the freeze lifts', 'Yes, merge it']) {
+    const { work, id } = answeredInRoom('yes', words);
+    const before = recorded(work, id);
+    const result = report(work, id, 'Yes');
+    assert.equal(result.conflict, true, words);
+    assert.equal(result.already, undefined, words);
+    assert.equal(recorded(work, id).history.at(-1).kind, 'reported-conflict', words);
+    assert.deepEqual(recorded(work, id).item.answer, before.item.answer, words);
+  }
+});
+
+test('the recorded choice decides: a reported yes never matches a tapped No whose words say yes', () => {
+  const { work, id } = answeredInRoom('no', 'yes');
+  const result = report(work, id, 'yes');
+  assert.equal(result.conflict, true);
+  assert.equal(result.already, undefined);
+  const agreeing = answeredInRoom('no', 'No');
+  assert.equal(report(agreeing.work, agreeing.id, 'no').conflict, false, 'ARRANGEMENT: the same word as the choice still matches');
+});
+
+test('an answer recorded on someone\'s behalf is not matched by a report of their own word', () => {
+  const { work } = fresh();
+  const bo = { subject_id: 's-7', name: 'Bo', kind: 'seat', owner: false };
+  const id = work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Dates?', body: 'b', asked_of: ref(bo),
+  }).item.id;
+  work.answer(owner, { operation_id: uuid(), id, expected_revision: 1, text: 'Yes', reason: 'Bo told me' });
+  assert.deepEqual(recorded(work, id).item.answer.attributed_to, ref(owner), 'ARRANGEMENT: attributed to the owner');
+  const result = report(work, id, 'yes');
+  assert.equal(result.conflict, true);
+  assert.equal(result.exposure.to, 'Bo');
+});
+
+test('conditions travel in the already line', () => {
+  const { work } = fresh();
+  const id = work.createItem(lead, {
+    operation_id: uuid(), kind: 'decision', project: 'ops', title: 'Dates?', body: 'b', asked_of: ref(owner),
+  }).item.id;
+  work.answer(owner, { operation_id: uuid(), id, expected_revision: 1, text: 'Yes', choice: 'yes', conditions: 'March only' });
+  const result = report(work, id, 'yes', { conditions: 'march only.' });
+  assert.deepEqual(result.already, { kind: 'direct', choice: 'yes', text: 'Yes', conditions: 'March only', room_message_id: null });
 });

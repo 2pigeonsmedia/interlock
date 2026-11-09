@@ -148,11 +148,17 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   carries an `exposure` draft addressed to the person whose words were relayed,
   for the reporter to send as an ordinary message. A report never replaces an
   answer recorded here; it attaches as a conflict. A report that says the
-  same as the recorded answer (the same words, or the bare Yes or No it
-  chose, with the same conditions; case, outer spaces and a closing full stop
-  aside) writes nothing to the decision and drafts no exposure: the response
-  carries `already` (`choice`, `text`, `room_message_id`) and the CLI prints
-  `Already answered: yes, room #N (D-n). Nothing recorded.`
+  same as the recorded answer writes nothing to the decision and drafts no
+  exposure. It says the same when its words and conditions match the
+  answer's, ignoring case, spaces at the ends, runs of spaces inside, and
+  closing full stops or exclamation marks. A bare Yes or No matches only a
+  bare recorded Yes or No, never a qualified answer ("Yes, not on prod"); a
+  bare word never matches the opposite recorded choice; and an answer
+  recorded on someone's behalf is never matched by a report of their own
+  word. The response carries `already` (`kind`, `choice`, `text`,
+  `conditions`, `room_message_id`) and the CLI prints the recorded answer in
+  full, for example `Already answered: yes, "Yes, not on prod", room #N (D-n).
+  Nothing recorded.`
 - The person a report names may confirm it (it becomes a direct answer) or
   correct it (the earlier wording stays in history).
 - Withdrawing, reopening and re-addressing are the asker's act or the owner's;

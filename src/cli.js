@@ -3424,9 +3424,20 @@ function renderWrite(stdout, verb, result, connection) {
   else if (verb === 'report-answer') {
     const already = result.already && typeof result.already === 'object' ? result.already : null;
     if (already) {
-      const said = already.choice === 'yes' || already.choice === 'no' ? already.choice : `"${terminalSafe(String(already.text))}"`;
-      const where = Number.isSafeInteger(already.room_message_id) ? `, room #${already.room_message_id}` : '';
-      line(stdout, `Already answered: ${said}${where} (${item.id}). Nothing recorded.`);
+      // The recorded words and conditions in full: a bare Yes never stands in
+      // for a qualified answer.
+      const choice = already.choice === 'yes' || already.choice === 'no' ? already.choice : null;
+      const words = String(already.text ?? '');
+      const bare = choice !== null && words.trim().replace(/[.!]+$/, '').toLowerCase() === choice;
+      const parts = [];
+      if (choice !== null) parts.push(choice);
+      if (!bare) parts.push(`"${terminalSafe(words)}"`);
+      if (typeof already.conditions === 'string' && already.conditions.trim() !== '') {
+        parts.push(`conditions "${terminalSafe(already.conditions)}"`);
+      }
+      if (Number.isSafeInteger(already.room_message_id)) parts.push(`room #${already.room_message_id}`);
+      const head = already.kind === 'reported' ? 'Already reported, not confirmed' : 'Already answered';
+      line(stdout, `${head}: ${parts.join(', ')} (${item.id}). Nothing recorded.`);
     } else if (result.conflict === true) line(stdout, `Recorded a conflicting report on ${item.id}; the answer recorded here stands.`);
     else line(stdout, `Recorded a reported answer on ${item.id} (reported, not confirmed by ${who(item.answer && item.answer.attributed_to) === 'nobody' && exposure ? terminalSafe(exposure.to) : who(item.answer && item.answer.attributed_to)}).`);
   } else if (verb === 'confirm') line(stdout, `Confirmed the reported answer on ${item.id} (${item.state}).`);
