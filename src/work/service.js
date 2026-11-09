@@ -1057,6 +1057,21 @@ function createWorkService(options) {
       });
   }
 
+  // A report says the same thing as the recorded answer when its words, or
+  // the bare Yes or No, match the answer's (case, outer spaces and a closing
+  // full stop aside) and its conditions match too. Anything else is a
+  // different answer.
+  function sameWords(left, right) {
+    const plain = value => String(value ?? '').trim().replace(/[.!]+$/, '').replace(/\s+/g, ' ').toLowerCase();
+    return plain(left) === plain(right);
+  }
+
+  function reportMatches(recorded, text, conditions) {
+    if (!sameWords(recorded.conditions, conditions)) return false;
+    if (sameWords(recorded.text, text)) return true;
+    return (recorded.choice === 'yes' || recorded.choice === 'no') && sameWords(recorded.choice, text);
+  }
+
   function reportAnswer(actor, rawInput) {
     return operation(actor, 'decisions.report', rawInput, ['id', 'expected_revision', 'text', 'source', 'conditions'],
       (draft, body, now) => {
@@ -1067,6 +1082,16 @@ function createWorkService(options) {
         const text = requiredText(body.text, BODY_BYTES, 'text');
         const source = requiredText(body.source, SHORT_BYTES, 'source');
         const conditions = optionalText(body.conditions, SHORT_BYTES, 'conditions') ?? '';
+        // Already answered the same way: nothing is written to the decision,
+        // and no exposure is drafted. The recorded answer keeps its author,
+        // its time and its source.
+        if (item.answer && reportMatches(item.answer, text, conditions)) {
+          return { ok: true, item: publicItem(item), conflict: false, already: {
+            choice: item.answer.choice === 'yes' || item.answer.choice === 'no' ? item.answer.choice : null,
+            text: item.answer.text,
+            room_message_id: Number.isSafeInteger(item.answer.room_message_id) ? item.answer.room_message_id : null,
+          } };
+        }
         const exposure = reportExposure(item, actor, text, source, conditions);
         if (item.answer && item.answer.kind === 'direct') {
           touch(item, now);

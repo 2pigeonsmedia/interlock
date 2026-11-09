@@ -134,6 +134,26 @@ test('work report-answer takes the id from argv, prints the exposure draft and h
   assert.match(result.stdout, /Send it with: interlock say --connection Marlow --file <the file you save it to>/);
 });
 
+test('work report-answer on an answer already recorded prints one plain line and no exposure draft', async () => {
+  const replies = [
+    [{ choice: 'yes', text: 'yes', room_message_id: 51 }, 'Already answered: yes, room #51 (D-4). Nothing recorded.'],
+    [{ choice: null, text: 'No guessing.', room_message_id: null }, 'Already answered: "No guessing." (D-4). Nothing recorded.'],
+  ];
+  for (const [already, expected] of replies) {
+    const { dependencies } = world(({ body }) => ({
+      json: {
+        ok: true, conflict: false, already,
+        item: { id: body.id, kind: 'decision', project: 'finance', title: 'Merge?', state: 'answered', revision: 3 },
+      },
+    }));
+    const file = tempJson({ expected_revision: 3, text: 'yes', source: 'room' });
+    const result = await captureCommand(['work', 'report-answer', 'D-4', '--connection', 'Marlow', '--file', file], dependencies);
+    assert.equal(result.code, EXIT_OK, result.stderr);
+    assert.equal(result.stdout.split('\n').filter(row => /^(Already|Recorded)/.test(row)).join('\n'), expected);
+    assert.doesNotMatch(result.stdout, /Exposure draft|conflicting/);
+  }
+});
+
 test('work share posts the file body with a generated operation id', async () => {
   const { calls, dependencies } = world(({ body }) => ({
     status: 201,
