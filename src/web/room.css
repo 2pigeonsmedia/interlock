@@ -539,7 +539,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   overflow-wrap: anywhere;
 }
 .people-group > summary:hover { color: var(--ink-2); }
-/* The row is a button: name, plate, state word, age. Its detail opens below. */
+/* The row is a button: name, then state word, age, plate. Its detail opens below. */
 .person-row {
   grid-column: 2;
   display: grid;

@@ -171,15 +171,15 @@ test('renderRoster puts People first and Not yet assigned last for a mixed roste
   assert.equal(groups[0].children[0].textContent, 'People');
 });
 
-test('a row reads name · plate · state word · age, and a quiet seat stays listed', () => {
+test('a row reads name · state word · age · plate, and a quiet seat stays listed', () => {
   const { page, el } = loadPage();
   page.renderRoster(MIXED);
   const finance = el('#roster-list').children.find(group => group.dataset.group === 'project:finance');
   const names = finance.findAll(node => node.tagName === 'STRONG').map(node => node.textContent);
   assert.deepEqual(names, ['Scout', 'Quiet']);
   const lines = finance.findAll(node => node.className === 'participant-fact participant-state').map(node => node.textContent);
-  assert.equal(lines[0], 'AI · opus-5.5 · working · 1m');
-  assert.equal(lines[1], 'AI · quiet · 3h');
+  assert.equal(lines[0], 'working · 1m · AI · opus-5.5', 'the state word first: a long model name cannot push it past the cut');
+  assert.equal(lines[1], 'quiet · 3h · AI');
   const lamps = finance.findAll(node => node.className === 'presence-lamp').map(node => node.dataset.state);
   assert.deepEqual(lamps, ['working', 'quiet']);
 });

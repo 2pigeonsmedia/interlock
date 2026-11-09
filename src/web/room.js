@@ -1064,8 +1064,10 @@ function rosterCard(participant, now, focusable) {
   const name = document.createElement('strong');
   name.textContent = participant.name;
   const age = InterlockPeopleModel.age(state.age_since, now);
+  // The state word first: the sidebar cuts the line at the right, and a long
+  // model name must never push the state word past the cut.
   toggle.append(name, participantFact(
-    [InterlockPeopleModel.plate(participant), state.word].concat(age ? [age] : []).join(' · '),
+    [state.word].concat(age ? [age] : [], [InterlockPeopleModel.plate(participant)]).join(' · '),
     'participant-state',
   ));
   card.append(toggle);

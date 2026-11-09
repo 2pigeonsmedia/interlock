@@ -87,11 +87,12 @@ test('an "in the middle of" line: not listening goes first', () => {
   }
 });
 
-test('the rendered row: name, then plate, then the state word, then any item', () => {
-  // room.js joins plate · word · age into the one line the sidebar cuts.
+test('the rendered row: the state word, then any item, then the age, then the plate', () => {
+  // room.js joins word · age · plate into the one line the sidebar cuts; the
+  // rendered order is pinned in web.people_column.test.js.
   const roomJs = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.js'), 'utf8');
-  assert.ok(roomJs.includes('[InterlockPeopleModel.plate(participant), state.word].concat(age ? [age] : []).join(\' · \')'));
+  assert.ok(roomJs.includes('[state.word].concat(age ? [age] : [], [InterlockPeopleModel.plate(participant)]).join(\' · \')'));
   const row = seat(DAY, HOLDING);
-  const line = [model.plate(row), model.stateOf(row, NOW).word, model.age(model.stateOf(row, NOW).age_since, NOW)].join(' · ');
-  assert.equal(line, 'AI · Opus 5.5 · not listening · holds W-50 · 1d');
+  const line = [model.stateOf(row, NOW).word, model.age(model.stateOf(row, NOW).age_since, NOW), model.plate(row)].join(' · ');
+  assert.equal(line, 'not listening · holds W-50 · 1d · AI · Opus 5.5');
 });

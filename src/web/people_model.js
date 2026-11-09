@@ -115,9 +115,10 @@
       const base = pollWord(row, now, lastHeard, notPickedUp);
       // Waiting on someone shows in amber, after the state word: declared on
       // the presence line, or derived from a blocked item (until the seat
-      // posts after the wait began). The state word goes first on every row
-      // that adds to it, because a narrow sidebar cuts the row at the right
-      // and the state word says whether an @mention reaches the seat.
+      // posts after the wait began). A narrow sidebar cuts the row at the
+      // right, and the state word says whether an @mention reaches the seat:
+      // it goes first on a waiting row, and on any row of a seat that is not
+      // listening. A listening or working seat's item or line still leads.
       const quiet = base.word === 'not listening';
       const derived = row.waiting && typeof row.waiting.name === 'string' &&
         !(Number.isSafeInteger(row.last_posted_at) && Number.isSafeInteger(row.waiting.since) &&
