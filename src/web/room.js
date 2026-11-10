@@ -936,8 +936,8 @@ function validParticipant(value) {
   const works = keys.includes('working_on');
   // `last_work_at` (0.3.6): when they last wrote to Work, or null.
   const wrote = keys.includes('last_work_at');
-  // `wake` (0.3.8): {ring_id, reply_id}, the room's proof of the wake path, or null.
-  const woke = keys.includes('wake');
+  // `last_answered` (0.3.8): {ring_id, reply_id, replied_at}, or null.
+  const woke = keys.includes('last_answered');
   if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) + (works ? 1 : 0) + (wrote ? 1 : 0) +
       (woke ? 1 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
@@ -951,9 +951,10 @@ function validParticipant(value) {
       typeof value.waiting.item === 'string' && Number.isSafeInteger(value.waiting.since)))) ||
     (works && !validWorkingOn(value.working_on)) ||
     (wrote && !(value.last_work_at === null || Number.isSafeInteger(value.last_work_at))) ||
-    (woke && !(value.wake === null || (value.wake && typeof value.wake === 'object' &&
-      Object.keys(value.wake).length === 2 && Number.isSafeInteger(value.wake.ring_id) &&
-      Number.isSafeInteger(value.wake.reply_id))))) return false;
+    (woke && !(value.last_answered === null || (value.last_answered && typeof value.last_answered === 'object' &&
+      Object.keys(value.last_answered).length === 3 && Number.isSafeInteger(value.last_answered.ring_id) &&
+      Number.isSafeInteger(value.last_answered.reply_id) &&
+      Number.isSafeInteger(value.last_answered.replied_at))))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'

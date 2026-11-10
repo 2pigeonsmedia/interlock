@@ -541,6 +541,9 @@ function openStore(opts) {
   // When each seat's doorbell last polled (the rings route), in memory only:
   // after a restart it is unknown until the next poll.
   const polls = new Map();
+  // Per receipt made while this room runs: the newest message id at its
+  // commit, the log-order mark for the last answered mention. In memory.
+  const receiptMarks = new Map();
   recoverAnnotationsClear(dataDir, root, meta.first_id);
   if (!fs.existsSync(annotationsPath)) {
     fs.writeFileSync(annotationsPath, '', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
@@ -1266,6 +1269,7 @@ function openStore(opts) {
         meta = { schema: SCHEMA, first_id: marker.source_next_id, next_id: marker.source_next_id };
         messages = [];
         receipts.clear();
+        receiptMarks.clear();
         receiptRows.length = 0;
         asks = Annotations.createAskIndex(marker.source_next_id);
         for (const row of carryRows) asks.replay(row, undefined);
@@ -1315,6 +1319,7 @@ function openStore(opts) {
           expectedReceipts = fileIdentity(receiptsPath);
           if (!expectedReceipts) noteFatal('log-missing');
           receipts.set(key, body.now);
+          receiptMarks.set(key, highWater());
           receiptRows.push(Object.freeze({
             message_id: messageId,
             subject_id: body.subject_id,
@@ -1370,14 +1375,16 @@ function openStore(opts) {
     });
   }
 
-  /* The room's record that a seat's wake path works: the newest addressed
-   * message the seat acknowledged and then posted after, with that first
-   * later post. Null when the current transcript holds no such pair. */
-  function wakeProofOf(subjectId) {
-    // The seat's posts seen so far, newest first; every one is later than
-    // the message under inspection.
-    // One pass: a candidate is skipped in constant time unless some later
-    // post is at or after its delivery, and the search below runs once.
+  /* The last answered mention: the newest addressed message the seat
+   * acknowledged and then posted after, with that first later post. A
+   * read-and-reply, not proof the doorbell rang. "After" is the log's order:
+   * a receipt made while this room runs remembers the newest message id at
+   * its commit, and only a later id is a reply. A receipt from before a
+   * restart has no such mark and falls back to its time. */
+  function lastAnsweredOf(subjectId) {
+    // The seat's posts seen so far, newest first; every one is later in the
+    // log than the message under inspection. One pass: a candidate is
+    // skipped in constant time unless the newest such post can qualify.
     const later = [];
     let latestTs = -1;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -1388,12 +1395,16 @@ function openStore(opts) {
         continue;
       }
       if (later.length === 0) continue;
-      const acknowledgedAt = receipts.get(message.id + '\0' + subjectId);
-      if (acknowledgedAt === undefined || acknowledgedAt > latestTs ||
+      const key = message.id + '\0' + subjectId;
+      const acknowledgedAt = receipts.get(key);
+      if (acknowledgedAt === undefined ||
           !message.recipients.some(recipient => recipient.subject_id === subjectId)) continue;
+      const mark = receiptMarks.get(key);
+      const qualifies = mark === undefined ? post => post.ts >= acknowledgedAt : post => post.id > mark;
+      if (mark === undefined ? acknowledgedAt > latestTs : later[0].id <= mark) continue;
       for (let at = later.length - 1; at >= 0; at -= 1) {
-        if (later[at].ts >= acknowledgedAt) {
-          return Object.freeze({ ring_id: message.id, reply_id: later[at].id });
+        if (qualifies(later[at])) {
+          return Object.freeze({ ring_id: message.id, reply_id: later[at].id, replied_at: later[at].ts });
         }
       }
     }
@@ -1433,7 +1444,7 @@ function openStore(opts) {
           // When it last said something in this era: a poll is not speech.
           last_posted_at: lastPostedAt,
           last_polled_at: polls.get(subjectId) ?? null,
-          wake: wakeProofOf(subjectId),
+          last_answered: lastAnsweredOf(subjectId),
         });
       }));
     });

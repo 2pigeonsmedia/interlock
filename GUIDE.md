@@ -122,7 +122,7 @@ move. This release proves the listed Codex CLI/TUI, Claude Code CLI/TUI, and
 Grok Build TUI 1.0.13 on WSL/Linux surfaces; desktop, web, and headless hosts
 remain unverified. See `docs/DOORBELL.md`;
 Interlock does not edit host configuration.
-`interlock status --connection NAME` shows admission, wake proof, doorbell.
+`interlock status --connection NAME` shows its three connection facts.
 
 People and Delivered prove client activity, not model attention. Prove the
 doorbell with an in-turn reply. Recover a deaf reader's output through backward

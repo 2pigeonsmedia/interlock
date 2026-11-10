@@ -1,7 +1,8 @@
 'use strict';
 
 // After join and in `interlock status`, a connection is three separate facts:
-// admitted · wake path proven/unproven · doorbell running/unverifiable/none.
+// admitted · last answered mention (a read-and-reply, not proof the doorbell
+// rang) · doorbell running/unverifiable/none.
 
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
@@ -34,7 +35,7 @@ function capture() {
 function roomFetch(answers) {
   return async (target, options) => {
     if (target.endsWith('/api/ai/session')) return answers.session();
-    if (target.endsWith('/api/ai/wake')) return answers.wake();
+    if (target.endsWith('/api/ai/last-answered')) return answers.wake();
     if (target.endsWith('/api/ai/head')) return fakeResponse(200, { ok: true, head: 3, connection_session: null });
     const body = JSON.parse(options.body);
     return fakeResponse(200, {
@@ -74,35 +75,38 @@ async function status(place, answers, extra = []) {
 
 test('join reports the three facts, before the doorbell step', async () => {
   const place = world();
-  const { code, io } = await joined(place, () => fakeResponse(200, { ok: true, wake: null }));
+  const { code, io } = await joined(place, () => fakeResponse(200, { ok: true, last_answered: null }));
   assert.equal(code, EXIT_OK, io.err);
   assert.match(io.out, /^ {2}Admitted: yes — the room accepts this connection until /m);
-  assert.match(io.out, /^ {2}Wake path: unproven — the room has no delivered @mention followed by a post from you/m);
+  assert.match(io.out, /^ {2}Last answered mention: none — the room has no delivered @mention followed by a post from you/m);
   assert.match(io.out, /^ {2}Doorbell: none — no doorbell adapter is recorded on this computer for Marlow\.$/m);
-  assert.ok(io.out.indexOf('Wake path:') < io.out.indexOf('Next, before you say hello'));
+  assert.ok(io.out.indexOf('Last answered mention:') < io.out.indexOf('Next, before you say hello'));
 });
 
 test('status names each fact from its own evidence, and says how it knows', async () => {
   const place = world();
-  assert.equal((await joined(place, () => fakeResponse(200, { ok: true, wake: null }))).code, EXIT_OK,
+  assert.equal((await joined(place, () => fakeResponse(200, { ok: true, last_answered: null }))).code, EXIT_OK,
     'arrangement: an admitted local profile');
 
   const proven = await status(place, { session: ADMITTED,
-    wake: () => fakeResponse(200, { ok: true, wake: { ring_id: 4, reply_id: 6 } }) });
+    wake: () => fakeResponse(200, { ok: true, last_answered: { ring_id: 4, reply_id: 6, replied_at: 1_800_000_000_000 } }) });
   assert.equal(proven.code, EXIT_OK, proven.io.err);
-  assert.deepEqual(proven.io.out.trimEnd().split('\n').map(text => text.split(' — ')[0]),
-    ['Admitted: yes', 'Wake path: proven', 'Doorbell: none']);
-  assert.match(proven.io.out, /delivered message 4 to you and you posted message 6 after it \(the room's record, not proof the model read it\)/);
+  assert.deepEqual(proven.io.out.trimEnd().split('\n').map(text => text.split(' — ')[0]), [
+    'Admitted: yes',
+    'Last answered mention: #4 → reply #6 (2027-01-15T08:00:00.000Z).',
+    '  (A read-and-reply, not proof the doorbell rang.)',
+    'Doorbell: none',
+  ]);
 
   const older = await status(place, { session: ADMITTED,
     wake: () => fakeResponse(404, { ok: false, error: 'not-found' }) });
-  assert.match(older.io.out, /^Wake path: unknown — this room does not report it/m);
+  assert.match(older.io.out, /^Last answered mention: unknown — this room does not report it/m);
 
   const refused = await status(place, { session: () => fakeResponse(401, { ok: false, error: 'invalid-connection' }),
     wake: () => fakeResponse(401, { ok: false, error: 'invalid-connection' }) }, ['--json']);
   assert.equal(refused.code, EXIT_RUNTIME);
   const json = JSON.parse(refused.io.out);
-  assert.deepEqual([json.facts.admitted.state, json.facts.wake.state, json.facts.doorbell.state],
+  assert.deepEqual([json.facts.admitted.state, json.facts.last_answered.state, json.facts.doorbell.state],
     ['no', 'unknown', 'none']);
 });
 
@@ -113,7 +117,7 @@ test('interlock-doorbell status prints the three facts after the adapter line', 
   ], { encoding: 'utf8', env: Object.assign({}, process.env, { XDG_DATA_HOME: place.root, LOCALAPPDATA: place.root }) });
   const lines = result.stdout.trimEnd().split('\n');
   assert.match(lines[0], /^Marlow: absent — /, 'arrangement: no adapter recorded');
-  assert.deepEqual(lines.filter(text => /^(Admitted|Wake path|Doorbell):/.test(text)).map(text => text.split(' — ')[0]),
-    ['Admitted: unknown', 'Wake path: unknown', 'Doorbell: none']);
+  assert.deepEqual(lines.filter(text => /^(Admitted|Last answered mention|Doorbell):/.test(text)).map(text => text.split(' — ')[0]),
+    ['Admitted: unknown', 'Last answered mention: unknown', 'Doorbell: none']);
   assert.match(result.stdout, /Admitted: unknown — no local connection with this name on this computer\./);
 });

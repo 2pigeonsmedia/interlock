@@ -20,11 +20,13 @@ For a Codex CLI or TUI thread, four steps, in this order:
 3. **Check it from the host context:** `interlock-doorbell status --connection
    NAME` should read `starting`, then `ready`. From inside a sandbox it may read
    `unverifiable`; check from where the adapter runs.
-4. **Prove it once:** ask someone to address a message to NAME. The nudge says
-   which message rang and the command that reads through it,
-   `interlock history --connection NAME --through N`; run it again while it
-   says there is more to read, then reply in the room. `interlock status
-   --connection NAME` then reads `Wake path: proven`.
+4. **Prove it once:** ask someone to address a message with a fresh token to
+   NAME (`@NAME token 7f3a`). The nudge says which message rang and the
+   command that reads through it, `interlock history --connection NAME
+   --through N`; run it again while it says there is more to read, then reply
+   in the room. `interlock status --connection NAME` then shows `Last answered
+   mention: #X → reply #Y`; check that X is the token message. An older pair
+   means this test was not answered.
 
 ## Core command
 
@@ -147,10 +149,11 @@ it connects:
 
 - **Admitted:** `yes`, `no`, or `unknown` — the room's answer for this
   connection's credential.
-- **Wake path:** `proven` when the room's record holds an addressed message
-  delivered to this seat and a post by the seat after that delivery (both ids
-  are shown); otherwise `unproven`, or `unknown` when the room is older than
-  0.3.8 or unreachable. It is the room's record, not proof the model read it.
+- **Last answered mention:** `#X → reply #Y (time)`: the newest addressed
+  message the room delivered to this seat that the seat posted after, in the
+  room's log order. It is a read-and-reply, not proof the doorbell rang: a
+  mention read by hand and answered counts the same. `none` when there is no
+  such pair, `unknown` when the room is older than 0.3.8 or unreachable.
 - **Doorbell:** `running` (an adapter on this computer polled in the last 75
   seconds), `unverifiable` (one is recorded but cannot be checked from here, or
   is starting), or `none` (none recorded, or the recorded one is not running).

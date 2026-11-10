@@ -272,7 +272,8 @@ function publicParticipant(participant) {
         (Number.isSafeInteger(participant.last_posted_at) && participant.last_posted_at >= 0)) ||
       !(participant.last_polled_at === undefined || participant.last_polled_at === null ||
         (Number.isSafeInteger(participant.last_polled_at) && participant.last_polled_at >= 0)) ||
-      !(participant.wake === undefined || participant.wake === null || validWake(participant.wake)) ||
+      !(participant.last_answered === undefined || participant.last_answered === null ||
+        validLastAnswered(participant.last_answered)) ||
       typeof participant.present !== 'boolean' ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
@@ -288,16 +289,18 @@ function publicParticipant(participant) {
     fetched_without_post_at: participant.fetched_without_post_at,
     last_posted_at: participant.last_posted_at === undefined ? null : participant.last_posted_at,
     last_polled_at: participant.last_polled_at === undefined ? null : participant.last_polled_at,
-    wake: participant.wake === undefined ? null : participant.wake,
+    last_answered: participant.last_answered === undefined ? null : participant.last_answered,
   });
 }
 
-// The wake proof: {ring_id, reply_id}, the ring before its reply.
-function validWake(value) {
+// The last answered mention: {ring_id, reply_id, replied_at}, the mention
+// before its reply.
+function validLastAnswered(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) &&
-    Object.keys(value).length === 2 &&
+    Object.keys(value).length === 3 &&
     Number.isSafeInteger(value.ring_id) && value.ring_id > 0 &&
-    Number.isSafeInteger(value.reply_id) && value.reply_id > value.ring_id;
+    Number.isSafeInteger(value.reply_id) && value.reply_id > value.ring_id &&
+    Number.isSafeInteger(value.replied_at) && value.replied_at >= 0;
 }
 
 function messageQuery(target) {
@@ -3277,8 +3280,9 @@ function createFirstOwnerHandler(options) {
     }
   }
 
-  /* The seat's own wake proof, read without touching its doorbell poll. */
-  async function readAiWake(request, response) {
+  /* The seat's own last answered mention, read without touching its
+   * doorbell poll. */
+  async function readAiLastAnswered(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
@@ -3288,16 +3292,16 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
       return;
     }
-    let wake;
+    let found;
     try {
       const [state] = await chat.participantState([authorized.subject_id]);
-      wake = state && state.wake ? state.wake : null;
-      if (wake !== null && !validWake(wake)) throw new Error('invalid wake proof');
+      found = state && state.last_answered ? state.last_answered : null;
+      if (found !== null && !validLastAnswered(found)) throw new Error('invalid last answered mention');
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
-    sendJson(request, response, 200, { ok: true, wake });
+    sendJson(request, response, 200, { ok: true, last_answered: found });
   }
 
   async function listRoomParticipants(request, response) {
@@ -3654,14 +3658,14 @@ function createFirstOwnerHandler(options) {
         listAdmissions(request, response);
         return;
       }
-      if (pathname === '/api/ai/wake') {
+      if (pathname === '/api/ai/last-answered') {
         if (request.method !== 'GET' || target.search !== '') {
           sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
             ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-connection-query',
           }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
           return;
         }
-        await readAiWake(request, response);
+        await readAiLastAnswered(request, response);
         return;
       }
       if (pathname === '/api/ai/session') {
