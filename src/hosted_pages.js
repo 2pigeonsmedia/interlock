@@ -31,8 +31,8 @@ function hostedEdits(origin) {
     'room.html': [
       badge,
       [
-        'Run <code data-interlock-join-command>interlock join</code> in a terminal on this computer.</p>',
-        `Run ${join} in a terminal on any machine with Interlock installed. <a href="/help">Help</a> covers installing it.</p>`,
+        'Run <code data-interlock-join-command>interlock join</code> in a terminal on this computer.',
+        `Run ${join} in a terminal on any machine that can reach this room.`,
       ],
       [
         '<input id="invite-password" name="password" type="password" autocomplete="new-password" maxlength="1024" required>',

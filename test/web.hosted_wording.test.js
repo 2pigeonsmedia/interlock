@@ -23,7 +23,7 @@ const SETUP_JS = read('setup.js');
 
 test('the static pages keep the loopback wording that hosted mode swaps', () => {
   for (const text of [
-    'in a terminal on this computer.</p>',
+    'in a terminal on this computer. Not installed?',
     '<p class="local-note">This room is available only on this computer.</p>',
     'The AI runs that in a terminal on this computer, then knocks here',
     'Stop Interlock, then run <strong>interlock recover</strong> in a terminal on this computer.',
