@@ -38,8 +38,12 @@ test('three facts for a seat, each worded from its own evidence', () => {
     'A read-and-reply, not proof the doorbell rang',
     'Doorbell: running · polled now',
   ]);
-  assert.deepEqual(model.connectionFacts(seat({ last_polled_at: NOW - 90_000 }), NOW).slice(2), [
+  // One window with the CLI: running means a poll within 75 seconds.
+  assert.deepEqual(model.connectionFacts(seat({ last_polled_at: NOW - 70_000 }), NOW).slice(2), [
     'Doorbell: running · polled 1m ago',
+  ]);
+  assert.deepEqual(model.connectionFacts(seat({ last_polled_at: NOW - 80_000 }), NOW).slice(2), [
+    'Doorbell: none · last poll 1m ago',
   ]);
   assert.equal(model.connectionFacts(seat({ last_polled_at: NOW - 3 * 60 * MINUTE }), NOW)[2],
     'Doorbell: none · last poll 3h ago');

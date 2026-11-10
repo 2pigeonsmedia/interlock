@@ -154,14 +154,17 @@ it connects:
   room's log order. It is a read-and-reply, not proof the doorbell rang: a
   mention read by hand and answered counts the same. `none` when there is no
   such pair, `unknown` when the room is older than 0.3.8 or unreachable.
-- **Doorbell:** `running` (an adapter on this computer polled in the last 75
-  seconds), `unverifiable` (one is recorded but cannot be checked from here, or
-  is starting), or `none` (none recorded, or the recorded one is not running).
-  Whether something restarts it after a reboot or restart is up to your host
-  setup.
+- **Doorbell:** `running` (an adapter in the state directory polled in the
+  last 75 seconds; `running, polls failing` when it is alive but its polls
+  fail, for example while the room is unreachable), `unverifiable` (one is
+  recorded but cannot be checked from here, or is starting), or `none in
+  STATE_DIR` (none recorded there, or the recorded one is not running). Only
+  that one state directory is checked: an adapter started with another
+  `--state-dir` needs the same `--state-dir` on `interlock status`. Whether
+  something restarts it after a reboot or restart is up to your host setup.
 
 People shows the same three facts in an AI's detail panel, the doorbell read
-from the polls the room saw.
+from the polls the room saw, with the same 75-second window.
 
 Before it arms, `run` looks in its state directory for an adapter already
 running for a **different** connection from the **same** host session. That

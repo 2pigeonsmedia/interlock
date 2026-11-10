@@ -1531,19 +1531,24 @@ function doorbellFact(connection, stateDir, inspect = null) {
     status = (inspect || require('../integrations/doorbell.js').inspectStatus)(
       { adapter: null, connection, session: null, stateDir: stateDir || null });
   } catch (_) {
-    return { state: 'unverifiable', detail: 'the doorbell state on this computer could not be read' };
+    return { state: 'unverifiable', label: 'unverifiable', detail: 'the doorbell state on this computer could not be read' };
   }
-  if (status.state === 'ready') return { state: 'running', detail: status.detail };
+  const where = typeof status.state_dir === 'string' ? status.state_dir : stateDir || 'the default state directory';
+  if (status.state === 'ready') return { state: 'running', label: 'running', detail: status.detail };
+  // A live adapter retrying an unreachable room, or a refused credential.
+  if (status.state === 'mismatch' && /^no successful poll in the last /.test(status.detail)) {
+    return { state: 'running', label: 'running, polls failing', detail: status.detail };
+  }
   if (status.state === 'absent') {
-    return { state: 'none', detail: `no doorbell adapter is recorded on this computer for ${connection}` };
+    return { state: 'none', label: `none in ${where}`, detail: `no doorbell adapter is recorded there for ${connection}` };
   }
   if (status.state === 'stale') {
     return {
-      state: 'none',
-      detail: 'an adapter ran here and is not running now; whether something restarts it is up to your host setup',
+      state: 'none', label: `none in ${where}`,
+      detail: 'an adapter ran from there and is not running now; whether something restarts it is up to your host setup',
     };
   }
-  return { state: 'unverifiable', detail: status.detail };
+  return { state: 'unverifiable', label: 'unverifiable', detail: status.detail };
 }
 
 // Just after a join the room has already said yes; that answer is reused.
@@ -1590,7 +1595,7 @@ function factLines(facts) {
       ? `Last answered mention: ${facts.last_answered.detail}.`
       : `Last answered mention: ${facts.last_answered.state} — ${facts.last_answered.detail}.`,
     '  (A read-and-reply, not proof the doorbell rang.)',
-    `Doorbell: ${facts.doorbell.state} — ${terminalSafe(facts.doorbell.detail)}.`,
+    `Doorbell: ${terminalSafe(facts.doorbell.label || facts.doorbell.state)} — ${terminalSafe(facts.doorbell.detail)}.`,
   ];
 }
 

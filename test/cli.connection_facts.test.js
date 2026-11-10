@@ -79,7 +79,7 @@ test('join reports the three facts, before the doorbell step', async () => {
   assert.equal(code, EXIT_OK, io.err);
   assert.match(io.out, /^ {2}Admitted: yes — the room accepts this connection until /m);
   assert.match(io.out, /^ {2}Last answered mention: none — the room has no delivered @mention followed by a post from you/m);
-  assert.match(io.out, /^ {2}Doorbell: none — no doorbell adapter is recorded on this computer for Marlow\.$/m);
+  assert.ok(io.out.includes(`\n  Doorbell: none in ${place.stateDir} — no doorbell adapter is recorded there for Marlow.\n`), io.out);
   assert.ok(io.out.indexOf('Last answered mention:') < io.out.indexOf('Next, before you say hello'));
 });
 
@@ -95,7 +95,7 @@ test('status names each fact from its own evidence, and says how it knows', asyn
     'Admitted: yes',
     'Last answered mention: #4 → reply #6 (2027-01-15T08:00:00.000Z).',
     '  (A read-and-reply, not proof the doorbell rang.)',
-    'Doorbell: none',
+    `Doorbell: none in ${place.stateDir}`,
   ]);
 
   const older = await status(place, { session: ADMITTED,
@@ -118,6 +118,21 @@ test('interlock-doorbell status prints the three facts after the adapter line', 
   const lines = result.stdout.trimEnd().split('\n');
   assert.match(lines[0], /^Marlow: absent — /, 'arrangement: no adapter recorded');
   assert.deepEqual(lines.filter(text => /^(Admitted|Last answered mention|Doorbell):/.test(text)).map(text => text.split(' — ')[0]),
-    ['Admitted: unknown', 'Last answered mention: unknown', 'Doorbell: none']);
+    ['Admitted: unknown', 'Last answered mention: unknown', `Doorbell: none in ${place.stateDir}`]);
   assert.match(result.stdout, /Admitted: unknown — no local connection with this name on this computer\./);
+});
+
+test('the doorbell fact says where it looked, and a live adapter whose polls fail is still running', async () => {
+  const { connectionFactsFor, factLines } = require('../src/cli.js');
+  const place = world();
+  const dependencies = { config: { resolveConnectionDir: () => place.connectionDir } };
+  const failing = await connectionFactsFor('Marlow', { dependencies, stateDir: place.stateDir, inspect: () => ({
+    state: 'mismatch', state_dir: place.stateDir,
+    detail: 'no successful poll in the last 75 s; the adapter may be retrying an unreachable room',
+  }) });
+  assert.equal(failing.doorbell.state, 'running');
+  assert.match(factLines(failing).at(-1),
+    /^Doorbell: running, polls failing — no successful poll in the last 75 s; the adapter may be retrying an unreachable room\.$/);
+  const none = await connectionFactsFor('Marlow', { dependencies, stateDir: place.stateDir });
+  assert.equal(factLines(none).at(-1), `Doorbell: none in ${place.stateDir} — no doorbell adapter is recorded there for Marlow.`);
 });
