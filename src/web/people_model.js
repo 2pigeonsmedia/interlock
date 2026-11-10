@@ -13,9 +13,6 @@
   const PERSON_HEARD_MS = 5 * MINUTE;
   // The doorbell long-polls for up to 45 seconds; two intervals with margin.
   const LISTENING_MS = 2 * MINUTE;
-  // The doorbell fact's "running": a poll within 75 seconds, the same window
-  // `interlock status` and `interlock-doorbell status` use.
-  const DOORBELL_FRESH_MS = 75_000;
   // How long a seat whose doorbell stopped still reads working (mid-task).
   const WORKING_MS = 3 * 60 * MINUTE;
 
@@ -247,7 +244,9 @@
       const since = now - row.last_polled_at;
       const span = age(row.last_polled_at, now);
       const when = span === null ? 'at an unknown time' : span === 'now' ? 'now' : span + ' ago';
-      doorbell = since >= 0 && since <= DOORBELL_FRESH_MS
+      // The listening window (two minutes): it allows one missed 45-second
+      // long poll, where the CLI's 75 seconds reads one adapter's own record.
+      doorbell = since >= 0 && since < LISTENING_MS
         ? 'Doorbell: running · polled ' + when
         : 'Doorbell: none · last poll ' + when;
     }
