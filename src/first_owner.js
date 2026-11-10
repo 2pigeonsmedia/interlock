@@ -2142,6 +2142,11 @@ function createFirstOwnerHandler(options) {
       }
       connectionSession = discriminator.session;
       await chat.touchParticipant(reauthorized.subject_id, Date.now());
+      // The ordinary read reached this far: a receipt at or below it now
+      // means read, and stops a ring (a search or look-back read never does).
+      if (typeof chat.noteOrdinaryRead === 'function' && Number.isSafeInteger(result.cursor)) {
+        chat.noteOrdinaryRead(reauthorized.subject_id, result.cursor);
+      }
     }
     catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });

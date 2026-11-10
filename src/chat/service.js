@@ -272,10 +272,25 @@ function createChatService(options) {
     return await store.read(query);
   }
 
-  /* `unreadOnly` is the ring form: an addressed row this seat has already
-   * acknowledged (any history read writes the receipt) is passed over, so a
-   * doorbell whose cursor trails the seat's reading never rings for it. */
+  /* How far each seat's ordinary history read (`/api/ai/messages`, the read
+   * that moves its cursor) has reached. Search and look-back reads do not
+   * move it. In memory only: after a restart it is empty, so a read message
+   * may ring once more, never the reverse. */
+  const ordinaryReadThrough = new Map();
+
+  function noteOrdinaryRead(subjectId, cursor) {
+    requireOpen();
+    if (typeof subjectId !== 'string' || subjectId.length === 0 ||
+        !Number.isSafeInteger(cursor) || cursor < 0) throw fail('invalid-read');
+    if (cursor > (ordinaryReadThrough.get(subjectId) || 0)) ordinaryReadThrough.set(subjectId, cursor);
+  }
+
+  /* `unreadOnly` is the ring form: an addressed row this seat has read is
+   * passed over, so a doorbell whose cursor trails the seat's reading never
+   * rings for it. Read means acknowledged AND reached by the seat's ordinary
+   * history read; a search or look-back read writes a receipt but is not it. */
   async function scanForSeat(query, subjectId, addressedOnly, unreadOnly = false) {
+    const readThrough = ordinaryReadThrough.get(subjectId) || 0;
     let after = query.after;
     const delivered = [];
     let firstId = 1;
@@ -294,7 +309,7 @@ function createChatService(options) {
         if (message.subject_id === subjectId) continue;
         if (addressedOnly && !message.recipients.some(recipient =>
           recipient.subject_id === subjectId &&
-          (!unreadOnly || recipient.acknowledged_at === null))) continue;
+          (!unreadOnly || recipient.acknowledged_at === null || message.id > readThrough))) continue;
         delivered.push(message);
         if (delivered.length === query.limit) break;
       }
@@ -705,7 +720,7 @@ function createChatService(options) {
     append, appendAnnotated, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
-    touchParticipant, notePoll, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
+    touchParticipant, notePoll, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });
 }
 

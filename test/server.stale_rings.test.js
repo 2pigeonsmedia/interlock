@@ -1,8 +1,10 @@
 'use strict';
 
 // A ring is for a message the seat has not read. A message the seat already
-// acknowledged (any history read writes the receipt) must not ring it again,
-// whichever doorbell cursor asks; one it has not read must still ring.
+// read through its ordinary history (the read that moves its cursor, then the
+// receipt) must not ring it again, whichever doorbell cursor asks. A search or
+// look-back read also writes a receipt, but it is not that read: those still
+// ring. One it has not read must still ring.
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -181,12 +183,17 @@ test('a message the seat already read does not ring; an unread one still does', 
       'arrangement: both addressed messages ring while unread');
 
     // The seat reads the first (as `interlock history` does: read, then receipt).
+    const page = await aiGet(runtime, `/api/ai/messages?after=0&limit=1&wait=0`, cue.token);
+    assert.equal(page.status, 200, page.text);
+    assert.deepEqual(page.json.messages.map(message => message.id), [first], 'arrangement: an ordinary read of the first');
     const read = await aiPost(runtime, '/api/ai/receipts', { message_ids: [first] }, cue.token);
     assert.equal(read.status, 200, read.text);
     const partly = await ringIds(runtime, cue.token);
     assert.deepEqual(partly.ids, [second], 'the read message must not ring; the unread one must');
     assert.equal(partly.cursor >= second, true);
 
+    const rest = await aiGet(runtime, `/api/ai/messages?after=${first}&limit=5&wait=0`, cue.token);
+    assert.equal(rest.status, 200, rest.text);
     const readAll = await aiPost(runtime, '/api/ai/receipts', { message_ids: [second] }, cue.token);
     assert.equal(readAll.status, 200, readAll.text);
     const none = await ringIds(runtime, cue.token);

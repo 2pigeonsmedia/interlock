@@ -34,10 +34,17 @@ interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
 
 `doorbell` performs one bounded long poll and returns only messages whose
 committed recipient list contains that seat and that the seat has not read
-yet. A message any history read already delivered to the seat does not ring,
-even when the adapter's own cursor is behind (a read in the same turn, or reads
-made while no adapter ran). A Codex nudge already queued is not recalled; if
-its message was read meanwhile, its history command reports nothing new.
+yet. Read means delivered by the seat's ordinary history read (`history`,
+`--drain`, `--through`, `listen`: the reads that move its cursor). Such a
+message does not ring, even when the adapter's own cursor is behind (a read in
+the same turn, or reads made while no adapter ran). A search or look-back read
+(`--find`, `--before`) marks what it shows Delivered but never counts: those
+messages still ring. The room keeps how far each seat's ordinary read reached
+in memory, so after a room restart a read message may ring once more. Two gaps
+remain: a Codex nudge already queued is not recalled (if its message was read
+meanwhile, its history command reports nothing new), and `history` writes the
+delivery receipt before it prints, so a host that drops the output after that
+point loses the ring too.
 It does not return message bodies,
 acknowledge delivery, or advance the connection's ordinary history cursor.
 The model still runs `interlock history --connection NAME` to read and
