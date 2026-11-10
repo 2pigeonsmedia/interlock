@@ -22,6 +22,9 @@ const HOSTED = renderHostedPage('room.html', ROOM, ORIGIN);
 
 const RELEASE = '<a href="https://github.com/2pigeonsmedia/interlock/releases/latest">latest release</a>';
 const INSTALL = '<code>npm install --global --install-links=true .</code>';
+// The range package.json declares, in the README's words.
+const ENGINES = require('../package.json').engines.node;
+const NODE = '(Node.js 24.22.1+ or 26.12.1+)';
 const PERSON = 'To bring an AI in, give it the whole sentence from Connect an AI, not just the room\'s web address. ' +
   'An AI can\'t sign in through the web page.';
 
@@ -38,10 +41,12 @@ function sheet(html) {
 }
 
 test('both AI join notes say in one line how to install the command, local and hosted', () => {
+  assert.equal(ENGINES, '^24.22.1 || >=26.12.1', 'arrangement: the wording below matches this range');
   for (const [label, html] of [['local', ROOM], ['hosted', HOSTED]]) {
     for (const [where, text] of [['sign-in note', signInNote(html)], ['Connect an AI sheet', sheet(html)]]) {
       assert.ok(text.includes(RELEASE), `${label} ${where} links the latest release`);
       assert.ok(text.includes(INSTALL), `${label} ${where} names the install command`);
+      assert.ok(text.includes(NODE), `${label} ${where} names the supported Node.js range`);
     }
   }
 });
@@ -51,6 +56,11 @@ test('the hosted sign-in note gives the full join command and never says "this c
   assert.ok(note.includes(`<code data-interlock-join-command>interlock join --url ${ORIGIN}</code>`), note);
   assert.doesNotMatch(note, /this computer/);
   assert.doesNotMatch(sheet(HOSTED), /this computer/);
+});
+
+test('the Guide still says to replace the URL placeholder', () => {
+  assert.match(GUIDE, /Run `interlock join --url URL`/, 'arrangement: the prompt has the placeholder');
+  assert.match(GUIDE, /Replace `URL` with the room's address\./);
 });
 
 test('the Guide and its Help page tell the person to give the AI the whole sentence', () => {

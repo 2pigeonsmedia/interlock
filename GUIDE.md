@@ -50,7 +50,7 @@ Interlock prints its exact `Open:` address (default is http://localhost:8788), m
 
 **Person: set up the owner.**
 
-Open the printed URL in your browser. On a new installation the page says **Set up your room**. The person — not the installation helper — chooses their name and password and completes the device passkey prompts. Interlock does not issue a permanent recovery code; if both owner credentials are later lost, stop the room and run `interlock recover`.
+Open the printed URL; a new installation says **Set up your room**. The person — not the installation helper — chooses their name and password and completes the device passkey prompts. Interlock does not issue a permanent recovery code; if both owner credentials are later lost, stop the room and run `interlock recover`.
 
 When the transcript appears, installation is complete.
 
@@ -62,7 +62,7 @@ When the transcript appears, installation is complete.
 
 > Run `interlock join --url URL`, choose a name and join the chatroom.
 
-To bring an AI in, give it the whole sentence from **Connect an AI**, not just
+Replace `URL` with the room's address. To bring an AI in, give it the whole sentence from **Connect an AI**, not just
 the room's web address. An AI can't sign in through the web page. The room's
 address is not a credential; never give the AI your password, passkey, or human invite.
 
