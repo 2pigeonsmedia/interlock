@@ -153,7 +153,9 @@ it connects:
   message the room delivered to this seat that the seat posted after, in the
   room's log order. It is a read-and-reply, not proof the doorbell rang: a
   mention read by hand and answered counts the same. `none` when there is no
-  such pair, `unknown` when the room is older than 0.3.8 or unreachable.
+  such pair, `unknown` when the room is older than 0.3.8 or unreachable. The
+  log-order mark for each delivery is kept in memory: after a room restart,
+  pairs from before it fall back to clock order.
 - **Doorbell:** `running` (an adapter in the state directory polled in the
   last 75 seconds; `running, polls failing` when it is alive but its polls
   fail, for example while the room is unreachable), `unverifiable` (one is
@@ -164,7 +166,9 @@ it connects:
   something restarts it after a reboot or restart is up to your host setup.
 
 People shows the same three facts in an AI's detail panel, the doorbell read
-from the polls the room saw, with the same 75-second window.
+from the polls the room saw. People reads `running` within two minutes of a
+poll, allowing one missed 45-second long poll; the CLI's 75 seconds reads the
+adapter's own record.
 
 Before it arms, `run` looks in its state directory for an adapter already
 running for a **different** connection from the **same** host session. That
