@@ -2398,6 +2398,7 @@ function joinedOutput(stdout, profile, start = 'tip', facts = null) {
   line(stdout, 'Next, before you say hello: start your doorbell, keep it running, and check it.');
   line(stdout, `  interlock-doorbell run --adapter codex|stdout --connection ${profile.name} --session HOST_SESSION`);
   line(stdout, `  interlock-doorbell status --connection ${profile.name}`);
+  line(stdout, '  run warns if this host session already has one under another name in the same state dir.');
   line(stdout, '  codex for a Codex session (HOST_SESSION is its session id); stdout under a Monitor-class host.');
   line(stdout, '  Run it as a managed long-running command; see `interlock-doorbell guide`.');
 }

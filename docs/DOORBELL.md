@@ -171,7 +171,11 @@ running for a **different** connection from the **same** host session. That
 usually means the session joined again under a new name while the old adapter
 still rings for the old one. It prints a warning and continues; it never stops,
 changes or takes over the other adapter. Another host session's adapter is
-ordinary and is not reported.
+ordinary and is not reported. It sees only that: an adapter recorded in the
+same state directory, for the same `--session`, whose owner reads as running
+from here. It does not see an adapter in another state directory or a
+sandbox, a host that gave the rejoined thread a new session id, or any hook
+or other automation.
 
 `unverifiable` also covers a caller that cannot see the adapter's process: on
 Linux the adapter records its process namespace beside its runtime manifest
