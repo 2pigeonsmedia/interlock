@@ -1,8 +1,8 @@
 'use strict';
 
 // The People detail panel shows an AI's connection as three separate facts:
-// admitted, wake path proven or unproven, and supervision healthy, unverified
-// or none. None of them claims the model is paying attention.
+// admitted, wake path proven or unproven, and the doorbell running or none
+// (unknown when the room predates these facts). None of them claims the model is paying attention.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -27,20 +27,20 @@ test('three facts for a seat, each worded from its own evidence', () => {
   assert.deepEqual(model.connectionFacts(seat(), NOW), [
     'Admitted',
     'Wake path: unproven · no post yet after a delivered @mention',
-    'Supervision: none · no doorbell poll recorded',
+    'Doorbell: none · no poll recorded',
   ]);
   assert.deepEqual(model.connectionFacts(seat({
     wake: { ring_id: 12, reply_id: 14 }, last_polled_at: NOW - 30_000,
   }), NOW), [
     'Admitted',
     'Wake path: proven · #12 delivered, then #14 posted',
-    'Supervision: healthy · doorbell polled now',
+    'Doorbell: running · polled now',
   ]);
   assert.deepEqual(model.connectionFacts(seat({ last_polled_at: NOW - 90_000 }), NOW).slice(2), [
-    'Supervision: healthy · doorbell polled 1m ago',
+    'Doorbell: running · polled 1m ago',
   ]);
   assert.equal(model.connectionFacts(seat({ last_polled_at: NOW - 3 * 60 * MINUTE }), NOW)[2],
-    'Supervision: unverified · last doorbell poll 3h ago');
+    'Doorbell: none · last poll 3h ago');
 });
 
 test('a person has no connection facts, and an older room says what it cannot show', () => {
@@ -51,7 +51,7 @@ test('a person has no connection facts, and an older room says what it cannot sh
   assert.deepEqual(model.connectionFacts(older, NOW), [
     'Admitted',
     'Wake path: unknown · this room does not report it',
-    'Supervision: unknown · this room does not report it',
+    'Doorbell: unknown · this room does not report it',
   ]);
 });
 

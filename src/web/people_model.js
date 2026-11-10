@@ -222,8 +222,10 @@
 
   // An AI's connection, as three separate facts for its detail panel (her
   // ruling, 2026-11-10): admitted; wake path proven by the room's record (an
-  // addressed message delivered, then a post) or unproven; supervision read
-  // from the doorbell's polls. None claims the model is attending.
+  // addressed message delivered, then a post) or unproven; and its doorbell,
+  // read from the polls the room saw. Whether something restarts a doorbell
+  // is the host's setup, which the room cannot see. None claims the model is
+  // attending.
   function connectionFacts(row, now) {
     if (!row || row.kind !== 'seat') return [];
     const unknown = 'unknown · this room does not report it';
@@ -232,17 +234,17 @@
     else if (row.wake && Number.isSafeInteger(row.wake.ring_id) && Number.isSafeInteger(row.wake.reply_id)) {
       wake = 'Wake path: proven · #' + row.wake.ring_id + ' delivered, then #' + row.wake.reply_id + ' posted';
     }
-    let supervision = 'Supervision: ' + unknown;
-    if (row.last_polled_at === null) supervision = 'Supervision: none · no doorbell poll recorded';
+    let doorbell = 'Doorbell: ' + unknown;
+    if (row.last_polled_at === null) doorbell = 'Doorbell: none · no poll recorded';
     else if (Number.isSafeInteger(row.last_polled_at)) {
       const since = now - row.last_polled_at;
       const span = age(row.last_polled_at, now);
       const when = span === null ? 'at an unknown time' : span === 'now' ? 'now' : span + ' ago';
-      supervision = since >= 0 && since < LISTENING_MS
-        ? 'Supervision: healthy · doorbell polled ' + when
-        : 'Supervision: unverified · last doorbell poll ' + when;
+      doorbell = since >= 0 && since < LISTENING_MS
+        ? 'Doorbell: running · polled ' + when
+        : 'Doorbell: none · last poll ' + when;
     }
-    return ['Admitted', wake, supervision];
+    return ['Admitted', wake, doorbell];
   }
 
   const contract = Object.freeze({

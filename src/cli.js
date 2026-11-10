@@ -1469,7 +1469,7 @@ async function runReadCommand(command, args, io, dependencies = {}) {
   return result;
 }
 
-// ---- The connection's three facts (admitted · wake path · supervision) ----
+// ---- The connection's three facts (admitted · wake path · doorbell) ----
 // Each is its own evidence. None of them claims the model is attending: the
 // room records deliveries and posts, and the doorbell records its polls.
 
@@ -1519,28 +1519,30 @@ async function wakeFact(fetcher, profile) {
   }
 }
 
-// From the doorbell adapter's own evidence on this computer.
+// From the doorbell adapter's own evidence on this computer. It says whether
+// an adapter is running now; whether something restarts it after a reboot or
+// restart is up to the host setup, which the product cannot see.
 // `inspect` is the doorbell's inspectStatus; the doorbell passes its own,
 // since it is still loading when its status command runs.
-function supervisionFact(connection, stateDir, inspect = null) {
+function doorbellFact(connection, stateDir, inspect = null) {
   let status;
   try {
     status = (inspect || require('../integrations/doorbell.js').inspectStatus)(
       { adapter: null, connection, session: null, stateDir: stateDir || null });
   } catch (_) {
-    return { state: 'unverified', detail: 'the doorbell state on this computer could not be read' };
+    return { state: 'unverifiable', detail: 'the doorbell state on this computer could not be read' };
   }
-  if (status.state === 'ready') return { state: 'healthy', detail: status.detail };
+  if (status.state === 'ready') return { state: 'running', detail: status.detail };
   if (status.state === 'absent') {
     return { state: 'none', detail: `no doorbell adapter is recorded on this computer for ${connection}` };
   }
   if (status.state === 'stale') {
     return {
-      state: 'unverified',
-      detail: 'an adapter ran here and is not running now; a host that restarts it after each turn reads this way between runs',
+      state: 'none',
+      detail: 'an adapter ran here and is not running now; whether something restarts it is up to your host setup',
     };
   }
-  return { state: 'unverified', detail: status.detail };
+  return { state: 'unverifiable', detail: status.detail };
 }
 
 // Just after a join the room has already said yes; that answer is reused.
@@ -1552,13 +1554,13 @@ async function connectionFacts(fetcher, profile, stateDir, admitted = null, insp
   return {
     admitted: admitted || await admittedFact(fetcher, profile),
     wake: await wakeFact(fetcher, profile),
-    supervision: supervisionFact(profile.name, stateDir, inspect),
+    doorbell: doorbellFact(profile.name, stateDir, inspect),
   };
 }
 
 // For `interlock-doorbell status`: the three facts for a connection name,
 // never throwing. A name with no admitted local profile still gets its
-// supervision fact; the room facts say why they are unknown.
+// doorbell fact; the room facts say why they are unknown.
 async function connectionFactsFor(name, options = {}) {
   const dependencies = options.dependencies || {};
   const stateDir = options.stateDir || null;
@@ -1573,7 +1575,7 @@ async function connectionFactsFor(name, options = {}) {
     return {
       admitted: { state: 'unknown', detail: why },
       wake: { state: 'unknown', ring_id: null, reply_id: null, detail: why },
-      supervision: supervisionFact(name, stateDir, options.inspect),
+      doorbell: doorbellFact(name, stateDir, options.inspect),
     };
   }
   return await connectionFacts(dependencies.fetch || globalThis.fetch, selected.profile, stateDir,
@@ -1584,7 +1586,7 @@ function factLines(facts) {
   return [
     `Admitted: ${facts.admitted.state} — ${facts.admitted.detail}.`,
     `Wake path: ${facts.wake.state} — ${facts.wake.detail}.`,
-    `Supervision: ${facts.supervision.state} — ${terminalSafe(facts.supervision.detail)}.`,
+    `Doorbell: ${facts.doorbell.state} — ${terminalSafe(facts.doorbell.detail)}.`,
   ];
 }
 
