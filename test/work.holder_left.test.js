@@ -267,3 +267,28 @@ test('holder left is not stored in a withdraw\'s replay record either; its repla
   live.add(gone.subject_id);
   assert.deepEqual(work.withdrawItem(owner, input).left_waiting.map(row => row.holder_left), [[]], 'a replay derives it now');
 });
+
+test('a removed person who still holds a grant does not bring the identity scan back: only AI holders can have left', () => {
+  const { service } = people();
+  grantTo(service, { subject_id: 'p-7', name: 'Bea', kind: 'person' }, 'ops');
+  let scans = 0;
+  const house = { listParticipants: () => [], listRecentEndedSeats: () => { scans += 1; return []; } };
+  for (let i = 0; i < 3; i += 1) endDepartedGrants({ people: { service }, house, now: 5000 + i });
+  assert.equal(scans, 0);
+});
+
+test('an approver\'s yes to a request whose asker already left is recorded, and flagged at once: holder left, its lead withdraws it', () => {
+  const { work, live } = rig();
+  const OWNER_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const filed = work.createApproval(Object.assign({}, gone, { session: null }), { operation_id: crypto.randomUUID(), project: 'ops',
+    title: 'Order rollers', scope: 'two rollers', approver: OWNER_OF, ask_message_id: 150 }).item;
+  live.delete(gone.subject_id);
+  assert.deepEqual(work.get(owner, { id: filed.id }).item.holder_left, [], 'awaiting: next to its approver, not held by the asker');
+  assert.equal(work.answerFromRoom(Object.assign({}, owner, { session: null }), {
+    ask_id: 150, message_id: 151, text: 'yes', choice: 'yes', by_addressee: true, of: OWNER_OF, revision: 1, approver_ok: true,
+  }).recorded, filed.id, 'the room and the record agree: her yes is recorded');
+  assert.deepEqual(work.get(owner, { id: filed.id }).item.holder_left, ['Juno']);
+  assert.equal(work.brief(lead, {}).needs_me.some(row => row.id === filed.id), true);
+  assert.equal(work.withdrawItem(lead, { operation_id: crypto.randomUUID(), id: filed.id,
+    expected_revision: work.get(owner, { id: filed.id }).item.revision, reason: 'its asker left' }).item.state, 'withdrawn');
+});

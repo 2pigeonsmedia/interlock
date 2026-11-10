@@ -363,12 +363,15 @@ function createPeopleService(options) {
     return Object.freeze(grants(now, live).filter(item => item.state === 'active'));
   }
 
-  /* Who holds an active grant (server-internal: subject ids), once each:
-   * what the departure pass checks against who is in the room. */
+  /* Which AI seats hold an active grant (server-internal: subject ids), once
+   * each: what the departure pass checks against who is in the room. A
+   * person's grant is not its business. */
   function activeHolderIds(now) {
     if (damaged()) return null;
     const ids = new Set();
-    for (const entry of grantsById.values()) if (stateOf(entry, now) === 'active') ids.add(entry.row.holder_subject_id);
+    for (const entry of grantsById.values()) {
+      if (entry.row.holder_kind === 'seat' && stateOf(entry, now) === 'active') ids.add(entry.row.holder_subject_id);
+    }
     return [...ids];
   }
 
