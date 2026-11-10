@@ -252,16 +252,27 @@ function createWorkService(options) {
    * 2026-11-10), by name, once each: an AI seat whose session ended (it
    * left, was removed, released or expired). Derived on each read, never
    * stored; nothing is reassigned. A done or withdrawn item says nothing. */
-  function holderLeft(item) {
-    if (item.kind === 'decision' || item.approval || !LIVE_WORK_STATES.includes(item.state)) return [];
+  // An AI seat that is no longer in the room.
+  function departed(ref) {
     const live = liveSet();
-    if (!live) return [];
+    return Boolean(live && ref && ref.kind === 'seat' && typeof ref.subject_id === 'string' && !live.has(ref.subject_id));
+  }
+  // A request for approval counts once approved: its asker then holds it. One
+  // still awaiting is next to its approver, never to the asker.
+  function holderLeft(item) {
+    if (item.kind === 'decision' || !LIVE_WORK_STATES.includes(item.state)) return [];
+    if (item.approval && item.approval.state !== 'approved') return [];
     const names = [];
     for (const ref of [item.responsible, item.next_to]) {
-      if (ref && ref.kind === 'seat' && typeof ref.subject_id === 'string' && !live.has(ref.subject_id) &&
-          !names.includes(ref.name)) names.push(ref.name);
+      if (departed(ref) && !names.includes(ref.name)) names.push(ref.name);
     }
     return names;
+  }
+  /* An approved request whose asker has left (ruling, 2026-11-10): its lead
+   * must have a way out. It is withdrawn, never handed on (what was approved
+   * was its asker doing it) and never marked done for them. */
+  function orphanedApproval(item) {
+    return Boolean(item.approval) && item.approval.state === 'approved' && holderLeft(item).length > 0;
   }
   // Who may move a record to another project (her rulings, 2026-10-31): the
   // first owner, the record's holder, and the lead of its current project.
@@ -313,8 +324,9 @@ function createWorkService(options) {
   // The names a refused assignment can ask, in that order, once each.
   function assignerNames(item, now) {
     const names = [];
+    // Never someone who has left: a later AI of the same name is not them.
     for (const ref of [item.created_by, item.responsible, item.next_to, liveLead(item.project, now)]) {
-      if (ref && typeof ref.name === 'string' && !names.includes(ref.name)) names.push(ref.name);
+      if (ref && typeof ref.name === 'string' && !departed(ref) && !names.includes(ref.name)) names.push(ref.name);
     }
     return names;
   }
@@ -337,7 +349,7 @@ function createWorkService(options) {
   }
 
   function mayWithdraw(actor, item, now) {
-    return item.kind !== 'decision' && !item.approval && LIVE_WORK_STATES.includes(item.state) &&
+    return item.kind !== 'decision' && (!item.approval || orphanedApproval(item)) && LIVE_WORK_STATES.includes(item.state) &&
       mayWithdrawAs(actor, item, now);
   }
 
@@ -381,14 +393,23 @@ function createWorkService(options) {
    * on each read (`holder_left`), which a replay derives afresh. */
   function stored(result) {
     const copy = clone(result);
-    if (copy && copy.item && typeof copy.item === 'object') delete copy.item.holder_left;
+    for (const row of rowsOf(copy)) delete row.holder_left;
     return copy;
+  }
+  // The item-shaped parts of a write's result: its item and a withdraw's
+  // left_waiting rows.
+  function rowsOf(result) {
+    if (!result || typeof result !== 'object') return [];
+    const rows = Array.isArray(result.left_waiting) ? result.left_waiting.slice() : [];
+    if (result.item && typeof result.item === 'object') rows.push(result.item);
+    return rows.filter(row => row && typeof row === 'object' && typeof row.id === 'string' && row.kind !== 'decision');
   }
   function replayed(draft, prior) {
     const out = Object.assign({}, clone(prior.result), { replayed: true });
-    const item = out.item && typeof out.item.id === 'string' && out.item.kind !== 'decision'
-      ? draft.items.find(row => row.id === out.item.id) : null;
-    if (item) out.item.holder_left = holderLeft(item);
+    for (const row of rowsOf(out)) {
+      const item = draft.items.find(other => other.id === row.id);
+      if (item) row.holder_left = holderLeft(item);
+    }
     return out;
   }
 
@@ -1737,7 +1758,7 @@ function createWorkService(options) {
     return operation(actor, 'items.withdraw', rawInput, ['id', 'expected_revision', 'reason'],
       (draft, body, now) => {
         const item = findItem(draft, body.id);
-        if (item.kind === 'decision' || item.approval) fail('invalid-kind');
+        if (item.kind === 'decision' || (item.approval && !orphanedApproval(item))) fail('invalid-kind');
         if (!mayWithdrawAs(actor, item, now)) fail('not-withdrawer');
         checkRevision(item, body.expected_revision);
         const reason = requiredText(body.reason, SHORT_BYTES, 'reason');

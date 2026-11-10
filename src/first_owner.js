@@ -863,36 +863,43 @@ function createFirstOwnerHandler(options) {
    * actor, with the items it held or was next on. Nothing is reassigned.
    * The record is written first; a room line that fails is a courtesy lost. */
   async function settleDeparture(seats, how, peopleActor, chatActor) {
+    // First every seat's grants, with no await between them or before them:
+    // nothing else runs in between, so the server's pass cannot end one of
+    // them first and record it as its own.
+    const now = Date.now();
     for (const seat of seats) {
-      const now = Date.now();
-      if (people) {
-        try {
-          people.service.endHeldGrants(Object.assign({ now }, peopleActor),
-            { holder_subject_id: seat.subject_id, reason: DEPARTURE_REASONS[how] });
-        } catch (_) {
-          // The grant still reads as ended: its holder is not in the room.
-        }
+      if (!people) break;
+      try {
+        people.service.endHeldGrants(Object.assign({ now }, peopleActor),
+          { holder_subject_id: seat.subject_id, reason: DEPARTURE_REASONS[how] });
+      } catch (_) {
+        // The grant still reads as ended: its holder is not in the room.
       }
+    }
+    if (!chatActor) return;
+    const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
+    const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
+    const recipientOf = project => {
+      const lead = people ? people.service.leadOf(project, now, live) : null;
+      return lead && typeof lead.subject_id === 'string' ? lead : first;
+    };
+    const notices = [];
+    for (const seat of seats) {
       const items = work && typeof work.heldBy === 'function' ? work.heldBy(seat.subject_id) : [];
-      if (items.length === 0 || !chatActor) continue;
-      const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
-      const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
-      const recipientOf = project => {
-        const lead = people ? people.service.leadOf(project, now, live) : null;
-        return lead && typeof lead.subject_id === 'string' ? lead : first;
-      };
-      const notices = departureNotices({ name: seat.name, how, items, recipientOf, poster: chatActor.subject_id });
-      for (const notice of notices) {
-        try {
-          const actor = chatActor.kind === 'seat'
-            ? Object.assign({}, chatActor, { client_message_id: require('node:crypto').randomUUID() }) : chatActor;
-          await chat.append({ text: notice.text }, actor);
-        } catch (_) {
-          // The record holds the departure; the room line is a courtesy that failed.
-        }
+      if (items.length > 0) notices.push(...departureNotices({ name: seat.name, how, items, recipientOf, poster: chatActor.subject_id }));
+    }
+    // Then the room lines.
+    for (const notice of notices) {
+      try {
+        const actor = chatActor.kind === 'seat'
+          ? Object.assign({}, chatActor, { client_message_id: require('node:crypto').randomUUID() }) : chatActor;
+        await chat.append({ text: notice.text }, actor);
+      } catch (_) {
+        // The record holds the departure; the room line is a courtesy that failed.
       }
     }
   }
+
 
   function sendStepUpRefusal(request, response, result) {
     const [status, error] = stepUpPageRefusal(result);

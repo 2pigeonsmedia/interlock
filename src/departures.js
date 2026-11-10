@@ -27,20 +27,27 @@ function reasonFor(how) {
 
 /* The sweep: every seat the room has ended (any way) that still holds an
  * active grant has it ended by the server, saying how the seat ended. Run
- * after each idle release and at start, so a seat that expired while nobody
- * looked is settled too. Returns the ended grants as {grant_id, holder}. */
+ * after each idle release (every minute, and on each participants read), so
+ * a seat that expired while nobody looked is settled too. It reads who holds
+ * an active grant against who is in the room, and asks identity how a seat
+ * ended only when a holder has gone: once per departure, since its grants
+ * are then ended. Returns the ended grants as {grant_id, holder}. */
 function endDepartedGrants(options) {
   const { people, house, now } = options || {};
   if (!people || !people.service || typeof people.service.endHeldGrants !== 'function' ||
-      typeof people.service.activeGrants !== 'function' ||
-      !house || typeof house.listRecentEndedSeats !== 'function' || !Number.isSafeInteger(now) || now < 0) {
+      typeof people.service.activeHolderIds !== 'function' || !house ||
+      typeof house.listRecentEndedSeats !== 'function' || typeof house.listParticipants !== 'function' ||
+      !Number.isSafeInteger(now) || now < 0) {
     throw new Error('departures: people, house and a trusted now are required');
   }
-  const active = people.service.activeGrants(now);
-  if (!active || active.length === 0) return [];
+  const holders = people.service.activeHolderIds(now);
+  if (!holders || holders.length === 0) return [];
+  const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
+  const gone = new Set(holders.filter(id => !live.has(id)));
+  if (gone.size === 0) return [];
   const ended = [];
   for (const seat of house.listRecentEndedSeats({ now, since: 0 })) {
-    if (!seat || seat.kind !== 'seat' || typeof seat.subject_id !== 'string') continue;
+    if (!seat || seat.kind !== 'seat' || typeof seat.subject_id !== 'string' || !gone.has(seat.subject_id)) continue;
     const ids = people.service.endHeldGrants(Object.assign({ now }, SERVER_ACTOR),
       { holder_subject_id: seat.subject_id, reason: reasonFor(seat.ended_how) });
     for (const id of ids) ended.push({ grant_id: id, holder: seat.name });

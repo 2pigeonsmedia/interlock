@@ -132,6 +132,7 @@ test('the sweep ends the grants of every seat the room has ended, by the server,
   const expired = grantTo(service, stay, 'books');
   const live = grantTo(service, lead, 'docs');
   const house = {
+    listParticipants: () => [{ subject_id: lead.subject_id, kind: 'seat' }],
     listRecentEndedSeats: meta => {
       assert.deepEqual(Object.keys(meta).sort(), ['now', 'since']);
       return [
@@ -186,4 +187,108 @@ test('holder left is never stored: not on the item, not in a write\'s replay rec
   live.delete(gone.subject_id);
   const again = work.createItem(owner, input);
   assert.deepEqual([again.replayed, again.item.holder_left], [true, ['Juno']]);
+});
+
+// ── cold-read fixes ──────────────────────────────────────────────────────────
+
+test('an approved request held by an AI that left says holder left, is in its lead\'s Needs you, and its lead may withdraw it', () => {
+  const { work, live } = rig();
+  const OWNER_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const asGone = Object.assign({}, gone, { session: null });
+  const filed = work.createApproval(asGone, { operation_id: crypto.randomUUID(), project: 'ops', title: 'Order rollers',
+    scope: 'two rollers, up to $40', approver: OWNER_OF, ask_message_id: 140 }).item;
+  assert.equal(work.answerFromRoom(Object.assign({}, owner, { session: null }), {
+    ask_id: 140, message_id: 141, text: 'yes', choice: 'yes', by_addressee: true, of: OWNER_OF, revision: 1, approver_ok: true,
+  }).recorded, filed.id);
+  const approved = work.get(owner, { id: filed.id }).item;
+  assert.deepEqual([approved.state, approved.approval.state, approved.responsible.name, approved.holder_left], ['active', 'approved', 'Juno', []],
+    'the arrangement: approved, held by its asker, who is here');
+  const withdraw = actor => work.withdrawItem(actor, { operation_id: crypto.randomUUID(), id: filed.id,
+    expected_revision: work.get(owner, { id: filed.id }).item.revision, reason: 'its asker left' });
+  assert.throws(() => withdraw(lead), error => error.code === 'invalid-kind', 'while its asker is here, nobody else withdraws it');
+  live.delete(gone.subject_id);
+  assert.deepEqual(work.get(owner, { id: filed.id }).item.holder_left, ['Juno']);
+  assert.equal(work.brief(lead, {}).needs_me.some(row => row.id === filed.id), true, 'in its lead\'s Needs you');
+  assert.equal(work.get(lead, { id: filed.id }).may_withdraw, true, 'the page offers its lead Withdraw');
+  assert.throws(() => withdraw(stay), error => error.code === 'not-withdrawer', 'not a bystander');
+  assert.throws(() => work.updateWork(lead, { operation_id: crypto.randomUUID(), id: filed.id,
+    expected_revision: work.get(owner, { id: filed.id }).item.revision, note: 'n', responsible: ref(stay) }), error => error.code === 'invalid-kind',
+    'not handed on: what was approved was its asker doing it');
+  assert.equal(withdraw(lead).item.state, 'withdrawn', 'its lead drops it, on the record');
+});
+
+test('a refusal never names someone who has left as whom to ask', () => {
+  const { work, live } = rig({ leads: false });
+  const item = work.createItem(gone, { operation_id: crypto.randomUUID(), kind: 'work', project: 'ops', title: 't', body: 'b', responsible: ref(gone) }).item;
+  live.delete(gone.subject_id);
+  const refused = (() => {
+    try { work.updateWork(stay, { operation_id: crypto.randomUUID(), id: item.id, expected_revision: 1, note: 'n', state: 'active' }); }
+    catch (error) { return error; }
+    return null;
+  })();
+  assert.equal(refused && refused.code, 'not-assigner');
+  assert.deepEqual(refused.can_assign, [], 'only the first owner or an administrator is left to ask');
+});
+
+test('the sweep reads identity\'s ended seats only when a grant\'s holder has gone', () => {
+  const { service } = people();
+  grantTo(service, stay, 'ops');
+  let scans = 0;
+  const live = new Set([stay.subject_id]);
+  const house = {
+    listParticipants: () => [...live].map(subject_id => ({ subject_id, kind: 'seat' })),
+    listRecentEndedSeats: () => {
+      scans += 1;
+      return live.has(stay.subject_id) ? [] : [{ subject_id: stay.subject_id, name: stay.name, kind: 'seat', ended_how: 'left' }];
+    },
+  };
+  for (let i = 0; i < 5; i += 1) assert.deepEqual(endDepartedGrants({ people: { service }, house, now: 5000 + i }), []);
+  assert.equal(scans, 0, 'nobody gone: no scan, however many seats ended before');
+  live.delete(stay.subject_id);
+  assert.equal(endDepartedGrants({ people: { service }, house, now: 6000 }).length, 1);
+  assert.equal(endDepartedGrants({ people: { service }, house, now: 7000 }).length, 0);
+  assert.equal(scans, 1, 'one scan for the one departure; then its grant is ended');
+});
+
+test('holder left is not stored in a withdraw\'s replay record either; its replay derives it afresh', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-holder-left-withdraw-'));
+  const live = new Set([owner.subject_id, gone.subject_id]);
+  const work = createWorkService({ store: openWorkStore({ dataDir }), live: () => live });
+  const base = work.createItem(owner, { operation_id: crypto.randomUUID(), kind: 'work', project: 'ops', title: 'base', body: 'b' }).item;
+  work.createItem(owner, { operation_id: crypto.randomUUID(), kind: 'work', project: 'ops', title: 'waits', body: 'b',
+    responsible: ref(gone), links: [base.id] });
+  live.delete(gone.subject_id);
+  const input = { operation_id: crypto.randomUUID(), id: base.id, expected_revision: 1, reason: 'dropped' };
+  const first = work.withdrawItem(owner, input);
+  assert.deepEqual(first.left_waiting.map(row => row.holder_left), [['Juno']], 'the arrangement: the answer carries it');
+  const raw = fs.readdirSync(path.join(dataDir, 'work')).map(name => fs.readFileSync(path.join(dataDir, 'work', name), 'utf8')).join('\n');
+  assert.ok(raw.includes('left_waiting'), 'the arrangement: the replay record was written');
+  assert.equal(raw.includes('holder_left'), false);
+  live.add(gone.subject_id);
+  assert.deepEqual(work.withdrawItem(owner, input).left_waiting.map(row => row.holder_left), [[]], 'a replay derives it now');
+});
+
+test('a removed person who still holds a grant does not bring the identity scan back: only AI holders can have left', () => {
+  const { service } = people();
+  grantTo(service, { subject_id: 'p-7', name: 'Bea', kind: 'person' }, 'ops');
+  let scans = 0;
+  const house = { listParticipants: () => [], listRecentEndedSeats: () => { scans += 1; return []; } };
+  for (let i = 0; i < 3; i += 1) endDepartedGrants({ people: { service }, house, now: 5000 + i });
+  assert.equal(scans, 0);
+});
+
+test('an approver\'s yes to a request whose asker already left is recorded, and flagged at once: holder left, its lead withdraws it', () => {
+  const { work, live } = rig();
+  const OWNER_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const filed = work.createApproval(Object.assign({}, gone, { session: null }), { operation_id: crypto.randomUUID(), project: 'ops',
+    title: 'Order rollers', scope: 'two rollers', approver: OWNER_OF, ask_message_id: 150 }).item;
+  live.delete(gone.subject_id);
+  assert.deepEqual(work.get(owner, { id: filed.id }).item.holder_left, [], 'awaiting: next to its approver, not held by the asker');
+  assert.equal(work.answerFromRoom(Object.assign({}, owner, { session: null }), {
+    ask_id: 150, message_id: 151, text: 'yes', choice: 'yes', by_addressee: true, of: OWNER_OF, revision: 1, approver_ok: true,
+  }).recorded, filed.id, 'the room and the record agree: her yes is recorded');
+  assert.deepEqual(work.get(owner, { id: filed.id }).item.holder_left, ['Juno']);
+  assert.equal(work.brief(lead, {}).needs_me.some(row => row.id === filed.id), true);
+  assert.equal(work.withdrawItem(lead, { operation_id: crypto.randomUUID(), id: filed.id,
+    expected_revision: work.get(owner, { id: filed.id }).item.revision, reason: 'its asker left' }).item.state, 'withdrawn');
 });
