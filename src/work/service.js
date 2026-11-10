@@ -223,7 +223,7 @@ function stripIds(value) {
 }
 
 function createWorkService(options) {
-  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf']);
+  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf', 'live']);
   const store = input && input.store;
   if (!store || typeof store.read !== 'function' || typeof store.commit !== 'function' ||
       typeof store.nextId !== 'function' || typeof store.nextEvent !== 'function') {
@@ -234,6 +234,35 @@ function createWorkService(options) {
   // A project's live lead `{subject_id, ...}` or null (server-internal);
   // without it no one moves a record as its project's lead.
   const leadOf = typeof input.leadOf === 'function' ? input.leadOf : null;
+  // The subject ids still in the room at `now`, as a Set (server-internal);
+  // without it nobody reads as having left.
+  const liveOf = typeof input.live === 'function' ? input.live : null;
+  let liveCache = { at: null, set: null };
+  function liveSet() {
+    if (!liveOf) return null;
+    const now = clock();
+    if (liveCache.at !== now) {
+      let set = null;
+      try { set = liveOf(now); } catch (_) { set = null; }
+      liveCache = { at: now, set: set instanceof Set ? set : null };
+    }
+    return liveCache.set;
+  }
+  /* Who of a live work item's holder and next has left the room (ruling,
+   * 2026-11-10), by name, once each: an AI seat whose session ended (it
+   * left, was removed, released or expired). Derived on each read, never
+   * stored; nothing is reassigned. A done or withdrawn item says nothing. */
+  function holderLeft(item) {
+    if (item.kind === 'decision' || item.approval || !LIVE_WORK_STATES.includes(item.state)) return [];
+    const live = liveSet();
+    if (!live) return [];
+    const names = [];
+    for (const ref of [item.responsible, item.next_to]) {
+      if (ref && ref.kind === 'seat' && typeof ref.subject_id === 'string' && !live.has(ref.subject_id) &&
+          !names.includes(ref.name)) names.push(ref.name);
+    }
+    return names;
+  }
   // Who may move a record to another project (her rulings, 2026-10-31): the
   // first owner, the record's holder, and the lead of its current project.
   function mayMove(actor, item, now) {
@@ -348,6 +377,21 @@ function createWorkService(options) {
     try { return run(); } finally { checking = false; }
   }
 
+  /* A write's result as its replay record keeps it: without what is derived
+   * on each read (`holder_left`), which a replay derives afresh. */
+  function stored(result) {
+    const copy = clone(result);
+    if (copy && copy.item && typeof copy.item === 'object') delete copy.item.holder_left;
+    return copy;
+  }
+  function replayed(draft, prior) {
+    const out = Object.assign({}, clone(prior.result), { replayed: true });
+    const item = out.item && typeof out.item.id === 'string' && out.item.kind !== 'decision'
+      ? draft.items.find(row => row.id === out.item.id) : null;
+    if (item) out.item.holder_left = holderLeft(item);
+    return out;
+  }
+
   function operation(actor, op, rawInput, keys, handler) {
     requireActor(actor);
     let rawDigest;
@@ -367,13 +411,13 @@ function createWorkService(options) {
     return (checking ? store.check : store.commit)(draft => {
       const prior = draft.operations[operationId];
       if (prior) {
-        if (prior.digest === digest) return Object.assign({}, clone(prior.result), { replayed: true });
+        if (prior.digest === digest) return replayed(draft, prior);
         fail('operation-conflict');
       }
       const result = handler(draft, rest, clock());
       draft.operations[operationId] = rawDigest === undefined
-        ? { digest, result: clone(result) }
-        : { digest, raw_digest: rawDigest, result: clone(result) };
+        ? { digest, result: stored(result) }
+        : { digest, raw_digest: rawDigest, result: stored(result) };
       return result;
     });
   }
@@ -386,10 +430,11 @@ function createWorkService(options) {
     requireActor(actor);
     if (typeof operationId !== 'string' || !UUID.test(operationId)) return null;
     if (typeof rawDigest !== 'string') return null;
-    const prior = snapshot().operations[operationId.toLowerCase()];
+    const draft = snapshot();
+    const prior = draft.operations[operationId.toLowerCase()];
     if (!prior || typeof prior.raw_digest !== 'string') return null;
     if (prior.raw_digest !== rawDigest) fail('operation-conflict');
-    return Object.assign({}, clone(prior.result), { replayed: true });
+    return replayed(draft, prior);
   }
 
   function findProject(draft, id) {
@@ -460,6 +505,8 @@ function createWorkService(options) {
       copy.kill = item.kill ? clone(item.kill) : null;
       copy.kill_state = killState(item);
       copy.question_revision = questionRevision(item);
+    } else {
+      copy.holder_left = holderLeft(item);
     }
     return copy;
   }
@@ -532,6 +579,8 @@ function createWorkService(options) {
       evidence_attached: draft.events.some(event => event.item === item.id && event.kind === 'evidence'),
       awaiting: awaitingDecision(draft, item),
       blocker_withdrawn: blockerWithdrawn(draft, item),
+      // Its holder or next has left the room: its lead decides what happens to it.
+      holder_left: holderLeft(item),
       source_message_id: item.source_message ? item.source_message.message_id : null,
       // A request for approval: its state, approver and scope, and the room
       // ask it is answered through, so the panel shows it once.
@@ -553,6 +602,10 @@ function createWorkService(options) {
   }
   function unassignedTo(item) {
     if (!unowned(item)) return null;
+    return leadOrOwner(item);
+  }
+  // Its project's live lead, else the first owner, as a subject id.
+  function leadOrOwner(item) {
     let lead = null;
     try { lead = leadOf ? leadOf(item.project, clock()) : null; } catch (_) { lead = null; }
     if (lead && typeof lead.subject_id === 'string') return lead.subject_id;
@@ -615,6 +668,13 @@ function createWorkService(options) {
     return null;
   }
 
+  /* The live work items a participant holds or is next on, by id order, as
+   * {id, project}: what a departure lists for its lead. */
+  function heldBy(subjectId) {
+    const mine = ownWork(subjectId);
+    return mine ? mine.map(entry => ({ id: entry.item.id, project: entry.item.project })) : [];
+  }
+
   function workingOf(subjectId) {
     const mine = ownWork(subjectId);
     if (!mine) return null;
@@ -637,6 +697,8 @@ function createWorkService(options) {
       return decisionState(item) === 'awaiting' && item.asked_of.subject_id === subjectId;
     }
     if (unowned(item)) return unassignedTo(item) === subjectId;
+    // Its holder or next has left: its lead (else the first owner) decides.
+    if (holderLeft(item).length > 0 && leadOrOwner(item) === subjectId) return true;
     // Next to the viewer; or, with nobody next, held by the viewer: a record
     // made someone's is theirs to act on until someone else is named next.
     const holds = !item.next_to && item.responsible && item.responsible.subject_id === subjectId;
@@ -1950,7 +2012,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, lastWriteOf, attachEvidence, addNote, share,
+    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, heldBy, lastWriteOf, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, revise, followAsk, recordDiscussion, priorDiscussion, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,

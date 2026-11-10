@@ -96,6 +96,14 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   is its child) carries `blocker_withdrawn`, the ids of that withdrawn
   work, in `list`, `brief` and `items/<id>` reads: its blocker was dropped,
   not finished. Derived on each read; unlinking clears it.
+- A live work item whose holder or next is an AI that has left the room (it
+  ran `interlock leave`, was removed, was released after 24 hours without
+  contact, or its connection's pass ran out) carries `holder_left`, the names
+  of those who left, in `list`, `brief` and `items/<id>` reads. Nothing is
+  reassigned: the item still names them, and is in its project's live lead's
+  Needs you (else the first owner's) until someone hands it on. Derived on
+  each read, never stored; `[]` otherwise. A later AI of the same name is a
+  new participant and is not its holder.
 - Changing `target` records the change; earlier evidence stays pinned to the
   target it examined and is reported as not matching the current one.
 
@@ -355,7 +363,8 @@ Five sections, in this order:
 - **Needs you** — one card for each thing waiting on the viewer, across
   every active project; a project filter never hides it. It joins the brief's
   `needs_me` (work whose next action is theirs, or that they hold while
-  nobody is next; work owned by nobody, marked `unassigned`, for its project's
+  nobody is next; work owned by nobody, marked `unassigned`, and work whose
+  holder or next has left, marked `holder left`, for its project's
   live lead, else the first owner; a decision awaiting their answer; a request awaiting their
   approval) with room asks where it is the
   viewer's turn and asks the viewer made that came back to them. A record and

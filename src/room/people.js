@@ -275,6 +275,28 @@ function createPeopleService(options) {
     }));
   }
 
+  /* When a participant leaves (ruling, 2026-11-10), its active grants end,
+   * each as a revoke row naming who ended it and why, in grant order. By the
+   * holder itself (it left), an administrator (who removed it) or the server
+   * (it was released or expired); this module checks only that. Returns the
+   * ended grant ids; a holder with none active changes nothing. */
+  function endHeldGrants(actor, input) {
+    requireActor(actor);
+    const body = request(input, ['holder_subject_id', 'reason'], []);
+    if (!validName(body.holder_subject_id) || !oneLine(body.reason, LIMITS.reason)) fail('invalid-request');
+    if (!(actor.kind === 'server' || actor.subject_id === body.holder_subject_id ||
+        (actor.kind === 'person' && actor.owner === true))) fail('not-authorized');
+    const now = nowOf(actor);
+    const ended = [];
+    for (const entry of grantsById.values()) {
+      if (entry.row.holder_subject_id !== body.holder_subject_id || entry.revoked_at !== null) continue;
+      if (entry.row.until !== null && entry.row.until <= now) continue;
+      write(Object.assign(base(actor, 'revoke'), { grant_id: entry.row.grant_id, reason: body.reason }));
+      ended.push(entry.row.grant_id);
+    }
+    return ended;
+  }
+
   function presenceWrite(actor, input) {
     requireActor(actor);
     if (!PARTICIPANT_KINDS.includes(actor.kind)) fail('not-authorized');
@@ -372,6 +394,7 @@ function createPeopleService(options) {
     assign,
     grant,
     revoke,
+    endHeldGrants,
     presence: presenceWrite,
     clearPresenceOnPost,
     profile,

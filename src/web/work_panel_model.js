@@ -329,6 +329,8 @@
         unassigned: row.unassigned === true,
         // Linked to work that was withdrawn: its blocker was dropped, not finished.
         blockerWithdrawn: Array.isArray(row.blocker_withdrawn) ? row.blocker_withdrawn.filter(id => typeof id === 'string') : [],
+        // Its holder or next has left the room: it is here for its lead to decide.
+        holderLeft: Array.isArray(row.holder_left) ? row.holder_left.filter(name => typeof name === 'string') : [],
       };
       if (bound) Object.assign(card, storyFields(bound, viewer));
       if (decision && killWord(row)) card.kill = killWord(row);
@@ -462,6 +464,10 @@
       parts.push('done', row.evidence_attached ? 'evidence attached' : 'no evidence attached');
       if (row.awaiting) parts.push('awaiting ' + row.awaiting);
       return parts.join(' · ');
+    }
+    // Its holder or next has left the room: said first, so a narrow row never hides it.
+    if (Array.isArray(row.holder_left) && row.holder_left.length) {
+      parts.push('holder left: ' + row.holder_left.filter(name => typeof name === 'string').join(', '));
     }
     const blocked = row.state === 'blocked';
     if (blocked && typeof row.block_reason === 'string' && row.block_reason.trim() !== '') {

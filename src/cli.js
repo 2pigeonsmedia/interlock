@@ -3323,12 +3323,18 @@ function blockerWithdrawn(row, separator) {
   return ids.length ? `${separator}blocker withdrawn: ${ids.map(id => terminalSafe(id)).join(', ')}` : '';
 }
 
+// A live item whose holder or next has left the room: its lead decides.
+function holderLeft(row, separator) {
+  const names = Array.isArray(row.holder_left) ? row.holder_left.filter(name => typeof name === 'string') : [];
+  return names.length ? `${separator}holder left: ${names.map(name => terminalSafe(name)).join(', ')}` : '';
+}
+
 function workRow(row) {
   if (row.kind === 'decision') {
     return `${row.id} · ${row.state}${killSuffix(row)} · asked of ${who(row.asked_of)} by ${who(row.asked_by)} · ${terminalSafe(row.title)}`;
   }
   const next = row.next_to ? `${who(row.next_to)} — ${terminalSafe(row.next_action || '')}` : 'nobody';
-  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}${blockerWithdrawn(row, ' · ')}`;
+  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}${blockerWithdrawn(row, ' · ')}${holderLeft(row, ' · ')}`;
 }
 
 function needsRow(row) {
@@ -3336,7 +3342,7 @@ function needsRow(row) {
     return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.proposal || '')} (${row.state}${killSuffix(row)}, asked by ${who(row.asked_by)})`;
   }
   const awaiting = row.awaiting ? `, awaiting ${row.awaiting}` : '';
-  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting}${blockerWithdrawn(row, ', ')})`;
+  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting}${blockerWithdrawn(row, ', ')}${holderLeft(row, ', ')})`;
 }
 
 function renderBrief(stdout, brief, connection) {

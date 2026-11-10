@@ -392,8 +392,14 @@ function createWorkRoutes(options) {
     catch (_) { return null; }
   }
 
+  // The live items a participant holds or is next on, as [{id, project}].
+  function heldBy(subjectId) {
+    try { return typeof work.heldBy === 'function' ? work.heldBy(subjectId) : []; }
+    catch (_) { return []; }
+  }
+
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, lastWriteOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, heldBy, lastWriteOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

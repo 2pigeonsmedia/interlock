@@ -223,6 +223,7 @@
       const facts = [card.who, card.project];
       if (card.blocks && card.blocks.length) facts.push('blocks ' + card.blocks.join(', '));
       if (card.unassigned) facts.push('unassigned');
+      if (card.holderLeft && card.holderLeft.length) facts.push('holder left: ' + card.holderLeft.join(', '));
       if (card.blockerWithdrawn && card.blockerWithdrawn.length) facts.push('blocker withdrawn: ' + card.blockerWithdrawn.join(', '));
       if (card.kill) facts.push(card.kill);
       node.append(make('p', 'work-tree-facts', facts.join(' · ')));
