@@ -103,7 +103,12 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   reassigned: the item still names them, and is in its project's live lead's
   Needs you (else the first owner's) until someone hands it on. Derived on
   each read, never stored; `[]` otherwise. A later AI of the same name is a
-  new participant and is not its holder.
+  new participant and is not its holder. An approved request for approval
+  counts too (its asker holds it); one still awaiting is next to its approver
+  and never says it. An approved request whose asker has left cannot be
+  handed on (what was approved was its asker doing it): its project's live
+  lead, the first owner or an administrator withdraws it with
+  `items/withdraw`. A refusal's `can_assign` never names someone who has left.
 - Changing `target` records the change; earlier evidence stays pinned to the
   target it examined and is reported as not matching the current one.
 
