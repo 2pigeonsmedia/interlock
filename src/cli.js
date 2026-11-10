@@ -3236,6 +3236,7 @@ async function workRequest(fetcher, profile, pathname, options = {}) {
       if (result && Array.isArray(result.needs_one_of)) error.needsOneOf = result.needs_one_of.filter(name => typeof name === 'string');
       if (result && typeof result.did_you_mean === 'string') error.didYouMean = result.did_you_mean;
       if (result && Array.isArray(result.can_assign)) error.canAssign = result.can_assign.filter(name => typeof name === 'string');
+      if (result && result.change === 'state') error.change = 'state';
       throw error;
     }
     return result;
@@ -3266,11 +3267,12 @@ function refusedFieldWords(error) {
   return ` ${field} is not one this command takes${takes}.`;
 }
 
-// Whom a refused assignment can ask, in words.
-function assignerAsk(names) {
+// Whom a refused assignment, or a refused change of state, can ask, in words.
+function assignerAsk(names, change) {
   const safe = Array.isArray(names) ? names.map(name => terminalSafe(name)) : [];
   const who = safe.length === 0 ? 'the first owner or an administrator'
     : `${safe.length > 1 ? safe.slice(0, -1).join(', ') + ' or ' + safe[safe.length - 1] : safe[0]} (or the first owner or an administrator)`;
+  if (change === 'state') return `Ask ${who} to change its state; your own items, and items nobody holds or is next on, are yours to change.`;
   return `Ask ${who} to assign it; you may take an item nobody holds, or step out of a slot yourself.`;
 }
 
@@ -3280,7 +3282,7 @@ function reportWorkError(stderr, error, profile) {
     const hint = (Object.prototype.hasOwnProperty.call(WORK_REFUSAL_HINTS, error.code) ? ' ' + WORK_REFUSAL_HINTS[error.code] : '') +
       (error.code === 'invalid-request' ? refusedFieldWords(error) : '') +
       (error.code === 'unknown-project' && typeof error.didYouMean === 'string' ? ` Did you mean ${terminalSafe(error.didYouMean)}?` : '') +
-      (error.code === 'not-assigner' ? ` ${assignerAsk(error.canAssign)}` : '');
+      (error.code === 'not-assigner' ? ` ${assignerAsk(error.canAssign, error.change)}` : '');
     line(stderr, `interlock: ${roomLabel(profile)} refused the command: ${terminalSafe(error.code)}${revision}.${hint}`);
     return;
   }
@@ -3321,12 +3323,18 @@ function blockerWithdrawn(row, separator) {
   return ids.length ? `${separator}blocker withdrawn: ${ids.map(id => terminalSafe(id)).join(', ')}` : '';
 }
 
+// A live item whose holder or next has left the room: its lead decides.
+function holderLeft(row, separator) {
+  const names = Array.isArray(row.holder_left) ? row.holder_left.filter(name => typeof name === 'string') : [];
+  return names.length ? `${separator}holder left: ${names.map(name => terminalSafe(name)).join(', ')}` : '';
+}
+
 function workRow(row) {
   if (row.kind === 'decision') {
     return `${row.id} · ${row.state}${killSuffix(row)} · asked of ${who(row.asked_of)} by ${who(row.asked_by)} · ${terminalSafe(row.title)}`;
   }
   const next = row.next_to ? `${who(row.next_to)} — ${terminalSafe(row.next_action || '')}` : 'nobody';
-  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}${blockerWithdrawn(row, ' · ')}`;
+  return `${row.id} · ${row.state} · ${terminalSafe(row.title)} · next: ${next}${blockerWithdrawn(row, ' · ')}${holderLeft(row, ' · ')}`;
 }
 
 function needsRow(row) {
@@ -3334,7 +3342,7 @@ function needsRow(row) {
     return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.proposal || '')} (${row.state}${killSuffix(row)}, asked by ${who(row.asked_by)})`;
   }
   const awaiting = row.awaiting ? `, awaiting ${row.awaiting}` : '';
-  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting}${blockerWithdrawn(row, ', ')})`;
+  return `${row.project} · ${row.id} · ${terminalSafe(row.title)} — ${terminalSafe(row.next_action || '')} (${row.state}${awaiting}${blockerWithdrawn(row, ', ')}${holderLeft(row, ', ')})`;
 }
 
 function renderBrief(stdout, brief, connection) {

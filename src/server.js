@@ -20,6 +20,7 @@ const { openPeopleStore } = require('./room/people_store.js');
 const { createPeopleService } = require('./room/people.js');
 const { createWorkRoutes } = require('./work/routes.js');
 const { releaseIdleSeats } = require('./idle.js');
+const { endDepartedGrants } = require('./departures.js');
 const { readRoomSettings } = require('./room_settings.js');
 const { renderGuidePage } = require('./guide.js');
 const { acquireInstanceLock } = require('./instance_lock.js');
@@ -473,7 +474,9 @@ async function startInterlockServer(options) {
     const work = createWorkRoutes({
       // A project's lead for moving its records: in the room now, as for approvals.
       work: createWorkService({ store: workStore, approverFor,
-        leadOf: (project, now) => people.service.leadOf(project, now, liveSubjects(now)) }),
+        leadOf: (project, now) => people.service.leadOf(project, now, liveSubjects(now)),
+        // Who is still in the room, so an item says when its holder has left.
+        live: liveSubjects }),
       participants: meta => house.listParticipants(meta),
       // A cited room message, looked up by id; null when it is not in the
       // room (never posted, or archived by a transcript clear).
@@ -490,7 +493,16 @@ async function startInterlockServer(options) {
     let idleBusy = null;
     const releaseIdle = now => {
       if (idleBusy) return idleBusy;
+      // Then any seat the room has ended (released now, or expired since the
+      // last pass) has its grants ended by the server, recorded with how.
       idleBusy = Promise.resolve(releaseIdleSeats({ house, store: chatStore, now }))
+        .then(released => {
+          // Never fails a read that waits on the release: the grant still
+          // reads as ended (its holder is not in the room), and the next
+          // pass records it.
+          try { endDepartedGrants({ people, house, now }); } catch (_) { /* next pass retries */ }
+          return released;
+        })
         .finally(() => { idleBusy = null; });
       return idleBusy;
     };

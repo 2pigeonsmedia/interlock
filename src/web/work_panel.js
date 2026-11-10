@@ -223,6 +223,7 @@
       const facts = [card.who, card.project];
       if (card.blocks && card.blocks.length) facts.push('blocks ' + card.blocks.join(', '));
       if (card.unassigned) facts.push('unassigned');
+      if (card.holderLeft && card.holderLeft.length) facts.push('holder left: ' + card.holderLeft.join(', '));
       if (card.blockerWithdrawn && card.blockerWithdrawn.length) facts.push('blocker withdrawn: ' + card.blockerWithdrawn.join(', '));
       if (card.kill) facts.push(card.kill);
       node.append(make('p', 'work-tree-facts', facts.join(' · ')));
@@ -733,7 +734,7 @@
       const code = error && typeof error.code === 'string' ? error.code : 'unavailable';
       if ((error && error.status === 401) || code === 'not-authenticated') state.deps.onSessionEnded();
       else if (code === 'stale-revision' && typeof body.id === 'string') await staleNotice(op, body.id, where);
-      else if (code === 'not-assigner') where.textContent = model().assignerWords(error.canAssign);
+      else if (code === 'not-assigner') where.textContent = model().assignerWords(error.canAssign, error.change);
       else where.textContent = model().errorWords(code);
       return null;
     }

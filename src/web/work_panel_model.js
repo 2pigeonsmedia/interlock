@@ -329,6 +329,8 @@
         unassigned: row.unassigned === true,
         // Linked to work that was withdrawn: its blocker was dropped, not finished.
         blockerWithdrawn: Array.isArray(row.blocker_withdrawn) ? row.blocker_withdrawn.filter(id => typeof id === 'string') : [],
+        // Its holder or next has left the room: it is here for its lead to decide.
+        holderLeft: Array.isArray(row.holder_left) ? row.holder_left.filter(name => typeof name === 'string') : [],
       };
       if (bound) Object.assign(card, storyFields(bound, viewer));
       if (decision && killWord(row)) card.kill = killWord(row);
@@ -462,6 +464,10 @@
       parts.push('done', row.evidence_attached ? 'evidence attached' : 'no evidence attached');
       if (row.awaiting) parts.push('awaiting ' + row.awaiting);
       return parts.join(' · ');
+    }
+    // Its holder or next has left the room: said first, so a narrow row never hides it.
+    if (Array.isArray(row.holder_left) && row.holder_left.length) {
+      parts.push('holder left: ' + row.holder_left.filter(name => typeof name === 'string').join(', '));
     }
     const blocked = row.state === 'blocked';
     if (blocked && typeof row.block_reason === 'string' && row.block_reason.trim() !== '') {
@@ -833,12 +839,14 @@
   }
 
   // Whom a refused assignment can ask, in words.
-  function assignerWords(names) {
+  // Whom to ask; `change` is 'state' when what was refused was a change of
+  // the item's state rather than who holds it or is next.
+  function assignerWords(names, change) {
     const list = Array.isArray(names) ? names.filter(name => typeof name === 'string') : [];
     const who = list.length === 0 ? 'the first owner or an administrator'
       : (list.length > 1 ? list.slice(0, -1).join(', ') + ' or ' + list[list.length - 1] : list[0]) +
         ' (or the first owner or an administrator)';
-    return 'Ask ' + who + ' to assign it.';
+    return 'Ask ' + who + (change === 'state' ? ' to change its state.' : ' to assign it.');
   }
 
   function errorWords(code) {

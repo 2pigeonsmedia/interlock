@@ -6,6 +6,7 @@ const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
 const { SETTINGS_ENDED_MS } = require('./idle.js');
+const { REASONS: DEPARTURE_REASONS, departureNotices } = require('./departures.js');
 const { readRoomSettings, writeRoomSettings } = require('./room_settings.js');
 const { version: PACKAGE_VERSION } = require('../package.json');
 
@@ -820,7 +821,7 @@ function createFirstOwnerHandler(options) {
     }, { 'set-cookie': session.set_cookie });
   }
 
-  function revokeParticipant(request, response, body) {
+  async function revokeParticipant(request, response, body) {
     if (!completed()) {
       return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
     }
@@ -830,9 +831,57 @@ function createFirstOwnerHandler(options) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-participant' });
     }
     if (!ownerSession(request, response, true)) return;
-    const result = house.revokeParticipant(requestMeta(request, Date.now()), input);
+    const at = Date.now();
+    // Who removes it, and which seats were in the room before: a removed
+    // person takes the seats delegated from them out with them.
+    const remover = authorizedActor(request, house.authorizeWrite(authorizationMeta(request, at), 'write', CHAT_RESOURCE), at);
+    const seatsBefore = house.listParticipants({ now: at }).filter(row => row.kind === 'seat');
+    const result = house.revokeParticipant(requestMeta(request, at), input);
     if (!result || result.ok !== true) return sendStepUpRefusal(request, response, result);
+    const after = new Set(house.listParticipants({ now: Date.now() }).map(row => row.subject_id));
+    if (remover) {
+      await settleDeparture(seatsBefore.filter(row => !after.has(row.subject_id)), 'revoked',
+        { subject_id: remover.subject_id, name: remover.name, kind: 'person', owner: true }, remover);
+    }
     return sendJson(request, response, 200, result);
+  }
+
+  /* When AI seats leave the room by an act (ruling, 2026-11-10): `leave` by
+   * the seat itself, or removal by an administrator. Each seat's active
+   * grants end, recorded as ended by whoever acted and why; then each of its
+   * live items' project lead (else the first owner) is rung once, by that
+   * actor, with the items it held or was next on. Nothing is reassigned.
+   * The record is written first; a room line that fails is a courtesy lost. */
+  async function settleDeparture(seats, how, peopleActor, chatActor) {
+    for (const seat of seats) {
+      const now = Date.now();
+      if (people) {
+        try {
+          people.service.endHeldGrants(Object.assign({ now }, peopleActor),
+            { holder_subject_id: seat.subject_id, reason: DEPARTURE_REASONS[how] });
+        } catch (_) {
+          // The grant still reads as ended: its holder is not in the room.
+        }
+      }
+      const items = work && typeof work.heldBy === 'function' ? work.heldBy(seat.subject_id) : [];
+      if (items.length === 0 || !chatActor) continue;
+      const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
+      const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
+      const recipientOf = project => {
+        const lead = people ? people.service.leadOf(project, now, live) : null;
+        return lead && typeof lead.subject_id === 'string' ? lead : first;
+      };
+      const notices = departureNotices({ name: seat.name, how, items, recipientOf, poster: chatActor.subject_id });
+      for (const notice of notices) {
+        try {
+          const actor = chatActor.kind === 'seat'
+            ? Object.assign({}, chatActor, { client_message_id: require('node:crypto').randomUUID() }) : chatActor;
+          await chat.append({ text: notice.text }, actor);
+        } catch (_) {
+          // The record holds the departure; the room line is a courtesy that failed.
+        }
+      }
+    }
   }
 
   function sendStepUpRefusal(request, response, result) {
@@ -2024,6 +2073,10 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
       return;
     }
+    // Its own act: its grants end as ended by it, and it rings its lead.
+    await settleDeparture([{ subject_id: authorized.subject_id, name: result.name }], 'left',
+      { subject_id: authorized.subject_id, name: result.name, kind: 'seat' },
+      seatActor(authorized, require('node:crypto').randomUUID()));
     sendJson(request, response, 200, {
       ok: true,
       name: result.name,

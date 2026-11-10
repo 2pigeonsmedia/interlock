@@ -230,7 +230,8 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     assert.equal(await grantState(), 'active', 'ARRANGEMENT: Scout holds an active grant');
     const left = await aiPost('/api/ai/leave', {}, scoutAuth);
     assert.equal(left.status, 200, left.text);
-    assert.equal(await grantState(), 'ended', 'a grant ends when its holder leaves the room');
+    // Since 0.3.8 the leave records it: revoked by the seat, because it left.
+    assert.equal(await grantState(), 'revoked', 'a grant ends when its holder leaves the room');
 
     const bad = await call(runtime, { path: '/api/ai/admissions', method: 'POST',
       body: Object.assign({}, knock, { request_id: crypto.randomUUID(), name: 'Bad', model: 'a\nb' }) });

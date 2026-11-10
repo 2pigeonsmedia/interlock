@@ -523,6 +523,7 @@ async function ownerMutation(path, body) {
   if (!response.ok || result.ok !== true) {
     const error = new Error(result.error || 'unavailable');
     if (result && Array.isArray(result.can_assign)) error.canAssign = result.can_assign.filter(name => typeof name === 'string');
+    if (result && result.change === 'state') error.change = 'state';
     error.code = result.error || 'unavailable';
     error.status = response.status;
     throw error;

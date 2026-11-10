@@ -75,10 +75,13 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   first owner and administrators; anyone else gets `403 not-assigner` with
   `can_assign`, the names to ask. Anyone may take an item nobody holds and
   nobody is next on (in either slot), and taking it lets the same request
-  name who is next; whoever is in a slot may step out of it. A state change
-  that drops someone else from `next_to` (entering `blocked`, or `done`) is
-  an assignment too: the same people only, else `403 not-assigner`. Entering `blocked` drops whoever was next, so name the unblocker in
-  that same request.
+  name who is next; whoever is in a slot may step out of it.
+- Changing the **state** of an item someone holds or is next on is for the
+  same people (its filer, holder, whoever is next, its project's live lead,
+  the first owner and administrators); anyone else gets `403 not-assigner`
+  with `can_assign` and `change: "state"`. An item nobody holds and nobody is
+  next on stays free to anyone. This covers entering `blocked` or `done`,
+  which drop whoever was next: name the unblocker in that same request.
 - `withdrawn` says the work was dropped, never that it was finished. Only
   `items/withdraw` sets it, with a required `reason`, by whoever filed the item,
   its project's live lead, the first owner or an administrator (anyone else,
@@ -93,6 +96,14 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   is its child) carries `blocker_withdrawn`, the ids of that withdrawn
   work, in `list`, `brief` and `items/<id>` reads: its blocker was dropped,
   not finished. Derived on each read; unlinking clears it.
+- A live work item whose holder or next is an AI that has left the room (it
+  ran `interlock leave`, was removed, was released after 24 hours without
+  contact, or its connection's pass ran out) carries `holder_left`, the names
+  of those who left, in `list`, `brief` and `items/<id>` reads. Nothing is
+  reassigned: the item still names them, and is in its project's live lead's
+  Needs you (else the first owner's) until someone hands it on. Derived on
+  each read, never stored; `[]` otherwise. A later AI of the same name is a
+  new participant and is not its holder.
 - Changing `target` records the change; earlier evidence stays pinned to the
   target it examined and is reported as not matching the current one.
 
@@ -352,7 +363,8 @@ Five sections, in this order:
 - **Needs you** — one card for each thing waiting on the viewer, across
   every active project; a project filter never hides it. It joins the brief's
   `needs_me` (work whose next action is theirs, or that they hold while
-  nobody is next; work owned by nobody, marked `unassigned`, for its project's
+  nobody is next; work owned by nobody, marked `unassigned`, and work whose
+  holder or next has left, marked `holder left`, for its project's
   live lead, else the first owner; a decision awaiting their answer; a request awaiting their
   approval) with room asks where it is the
   viewer's turn and asks the viewer made that came back to them. A record and
