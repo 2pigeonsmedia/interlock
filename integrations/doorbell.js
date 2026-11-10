@@ -552,6 +552,43 @@ function nudge(options, rings) {
     'if it says there is more to read, run the same command again.';
 }
 
+/* Adapters running on this computer, from this state directory, for a
+ * DIFFERENT connection but the same host session: that session joined again
+ * under another name, and the older adapter still rings for the old one.
+ * Read-only; an unreadable entry is skipped. Another host session's adapter
+ * is ordinary and is not reported. */
+function sameSessionOtherConnections(options, stateDir) {
+  const found = [];
+  let owners;
+  try { owners = fs.readdirSync(path.join(stateDir, '.locks')); } catch (_) { return found; }
+  const mine = path.basename(lockDirectory(options, stateDir));
+  for (const owner of owners) {
+    if (owner === mine) continue;
+    const dataDir = path.join(stateDir, '.locks', owner);
+    try {
+      const read = readStatusJson(path.join(dataDir, 'runtime.json'));
+      const runtime = read.kind === 'value' ? validRuntime(read.value) : null;
+      if (!runtime || runtime.connection === options.connection || runtime.session !== options.session) continue;
+      const lock = inspectInstanceLock({ dataDir });
+      if (lock.state !== 'active' || !lock.owner || lock.owner.pid !== runtime.pid) continue;
+      found.push(runtime);
+    } catch (_) { /* not evidence */ }
+  }
+  return found;
+}
+
+function warnSameSession(options, others) {
+  for (const other of others) {
+    process.stderr.write('interlock doorbell adapter: warning: this host session ' +
+      `(${options.session}) already has a doorbell adapter running for a different connection, ` +
+      `${other.connection} (pid ${other.pid}, adapter ${other.adapter}). This run is for ` +
+      `${options.connection}. It does not stop, change or take over the other adapter. ` +
+      'One host session under two names usually means it joined again under a new name; ' +
+      `the other adapter keeps ringing for ${other.connection}. If that name is no longer ` +
+      'in use, stop its adapter where it was started.\n');
+  }
+}
+
 function replacementRecoveryHint(state, replacementPending, firstPoll) {
   if (!firstPoll || state === null || replacementPending) return '';
   return '\nIf this immediately follows an intentional Interlock connection ' +
@@ -591,6 +628,7 @@ function runAdapter(argv) {
   const codex = process.env.INTERLOCK_DOORBELL_CODEX ||
     (process.platform === 'win32' ? 'codex.exe' : 'codex');
   const lockDir = lockDirectory(options, stateDir);
+  warnSameSession(options, sameSessionOtherConnections(options, stateDir));
   fs.mkdirSync(lockDir, { recursive: true, mode: 0o700 });
   let adapterLock;
   try {

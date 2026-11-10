@@ -666,6 +666,48 @@ test('a second live adapter cannot steal one connection from the first', async (
   assert.equal(code, 0);
 });
 
+// Before arming, the adapter looks for one already running on this computer
+// for a DIFFERENT connection from the same host session: that session joined
+// again under another name. It warns and explains; it never stops or takes
+// over the other one. Another host session's adapter is ordinary.
+function otherArgs(world, connection, session) {
+  return [RUNNER, '--adapter', 'stdout', '--connection', connection, '--session', session,
+    '--state-dir', world.stateDir, '--once'];
+}
+
+test('arming warns about this host session\'s adapter for a different connection, and leaves it running', async () => {
+  const world = fixture(ringPage({ rings: [], cursor: 5 }));
+  world.delay = 1_500;
+  const other = spawnTracked(otherArgs(world, 'Marlow-Old', 'host-session-1'), {
+    cwd: ROOT, env: runnerEnv(world), stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  await waitForAdapterLock(world.stateDir);
+  assert.ok(await waitUntil(() => runtimeFile(world.stateDir) !== null), 'arrangement: the other adapter recorded itself');
+  world.delay = 0;
+  const armed = run(world, 'stdout');
+  assert.equal(armed.status, 0, armed.stderr);
+  assert.match(armed.stderr, /warning: this host session \(host-session-1\) already has a doorbell adapter running for a different connection, Marlow-Old \(pid \d+, adapter stdout\)/);
+  assert.match(armed.stderr, /This run is for Marlow\. It does not stop, change or take over the other adapter\./);
+  assert.equal(other.exitCode, null, 'the other adapter is still running after the warning');
+  const [code] = await once(other, 'exit');
+  assert.equal(code, 0, 'the other adapter finished its own run untouched');
+});
+
+test('another host session\'s adapter for another connection is ordinary: no warning', async () => {
+  const world = fixture(ringPage({ rings: [], cursor: 5 }));
+  world.delay = 1_500;
+  const other = spawnTracked(otherArgs(world, 'Wren', 'host-session-2'), {
+    cwd: ROOT, env: runnerEnv(world), stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  await waitForAdapterLock(world.stateDir);
+  assert.ok(await waitUntil(() => runtimeFile(world.stateDir) !== null), 'arrangement: the other adapter recorded itself');
+  world.delay = 0;
+  const armed = run(world, 'stdout');
+  assert.equal(armed.status, 0, armed.stderr);
+  assert.doesNotMatch(armed.stderr, /warning/);
+  await once(other, 'exit');
+});
+
 // A fake room served over HTTP and reached through the real interlock CLI, so
 // the outage classification is exercised exactly as an armed adapter meets it.
 function fakeRoom() {
