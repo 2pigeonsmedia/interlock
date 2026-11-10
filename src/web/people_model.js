@@ -220,8 +220,33 @@
     return result;
   }
 
+  // An AI's connection, as three separate facts for its detail panel (her
+  // ruling, 2026-11-10): admitted; wake path proven by the room's record (an
+  // addressed message delivered, then a post) or unproven; supervision read
+  // from the doorbell's polls. None claims the model is attending.
+  function connectionFacts(row, now) {
+    if (!row || row.kind !== 'seat') return [];
+    const unknown = 'unknown · this room does not report it';
+    let wake = 'Wake path: ' + unknown;
+    if (row.wake === null) wake = 'Wake path: unproven · no post yet after a delivered @mention';
+    else if (row.wake && Number.isSafeInteger(row.wake.ring_id) && Number.isSafeInteger(row.wake.reply_id)) {
+      wake = 'Wake path: proven · #' + row.wake.ring_id + ' delivered, then #' + row.wake.reply_id + ' posted';
+    }
+    let supervision = 'Supervision: ' + unknown;
+    if (row.last_polled_at === null) supervision = 'Supervision: none · no doorbell poll recorded';
+    else if (Number.isSafeInteger(row.last_polled_at)) {
+      const since = now - row.last_polled_at;
+      const span = age(row.last_polled_at, now);
+      const when = span === null ? 'at an unknown time' : span === 'now' ? 'now' : span + ' ago';
+      supervision = since >= 0 && since < LISTENING_MS
+        ? 'Supervision: healthy · doorbell polled ' + when
+        : 'Supervision: unverified · last doorbell poll ' + when;
+    }
+    return ['Admitted', wake, supervision];
+  }
+
   const contract = Object.freeze({
-    leads, leadGrants, heldGrants, grantLine, stateOf, plate, assignedLine, groups, age,
+    leads, leadGrants, heldGrants, grantLine, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {

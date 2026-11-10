@@ -128,6 +128,7 @@ test('clear verifies both copies first, preserves activity, and never reuses mes
     fetched_without_post_at: null,
     last_posted_at: null,
     last_polled_at: null,
+    wake: null,
   }]);
   assert.equal(verifyArchiveSet(dataDir, result.archive_id).document.messages.length, 2);
   const after = await store.append({ text: 'new era' }, PERSON);

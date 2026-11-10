@@ -1370,6 +1370,29 @@ function openStore(opts) {
     });
   }
 
+  /* The room's record that a seat's wake path works: the newest addressed
+   * message the seat acknowledged and then posted after, with that first
+   * later post. Null when the current transcript holds no such pair. */
+  function wakeProofOf(subjectId) {
+    // The seat's posts seen so far, newest first; every one is later than
+    // the message under inspection.
+    const later = [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.subject_id === subjectId) { later.push(message); continue; }
+      if (later.length === 0) continue;
+      const acknowledgedAt = receipts.get(message.id + '\0' + subjectId);
+      if (acknowledgedAt === undefined ||
+          !message.recipients.some(recipient => recipient.subject_id === subjectId)) continue;
+      for (let at = later.length - 1; at >= 0; at -= 1) {
+        if (later[at].ts >= acknowledgedAt) {
+          return Object.freeze({ ring_id: message.id, reply_id: later[at].id });
+        }
+      }
+    }
+    return null;
+  }
+
   function participantState(subjectIds) {
     return exclusive(() => {
       requireOpen();
@@ -1403,6 +1426,7 @@ function openStore(opts) {
           // When it last said something in this era: a poll is not speech.
           last_posted_at: lastPostedAt,
           last_polled_at: polls.get(subjectId) ?? null,
+          wake: wakeProofOf(subjectId),
         });
       }));
     });
