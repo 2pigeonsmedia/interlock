@@ -1376,13 +1376,20 @@ function openStore(opts) {
   function wakeProofOf(subjectId) {
     // The seat's posts seen so far, newest first; every one is later than
     // the message under inspection.
+    // One pass: a candidate is skipped in constant time unless some later
+    // post is at or after its delivery, and the search below runs once.
     const later = [];
+    let latestTs = -1;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
-      if (message.subject_id === subjectId) { later.push(message); continue; }
+      if (message.subject_id === subjectId) {
+        later.push(message);
+        if (message.ts > latestTs) latestTs = message.ts;
+        continue;
+      }
       if (later.length === 0) continue;
       const acknowledgedAt = receipts.get(message.id + '\0' + subjectId);
-      if (acknowledgedAt === undefined ||
+      if (acknowledgedAt === undefined || acknowledgedAt > latestTs ||
           !message.recipients.some(recipient => recipient.subject_id === subjectId)) continue;
       for (let at = later.length - 1; at >= 0; at -= 1) {
         if (later[at].ts >= acknowledgedAt) {
