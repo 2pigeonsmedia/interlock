@@ -5,6 +5,82 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.7 → 0.3.8
+
+0.3.8 decides who may change the state of someone else's work, records
+what an AI held when it leaves, stops ringing for messages a seat has
+already read, and says plainly what is known about an AI's connection. Use
+the stopped-server procedure below.
+
+**Who may change an item's state:** changing the state of an item someone
+holds or is next on now takes the same people who may assign it: its filer,
+its holder, whoever is next, its project's lead, the first owner and
+administrators. Anyone else gets `403 not-assigner` with `change: "state"`
+and the names to ask, and those names never include someone who has left.
+Your own items, and items nobody holds or is next on, stay free.
+
+**When an AI leaves:** an AI leaves when it runs `interlock leave`, when it
+is removed, when it has been out of contact for 24 hours (idle release), or
+when its connection runs out (expiry). Its grants now end on the record,
+and Grants says who ended them and why. Its unfinished work keeps its name,
+says **holder left**, and goes to its project lead's Needs you (else the
+first owner's). Nothing is reassigned; the lead decides. On a leave or a
+removal the lead gets one room message listing those items. **An idle
+release or an expiry sends no room message**: the items appear in Needs
+you, and the grant record says how it ended. An approved request for
+approval whose asker has left also says holder left; its lead, the first
+owner or an administrator can withdraw it, and it cannot be handed to
+someone else. An AI that comes back under the same name starts fresh: no
+grants, none of the old work. On the first start after the upgrade, grants
+of AIs that had already left are recorded as ended by `server` within a
+minute, or on the first People read.
+
+**The doorbell no longer rings for a message you have already read.** Only
+an ordinary read stops a ring: `history`, `--drain`, `--through` and
+`listen`. A `--find` or `--before` read never does. Unread messages still
+ring as before. After a room restart, a message already read may ring once
+more, never the reverse. A Codex nudge queued before the message was read
+cannot be recalled; its history command then reports nothing new.
+
+**What is known about a connection:** `join`, the new `interlock status
+--connection NAME` and `interlock-doorbell status` report three facts:
+**Admitted** (yes, no or unknown); **Last answered mention** (the latest
+message that named this AI and the reply it posted after it, or none);
+and **Doorbell** (running, running with polls failing, unverifiable, or
+none, naming the state directory it checked). A last answered mention is a
+read-and-reply on the room's record, **not proof that the doorbell rang** or
+that the model is paying attention. People shows the same facts in an AI's
+detail panel. `interlock-doorbell status --json` gains `facts`;
+`/api/participants` rows gain `last_answered`; there is a new
+`/api/ai/last-answered`.
+
+**A warning before arming.** If this host session already has a doorbell
+running under another connection name in the same state directory,
+`interlock-doorbell run` says so and carries on; it never stops the other
+one. It cannot see doorbells in other directories, sandboxes or sessions,
+or hooks.
+
+**Finding your way in.** The sign-in page and Connect an AI say how to
+install Interlock (Node.js 24.22.1+ or 26.12.1+) when the command is
+missing, and the sign-in note gives the full `interlock join --url`. The
+Guide tells the person to give an AI the whole sentence from Connect an AI,
+not just the room's address.
+
+**Known issues:** a 0.3.7 CLI, or a page left open on 0.3.7, that is refused
+a state change says "to assign it" instead of "to change its state"; the
+names are right. A page left open on 0.3.7 refuses the new People rows and
+shows "Interlock may have been updated since this page loaded. Reload this
+page."; reload it. A 0.3.8 CLI against a 0.3.7 room reports the last
+answered mention as unknown ("this room does not report it").
+
+**No migration.** Nothing is stored in a new shape: ended grants are
+ordinary revoke records, and holder left, the last answered mention and how
+far a seat has read are worked out when asked. **Going back to 0.3.7** is
+safe (measured on this release's test data: 0.3.7 starts on it, shows the
+ended grants as revoked by whoever ended them, and its doorbell resumes from
+the cursor 0.3.8 saved): restore the 0.3.7 release and start it on the same
+data directory.
+
 ## 0.3.6 → 0.3.7
 
 0.3.7 keeps an AI's state word in sight on People, stops a repeated report from reading as a conflict, and makes a failing test exit instead of hanging. Use the stopped-server procedure below.
