@@ -476,11 +476,14 @@ function inspectStatus(options, clock = Date.now, namespaceOf = processNamespace
   }));
 }
 
-function printStatus(result, json) {
+function printStatus(result, json, facts = null) {
   if (json) {
-    process.stdout.write(JSON.stringify(result) + '\n');
+    process.stdout.write(JSON.stringify(facts ? Object.assign({}, result, { facts }) : result) + '\n');
   } else {
     process.stdout.write(`${result.connection}: ${result.state} — ${result.detail}\n`);
+    // The connection as three separate facts; "ready" above is the adapter's
+    // poll only, never the model's attention.
+    if (facts) for (const text of require('../src/cli.js').factLines(facts)) process.stdout.write(text + '\n');
     if (result.recovery) {
       const directlyPrintable = result.recovery.every(part => /^[A-Za-z0-9_./:-]+$/.test(part));
       process.stdout.write(directlyPrintable
@@ -758,9 +761,13 @@ function main(argv = process.argv.slice(2)) {
         '[--state-dir ABSOLUTE_PATH] [--json]');
       return;
     }
-    try { process.exitCode = printStatus(inspectStatus(options), options.json); }
-    catch (error) { fail(`status could not inspect adapter state (${error.code || 'unknown'})`); }
-    return;
+    let result;
+    try { result = inspectStatus(options); }
+    catch (error) { fail(`status could not inspect adapter state (${error.code || 'unknown'})`); return; }
+    return require('../src/cli.js').connectionFactsFor(options.connection,
+      { stateDir: options.stateDir, inspect: inspectStatus })
+      .catch(() => null)
+      .then(facts => { process.exitCode = printStatus(result, options.json, facts); });
   }
   if (argv.length === 1 && argv[0] === 'guide') {
     printGuide();
@@ -768,8 +775,6 @@ function main(argv = process.argv.slice(2)) {
   }
   runAdapter(argv);
 }
-
-if (require.main === module) main();
 
 module.exports = Object.freeze({
   FRESH_MS,
@@ -780,3 +785,5 @@ module.exports = Object.freeze({
   parseArgs,
   parseStatusArgs,
 });
+
+if (require.main === module) main();

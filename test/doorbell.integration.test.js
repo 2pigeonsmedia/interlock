@@ -126,6 +126,9 @@ function runnerEnv(world) {
       FAKE_HOST_ARGS: world.hostArgs,
       FAKE_HOST_EXIT: String(world.hostExit),
       FAKE_INTERLOCK_DELAY: String(world.delay),
+      // Status reads the local connection profiles; keep it off the real ones.
+      XDG_DATA_HOME: world.root,
+      LOCALAPPDATA: world.root,
   });
 }
 
