@@ -833,12 +833,14 @@
   }
 
   // Whom a refused assignment can ask, in words.
-  function assignerWords(names) {
+  // Whom to ask; `change` is 'state' when what was refused was a change of
+  // the item's state rather than who holds it or is next.
+  function assignerWords(names, change) {
     const list = Array.isArray(names) ? names.filter(name => typeof name === 'string') : [];
     const who = list.length === 0 ? 'the first owner or an administrator'
       : (list.length > 1 ? list.slice(0, -1).join(', ') + ' or ' + list[list.length - 1] : list[0]) +
         ' (or the first owner or an administrator)';
-    return 'Ask ' + who + ' to assign it.';
+    return 'Ask ' + who + (change === 'state' ? ' to change its state.' : ' to assign it.');
   }
 
   function errorWords(code) {

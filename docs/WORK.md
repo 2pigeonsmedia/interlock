@@ -75,10 +75,13 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   first owner and administrators; anyone else gets `403 not-assigner` with
   `can_assign`, the names to ask. Anyone may take an item nobody holds and
   nobody is next on (in either slot), and taking it lets the same request
-  name who is next; whoever is in a slot may step out of it. A state change
-  that drops someone else from `next_to` (entering `blocked`, or `done`) is
-  an assignment too: the same people only, else `403 not-assigner`. Entering `blocked` drops whoever was next, so name the unblocker in
-  that same request.
+  name who is next; whoever is in a slot may step out of it.
+- Changing the **state** of an item someone holds or is next on is for the
+  same people (its filer, holder, whoever is next, its project's live lead,
+  the first owner and administrators); anyone else gets `403 not-assigner`
+  with `can_assign` and `change: "state"`. An item nobody holds and nobody is
+  next on stays free to anyone. This covers entering `blocked` or `done`,
+  which drop whoever was next: name the unblocker in that same request.
 - `withdrawn` says the work was dropped, never that it was finished. Only
   `items/withdraw` sets it, with a required `reason`, by whoever filed the item,
   its project's live lead, the first owner or an administrator (anyone else,

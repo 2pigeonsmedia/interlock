@@ -120,7 +120,7 @@ test('the route answers 403 with can_assign; the CLI and the page say whom to as
 
   assert.equal(MODEL.assignerWords(['Filer', 'Holder', 'Lead']),
     'Ask Filer, Holder or Lead (or the first owner or an administrator) to assign it.');
-  assert.ok(PANEL.includes("else if (code === 'not-assigner') where.textContent = model().assignerWords(error.canAssign);"));
+  assert.ok(PANEL.includes("else if (code === 'not-assigner') where.textContent = model().assignerWords(error.canAssign, error.change);"));
   assert.ok(ROOM.includes('if (result && Array.isArray(result.can_assign)) error.canAssign = result.can_assign.filter(name => typeof name === \'string\');'));
 });
 

@@ -79,8 +79,11 @@ function errorResponse(error) {
   if (code === 'invalid-input') return refusal(400, 'invalid-request', inputDetail(error));
   if (code === 'invalid-query') return refusal(400, 'invalid-query');
   if (code === 'not-assigner') {
-    // Who can assign it, so a blocked hand-off knows whom to ask.
-    return refusal(403, code, names(error.can_assign) ? { can_assign: [...error.can_assign] } : undefined);
+    // Who can assign it, so a blocked hand-off knows whom to ask; and, when
+    // what was refused was a change of state, that it was.
+    const extra = names(error.can_assign) ? { can_assign: [...error.can_assign] } : {};
+    if (error.change === 'state') extra.change = 'state';
+    return refusal(403, code, Object.keys(extra).length ? extra : undefined);
   }
   if (STATUS[code]) {
     return refusal(STATUS[code], code, code === 'stale-revision' ? { revision: error.revision } : undefined);

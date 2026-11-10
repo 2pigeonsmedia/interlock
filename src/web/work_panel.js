@@ -733,7 +733,7 @@
       const code = error && typeof error.code === 'string' ? error.code : 'unavailable';
       if ((error && error.status === 401) || code === 'not-authenticated') state.deps.onSessionEnded();
       else if (code === 'stale-revision' && typeof body.id === 'string') await staleNotice(op, body.id, where);
-      else if (code === 'not-assigner') where.textContent = model().assignerWords(error.canAssign);
+      else if (code === 'not-assigner') where.textContent = model().assignerWords(error.canAssign, error.change);
       else where.textContent = model().errorWords(code);
       return null;
     }

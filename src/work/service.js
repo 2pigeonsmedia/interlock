@@ -864,13 +864,15 @@ function createWorkService(options) {
         next.done_without_evidence = false;
         changed.push('done_evidence', 'done_without_evidence');
       }
-      // A state change that drops someone else from next (entering Blocked,
-      // or Done) is an assignment too: only whoever may assign drops them,
-      // so it cannot clear the way to a claim. Decided on the outcome, not on
-      // what the request named. (Whoever is next is among them, so may drop
-      // themselves.)
-      if (item.next_to && next.next_to === null && !mayAssign(actor, item, now)) {
-        fail('not-assigner', { can_assign: assignerNames(item, now) });
+      // Changing the state of an item someone holds or is next on takes
+      // whoever may assign it (ruling, 2026-11-10); an item nobody holds or
+      // is next on stays free, and the holder and whoever is next are among
+      // the assigners, so their own items are free too. Decided against the
+      // item as it was, so a claim in the same request cannot open the way.
+      // This also covers entering Blocked or Done, which drops whoever is
+      // next: that drop is a state change, never possible without one.
+      if (next.state !== item.state && (item.responsible || item.next_to) && !mayAssign(actor, item, now)) {
+        fail('not-assigner', { can_assign: assignerNames(item, now), change: 'state' });
       }
       if (next.next_to && next.next_action.trim() === '') fail('invalid-next-action');
       next.revision = item.revision + 1;
