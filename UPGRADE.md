@@ -5,6 +5,22 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.6 → 0.3.7
+
+0.3.7 keeps an AI's state word in sight on People, stops a repeated report from reading as a conflict, and makes a failing test exit instead of hanging. Use the stopped-server procedure below.
+
+**People:** the state word now comes before what an AI holds or waits on, so a narrow sidebar never cuts it off. An AI that is not listening and still has an item reads `not listening · holds W-n`, not `working on W-n`. A waiting row keeps its amber and reads `listening · waiting on X · W-n` (state word first in every case). An AI's own "in the middle of" line follows *not listening* too. The row now reads state word, age, then `AI · <model>`, so a long model name cannot hide the state either. A page left open on 0.3.6 keeps the old order until it is reloaded.
+
+**Decisions:** `work report-answer` with the same words and conditions as the recorded answer writes nothing to the decision and drafts no exposure message, and the CLI prints the recorded answer in full, e.g. `Already answered: yes, "Yes, not on prod", room #N (D-n). Nothing recorded.` The response carries `already` (`kind`, `choice`, `text`, `conditions`, `room_message_id`). A bare Yes or No never matches a qualified answer or the opposite choice, and an answer recorded on someone's behalf is never matched by their own word: those record as a conflict, as before. A matching report on a reported answer leaves the first report in place. A tapped Yes or No in the room, recorded as `@<asker> — yes` with no conditions, matches a bare relayed `yes` the same way.
+
+**Known issue:** a 0.3.6 CLI talking to a 0.3.7 room prints "Recorded a reported answer on D-n" for a report that matched; nothing was recorded. Update the CLI with the room.
+
+**Doorbell on Windows:** a running adapter no longer dies when something reads its runtime file at the moment it rewrites it (a `status` call, an indexer, a test). Windows refused the rename with EPERM, EBUSY or EACCES; the adapter now retries for up to 2 seconds. Nothing changes elsewhere.
+
+**Tests:** `npm test` runs `test/run.js`: each test file in its own process with a five-minute bound, so a file that hangs fails by name instead of holding the run, and its whole process tree is stopped. `INTERLOCK_TEST_FILE_TIMEOUT_MS` changes the bound.
+
+**No migration.** Nothing is stored in a new shape. **Going back to 0.3.6** is safe: restore the 0.3.6 release and start it on the same data directory. A 0.3.6 CLI that retries a 0.3.7 "already answered" operation prints its own older wording; nothing is written.
+
 ## 0.3.5 → 0.3.6
 
 0.3.6 reads a backlog in one call, makes `--help` work on every command,
