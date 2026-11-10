@@ -191,3 +191,32 @@ test('conditions travel in the already line', () => {
   const result = report(work, id, 'yes', { conditions: 'march only.' });
   assert.deepEqual(result.already, { kind: 'direct', choice: 'yes', text: 'Yes', conditions: 'March only', room_message_id: null });
 });
+
+// A tapped Yes or No posts "@<asker> — yes" and the room records that whole
+// text. Exactly that, with the chosen word and no conditions, is a bare
+// answer; anything more stays a conflict.
+test('a tapped room answer is a bare one: a matching relay is a no-op', () => {
+  for (const [choice, posted] of [['yes', '@Lead — yes'], ['no', '@Lead — no'], ['yes', '@Ana Marie — yes']]) {
+    const { work, id } = answeredInRoom(choice, posted);
+    const before = recorded(work, id);
+    const result = report(work, id, choice === 'yes' ? 'Yes.' : 'no');
+    assert.equal(result.conflict, false, posted);
+    assert.equal(result.already.text, posted, posted + ': the recorded words are returned as recorded');
+    assert.deepEqual(recorded(work, id), before, posted);
+  }
+});
+
+test('a tapped answer with anything more, or the other word, is still a conflict', () => {
+  const cases = [
+    ['yes', '@Lead — yes, not on prod', 'yes', {}],
+    ['no', '@Lead — yes', 'yes', {}],
+    ['yes', '@Lead — yes', 'no', {}],
+    ['yes', '@Lead — yes', 'yes', { conditions: 'March only' }],
+    ['yes', 'Lead — yes', 'yes', {}],
+    ['yes', '@Lead - yes', 'yes', {}],
+  ];
+  for (const [choice, posted, words, extra] of cases) {
+    const { work, id } = answeredInRoom(choice, posted);
+    assert.equal(report(work, id, words, extra).conflict, true, posted + ' vs ' + words);
+  }
+});

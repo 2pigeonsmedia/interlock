@@ -153,6 +153,8 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   answer's, ignoring case, spaces at the ends, runs of spaces inside, and
   closing full stops or exclamation marks. A bare Yes or No matches only a
   bare recorded Yes or No, never a qualified answer ("Yes, not on prod"); a
+  tapped room answer, recorded as `@<asker> — yes` with no conditions, counts
+  as the bare word it chose; a
   bare word never matches the opposite recorded choice; and an answer
   recorded on someone's behalf is never matched by a report of their own
   word. The response carries `already` (`kind`, `choice`, `text`,

@@ -1075,7 +1075,17 @@ function createWorkService(options) {
     const said = plainWords(text);
     const choice = recorded.choice === 'yes' || recorded.choice === 'no' ? recorded.choice : null;
     if (choice !== null && (said === 'yes' || said === 'no') && said !== choice) return false;
-    return plainWords(recorded.text) === said;
+    return plainWords(recordedWords(recorded, choice)) === said;
+  }
+
+  // A tapped Yes or No posts "@<asker> — yes" and the room records that whole
+  // text. Exactly that, with the chosen word and no conditions, reads as the
+  // bare word; any other text is compared as it stands.
+  const TAPPED = /^@[\w .-]{1,40} \u2014 (yes|no)$/;
+  function recordedWords(recorded, choice) {
+    const tapped = TAPPED.exec(String(recorded.text ?? ''));
+    const bare = tapped && choice !== null && tapped[1] === choice && plainWords(recorded.conditions) === '';
+    return bare ? choice : recorded.text;
   }
 
   function reportAnswer(actor, rawInput) {
