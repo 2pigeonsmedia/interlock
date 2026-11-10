@@ -449,6 +449,7 @@ test('join confirms and reuses the exact admitted local seat without a knock', a
     identity: { newAiCredential() { throw new Error('reconnect must not mint'); } },
     ask: async () => { throw new Error('exact reconnect must not prompt'); },
     async fetch(url, options) {
+      if (url.endsWith('/api/ai/wake')) return fakeResponse(404, { ok: false, error: 'not-found' });
       requests.push({ url, options });
       assert.equal(url, 'http://localhost:8788/api/ai/session');
       assert.equal(options.method, 'GET');
@@ -487,6 +488,7 @@ test('join deliberately finishes its exact interrupted candidate without knockin
     identity: { newAiCredential() { throw new Error('reconnect must not mint'); } },
     ask: async () => { throw new Error('exact reconnect must not prompt'); },
     async fetch(url, options) {
+      if (url.endsWith('/api/ai/wake')) return fakeResponse(404, { ok: false, error: 'not-found' });
       requests.push({ url, options });
       if (url.endsWith('/api/ai/head')) {
         return fakeResponse(200, { ok: true, head: 0, connection_session: null });
@@ -780,6 +782,7 @@ test('a still-waiting unfinished candidate resumes only its exact knock', async 
     clock: () => 3_000,
     identity: { newAiCredential() { throw new Error('resume must not mint'); } },
     async fetch(url, options) {
+      if (url.endsWith('/api/ai/wake')) return fakeResponse(404, { ok: false, error: 'not-found' });
       if (url.endsWith('/api/ai/head')) {
         return fakeResponse(200, { ok: true, head: 0, connection_session: null });
       }
@@ -966,6 +969,7 @@ test('an ambiguous replacement preserves both credentials and deliberate join re
     clock: () => 5_000,
     identity: { newAiCredential() { throw new Error('resume must not mint'); } },
     async fetch(url, options) {
+      if (url.endsWith('/api/ai/wake')) return fakeResponse(404, { ok: false, error: 'not-found' });
       resumedRequests.push({ url, options });
       if (url.endsWith('/api/ai/head')) {
         return fakeResponse(200, { ok: true, head: 0, connection_session: null });

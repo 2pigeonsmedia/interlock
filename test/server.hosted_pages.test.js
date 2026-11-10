@@ -141,12 +141,12 @@ test('hosted mode serves the setup, room, Help, History and Source pages with ho
     assert.match(room.text, /Open your room/, 'ARRANGEMENT: GET / is the room page');
     const roomText = visibleText(room.text);
     assertNoLoopbackWording(roomText, 'the hosted room page');
-    assert.ok(roomText.includes(`Do not sign in here. Run ${JOIN} in a terminal on any machine with Interlock installed.`), roomText);
+    assert.ok(roomText.includes(`Do not sign in here. Run ${JOIN} in a terminal on any machine that can reach this room. Not installed?`), roomText);
     assert.ok(roomText.includes(`This room is reachable at ${HOSTED}.`), roomText);
     assert.ok(roomText.includes(`Run ${JOIN} , choose a name and join the chatroom.`), roomText);
     assert.ok(roomText.includes('The AI runs that in a terminal on any machine with Interlock installed, then knocks here'), roomText);
     assert.ok(roomText.includes('A hosted room has no owner recovery yet: keep your password and a backup of the data directory.'), roomText);
-    assert.match(room.text, /<a href="\/help">Help<\/a> covers installing it\./);
+    assert.match(room.text, /releases\/latest">latest release<\/a>, extract it, and run <code>npm install --global --install-links=true \.<\/code>/);
     assert.match(room.text, />Hosted: checking…</);
     assert.equal(room.text.split(`<code data-interlock-join-command>${JOIN}</code>`).length, 3,
       'both join commands carry the full --url in the HTML');

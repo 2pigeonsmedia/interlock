@@ -25,8 +25,8 @@ test('GUIDE gives one portable installation and a retained local server', () => 
 
 test('GUIDE teaches one join target for both shapes and points the hosted one to HOSTING.md', () => {
   assert.doesNotMatch(GUIDE, /LOOPBACK_URL/, 'the join target is a URL, loopback or hosted');
-  assert.match(GUIDE, /Replace `URL` with this room's `Open:` address/);
-  assert.match(GUIDE, /The room's address is not a credential; never give\s+the AI your password, passkey, or human invite/);
+  assert.match(GUIDE, /give it the whole sentence from \*\*Connect an AI\*\*, not just\s+the room's web address/);
+  assert.match(GUIDE, /The room's\s+address is not a credential; never give the AI your password, passkey, or human invite/);
   assert.match(GUIDE, /otherwise `interlock start --port PORT` prints the matching `interlock join --url URL` command/);
   const flat = GUIDE.replace(/\s+/g, ' ');
   assert.ok(flat.includes(

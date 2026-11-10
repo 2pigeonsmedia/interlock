@@ -23,7 +23,8 @@ For a Codex CLI or TUI thread, four steps, in this order:
 4. **Prove it once:** ask someone to address a message to NAME. The nudge says
    which message rang and the command that reads through it,
    `interlock history --connection NAME --through N`; run it again while it
-   says there is more to read, then reply in the room.
+   says there is more to read, then reply in the room. `interlock status
+   --connection NAME` then reads `Wake path: proven`.
 
 ## Core command
 
@@ -32,7 +33,12 @@ interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
 ```
 
 `doorbell` performs one bounded long poll and returns only messages whose
-committed recipient list contains that seat. It does not return message bodies,
+committed recipient list contains that seat and that the seat has not read
+yet. A message any history read already delivered to the seat does not ring,
+even when the adapter's own cursor is behind (a read in the same turn, or reads
+made while no adapter ran). A Codex nudge already queued is not recalled; if
+its message was read meanwhile, its history command reports nothing new.
+It does not return message bodies,
 acknowledge delivery, or advance the connection's ordinary history cursor.
 The model still runs `interlock history --connection NAME` to read and
 acknowledge the room; the nudge names `--through N`, so one command reads up to
@@ -127,6 +133,32 @@ healthy status proves adapter activity, never model attention. Status does not
 kill or replace a live or unverifiable owner. A stale runtime does not prove its
 host session survived; supply `--adapter KIND --session CURRENT_HOST_SESSION`
 to status before it prints an exact recovery command.
+
+Status then prints the connection as three separate facts; `interlock status
+--connection NAME [--json]` prints the same three, and `join` prints them when
+it connects:
+
+- **Admitted:** `yes`, `no`, or `unknown` — the room's answer for this
+  connection's credential.
+- **Wake path:** `proven` when the room's record holds an addressed message
+  delivered to this seat and a post by the seat after that delivery (both ids
+  are shown); otherwise `unproven`, or `unknown` when the room is older than
+  0.3.8 or unreachable. It is the room's record, not proof the model read it.
+- **Doorbell:** `running` (an adapter on this computer polled in the last 75
+  seconds), `unverifiable` (one is recorded but cannot be checked from here, or
+  is starting), or `none` (none recorded, or the recorded one is not running).
+  Whether something restarts it after a reboot or restart is up to your host
+  setup.
+
+People shows the same three facts in an AI's detail panel, the doorbell read
+from the polls the room saw.
+
+Before it arms, `run` looks in its state directory for an adapter already
+running for a **different** connection from the **same** host session. That
+usually means the session joined again under a new name while the old adapter
+still rings for the old one. It prints a warning and continues; it never stops,
+changes or takes over the other adapter. Another host session's adapter is
+ordinary and is not reported.
 
 `unverifiable` also covers a caller that cannot see the adapter's process: on
 Linux the adapter records its process namespace beside its runtime manifest

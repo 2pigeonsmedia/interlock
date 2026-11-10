@@ -64,6 +64,7 @@ Usage:
   interlock ask revise N --means-file PATH|--means-stdin --connection NAME [--json]
   interlock listen --connection NAME [--json]
   interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
+  interlock status --connection NAME [--state-dir ABSOLUTE_PATH] [--json]
   interlock leave --connection NAME [--json]
   interlock presence --connection NAME --file PATH | --clear [--json]
   interlock presence --connection NAME --project ID|none [--assign NAME] [--json]
@@ -1468,6 +1469,161 @@ async function runReadCommand(command, args, io, dependencies = {}) {
   return result;
 }
 
+// ---- The connection's three facts (admitted · wake path · doorbell) ----
+// Each is its own evidence. None of them claims the model is attending: the
+// room records deliveries and posts, and the doorbell records its polls.
+
+const FACTS_TIMEOUT_MS = 10_000;
+
+async function admittedFact(fetcher, profile) {
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/session', { timeoutMs: FACTS_TIMEOUT_MS });
+    const connection = exactObject(result, ['ok', 'connection']) ? result.connection : null;
+    if (!validConnection(connection, profile) || connection.subject_id !== profile.subject_id) {
+      return { state: 'unknown', detail: 'the room answered, but not with this exact connection' };
+    }
+    return { state: 'yes', detail: `the room accepts this connection until ${new Date(connection.expires_at).toISOString()}` };
+  } catch (error) {
+    if (error && error.status === 401 && error.code === 'invalid-connection') {
+      return { state: 'no', detail: 'the room no longer accepts this connection; run "interlock join" again' };
+    }
+    return { state: 'unknown', detail: roomUnreachable(error) ? 'the room could not be reached' : 'the room did not answer usably' };
+  }
+}
+
+async function wakeFact(fetcher, profile) {
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/wake', { timeoutMs: FACTS_TIMEOUT_MS });
+    if (!exactObject(result, ['ok', 'wake'])) throw incompatibleResponse();
+    if (result.wake === null) {
+      return {
+        state: 'unproven', ring_id: null, reply_id: null,
+        detail: 'the room has no delivered @mention followed by a post from you; to prove it, have someone @mention you while your doorbell runs, and reply',
+      };
+    }
+    const wake = exactObject(result.wake, ['ring_id', 'reply_id']);
+    if (!wake || !Number.isSafeInteger(wake.ring_id) || !Number.isSafeInteger(wake.reply_id) ||
+        wake.reply_id <= wake.ring_id) throw incompatibleResponse();
+    return {
+      state: 'proven', ring_id: wake.ring_id, reply_id: wake.reply_id,
+      detail: `the room delivered message ${wake.ring_id} to you and you posted message ${wake.reply_id} after it (the room's record, not proof the model read it)`,
+    };
+  } catch (error) {
+    if (error && error.status === 404) {
+      return { state: 'unknown', ring_id: null, reply_id: null, detail: 'this room does not report it (Interlock 0.3.7 or older)' };
+    }
+    return {
+      state: 'unknown', ring_id: null, reply_id: null,
+      detail: roomUnreachable(error) ? 'the room could not be reached' : 'the room did not answer usably',
+    };
+  }
+}
+
+// From the doorbell adapter's own evidence on this computer. It says whether
+// an adapter is running now; whether something restarts it after a reboot or
+// restart is up to the host setup, which the product cannot see.
+// `inspect` is the doorbell's inspectStatus; the doorbell passes its own,
+// since it is still loading when its status command runs.
+function doorbellFact(connection, stateDir, inspect = null) {
+  let status;
+  try {
+    status = (inspect || require('../integrations/doorbell.js').inspectStatus)(
+      { adapter: null, connection, session: null, stateDir: stateDir || null });
+  } catch (_) {
+    return { state: 'unverifiable', detail: 'the doorbell state on this computer could not be read' };
+  }
+  if (status.state === 'ready') return { state: 'running', detail: status.detail };
+  if (status.state === 'absent') {
+    return { state: 'none', detail: `no doorbell adapter is recorded on this computer for ${connection}` };
+  }
+  if (status.state === 'stale') {
+    return {
+      state: 'none',
+      detail: 'an adapter ran here and is not running now; whether something restarts it is up to your host setup',
+    };
+  }
+  return { state: 'unverifiable', detail: status.detail };
+}
+
+// Just after a join the room has already said yes; that answer is reused.
+function joinedAdmission(profile) {
+  return { state: 'yes', detail: `the room accepts this connection until ${new Date(profile.expires_at).toISOString()}` };
+}
+
+async function connectionFacts(fetcher, profile, stateDir, admitted = null, inspect = null) {
+  return {
+    admitted: admitted || await admittedFact(fetcher, profile),
+    wake: await wakeFact(fetcher, profile),
+    doorbell: doorbellFact(profile.name, stateDir, inspect),
+  };
+}
+
+// For `interlock-doorbell status`: the three facts for a connection name,
+// never throwing. A name with no admitted local profile still gets its
+// doorbell fact; the room facts say why they are unknown.
+async function connectionFactsFor(name, options = {}) {
+  const dependencies = options.dependencies || {};
+  const stateDir = options.stateDir || null;
+  let selected;
+  try { selected = selectedConnection(name, dependencies); }
+  catch (error) {
+    const why = error && error.code === 'profile-not-found'
+      ? 'no local connection with this name on this computer'
+      : error && error.code === 'not-admitted'
+        ? 'this computer holds only an unfinished join for this name'
+        : 'the local connection could not be read';
+    return {
+      admitted: { state: 'unknown', detail: why },
+      wake: { state: 'unknown', ring_id: null, reply_id: null, detail: why },
+      doorbell: doorbellFact(name, stateDir, options.inspect),
+    };
+  }
+  return await connectionFacts(dependencies.fetch || globalThis.fetch, selected.profile, stateDir,
+    null, options.inspect);
+}
+
+function factLines(facts) {
+  return [
+    `Admitted: ${facts.admitted.state} — ${facts.admitted.detail}.`,
+    `Wake path: ${facts.wake.state} — ${facts.wake.detail}.`,
+    `Doorbell: ${facts.doorbell.state} — ${terminalSafe(facts.doorbell.detail)}.`,
+  ];
+}
+
+async function runStatus(args, io, dependencies = {}) {
+  let json = false;
+  let connection = null;
+  let stateDir = null;
+  const seen = new Set();
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (seen.has(flag)) { connection = null; break; }
+    seen.add(flag);
+    if (flag === '--json') { json = true; continue; }
+    const value = args[index + 1];
+    if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) { connection = null; seen.add('bad'); break; }
+    index += 1;
+    if (flag === '--connection') connection = value;
+    else if (flag === '--state-dir' && path.isAbsolute(value)) stateDir = value;
+    else { connection = null; seen.add('bad'); break; }
+  }
+  if (connection === null || seen.has('bad')) {
+    line(io.stderr, 'interlock: usage: interlock status --connection NAME [--state-dir ABSOLUTE_PATH] [--json]');
+    return EXIT_USAGE;
+  }
+  let selected;
+  try { selected = selectedConnection(connection, dependencies); }
+  catch (error) {
+    reportConnectionError(io.stderr, error, connection);
+    return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+  }
+  const facts = await connectionFacts(dependencies.fetch || globalThis.fetch, selected.profile,
+    stateDir || dependencies.doorbellStateDir || null);
+  if (json) line(io.stdout, JSON.stringify({ ok: true, connection: selected.profile.name, facts }));
+  else for (const text of factLines(facts)) line(io.stdout, text);
+  return facts.admitted.state === 'yes' ? EXIT_OK : EXIT_RUNTIME;
+}
+
 async function runDoorbell(args, io, dependencies = {}) {
   const parsed = commandOptions('doorbell', args);
   if (!parsed) {
@@ -2193,8 +2349,12 @@ function admissionBody(profile, declared = {}) {
   }, declared.project ? { project: declared.project } : {}, declared.model ? { model: declared.model } : {});
 }
 
-function joinedOutput(stdout, profile, start = 'tip') {
+function joinedOutput(stdout, profile, start = 'tip', facts = null) {
   line(stdout, `Connected as ${profile.name} (${profile.product}).`);
+  if (facts) {
+    line(stdout, 'Your connection, as three separate facts (none says the model is attending):');
+    for (const text of factLines(facts)) line(stdout, '  ' + text);
+  }
   if (start === 'beginning') {
     line(stdout, 'Interlock could not read the current tip, so this seat starts at the');
     line(stdout, 'beginning. Read earlier history if the task needs it, or skip to current.');
@@ -2249,14 +2409,17 @@ async function applyAdmissionHead(fetcher, profile, profiles) {
   }
 }
 
-async function completeJoin(profiles, profile, enrollment, clock, stdout, staged, fetcher) {
+async function completeJoin(profiles, profile, enrollment, clock, stdout, staged, fetcher, doorbellStateDir = null) {
   const admit = staged ? profiles.markStagedAdmitted : profiles.markAdmitted;
   const admitted = admit(profile.name, Object.assign(
     { request_id: profile.request_id, admitted_at: clock() },
     enrollment,
   ));
   const start = await applyAdmissionHead(fetcher, admitted, profiles);
-  joinedOutput(stdout, start === 'tip' ? profiles.load(profile.name) : admitted, start);
+  const current = start === 'tip' ? profiles.load(profile.name) : admitted;
+  const facts = typeof fetcher === 'function'
+    ? await connectionFacts(fetcher, current, doorbellStateDir, joinedAdmission(current)) : null;
+  joinedOutput(stdout, current, start, facts);
 }
 
 function completedJoinDecision(code) {
@@ -2327,7 +2490,8 @@ async function reconnectExisting(profiles, profile, product, serverUrl, fetcher,
     line(io.stderr, `interlock: the server did not confirm the exact local connection ${terminalSafe(profile.name)}. The profile was kept, and no new admission was created.`);
     return completedJoinDecision(EXIT_RUNTIME);
   }
-  joinedOutput(io.stdout, profile);
+  joinedOutput(io.stdout, profile, 'tip',
+    await connectionFacts(fetcher, profile, null, joinedAdmission(profile)));
   return completedJoinDecision(EXIT_OK);
 }
 
@@ -2495,7 +2659,7 @@ async function runJoin(args, io, dependencies = {}) {
             }
             const connected = await confirmCandidate(fetcher, parsed.url, profile);
             if (connected) {
-              await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher);
+              await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher, dependencies.doorbellStateDir || null);
               return EXIT_OK;
             }
             if (!statedWaiting) {
@@ -2505,7 +2669,7 @@ async function runJoin(args, io, dependencies = {}) {
             continue;
           }
           if (result.state === 'allowed' && validConnection(result.enrollment, profile)) {
-            await completeJoin(profiles, profile, result.enrollment, clock, stdout, staged, fetcher);
+            await completeJoin(profiles, profile, result.enrollment, clock, stdout, staged, fetcher, dependencies.doorbellStateDir || null);
             return EXIT_OK;
           }
           if (result.state === 'declined' || result.state === 'expired') {
@@ -2563,7 +2727,7 @@ async function runJoin(args, io, dependencies = {}) {
           // that exact credential before waiting or knocking again.
           const connected = await confirmCandidate(fetcher, parsed.url, profile);
           if (connected) {
-            await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher);
+            await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher, dependencies.doorbellStateDir || null);
             return EXIT_OK;
           }
           if (!statedWaiting) {
@@ -2578,7 +2742,7 @@ async function runJoin(args, io, dependencies = {}) {
       if (lastNetworkFailure) {
         const connected = await confirmCandidate(fetcher, parsed.url, profile);
         if (connected) {
-          await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher);
+          await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher, dependencies.doorbellStateDir || null);
           return EXIT_OK;
         }
         line(stderr, 'interlock: the join result could not be confirmed. The unadmitted candidate was kept for diagnosis, not adopted by another join.');
@@ -3629,6 +3793,8 @@ function run(argv, io, dependencies = {}) {
 
   if (argv[0] === 'doorbell') return runDoorbell(argv.slice(1), io, dependencies);
 
+  if (argv[0] === 'status') return runStatus(argv.slice(1), io, dependencies);
+
   if (argv[0] === 'say') return runSay(argv.slice(1), io, dependencies);
 
   if (argv[0] === 'asks') return runAsks(argv.slice(1), io, dependencies);
@@ -3648,6 +3814,8 @@ function run(argv, io, dependencies = {}) {
 }
 
 module.exports = {
+  connectionFactsFor,
+  factLines,
   EXIT_OK,
   EXIT_RUNTIME,
   EXIT_UNREACHABLE,

@@ -273,6 +273,7 @@ function publicParticipant(participant) {
         (Number.isSafeInteger(participant.last_posted_at) && participant.last_posted_at >= 0)) ||
       !(participant.last_polled_at === undefined || participant.last_polled_at === null ||
         (Number.isSafeInteger(participant.last_polled_at) && participant.last_polled_at >= 0)) ||
+      !(participant.wake === undefined || participant.wake === null || validWake(participant.wake)) ||
       typeof participant.present !== 'boolean' ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
@@ -288,7 +289,16 @@ function publicParticipant(participant) {
     fetched_without_post_at: participant.fetched_without_post_at,
     last_posted_at: participant.last_posted_at === undefined ? null : participant.last_posted_at,
     last_polled_at: participant.last_polled_at === undefined ? null : participant.last_polled_at,
+    wake: participant.wake === undefined ? null : participant.wake,
   });
+}
+
+// The wake proof: {ring_id, reply_id}, the ring before its reply.
+function validWake(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).length === 2 &&
+    Number.isSafeInteger(value.ring_id) && value.ring_id > 0 &&
+    Number.isSafeInteger(value.reply_id) && value.reply_id > value.ring_id;
 }
 
 function messageQuery(target) {
@@ -2239,7 +2249,7 @@ function createFirstOwnerHandler(options) {
           authorized.subject_id, { timeoutMs: AI_MESSAGE_WAIT_MS, signal: controller.signal })
         : Object.freeze(Object.assign({}, await chat.readForSeat(
           { after: query.after, limit: query.limit }, authorized.subject_id,
-          { addressedOnly: true },
+          { addressedOnly: true, unreadOnly: true },
         ), { timed_out: false }));
     } catch (error) {
       if (controller.signal.aborted || response.destroyed) return;
@@ -3315,6 +3325,29 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  /* The seat's own wake proof, read without touching its doorbell poll. */
+  async function readAiWake(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let wake;
+    try {
+      const [state] = await chat.participantState([authorized.subject_id]);
+      wake = state && state.wake ? state.wake : null;
+      if (wake !== null && !validWake(wake)) throw new Error('invalid wake proof');
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    sendJson(request, response, 200, { ok: true, wake });
+  }
+
   async function listRoomParticipants(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -3667,6 +3700,16 @@ function createFirstOwnerHandler(options) {
           return;
         }
         listAdmissions(request, response);
+        return;
+      }
+      if (pathname === '/api/ai/wake') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-connection-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        await readAiWake(request, response);
         return;
       }
       if (pathname === '/api/ai/session') {
