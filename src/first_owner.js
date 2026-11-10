@@ -2186,7 +2186,7 @@ function createFirstOwnerHandler(options) {
           authorized.subject_id, { timeoutMs: AI_MESSAGE_WAIT_MS, signal: controller.signal })
         : Object.freeze(Object.assign({}, await chat.readForSeat(
           { after: query.after, limit: query.limit }, authorized.subject_id,
-          { addressedOnly: true },
+          { addressedOnly: true, unreadOnly: true },
         ), { timed_out: false }));
     } catch (error) {
       if (controller.signal.aborted || response.destroyed) return;

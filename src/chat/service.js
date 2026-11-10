@@ -271,7 +271,10 @@ function createChatService(options) {
     return await store.read(query);
   }
 
-  async function scanForSeat(query, subjectId, addressedOnly) {
+  /* `unreadOnly` is the ring form: an addressed row this seat has already
+   * acknowledged (any history read writes the receipt) is passed over, so a
+   * doorbell whose cursor trails the seat's reading never rings for it. */
+  async function scanForSeat(query, subjectId, addressedOnly, unreadOnly = false) {
     let after = query.after;
     const delivered = [];
     let firstId = 1;
@@ -289,7 +292,8 @@ function createChatService(options) {
         after = message.id;
         if (message.subject_id === subjectId) continue;
         if (addressedOnly && !message.recipients.some(recipient =>
-          recipient.subject_id === subjectId)) continue;
+          recipient.subject_id === subjectId &&
+          (!unreadOnly || recipient.acknowledged_at === null))) continue;
         delivered.push(message);
         if (delivered.length === query.limit) break;
       }
@@ -303,10 +307,11 @@ function createChatService(options) {
 
   async function readForSeat(query, subjectId, optionsInRead = {}) {
     requireOpen();
-    const options = closedObject(optionsInRead, ['addressedOnly']);
+    const options = closedObject(optionsInRead, ['addressedOnly', 'unreadOnly']);
     if (!options || typeof options.addressedOnly !== 'boolean' ||
+        !(options.unreadOnly === undefined || typeof options.unreadOnly === 'boolean') ||
         typeof subjectId !== 'string' || subjectId.length === 0) throw fail('invalid-read');
-    return await scanForSeat(query, subjectId, options.addressedOnly);
+    return await scanForSeat(query, subjectId, options.addressedOnly, options.unreadOnly === true);
   }
 
   async function wait(query, optionsIn = {}) {
@@ -554,7 +559,7 @@ function createChatService(options) {
         reading = true;
         wakeDue = false;
         const priorScanCursor = scanCursor;
-        scanForSeat({ after: scanCursor, limit: query.limit }, subjectId, true).then(page => {
+        scanForSeat({ after: scanCursor, limit: query.limit }, subjectId, true, true).then(page => {
           reading = false;
           if (settled) return;
           scanCursor = page.cursor;
