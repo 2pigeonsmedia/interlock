@@ -163,6 +163,35 @@ function fsyncFile(file) {
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }
 
+// Windows refuses to rename over a file another process has open (a status
+// read, a test, an indexer) with EPERM, EBUSY or EACCES. That is a moment, not
+// a fault: the rename is retried for up to RENAME_RETRY_MS. Elsewhere these
+// codes are real faults and are thrown at once. A rename that never succeeds
+// removes its temporary file and throws.
+const RENAME_RETRY_MS = 2_000;
+const RENAME_RETRY_STEP_MS = 20;
+
+function sharingViolation(error) {
+  const code = error && error.code;
+  return process.platform === 'win32' && (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES');
+}
+
+function renameOver(temporary, file) {
+  const deadline = Date.now() + RENAME_RETRY_MS;
+  for (;;) {
+    try {
+      fs.renameSync(temporary, file);
+      return;
+    } catch (error) {
+      if (!sharingViolation(error) || Date.now() >= deadline) {
+        try { fs.unlinkSync(temporary); } catch (_) { /* already gone */ }
+        throw error;
+      }
+      Atomics.wait(SLEEPER, 0, 0, RENAME_RETRY_STEP_MS);
+    }
+  }
+}
+
 function atomicJson(file, value) {
   const directory = path.dirname(file);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -172,7 +201,7 @@ function atomicJson(file, value) {
     encoding: 'utf8', mode: 0o600, flag: 'wx',
   });
   fsyncFile(temporary);
-  fs.renameSync(temporary, file);
+  renameOver(temporary, file);
   if (process.platform !== 'win32') {
     const fd = fs.openSync(directory, 'r');
     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }

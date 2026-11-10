@@ -1033,3 +1033,53 @@ test('an invalid retry schedule refuses before the adapter takes ownership', () 
   assert.equal(fs.existsSync(world.interlockCount), false, 'no poll ran');
   assert.equal(fs.existsSync(path.join(world.stateDir, '.locks')), false, 'no ownership was taken');
 });
+
+// Windows refuses to rename over a file another process has open, with EPERM,
+// EBUSY or EACCES. A status read of runtime.json at the moment the adapter
+// rewrites it made the adapter exit ("runtime manifest could not be
+// committed"). On Windows the rename is retried for a bounded time. The
+// child here reports win32 and refuses the first renames onto runtime.json.
+function sharingViolationRun(refusals) {
+  const world = fixture(ringPage());
+  const preload = path.join(path.dirname(world.stateDir), 'sharing-violation.js');
+  fs.writeFileSync(preload, `
+const fs = require('node:fs');
+Object.defineProperty(process, 'platform', { value: 'win32' });
+let left = ${refusals};
+const rename = fs.renameSync;
+fs.renameSync = (from, to) => {
+  if (String(to).endsWith('runtime.json') && left > 0) {
+    left -= 1;
+    const error = new Error('EPERM: operation not permitted, rename');
+    error.code = 'EPERM';
+    throw error;
+  }
+  return rename(from, to);
+};
+`);
+  const result = childProcess.spawnSync(process.execPath, ['--require', preload, RUNNER, 'run', '--adapter', 'stdout',
+    '--connection', 'Marlow', '--session', 'host-session-1', '--state-dir', world.stateDir, '--once'], {
+    cwd: ROOT, encoding: 'utf8', env: runnerEnv(world), timeout: 30_000,
+  });
+  return { world, result };
+}
+
+test('on Windows, a runtime rename refused by a concurrent reader is retried, not fatal', () => {
+  const { world, result } = sharingViolationRun(3);
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /runtime manifest could not be committed/);
+  assert.ok(runtimeFile(world.stateDir), 'the runtime file was written');
+  assert.equal(fs.readdirSync(path.dirname(runtimeFile(world.stateDir))).filter(name => name.includes('.tmp-')).length, 0,
+    'no temporary file is left behind');
+});
+
+test('on Windows, a rename that stays refused still fails, within a bound', () => {
+  const started = Date.now();
+  const { world, result } = sharingViolationRun(1_000_000);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /runtime manifest could not be committed: EPERM/);
+  assert.ok(Date.now() - started < 15_000, 'it gave up within the bound: ' + (Date.now() - started) + ' ms');
+  const dir = path.join(world.stateDir, '.locks');
+  const leftovers = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).filter(name => String(name).includes('.tmp-')) : [];
+  assert.deepEqual(leftovers, [], 'the refused temporary file is removed');
+});
