@@ -156,7 +156,7 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
     const people = await call(runtime, { path: '/api/participants', headers: { cookie: owner.cookie } });
     assert.equal(people.status, 200, people.text);
     const row = name => people.json.participants.find(item => item.name === name);
-    assert.equal(Object.keys(row('Scout')).length, 20, 'People rows carry waiting, working_on, last_work_at and wake');
+    assert.equal(Object.keys(row('Scout')).length, 20, 'People rows carry waiting, working_on, last_work_at and last_answered');
     assert.deepEqual([row('Scout').model, row('Scout').project, row('Scout').assigned.how, row('Scout').presence],
       ['Opus 5.5', 'ops', 'join', null]);
     assert.deepEqual([row('Wren').model, row('Wren').project, row('Wren').assigned], [null, null, null]);

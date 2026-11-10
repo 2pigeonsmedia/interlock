@@ -52,6 +52,8 @@ test('a successful join ends with the doorbell command and the status check, for
   assert.match(tail, /^Next, before you say hello: start your doorbell, keep it running, and check it\.$/m);
   assert.match(tail, /^ {2}interlock-doorbell run --adapter codex\|stdout --connection Marlow --session HOST_SESSION$/m);
   assert.match(tail, /^ {2}interlock-doorbell status --connection Marlow$/m);
+  assert.match(tail, /^ {2}run warns if this host session already has one under another name in the same state dir\.$/m,
+    'join says what the warning before arming can see, and no more');
   assert.match(tail, /managed long-running command/);
   assert.match(tail, /`interlock-doorbell guide`/);
   assert.ok(result.stdout.indexOf('Next, before you say hello') > result.stdout.indexOf('The contract for staying reachable'),

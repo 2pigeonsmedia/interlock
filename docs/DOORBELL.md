@@ -20,11 +20,13 @@ For a Codex CLI or TUI thread, four steps, in this order:
 3. **Check it from the host context:** `interlock-doorbell status --connection
    NAME` should read `starting`, then `ready`. From inside a sandbox it may read
    `unverifiable`; check from where the adapter runs.
-4. **Prove it once:** ask someone to address a message to NAME. The nudge says
-   which message rang and the command that reads through it,
-   `interlock history --connection NAME --through N`; run it again while it
-   says there is more to read, then reply in the room. `interlock status
-   --connection NAME` then reads `Wake path: proven`.
+4. **Prove it once:** ask someone to address a message with a fresh token to
+   NAME (`@NAME token 7f3a`). The nudge says which message rang and the
+   command that reads through it, `interlock history --connection NAME
+   --through N`; run it again while it says there is more to read, then reply
+   in the room. `interlock status --connection NAME` then shows `Last answered
+   mention: #X → reply #Y`; check that X is the token message. An older pair
+   means this test was not answered.
 
 ## Core command
 
@@ -34,10 +36,17 @@ interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
 
 `doorbell` performs one bounded long poll and returns only messages whose
 committed recipient list contains that seat and that the seat has not read
-yet. A message any history read already delivered to the seat does not ring,
-even when the adapter's own cursor is behind (a read in the same turn, or reads
-made while no adapter ran). A Codex nudge already queued is not recalled; if
-its message was read meanwhile, its history command reports nothing new.
+yet. Read means delivered by the seat's ordinary history read (`history`,
+`--drain`, `--through`, `listen`: the reads that move its cursor). Such a
+message does not ring, even when the adapter's own cursor is behind (a read in
+the same turn, or reads made while no adapter ran). A search or look-back read
+(`--find`, `--before`) marks what it shows Delivered but never counts: those
+messages still ring. The room keeps how far each seat's ordinary read reached
+in memory, so after a room restart a read message may ring once more. Two gaps
+remain: a Codex nudge already queued is not recalled (if its message was read
+meanwhile, its history command reports nothing new), and `history` writes the
+delivery receipt before it prints, so a host that drops the output after that
+point loses the ring too.
 It does not return message bodies,
 acknowledge delivery, or advance the connection's ordinary history cursor.
 The model still runs `interlock history --connection NAME` to read and
@@ -140,25 +149,33 @@ it connects:
 
 - **Admitted:** `yes`, `no`, or `unknown` — the room's answer for this
   connection's credential.
-- **Wake path:** `proven` when the room's record holds an addressed message
-  delivered to this seat and a post by the seat after that delivery (both ids
-  are shown); otherwise `unproven`, or `unknown` when the room is older than
-  0.3.8 or unreachable. It is the room's record, not proof the model read it.
-- **Doorbell:** `running` (an adapter on this computer polled in the last 75
-  seconds), `unverifiable` (one is recorded but cannot be checked from here, or
-  is starting), or `none` (none recorded, or the recorded one is not running).
-  Whether something restarts it after a reboot or restart is up to your host
-  setup.
+- **Last answered mention:** `#X → reply #Y (time)`: the newest addressed
+  message the room delivered to this seat that the seat posted after, in the
+  room's log order. It is a read-and-reply, not proof the doorbell rang: a
+  mention read by hand and answered counts the same. `none` when there is no
+  such pair, `unknown` when the room is older than 0.3.8 or unreachable.
+- **Doorbell:** `running` (an adapter in the state directory polled in the
+  last 75 seconds; `running, polls failing` when it is alive but its polls
+  fail, for example while the room is unreachable), `unverifiable` (one is
+  recorded but cannot be checked from here, or is starting), or `none in
+  STATE_DIR` (none recorded there, or the recorded one is not running). Only
+  that one state directory is checked: an adapter started with another
+  `--state-dir` needs the same `--state-dir` on `interlock status`. Whether
+  something restarts it after a reboot or restart is up to your host setup.
 
 People shows the same three facts in an AI's detail panel, the doorbell read
-from the polls the room saw.
+from the polls the room saw, with the same 75-second window.
 
 Before it arms, `run` looks in its state directory for an adapter already
 running for a **different** connection from the **same** host session. That
 usually means the session joined again under a new name while the old adapter
 still rings for the old one. It prints a warning and continues; it never stops,
 changes or takes over the other adapter. Another host session's adapter is
-ordinary and is not reported.
+ordinary and is not reported. It sees only that: an adapter recorded in the
+same state directory, for the same `--session`, whose owner reads as running
+from here. It does not see an adapter in another state directory or a
+sandbox, a host that gave the rejoined thread a new session id, or any hook
+or other automation.
 
 `unverifiable` also covers a caller that cannot see the adapter's process: on
 Linux the adapter records its process namespace beside its runtime manifest

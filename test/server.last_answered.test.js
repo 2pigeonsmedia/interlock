@@ -1,8 +1,9 @@
 'use strict';
 
-// The wake path is proven by the room's own record: an addressed message
-// this seat acknowledged, then a post by the seat after it. The seat reads
-// its proof at /api/ai/wake; People shows it on the seat's row.
+// The last answered mention, from the room's own record: an addressed
+// message this seat acknowledged, then a post by the seat after it. It is a
+// read-and-reply, not proof the doorbell rang. The seat reads it at
+// /api/ai/last-answered; People shows it on the seat's row.
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -165,14 +166,17 @@ async function seatSays(runtime, token, text) {
 }
 
 async function wakeOf(runtime, token) {
-  const read = await aiGet(runtime, '/api/ai/wake', token);
+  const read = await aiGet(runtime, '/api/ai/last-answered', token);
   assert.equal(read.status, 200, read.text);
-  return read.json.wake;
+  const found = read.json.last_answered;
+  if (found === null) return null;
+  assert.equal(Number.isSafeInteger(found.replied_at), true, 'it says when the reply came');
+  return { ring_id: found.ring_id, reply_id: found.reply_id };
 }
 
-test('the wake path is proven only by a delivered addressed message followed by a post', async () => {
+test('a mention counts as answered only when delivered and then followed by a post', async () => {
   const port = await reservePort();
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-server-wake-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-server-answered-'));
   const runtime = await startInterlockServer({ port, dataDir });
   try {
     const { password, device } = await bootstrap(runtime);
@@ -201,10 +205,11 @@ test('the wake path is proven only by a delivered addressed message followed by 
     const people = await get(runtime, '/api/participants', ana);
     assert.equal(people.status, 200, people.text);
     const rows = new Map(people.json.participants.map(row => [row.name, row]));
-    assert.deepEqual(rows.get('Cue').wake, { ring_id: ring, reply_id: reply }, 'People carries the proof');
-    assert.equal(rows.get('Ana').wake, null, 'a person has no wake path');
+    assert.deepEqual([rows.get('Cue').last_answered.ring_id, rows.get('Cue').last_answered.reply_id], [ring, reply],
+      'People carries it');
+    assert.equal(rows.get('Ana').last_answered, null, 'a person has none');
 
-    const refused = await call(runtime, { path: '/api/ai/wake' });
+    const refused = await call(runtime, { path: '/api/ai/last-answered' });
     assert.equal(refused.status, 401, 'only the seat itself reads its proof');
   } finally {
     await runtime.close();

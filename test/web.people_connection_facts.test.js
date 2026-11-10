@@ -1,7 +1,8 @@
 'use strict';
 
 // The People detail panel shows an AI's connection as three separate facts:
-// admitted, wake path proven or unproven, and the doorbell running or none
+// admitted, the last answered mention (a read-and-reply, not proof the
+// doorbell rang), and the doorbell running or none
 // (unknown when the room predates these facts). None of them claims the model is paying attention.
 
 const assert = require('node:assert/strict');
@@ -19,25 +20,30 @@ function seat(extra = {}) {
     name: 'Marlow', kind: 'seat', session: 1, product: 'Claude Code', product_provenance: 'client-reported',
     expires_at: NOW + 3_600_000, last_heard: NOW - MINUTE, present: true, outstanding: 0,
     fetched_without_post_at: null, model: null, project: null, assigned: null, presence: null,
-    last_posted_at: null, last_polled_at: null, wake: null,
+    last_posted_at: null, last_polled_at: null, last_answered: null,
   }, extra);
 }
 
 test('three facts for a seat, each worded from its own evidence', () => {
   assert.deepEqual(model.connectionFacts(seat(), NOW), [
     'Admitted',
-    'Wake path: unproven · no post yet after a delivered @mention',
+    'Last answered mention: none yet',
     'Doorbell: none · no poll recorded',
   ]);
   assert.deepEqual(model.connectionFacts(seat({
-    wake: { ring_id: 12, reply_id: 14 }, last_polled_at: NOW - 30_000,
+    last_answered: { ring_id: 12, reply_id: 14, replied_at: NOW - 4 * MINUTE }, last_polled_at: NOW - 30_000,
   }), NOW), [
     'Admitted',
-    'Wake path: proven · #12 delivered, then #14 posted',
+    'Last answered mention: #12 → reply #14 · 4m ago',
+    'A read-and-reply, not proof the doorbell rang',
     'Doorbell: running · polled now',
   ]);
-  assert.deepEqual(model.connectionFacts(seat({ last_polled_at: NOW - 90_000 }), NOW).slice(2), [
+  // One window with the CLI: running means a poll within 75 seconds.
+  assert.deepEqual(model.connectionFacts(seat({ last_polled_at: NOW - 70_000 }), NOW).slice(2), [
     'Doorbell: running · polled 1m ago',
+  ]);
+  assert.deepEqual(model.connectionFacts(seat({ last_polled_at: NOW - 80_000 }), NOW).slice(2), [
+    'Doorbell: none · last poll 1m ago',
   ]);
   assert.equal(model.connectionFacts(seat({ last_polled_at: NOW - 3 * 60 * MINUTE }), NOW)[2],
     'Doorbell: none · last poll 3h ago');
@@ -46,11 +52,11 @@ test('three facts for a seat, each worded from its own evidence', () => {
 test('a person has no connection facts, and an older room says what it cannot show', () => {
   assert.deepEqual(model.connectionFacts({ kind: 'person', name: 'Ana' }, NOW), []);
   const older = seat();
-  delete older.wake;
+  delete older.last_answered;
   delete older.last_polled_at;
   assert.deepEqual(model.connectionFacts(older, NOW), [
     'Admitted',
-    'Wake path: unknown · this room does not report it',
+    'Last answered mention: unknown · this room does not report it',
     'Doorbell: unknown · this room does not report it',
   ]);
 });
@@ -58,7 +64,7 @@ test('a person has no connection facts, and an older room says what it cannot sh
 test('the facts never claim the model is attending', () => {
   const words = [
     ...model.connectionFacts(seat(), NOW),
-    ...model.connectionFacts(seat({ wake: { ring_id: 1, reply_id: 2 }, last_polled_at: NOW }), NOW),
+    ...model.connectionFacts(seat({ last_answered: { ring_id: 1, reply_id: 2, replied_at: NOW }, last_polled_at: NOW }), NOW),
   ].join(' ');
   assert.doesNotMatch(words, /\bready\b|attent|awake|is reading/i);
 });

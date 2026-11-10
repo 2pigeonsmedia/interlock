@@ -13,6 +13,9 @@
   const PERSON_HEARD_MS = 5 * MINUTE;
   // The doorbell long-polls for up to 45 seconds; two intervals with margin.
   const LISTENING_MS = 2 * MINUTE;
+  // The doorbell fact's "running": a poll within 75 seconds, the same window
+  // `interlock status` and `interlock-doorbell status` use.
+  const DOORBELL_FRESH_MS = 75_000;
   // How long a seat whose doorbell stopped still reads working (mid-task).
   const WORKING_MS = 3 * 60 * MINUTE;
 
@@ -221,18 +224,22 @@
   }
 
   // An AI's connection, as three separate facts for its detail panel (her
-  // ruling, 2026-11-10): admitted; wake path proven by the room's record (an
-  // addressed message delivered, then a post) or unproven; and its doorbell,
-  // read from the polls the room saw. Whether something restarts a doorbell
-  // is the host's setup, which the room cannot see. None claims the model is
+  // ruling, 2026-11-10, worded by the lead after the cold read): admitted;
+  // its last answered mention (an addressed message delivered, then a post: a
+  // read-and-reply, not proof the doorbell rang); and its doorbell, read from
+  // the polls the room saw. Whether something restarts a doorbell is the
+  // host's setup, which the room cannot see. None claims the model is
   // attending.
   function connectionFacts(row, now) {
     if (!row || row.kind !== 'seat') return [];
     const unknown = 'unknown · this room does not report it';
-    let wake = 'Wake path: ' + unknown;
-    if (row.wake === null) wake = 'Wake path: unproven · no post yet after a delivered @mention';
-    else if (row.wake && Number.isSafeInteger(row.wake.ring_id) && Number.isSafeInteger(row.wake.reply_id)) {
-      wake = 'Wake path: proven · #' + row.wake.ring_id + ' delivered, then #' + row.wake.reply_id + ' posted';
+    const found = row.last_answered;
+    let answered = 'Last answered mention: ' + unknown;
+    if (found === null) answered = 'Last answered mention: none yet';
+    else if (found && Number.isSafeInteger(found.ring_id) && Number.isSafeInteger(found.reply_id)) {
+      const span = age(found.replied_at, now);
+      answered = 'Last answered mention: #' + found.ring_id + ' → reply #' + found.reply_id +
+        (span === null ? '' : span === 'now' ? ' · now' : ' · ' + span + ' ago');
     }
     let doorbell = 'Doorbell: ' + unknown;
     if (row.last_polled_at === null) doorbell = 'Doorbell: none · no poll recorded';
@@ -240,11 +247,14 @@
       const since = now - row.last_polled_at;
       const span = age(row.last_polled_at, now);
       const when = span === null ? 'at an unknown time' : span === 'now' ? 'now' : span + ' ago';
-      doorbell = since >= 0 && since < LISTENING_MS
+      doorbell = since >= 0 && since <= DOORBELL_FRESH_MS
         ? 'Doorbell: running · polled ' + when
         : 'Doorbell: none · last poll ' + when;
     }
-    return ['Admitted', wake, doorbell];
+    const facts = ['Admitted', answered];
+    if (found) facts.push('A read-and-reply, not proof the doorbell rang');
+    facts.push(doorbell);
+    return facts;
   }
 
   const contract = Object.freeze({

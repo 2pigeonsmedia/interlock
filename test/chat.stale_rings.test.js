@@ -35,7 +35,13 @@ test('a waiting doorbell does not wake for a message the seat already read', asy
   const chat = service();
   const read = await chat.append({ text: '@Marlow already read' }, ANA);
   assert.deepEqual(read.recipients.map(row => row.name), ['Marlow'], 'arrangement: addressed');
+  // An acknowledgement alone (a search read writes one too) does not silence it.
   await chat.acknowledge(MARLOW, [read.id]);
+  const peeked = await chat.waitForSeatRings({ after: 0, limit: 10 }, MARLOW, { timeoutMs: 30 });
+  assert.deepEqual(peeked.messages.map(message => message.id), [read.id],
+    'acknowledged but never read through ordinary history: still rings');
+  // The ordinary history read reached it; now it is read.
+  chat.noteOrdinaryRead(MARLOW, read.id);
   const quiet = await chat.waitForSeatRings({ after: 0, limit: 10 }, MARLOW, { timeoutMs: 30 });
   assert.deepEqual(quiet.messages, [], 'an acknowledged message must not ring');
   assert.equal(quiet.timed_out, true);

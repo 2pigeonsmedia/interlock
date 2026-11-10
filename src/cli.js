@@ -1469,7 +1469,7 @@ async function runReadCommand(command, args, io, dependencies = {}) {
   return result;
 }
 
-// ---- The connection's three facts (admitted · wake path · doorbell) ----
+// ---- The connection's three facts (admitted · last answered mention · doorbell) ----
 // Each is its own evidence. None of them claims the model is attending: the
 // room records deliveries and posts, and the doorbell records its polls.
 
@@ -1491,31 +1491,32 @@ async function admittedFact(fetcher, profile) {
   }
 }
 
-async function wakeFact(fetcher, profile) {
+// The last answered mention: an addressed message the room delivered to this
+// seat and a post by the seat after it. A read-and-reply, not proof the
+// doorbell rang.
+async function lastAnsweredFact(fetcher, profile) {
+  const empty = { ring_id: null, reply_id: null, replied_at: null };
   try {
-    const result = await localRequest(fetcher, profile, '/api/ai/wake', { timeoutMs: FACTS_TIMEOUT_MS });
-    if (!exactObject(result, ['ok', 'wake'])) throw incompatibleResponse();
-    if (result.wake === null) {
-      return {
-        state: 'unproven', ring_id: null, reply_id: null,
-        detail: 'the room has no delivered @mention followed by a post from you; to prove it, have someone @mention you while your doorbell runs, and reply',
-      };
+    const result = await localRequest(fetcher, profile, '/api/ai/last-answered', { timeoutMs: FACTS_TIMEOUT_MS });
+    if (!exactObject(result, ['ok', 'last_answered'])) throw incompatibleResponse();
+    if (result.last_answered === null) {
+      return Object.assign({ state: 'none', detail: 'the room has no delivered @mention followed by a post from you' }, empty);
     }
-    const wake = exactObject(result.wake, ['ring_id', 'reply_id']);
-    if (!wake || !Number.isSafeInteger(wake.ring_id) || !Number.isSafeInteger(wake.reply_id) ||
-        wake.reply_id <= wake.ring_id) throw incompatibleResponse();
+    const found = exactObject(result.last_answered, ['ring_id', 'reply_id', 'replied_at']);
+    if (!found || !Number.isSafeInteger(found.ring_id) || !Number.isSafeInteger(found.reply_id) ||
+        found.reply_id <= found.ring_id || !Number.isSafeInteger(found.replied_at)) throw incompatibleResponse();
     return {
-      state: 'proven', ring_id: wake.ring_id, reply_id: wake.reply_id,
-      detail: `the room delivered message ${wake.ring_id} to you and you posted message ${wake.reply_id} after it (the room's record, not proof the model read it)`,
+      state: 'found', ring_id: found.ring_id, reply_id: found.reply_id, replied_at: found.replied_at,
+      detail: `#${found.ring_id} → reply #${found.reply_id} (${new Date(found.replied_at).toISOString()})`,
     };
   } catch (error) {
     if (error && error.status === 404) {
-      return { state: 'unknown', ring_id: null, reply_id: null, detail: 'this room does not report it (Interlock 0.3.7 or older)' };
+      return Object.assign({ state: 'unknown', detail: 'this room does not report it (Interlock 0.3.7 or older)' }, empty);
     }
-    return {
-      state: 'unknown', ring_id: null, reply_id: null,
+    return Object.assign({
+      state: 'unknown',
       detail: roomUnreachable(error) ? 'the room could not be reached' : 'the room did not answer usably',
-    };
+    }, empty);
   }
 }
 
@@ -1530,19 +1531,24 @@ function doorbellFact(connection, stateDir, inspect = null) {
     status = (inspect || require('../integrations/doorbell.js').inspectStatus)(
       { adapter: null, connection, session: null, stateDir: stateDir || null });
   } catch (_) {
-    return { state: 'unverifiable', detail: 'the doorbell state on this computer could not be read' };
+    return { state: 'unverifiable', label: 'unverifiable', detail: 'the doorbell state on this computer could not be read' };
   }
-  if (status.state === 'ready') return { state: 'running', detail: status.detail };
+  const where = typeof status.state_dir === 'string' ? status.state_dir : stateDir || 'the default state directory';
+  if (status.state === 'ready') return { state: 'running', label: 'running', detail: status.detail };
+  // A live adapter retrying an unreachable room, or a refused credential.
+  if (status.state === 'mismatch' && /^no successful poll in the last /.test(status.detail)) {
+    return { state: 'running', label: 'running, polls failing', detail: status.detail };
+  }
   if (status.state === 'absent') {
-    return { state: 'none', detail: `no doorbell adapter is recorded on this computer for ${connection}` };
+    return { state: 'none', label: `none in ${where}`, detail: `no doorbell adapter is recorded there for ${connection}` };
   }
   if (status.state === 'stale') {
     return {
-      state: 'none',
-      detail: 'an adapter ran here and is not running now; whether something restarts it is up to your host setup',
+      state: 'none', label: `none in ${where}`,
+      detail: 'an adapter ran from there and is not running now; whether something restarts it is up to your host setup',
     };
   }
-  return { state: 'unverifiable', detail: status.detail };
+  return { state: 'unverifiable', label: 'unverifiable', detail: status.detail };
 }
 
 // Just after a join the room has already said yes; that answer is reused.
@@ -1553,7 +1559,7 @@ function joinedAdmission(profile) {
 async function connectionFacts(fetcher, profile, stateDir, admitted = null, inspect = null) {
   return {
     admitted: admitted || await admittedFact(fetcher, profile),
-    wake: await wakeFact(fetcher, profile),
+    last_answered: await lastAnsweredFact(fetcher, profile),
     doorbell: doorbellFact(profile.name, stateDir, inspect),
   };
 }
@@ -1574,7 +1580,7 @@ async function connectionFactsFor(name, options = {}) {
         : 'the local connection could not be read';
     return {
       admitted: { state: 'unknown', detail: why },
-      wake: { state: 'unknown', ring_id: null, reply_id: null, detail: why },
+      last_answered: { state: 'unknown', ring_id: null, reply_id: null, replied_at: null, detail: why },
       doorbell: doorbellFact(name, stateDir, options.inspect),
     };
   }
@@ -1585,8 +1591,11 @@ async function connectionFactsFor(name, options = {}) {
 function factLines(facts) {
   return [
     `Admitted: ${facts.admitted.state} — ${facts.admitted.detail}.`,
-    `Wake path: ${facts.wake.state} — ${facts.wake.detail}.`,
-    `Doorbell: ${facts.doorbell.state} — ${terminalSafe(facts.doorbell.detail)}.`,
+    facts.last_answered.state === 'found'
+      ? `Last answered mention: ${facts.last_answered.detail}.`
+      : `Last answered mention: ${facts.last_answered.state} — ${facts.last_answered.detail}.`,
+    '  (A read-and-reply, not proof the doorbell rang.)',
+    `Doorbell: ${terminalSafe(facts.doorbell.label || facts.doorbell.state)} — ${terminalSafe(facts.doorbell.detail)}.`,
   ];
 }
 
@@ -2389,6 +2398,7 @@ function joinedOutput(stdout, profile, start = 'tip', facts = null) {
   line(stdout, 'Next, before you say hello: start your doorbell, keep it running, and check it.');
   line(stdout, `  interlock-doorbell run --adapter codex|stdout --connection ${profile.name} --session HOST_SESSION`);
   line(stdout, `  interlock-doorbell status --connection ${profile.name}`);
+  line(stdout, '  run warns if this host session already has one under another name in the same state dir.');
   line(stdout, '  codex for a Codex session (HOST_SESSION is its session id); stdout under a Monitor-class host.');
   line(stdout, '  Run it as a managed long-running command; see `interlock-doorbell guide`.');
 }
