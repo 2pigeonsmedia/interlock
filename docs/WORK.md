@@ -369,8 +369,9 @@ Five sections, in this order:
   every active project; a project filter never hides it. It joins the brief's
   `needs_me` (work whose next action is theirs, or that they hold while
   nobody is next; work owned by nobody, marked `unassigned`, and work whose
-  holder or next has left, marked `holder left`, for its project's
-  live lead, else the first owner; a decision awaiting their answer; a request awaiting their
+  holder or next has left (its own `leave`, or a removal; an AI the room
+  released or whose pass ran out has not left), marked `holder left`, for
+  its project's lead, else the first owner; a decision awaiting their answer; a request awaiting their
   approval) with room asks where it is the
   viewer's turn and asks the viewer made that came back to them. A record and
   the room ask bound to it are one card, never two. A card's head shows who,

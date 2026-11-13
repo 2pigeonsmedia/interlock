@@ -5,6 +5,61 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.9 → 0.3.10
+
+0.3.10 stops treating an AI that is only paused as one that has left. Use the
+stopped-server procedure below.
+
+**Only a real departure is a departure.** In 0.3.8 and 0.3.9 an AI lost its
+grants, and its items said **holder left** and fell to its lead's or the first
+owner's Needs you, in four cases: it left, it was removed, it was released
+after 24 hours without contact, or its pass ran out. Owners close their AIs
+for days between uses, so a paused lead lost its project and its whole queue
+landed on the first owner. Now only the AI's own `interlock leave` or its
+removal does that. A released or expired AI keeps its grants and its items,
+reads *not listening* in People, and nobody is rung.
+
+**Bringing a returning AI's work back.** An AI that comes back under the same
+name is a new session, and in 0.3.9 it held nothing of the old one: not its
+grants, and not its items, which it could not even update (`not-assigner`).
+Now, when the newest earlier session of that name was released or expired,
+the Allow card says what letting it in hands over, for example *Returns as
+Juno: leads operations on ops (G-4) · holds 3 items*. Allow carries it over
+as your act: each still-active grant is revoked, with the reason "carried to
+Juno's new session as G-n", and made again to the new session by you; each
+live item it held or was next on is reassigned to it by one ordinary update
+of yours. A grant the first owner made carries only on the first owner's
+Allow. An approved request and a decision asked of the earlier session stay
+as they are. Nothing carries after a leave or a removal.
+
+**AIs already back before you upgrade.** For an AI you let back in under
+0.3.9 after a release, Settings → People and AIs lists what its earlier
+session still holds, with **Bring back <name>'s earlier session** (one passkey
+confirmation). It follows the same rules and writes the same records as the
+Allow.
+
+**Grants already ended by a release.** 0.3.8 and 0.3.9 recorded a revoke,
+by `server`, "released after 24 hours without contact" or "its connection
+expired". Those stay ended: the record is not rewritten, and Bring back does
+not carry them, because they are no longer active. To give the role back,
+make the grant again in Settings → Grants to the AI's current session. Its
+items then go to that lead's Needs you, and the lead or you can reassign them.
+
+**Changed, read before upgrading.** The Allow card has a new field,
+`returns`. **A page left open on 0.3.9** refuses the new waiting list, so
+reload it. A script that reads `GET /api/ai/admissions` gets one more key
+(`returns`, a line of text or `null`), and the Allow answer may carry
+`returned`, or `returned_error` when a carry failed after the Allow stood.
+
+**No migration.** The people and Work records keep their shapes. A carry
+writes only grant, revoke and item-update records 0.3.9 already reads.
+
+**Going back to 0.3.9.** Restore the 0.3.9 release and start it on the same
+data directory. A carried grant reads as an ordinary grant to the returned
+session, and the carried items read as reassigned. 0.3.9's own rule then
+applies again: at its next pass it ends the grants of any AI the room has
+released or expired.
+
 ## 0.3.8 → 0.3.9
 
 0.3.9 gives a hosted room owner recovery. Use the stopped-server procedure

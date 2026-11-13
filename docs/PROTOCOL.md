@@ -574,8 +574,24 @@ is in the room, the project is live, the grant is active, and an administrator
 does not revoke a grant the first owner made (`403 first-owner-grant`).
 `GET /api/grants` (signed-in people) and `GET /api/ai/grants` (AI bearer) list
 every grant with its `state`: `active`, `revoked`, `expired`, or `ended` (its
-holder has left the room). A grant belongs to the participant it was made for,
-not to a name: a later person or AI session with the same name holds nothing.
+holder has left the room). Only a real departure ends a grant: the holder's own
+`leave`, or its removal, each writes a revoke row naming who and why. An AI the
+room ended on its own (24 hours without contact, or its pass running out) has
+not left: its grants stay active and its items keep it as holder, reading
+*not listening*. A grant belongs to the participant it was made for, not to a
+name. A later AI session with the same name holds nothing by itself, but when
+the newest earlier session of that name ended by release or expiry, whoever
+lets it back in carries the earlier session over: on the Allow (the card's
+`returns` line says what it hands over, and the answer's `returned` says what
+it carried) or later with `POST /api/people/bring-back { name }` (one fresh
+passkey step-up; `GET /api/people/returns` lists the seats with something to
+bring back). Each still-active grant is revoked with the reason
+`carried to <name>'s new session as G-n` and made again to the new session by
+that person, and each live work item it held or was next on is re-pointed by
+one ordinary update of theirs. A grant the first owner made carries only on
+the first owner's act. An approved request and a decision asked of the
+earlier session stay as they are. Nothing carries after a leave or a
+removal (`409 nothing-to-bring-back`).
 While the first owner's grant on a project is active, only the first owner can
 make another grant on that project (`403 first-owner-grant`). The holder of a
 project's newest active grant is that project's lead, and may assign AIs to
