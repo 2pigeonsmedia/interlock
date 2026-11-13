@@ -36,8 +36,11 @@ function reasonFor(how) {
  * departure, so a cause nobody named never keeps a grant alive. */
 function endedByRoom(seat) {
   if (!seat || seat.kind !== 'seat') return false;
+  // A leave or a removal is final, even one that falls on the pass's last
+  // moment (identity calls that tie a departure too).
+  if (seat.ended_how === 'left' || seat.ended_how === 'revoked') return false;
   if (seat.ended_how === 'released') return true;
-  return Number.isSafeInteger(seat.expires_at) && seat.ended_at === seat.expires_at;
+  return seat.ended_how === null && Number.isSafeInteger(seat.expires_at) && seat.ended_at === seat.expires_at;
 }
 
 /* The subject ids still standing in the room at `now`: everyone in it, and

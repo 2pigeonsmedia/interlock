@@ -166,6 +166,8 @@ test('only a release or an expiry keeps a seat standing; a removal, a leave, or 
     { subject_id: 's-24', name: 'D', kind: 'seat', ended_how: 'revoked', ended_at: 500, expires_at: 9000 },
     // An older revoke that recorded no reason (identity reports null, like expiry).
     { subject_id: 's-25', name: 'E', kind: 'seat', ended_how: null, ended_at: 500, expires_at: 9000 },
+    // A removal on the pass's last moment is still a removal.
+    { subject_id: 's-26', name: 'F', kind: 'seat', ended_how: 'revoked', ended_at: 9000, expires_at: 9000 },
   ];
   const house = { listRecentEndedSeats: () => rows };
   const standing = standingSubjects(house, 10_000, ['p-1']);
@@ -188,6 +190,12 @@ test('carrying a grant follows the grant rules: a project the first owner holds 
   grantTo(service, lead, 'ops');
   assert.equal(service.carryRefusal(bea.subject_id, beas.grant_id, owner.subject_id, 2000), 'first-owner-grant');
   assert.equal(service.carryRefusal(owner.subject_id, beas.grant_id, owner.subject_id, 2000), null);
+  // A grant the first owner made with no project: no project lock applies,
+  // and it is still hers to move.
+  const roomWide = service.grant(Object.assign({}, owner, { now: 1000 }),
+    { holder_subject_id: juno.subject_id, holder_name: 'Juno', holder_kind: 'seat', project: null, scope: 'answers', until: null },
+    { now: 1000, firstOwnerSubjectId: owner.subject_id });
+  assert.equal(service.carryRefusal(bea.subject_id, roomWide.grant_id, owner.subject_id, 2000), 'first-owner-grant');
   assert.throws(() => service.carryGrant(Object.assign({}, bea, { now: 2000 }),
     { grant_id: beas.grant_id, to_subject_id: 's-32', to_name: 'Juno' }, { firstOwnerSubjectId: owner.subject_id }),
   error => error.code === 'first-owner-grant');
@@ -196,6 +204,25 @@ test('carrying a grant follows the grant rules: a project the first owner holds 
   const rows = service.grants(3000);
   assert.deepEqual([rows.find(row => row.grant_id === beas.grant_id).reason, rows.find(row => row.grant_id === carried.grant_id).state],
     [`carried to Juno's new session as ${carried.grant_id}`, 'active']);
+});
+
+test('a return carries live work it held, and keeps an approved request and an open ask as they are', () => {
+  const { work } = rig();
+  const OWNER_OF = { kind: 'person', subject_id: owner.subject_id, name: 'Ana' };
+  const asGone = Object.assign({}, gone, { session: null });
+  const held = filed(work, { responsible: ref(gone) });
+  const request = work.createApproval(asGone, { operation_id: crypto.randomUUID(), project: 'ops', title: 'Order rollers',
+    scope: 'two rollers, up to $40', approver: OWNER_OF, ask_message_id: 150 }).item;
+  work.answerFromRoom(Object.assign({}, owner, { session: null }), {
+    ask_id: 150, message_id: 151, text: 'yes', choice: 'yes', by_addressee: true, of: OWNER_OF, revision: 1, approver_ok: true,
+  });
+  assert.equal(work.get(owner, { id: request.id }).item.approval.state, 'approved', 'ARRANGEMENT: approved, held by its asker');
+  const preview = work.carryPreview([gone.subject_id]);
+  assert.deepEqual([preview.items, preview.approvals_kept], [[held.id], 1]);
+  const back = { subject_id: 's-40', name: 'Juno', kind: 'seat' };
+  assert.deepEqual(work.carryHeld(owner, { from: [gone.subject_id], to: back, note: 'carried' }), [held.id]);
+  assert.equal(work.get(owner, { id: held.id }).item.responsible.subject_id, 's-40');
+  assert.equal(work.get(owner, { id: request.id }).item.responsible.subject_id, gone.subject_id, 'the approved request stays');
 });
 
 test('a departure notice: one per recipient, listing its items by project, never to the poster', () => {
