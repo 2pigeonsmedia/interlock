@@ -20,7 +20,7 @@ const { openPeopleStore } = require('./room/people_store.js');
 const { createPeopleService } = require('./room/people.js');
 const { createWorkRoutes } = require('./work/routes.js');
 const { releaseIdleSeats } = require('./idle.js');
-const { endDepartedGrants } = require('./departures.js');
+const { endDepartedGrants, standingSubjects } = require('./departures.js');
 const { readRoomSettings } = require('./room_settings.js');
 const { renderGuidePage } = require('./guide.js');
 const { acquireInstanceLock } = require('./instance_lock.js');
@@ -474,7 +474,10 @@ async function startInterlockServer(options) {
     });
     // Who approves a request for approval: one rule for routing it, checking
     // an answer and placing it in a Needs you (server-internal).
-    const liveSubjects = now => new Set(house.listParticipants({ now }).map(row => row.subject_id));
+    // Who is still standing: in the room, or an AI the room ended on its own
+    // (idle release, pass expiry), which has not left. Only a leave or a
+    // removal makes a holder "left".
+    const liveSubjects = now => standingSubjects(house, now, house.listParticipants({ now }).map(row => row.subject_id));
     const approverFor = createApproverRule({
       leadOf: (project, now, live) => people.service.leadOf(project, now, live),
       live: liveSubjects,

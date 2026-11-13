@@ -126,11 +126,15 @@ test('only the holder itself, an administrator or the server ends a holder\'s gr
   assert.equal(service.endHeldGrants(server, { holder_subject_id: gone.subject_id, reason: REASONS.released }).length, 1);
 });
 
-test('the sweep ends the grants of every seat the room has ended, by the server, saying how it ended', () => {
+test('the sweep ends only a departure\'s grants (a leave or a removal), never a released or expired seat\'s', () => {
   const { service } = people();
   const released = grantTo(service, gone, 'ops');
   const expired = grantTo(service, stay, 'books');
   const live = grantTo(service, lead, 'docs');
+  const leaver = { subject_id: 's-11', name: 'Kit', kind: 'seat' };
+  const removed = { subject_id: 's-12', name: 'Rex', kind: 'seat' };
+  const left = grantTo(service, leaver, 'ops');
+  const gotRemoved = grantTo(service, removed, 'books');
   const house = {
     listParticipants: () => [{ subject_id: lead.subject_id, kind: 'seat' }],
     listRecentEndedSeats: meta => {
@@ -138,16 +142,18 @@ test('the sweep ends the grants of every seat the room has ended, by the server,
       return [
         { subject_id: gone.subject_id, name: gone.name, kind: 'seat', ended_how: 'released' },
         { subject_id: stay.subject_id, name: stay.name, kind: 'seat', ended_how: null },
+        { subject_id: leaver.subject_id, name: leaver.name, kind: 'seat', ended_how: 'left' },
+        { subject_id: removed.subject_id, name: removed.name, kind: 'seat', ended_how: 'revoked' },
       ];
     },
   };
   const ended = endDepartedGrants({ people: { service }, house, now: 5000 });
-  assert.deepEqual(ended.map(row => row.grant_id), [released.grant_id, expired.grant_id]);
+  assert.deepEqual(ended.map(row => row.grant_id), [left.grant_id, gotRemoved.grant_id]);
   const rows = service.grants(6000);
   const of = id => rows.find(row => row.grant_id === id);
-  assert.deepEqual([of(released.grant_id).revoked_by, of(released.grant_id).reason], ['server', 'released after 24 hours without contact']);
-  assert.deepEqual([of(expired.grant_id).revoked_by, of(expired.grant_id).reason], ['server', 'its connection expired']);
-  assert.equal(of(live.grant_id).state, 'active');
+  assert.deepEqual([of(left.grant_id).revoked_by, of(left.grant_id).reason], ['server', 'left the room']);
+  assert.deepEqual([of(gotRemoved.grant_id).revoked_by, of(gotRemoved.grant_id).reason], ['server', 'removed from the room']);
+  for (const kept of [released, expired, live]) assert.equal(of(kept.grant_id).state, 'active', kept.grant_id);
   assert.deepEqual(endDepartedGrants({ people: { service }, house, now: 7000 }), [], 'the next sweep finds nothing to end');
 });
 

@@ -47,6 +47,7 @@ const addPasskeySignIn = document.querySelector('#add-passkey-signin');
 const settingsParticipantList = document.querySelector('#settings-participant-list');
 const settingsPeopleStatus = document.querySelector('#settings-people-status');
 const allowEndedReuse = document.querySelector('#allow-ended-reuse');
+const settingsReturns = document.querySelector('#settings-returns');
 const changePasswordForm = document.querySelector('#change-password-form');
 const changePasswordButton = document.querySelector('#change-password-button');
 const signOutOthersButton = document.querySelector('#sign-out-others-button');
@@ -571,12 +572,13 @@ async function freshOwnerStepUp() {
 function validPendingAi(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 13 || ![
+  if (keys.length !== 14 || ![
     'request_id', 'name', 'product', 'product_provenance',
     'previously_used', 'last_ended_at', 'reuse', 'reuse_session',
-    'created_at', 'expires_at', 'match_code', 'connected', 'declared_project',
+    'created_at', 'expires_at', 'match_code', 'connected', 'declared_project', 'returns',
   ].every(key => keys.includes(key)) ||
-    !(value.declared_project === null || typeof value.declared_project === 'string')) return false;
+    !(value.declared_project === null || typeof value.declared_project === 'string') ||
+    !(value.returns === null || (typeof value.returns === 'string' && value.returns.length <= 2000))) return false;
   return typeof value.request_id === 'string' && typeof value.name === 'string' &&
     typeof value.product === 'string' &&
     (value.product_provenance === 'client-reported' ||
@@ -656,6 +658,13 @@ function renderPendingAis(rows) {
     if (row.reuse === 'held' || row.reuse === 'ended') {
       facts.append(priorUse);
     }
+    if (row.returns !== null) {
+      // What this Allow hands over from the earlier session (grants, items).
+      const returns = document.createElement('small');
+      returns.className = 'pending-ai-returns';
+      returns.textContent = `${row.returns}. Allow carries these over.`;
+      facts.append(returns);
+    }
     facts.append(connection);
 
     const actions = document.createElement('div');
@@ -732,9 +741,14 @@ async function decidePendingAi(requestId, action, controls) {
       result = await ownerMutation(`/api/ai/admissions/${requestId}/allow`, {});
     }
     await loadPendingAis();
-    pendingStatus(result.state === 'allowed'
-      ? `${result.name} joined the room.`
-      : `${result.name} was declined.`, result.state === 'allowed' ? 'success' : '');
+    let joined = `${result.name} joined the room.`;
+    if (result.returned && Array.isArray(result.returned.grants) && Array.isArray(result.returned.items)) {
+      joined += ` Carried over from its earlier session: ${result.returned.grants.length} grant(s), ${result.returned.items.length} item(s).`;
+    } else if (result.returned_error) {
+      joined += ' Its earlier session could not be carried over; use Bring back in Settings.';
+    }
+    pendingStatus(result.state === 'allowed' ? joined : `${result.name} was declined.`,
+      result.state === 'allowed' ? 'success' : '');
     if (result.state === 'allowed') loadRoster();
   } catch (error) {
     if (error.code === 'not-authenticated') {
@@ -1308,6 +1322,7 @@ async function loadSettingsParticipants(allEnded = false) {
   }
   allowEndedReuse.checked = result.allow_ended_reuse;
   renderSettingsParticipants(result);
+  loadReturns().catch(() => { settingsReturns.hidden = true; });
   if (result.ended_more > 0) {
     // Seats ended this week beyond the newest page are one click away.
     const more = document.createElement('button');
@@ -1332,6 +1347,44 @@ function tabOutOfDate() {
   const stale = new Error('tab-out-of-date');
   stale.code = 'tab-out-of-date';
   return stale;
+}
+
+// AIs back in the room whose earlier session (ended by the room on its own)
+// still holds something: one line each, and Bring back.
+async function loadReturns() {
+  const response = await fetch('/api/people/returns', { cache: 'no-store', credentials: 'same-origin' });
+  const result = await readJson(response);
+  if (!response.ok || !result || result.ok !== true || !Array.isArray(result.returns) ||
+      result.returns.some(row => !row || typeof row.name !== 'string' || typeof row.line !== 'string')) {
+    settingsReturns.hidden = true;
+    return;
+  }
+  settingsReturns.replaceChildren();
+  for (const row of result.returns) {
+    const line = document.createElement('p');
+    line.textContent = row.line + ' ';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'quiet-action';
+    button.textContent = `Bring back ${row.name}'s earlier session`;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      setSettingsStatus(settingsPeopleStatus, `Confirm with your passkey to bring back ${row.name}'s earlier session…`);
+      try {
+        const done = await freshAdminMutation('/api/people/bring-back', { name: row.name });
+        const back = done.returned || { grants: [], items: [] };
+        setSettingsStatus(settingsPeopleStatus,
+          `${row.name}: carried over ${back.grants.length} grant(s) and ${back.items.length} item(s).`, 'success');
+        await loadReturns();
+      } catch (error) {
+        setSettingsStatus(settingsPeopleStatus, `${row.name}'s earlier session was not brought back (${error.code || 'unavailable'}).`, 'error');
+        button.disabled = false;
+      }
+    });
+    line.append(button);
+    settingsReturns.append(line);
+  }
+  settingsReturns.hidden = result.returns.length === 0;
 }
 
 async function freshAdminMutation(path, body) {

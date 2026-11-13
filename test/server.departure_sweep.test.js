@@ -1,9 +1,9 @@
 'use strict';
 
-// The two ways the room ends an AI on its own (ruling, 2026-11-10): after
-// 24 hours without contact the seat is released, and the server's pass then
-// ends its grants on the record, by `server`, saying so. Nobody is rung (a
-// room line needs a person or an AI to say it); the item says holder left.
+// The two ways the room ends an AI on its own: after 24 hours without
+// contact the seat is released, or its pass runs out. Neither is a departure
+// (ruling, 2026-11-13, which replaced the 2026-11-10 one): the server's pass
+// ends no grant, the item does not say holder left, and nobody is rung.
 // Real server; only Date is mocked, to step past the idle bound.
 
 const assert = require('node:assert/strict');
@@ -192,7 +192,7 @@ async function workItem(runtime, owner, body) {
   return made.json.item;
 }
 
-test('an AI released after 24 hours without contact: its grant ends by the server, saying so; nobody is rung', async () => {
+test('an AI released after 24 hours without contact: the server ends no grant, nothing is holder-left, nobody is rung', async () => {
   const start = Date.now();
   mock.timers.enable({ apis: ['Date'], now: start });
   const port = await reservePort();
@@ -217,10 +217,10 @@ test('an AI released after 24 hours without contact: its grant ends by the serve
     assert.equal(roster.status, 200, roster.text);
     assert.equal(roster.json.participants.some(row => row.name === 'Juno'), false, 'the arrangement: the read released Juno');
 
-    const ended = await grant(owner);
-    assert.deepEqual([ended.state, ended.revoked_by, ended.reason], ['revoked', 'server', 'released after 24 hours without contact'],
-      'recorded, not only read as ended');
-    assert.deepEqual((await item(runtime, owner, held.id)).holder_left, ['Juno']);
+    const kept = await grant(owner);
+    assert.deepEqual([kept.state, kept.revoked_by, kept.reason], ['active', null, null],
+      'a release is not a departure: no revoke row');
+    assert.deepEqual((await item(runtime, owner, held.id)).holder_left, []);
     assert.equal((await messages(runtime, owner)).slice(before).some(message => /holder left/.test(message.text)), false, 'nobody is rung');
   } finally {
     await runtime.close();

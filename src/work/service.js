@@ -691,6 +691,47 @@ function createWorkService(options) {
 
   /* The live work items a participant holds or is next on, by id order, as
    * {id, project}: what a departure lists for its lead. */
+  /* What a returning seat's earlier sessions hold (ruling, 2026-11-13): the
+   * live work items whose holder or next is one of `fromIds`, which carry; and
+   * what stays as it is, counted: an approved request (what was approved was
+   * its asker doing it, and only its approval moves it) and an open decision
+   * asked of the earlier session (an ask names who was asked). */
+  function carryPreview(fromIds) {
+    const from = new Set(fromIds);
+    const draft = store.read();
+    if (!draft) return null;
+    const holds = item => [item.responsible, item.next_to].some(ref => ref && from.has(ref.subject_id));
+    const live = draft.items.filter(item => item.kind !== 'decision' && LIVE_WORK_STATES.includes(item.state) && holds(item));
+    return Object.freeze({
+      items: Object.freeze(live.filter(item => !item.approval).map(item => item.id)),
+      approvals_kept: live.filter(item => item.approval).length,
+      asks_kept: draft.items.filter(item => item.kind === 'decision' && decisionState(item) === 'awaiting' &&
+        item.asked_of && from.has(item.asked_of.subject_id)).length,
+    });
+  }
+
+  /* Carry those items to the returned seat `to`: one ordinary update each,
+   * by `actor` (the person who let it back in), changing only the holder and
+   * next slots that named an earlier session. Returns the item ids. */
+  function carryHeld(actor, input) {
+    requireActor(actor);
+    const body = closedObject(input, ['from', 'to', 'note']);
+    if (!body || !Array.isArray(body.from) || !validRef(body.to) || typeof body.note !== 'string') fail('invalid-input');
+    const preview = carryPreview(body.from);
+    if (!preview) fail('store-damaged');
+    const from = new Set(body.from);
+    const carried = [];
+    for (const id of preview.items) {
+      const item = store.read().items.find(row => row.id === id);
+      const update = { operation_id: crypto.randomUUID(), id, note: body.note, expected_revision: item.revision };
+      if (item.responsible && from.has(item.responsible.subject_id)) update.responsible = body.to;
+      if (item.next_to && from.has(item.next_to.subject_id)) update.next_to = body.to;
+      updateWork(actor, update);
+      carried.push(id);
+    }
+    return Object.freeze(carried);
+  }
+
   function heldBy(subjectId) {
     const mine = ownWork(subjectId);
     return mine ? mine.map(entry => ({ id: entry.item.id, project: entry.item.project })) : [];
@@ -2033,7 +2074,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, heldBy, lastWriteOf, attachEvidence, addNote, share,
+    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, heldBy, carryPreview, carryHeld, lastWriteOf, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, revise, followAsk, recordDiscussion, priorDiscussion, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,

@@ -217,9 +217,9 @@ test('the Allow card names the declared project only when one was typed', () => 
   const knock = {
     request_id: 'r1', name: 'Scout', product: 'Claude Code', product_provenance: 'client-reported',
     previously_used: false, last_ended_at: null, reuse: 'fresh', reuse_session: null,
-    created_at: NOW, expires_at: NOW + 60_000, match_code: 'ABCDE', connected: true, declared_project: null,
+    created_at: NOW, expires_at: NOW + 60_000, match_code: 'ABCDE', connected: true, declared_project: null, returns: null,
   };
-  assert.equal(page.validPendingAi(knock), true, 'ARRANGEMENT: the 13-key knock is valid');
+  assert.equal(page.validPendingAi(knock), true, 'ARRANGEMENT: the 14-key knock is valid');
   page.renderPendingAis([knock]);
   assert.equal(el('#pending-ai-list').find(node => node.className === 'pending-ai-project'), null);
 
@@ -227,6 +227,27 @@ test('the Allow card names the declared project only when one was typed', () => 
   const line = el('#pending-ai-list').find(node => node.className === 'pending-ai-project');
   assert.ok(line);
   assert.equal(line.textContent, 'Project: finanse (as typed by the AI)');
+});
+
+test('the Allow card says what a same-name return carries, before the click', () => {
+  const { page, el } = loadPage();
+  const knock = {
+    request_id: 'r2', name: 'Juno', product: 'Claude Code', product_provenance: 'client-reported',
+    previously_used: true, last_ended_at: NOW - 1000, reuse: 'ended', reuse_session: 1,
+    created_at: NOW, expires_at: NOW + 60_000, match_code: 'ABCDE', connected: true, declared_project: null,
+    returns: 'Returns as Juno: leads operations on ops (G-1) · holds 2 items',
+  };
+  assert.equal(page.validPendingAi(knock), true);
+  assert.equal(page.validPendingAi(Object.assign({}, knock, { returns: 7 })), false);
+  const withoutReturns = Object.assign({}, knock);
+  delete withoutReturns.returns;
+  assert.equal(page.validPendingAi(withoutReturns), false, 'a 13-key card from an older server is refused, never half-read');
+  page.renderPendingAis([knock]);
+  const line = el('#pending-ai-list').find(node => node.className === 'pending-ai-returns');
+  assert.ok(line, 'the card shows the returns line');
+  assert.equal(line.textContent, 'Returns as Juno: leads operations on ops (G-1) · holds 2 items. Allow carries these over.');
+  page.renderPendingAis([Object.assign({}, knock, { returns: null })]);
+  assert.equal(el('#pending-ai-list').find(node => node.className === 'pending-ai-returns'), null);
 });
 
 test('grants are validated with closed keys before People uses them', () => {

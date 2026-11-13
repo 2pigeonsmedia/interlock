@@ -4,12 +4,15 @@
 // recorded like a revoke (who and why), and its project's lead, else the
 // first owner, hears once which items it held or was next on. Nothing is
 // reassigned: the items say "holder left" (derived by the work service) until
-// the lead hands them on. A seat ends four ways: it leaves (`interlock
-// leave`), an administrator removes it, the room releases it after 24 hours
-// without contact, or its connection's pass runs out. The first two are acts
-// in a request, and their actor ends the grants and rings; the last two have
-// no actor, so the server's sweep ends the grants and rings nobody (a room
-// line needs a person or a seat to say it).
+// the lead hands them on.
+//
+// A seat ends four ways, and only two of them are a departure: it leaves
+// (`interlock leave`), or an administrator removes it. Both are acts in a
+// request, whose actor ends the grants and rings. The room also ends a seat
+// on its own, after 24 hours without contact or when its connection's pass
+// runs out; that seat has NOT left. Owners close their AIs for days between
+// uses, so it keeps its grants and its items, reads as not listening, and
+// nobody is rung.
 
 const SERVER_ACTOR = Object.freeze({ subject_id: 'server', name: 'server', kind: 'server' });
 
@@ -25,13 +28,33 @@ function reasonFor(how) {
   return Object.prototype.hasOwnProperty.call(REASONS, how) ? REASONS[how] : REASONS.expired;
 }
 
-/* The sweep: every seat the room has ended (any way) that still holds an
- * active grant has it ended by the server, saying how the seat ended. Run
- * after each idle release (every minute, and on each participants read), so
- * a seat that expired while nobody looked is settled too. It reads who holds
- * an active grant against who is in the room, and asks identity how a seat
- * ended only when a holder has gone: once per departure, since its grants
- * are then ended. Returns the ended grants as {grant_id, holder}. */
+// How a seat ended, for the two endings that are departures.
+const DEPARTED = Object.freeze(['left', 'revoked']);
+
+function departedHow(how) {
+  return DEPARTED.includes(how);
+}
+
+/* The subject ids still standing in the room at `now`: everyone in it, and
+ * every AI seat the room ended on its own (released or expired). This is the
+ * set "has this holder left?" is asked against: a grant, a lead, an item's
+ * holder. `liveIds` is who is in the room now (from identity or the chat). */
+function standingSubjects(house, now, liveIds) {
+  const standing = new Set(liveIds);
+  for (const seat of house.listRecentEndedSeats({ now, since: 0 })) {
+    if (seat && seat.kind === 'seat' && typeof seat.subject_id === 'string' && !departedHow(seat.ended_how)) {
+      standing.add(seat.subject_id);
+    }
+  }
+  return standing;
+}
+
+/* The sweep: every seat that LEFT or was REMOVED and still holds an active
+ * grant has it ended by the server, saying how. The leave and the removal
+ * end grants in their own request; this settles one whose request ended
+ * before it could. A released or expired seat is never swept. Run after each
+ * idle release (every minute, and on each participants read). Returns the
+ * ended grants as {grant_id, holder}. */
 function endDepartedGrants(options) {
   const { people, house, now } = options || {};
   if (!people || !people.service || typeof people.service.endHeldGrants !== 'function' ||
@@ -47,7 +70,8 @@ function endDepartedGrants(options) {
   if (gone.size === 0) return [];
   const ended = [];
   for (const seat of house.listRecentEndedSeats({ now, since: 0 })) {
-    if (!seat || seat.kind !== 'seat' || typeof seat.subject_id !== 'string' || !gone.has(seat.subject_id)) continue;
+    if (!seat || seat.kind !== 'seat' || typeof seat.subject_id !== 'string' || !gone.has(seat.subject_id) ||
+        !departedHow(seat.ended_how)) continue;
     const ids = people.service.endHeldGrants(Object.assign({ now }, SERVER_ACTOR),
       { holder_subject_id: seat.subject_id, reason: reasonFor(seat.ended_how) });
     for (const id of ids) ended.push({ grant_id: id, holder: seat.name });
@@ -85,4 +109,6 @@ function departureNotices(options) {
   });
 }
 
-module.exports = Object.freeze({ SERVER_ACTOR, REASONS, reasonFor, endDepartedGrants, departureNotices });
+module.exports = Object.freeze({
+  SERVER_ACTOR, REASONS, reasonFor, departedHow, standingSubjects, endDepartedGrants, departureNotices,
+});

@@ -6,7 +6,8 @@ const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
 const { SETTINGS_ENDED_MS } = require('./idle.js');
-const { REASONS: DEPARTURE_REASONS, departureNotices } = require('./departures.js');
+const { REASONS: DEPARTURE_REASONS, departureNotices, standingSubjects } = require('./departures.js');
+const { returnPreview, bringBack, previewLine } = require('./returns.js');
 const { readRoomSettings, writeRoomSettings } = require('./room_settings.js');
 const { version: PACKAGE_VERSION } = require('../package.json');
 
@@ -944,7 +945,7 @@ function createFirstOwnerHandler(options) {
       }
     }
     if (!chatActor) return;
-    const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
+    const live = standingSubjects(house, now, house.listParticipants({ now }).map(row => row.subject_id));
     const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
     const recipientOf = project => {
       const lead = people ? people.service.leadOf(project, now, live) : null;
@@ -1749,13 +1750,18 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
     }
-    if (!ownerSession(request, response, false)) return;
+    const viewer = ownerSession(request, response, false);
+    if (!viewer) return;
     try {
       const pending = admission.list();
       const live = new Set(pending.map(row => row.request_id));
       for (const id of knockFacts.keys()) if (!live.has(id)) knockFacts.delete(id);
+      const now = Date.now();
+      const actors = viewer ? returnActors(viewer.subject_id, now) : null;
       sendJson(request, response, 200, { ok: true, pending: pending.map(row => Object.freeze(Object.assign({}, row, {
         declared_project: knockFacts.has(row.request_id) ? knockFacts.get(row.request_id).project : null,
+        // What Allow hands over, said before the click (ruling, 2026-11-13).
+        returns: row.reuse === 'ended' ? previewLine(row.name, previewFor(row.name, null, actors, now)) : null,
       }))) });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
@@ -2413,7 +2419,7 @@ function createFirstOwnerHandler(options) {
   // can never disagree.
   const approverRule = people ? createApproverRule({
     leadOf: (project, now, live) => people.service.leadOf(project, now, live),
-    live: now => new Set(house.listParticipants({ now }).map(row => row.subject_id)),
+    live: now => standingSubjects(house, now, house.listParticipants({ now }).map(row => row.subject_id)),
     firstOwner: () => (typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null),
   }) : null;
 
@@ -2720,7 +2726,8 @@ function createFirstOwnerHandler(options) {
     if (!people) return;
     let lead = null;
     try {
-      const live = new Set(house.listParticipants({ now: workActor.now }).map(row => row.subject_id));
+      const live = standingSubjects(house, workActor.now,
+        house.listParticipants({ now: workActor.now }).map(row => row.subject_id));
       lead = people.service.leadOf(item.project, workActor.now, live);
     } catch (_) { lead = null; }
     if (!lead || !lead.name || lead.subject_id === workActor.subject_id) return;
@@ -3333,12 +3340,14 @@ function createFirstOwnerHandler(options) {
 
   async function sendGrants(request, response) {
     let live;
+    const now = Date.now();
     try {
-      live = new Set((await chat.listParticipants()).map(row => row.subject_id).filter(id => typeof id === 'string'));
+      live = standingSubjects(house, now,
+        (await chat.listParticipants()).map(row => row.subject_id).filter(id => typeof id === 'string'));
     } catch (_) {
       return sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
     }
-    const grants = people.service.grants(Date.now(), live);
+    const grants = people.service.grants(now, live);
     if (grants === null) return sendJson(request, response, 503, { ok: false, error: 'store-damaged' });
     return sendJson(request, response, 200, { ok: true, grants });
   }
@@ -3589,12 +3598,101 @@ function createFirstOwnerHandler(options) {
   // Refusals the admission record makes itself, before identity is asked.
   const ADMISSION_OWN_REFUSALS = Object.freeze(['not-found', 'not-connected', 'reuse-disabled']);
 
+  // ── A seat back after an idle release or expiry (ruling, 2026-11-13) ──
+  // The person acting, as the people and work records name them.
+  function returnActors(subjectId, now) {
+    const me = house.listParticipants({ now }).find(row => row.subject_id === subjectId && row.kind === 'person');
+    const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
+    if (!me || !first) return null;
+    return {
+      people: Object.freeze({ subject_id: me.subject_id, name: me.name, kind: 'person', owner: true, now }),
+      work: Object.freeze({ subject_id: me.subject_id, name: me.name, kind: 'person', session: null,
+        owner: true, now, first_owner: me.subject_id === first.subject_id }),
+      firstOwnerSubjectId: first.subject_id,
+    };
+  }
+
+  // The live AI seat named `name`, as a work record names a holder.
+  function liveSeatRef(name, now) {
+    const seat = house.listParticipants({ now }).find(row => row.kind === 'seat' && row.name === name);
+    if (!seat) return null;
+    const discriminator = house.aiSessionDiscriminator(seat.subject_id);
+    const session = discriminator && Number.isSafeInteger(discriminator.session) ? discriminator.session : undefined;
+    return Object.freeze(Object.assign({ subject_id: seat.subject_id, name: seat.name, kind: 'seat' },
+      session === undefined ? {} : { session }));
+  }
+
+  function previewFor(name, exceptSubjectId, actors, now) {
+    if (!people || !work || !actors) return null;
+    return returnPreview({ house, people, work, name, exceptSubjectId,
+      actorSubjectId: actors.people.subject_id, firstOwnerSubjectId: actors.firstOwnerSubjectId, now });
+  }
+
+  // Carry an earlier session over to the live seat `name`, as `subjectId`'s
+  // act. Returns the summary, or null when there was nothing to carry.
+  function carryToLiveSeat(name, subjectId, now) {
+    const actors = returnActors(subjectId, now);
+    const to = liveSeatRef(name, now);
+    if (!actors || !to) return null;
+    const preview = previewFor(name, to.subject_id, actors, now);
+    if (!preview) return null;
+    return bringBack({ preview, people, work, to, peopleActor: actors.people, workActor: actors.work,
+      firstOwnerSubjectId: actors.firstOwnerSubjectId });
+  }
+
+  // The seats in the room now that have an earlier session to bring back,
+  // for the owner's Settings: one line each, saying what would carry.
+  function listReturns(request, response) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const owner = ownerSession(request, response, false);
+    if (!owner) return undefined;
+    const now = Date.now();
+    const actors = returnActors(owner.subject_id, now);
+    const rows = [];
+    for (const seat of house.listParticipants({ now }).filter(row => row.kind === 'seat')) {
+      const preview = previewFor(seat.name, seat.subject_id, actors, now);
+      const line = previewLine(seat.name, preview);
+      if (line) rows.push(Object.freeze({ name: seat.name, line }));
+    }
+    return sendJson(request, response, 200, { ok: true, returns: rows });
+  }
+
+  // "Bring back <name>'s earlier session": for a seat let back in before the
+  // Allow carried anything. The same rules and record as on Allow, behind the
+  // same fresh passkey confirmation as a grant.
+  async function bringBackSeat(request, response, body) {
+    if (!people || !work) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const input = closedObject(body, ['name']);
+    if (!input || typeof input.name !== 'string' || input.name.length === 0 || input.name.length > 256) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    const owner = ownerSession(request, response, true);
+    if (!owner) return undefined;
+    const now = Date.now();
+    const actors = returnActors(owner.subject_id, now);
+    const to = liveSeatRef(input.name, now);
+    if (!actors || !to) return sendJson(request, response, 404, { ok: false, error: 'not-in-room' });
+    const preview = previewFor(input.name, to.subject_id, actors, now);
+    if (!preview) return sendJson(request, response, 409, { ok: false, error: 'nothing-to-bring-back' });
+    const confirmed = house.confirmGrantAct(requestMeta(request, now), 'grant.create');
+    if (!confirmed || confirmed.ok !== true) return sendStepUpRefusal(request, response, confirmed);
+    try {
+      const returned = bringBack({ preview, people, work, to, peopleActor: actors.people, workActor: actors.work,
+        firstOwnerSubjectId: actors.firstOwnerSubjectId });
+      return sendJson(request, response, 200, { ok: true, returned });
+    } catch (error) {
+      return sendGrantError(request, response, error);
+    }
+  }
+
   function mutateAdmission(request, response, body, requestId, action) {
     if (!closedObject(body, [])) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
       return;
     }
-    if (!ownerSession(request, response, true)) return;
+    const allowerSession = ownerSession(request, response, true);
+    if (!allowerSession) return;
     let result;
     try {
       result = action === 'allow'
@@ -3602,6 +3700,17 @@ function createFirstOwnerHandler(options) {
         : admission.decline(requestId);
       if (result && result.ok === true && action === 'allow') recordJoin(result.name, knockFacts.get(requestId));
       if (result && result.ok === true) knockFacts.delete(requestId);
+      // A re-join after an idle release or expiry: what the earlier session
+      // held carries to this one, as the allower's act. The Allow already
+      // stands; a carry that fails says so and leaves the rest as it was.
+      if (result && result.ok === true && action === 'allow') {
+        try {
+          const returned = carryToLiveSeat(result.name, allowerSession.subject_id, Date.now());
+          if (returned) result = Object.freeze(Object.assign({}, result, { returned }));
+        } catch (_) {
+          result = Object.freeze(Object.assign({}, result, { returned_error: 'carry-failed' }));
+        }
+      }
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
       return;
@@ -3654,6 +3763,7 @@ function createFirstOwnerHandler(options) {
     ['/api/presence', setPersonPresence],
     ['/api/profile', setPersonProfile],
     ['/api/people/assign', assignSeat],
+    ['/api/people/bring-back', bringBackSeat],
   ]);
   if (hostedMode && house.ownerRecovery) {
     mutations.set('/api/owner-recovery/options', ownerRecoveryOptions);
@@ -3824,6 +3934,16 @@ function createFirstOwnerHandler(options) {
         }
         if (pathname === '/api/grants') await listGrants(request, response);
         else await listAiGrants(request, response);
+        return;
+      }
+      if (pathname === '/api/people/returns') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-request',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        listReturns(request, response);
         return;
       }
       if (pathname === '/api/participants') {

@@ -398,8 +398,19 @@ function createWorkRoutes(options) {
     catch (_) { return []; }
   }
 
+  // What a returning seat's earlier sessions hold, and carrying it over
+  // (server-internal; the caller is the Allow or the bring-back act).
+  function carryPreview(fromIds) {
+    return typeof work.carryPreview === 'function' ? work.carryPreview(fromIds) : null;
+  }
+
+  function carryHeld(actor, input) {
+    if (typeof work.carryHeld !== 'function') throw new Error('work: carry unavailable');
+    return work.carryHeld(actor, input);
+  }
+
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, heldBy, lastWriteOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, heldBy, carryPreview, carryHeld, lastWriteOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

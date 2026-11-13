@@ -297,6 +297,62 @@ function createPeopleService(options) {
     return ended;
   }
 
+  /* A seat the room ended on its own (idle release, pass expiry) that comes
+   * back under the same name is a new subject. Its still-active grants carry
+   * to it as one act of the person who let it back in (ruling, 2026-11-13):
+   * the old grant is revoked naming where it went, and the same grant (holder
+   * name, project, scope, until) is made to the new subject by that person.
+   * The same authority as an ordinary grant: a grant the first owner made
+   * carries only on the first owner's act. `context.check` writes nothing.
+   * Returns the new grant row. */
+  function carryGrant(actor, input, context) {
+    requireActor(actor);
+    const body = request(input, ['grant_id', 'to_subject_id', 'to_name'], []);
+    if (typeof body.grant_id !== 'string' || !validName(body.to_subject_id) || !validName(body.to_name)) {
+      fail('invalid-request');
+    }
+    if (!plainObject(context) || !validName(context.firstOwnerSubjectId)) fail('invalid-request');
+    if (actor.kind !== 'person' || actor.owner !== true) fail('not-authorized');
+    const now = nowOf(actor);
+    const entry = grantsById.get(body.grant_id);
+    if (!entry || stateOf(entry, now) !== 'active' || entry.row.holder_kind !== 'seat' ||
+        entry.row.holder_subject_id === body.to_subject_id) fail('grant-not-active');
+    if (entry.row.by_subject_id === context.firstOwnerSubjectId &&
+        actor.subject_id !== context.firstOwnerSubjectId) fail('first-owner-grant');
+    if (damaged()) fail('store-damaged');
+    if (context.check === true) return null;
+    const row = entry.row;
+    const grantId = store.nextGrantId();
+    write(Object.assign(base(actor, 'revoke'), {
+      grant_id: row.grant_id,
+      reason: `carried to ${body.to_name}'s new session as ${grantId}`,
+    }));
+    return write(Object.assign(base(actor, 'grant'), {
+      grant_id: grantId,
+      holder_subject_id: body.to_subject_id,
+      holder_name: body.to_name,
+      holder_kind: 'seat',
+      project: row.project,
+      scope: row.scope,
+      until: row.until,
+    }));
+  }
+
+  /* The active grants held by any of these subjects (server-internal), in
+   * grant order, with who made each: what a return would carry. */
+  function activeGrantsOf(subjectIds, now) {
+    if (damaged()) return null;
+    const want = new Set(subjectIds);
+    return Object.freeze([...grantsById.values()]
+      .filter(entry => want.has(entry.row.holder_subject_id) && entry.row.holder_kind === 'seat' &&
+        stateOf(entry, now) === 'active')
+      .sort((a, b) => a.row.seq - b.row.seq)
+      .map(entry => Object.freeze({
+        grant_id: entry.row.grant_id, project: entry.row.project, scope: entry.row.scope,
+        by_subject_id: entry.row.by_subject_id,
+      })));
+  }
+
   function presenceWrite(actor, input) {
     requireActor(actor);
     if (!PARTICIPANT_KINDS.includes(actor.kind)) fail('not-authorized');
@@ -407,6 +463,8 @@ function createPeopleService(options) {
     grant,
     revoke,
     endHeldGrants,
+    carryGrant,
+    activeGrantsOf,
     presence: presenceWrite,
     clearPresenceOnPost,
     profile,
