@@ -5,6 +5,34 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.8 → 0.3.9
+
+0.3.9 gives a hosted room owner recovery. Use the stopped-server procedure
+below.
+
+**Hosted owner recovery.** Before 0.3.9 a hosted room had no way back in for
+an owner who lost both the password and the passkey. Now, with the service
+stopped, whoever runs the server runs `interlock recover --hosted` on that
+machine, as the service user. It prints a one-time code that lasts 30 minutes.
+The owner redeems it at `https://HOST/recover-owner` with a new password and a
+new passkey for that hostname, and every old owner passkey and session stops
+working. Until the code is redeemed nothing about the owner sign-in changes.
+See [`RECOVERY.md`](RECOVERY.md#recover-a-hosted-room) and
+[`HOSTING.md`](HOSTING.md). Plain `interlock recover` on a loopback room is
+unchanged; on a hosted room it still refuses, and now names `--hosted`.
+
+**No migration.** The identity state keeps its shape. Issuing and redeeming a
+code write only mutation kinds 0.3.8 already reads (`operator.recovery.mint`,
+`admission.mint`, `admission.consume`, `password.reset`,
+`authenticator.revoke`, `authenticator.bind`, `recovery.complete`). The acts
+and refused codes go to the `authz` and `authn_deny` telemetry.
+
+**Going back to 0.3.8.** Restore the 0.3.8 release and start it on the same
+data directory. It starts after a completed hosted recovery and signs the
+owner in with the new password and passkey. It also starts after a code was
+issued but not redeemed. 0.3.8 has no page to redeem that code, so the old
+password still works and the code expires unused.
+
 ## 0.3.7 → 0.3.8
 
 0.3.8 decides who may change the state of someone else's work, records
