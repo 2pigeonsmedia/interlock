@@ -486,7 +486,12 @@ async function startInterlockServer(options) {
     const work = createWorkRoutes({
       // A project's lead for moving its records: in the room now, as for approvals.
       work: createWorkService({ store: workStore, approverFor,
-        leadOf: (project, now) => people.service.leadOf(project, now, liveSubjects(now)),
+        // The lead who acts and whose Needs you collects the project's work:
+        // one in the room now. A released lead keeps its grant (it has not
+        // left), but while it is away its project's work goes to the first
+        // owner, so nothing waits on a seat that cannot read it.
+        leadOf: (project, now) => people.service.leadOf(project, now,
+          new Set(house.listParticipants({ now }).map(row => row.subject_id))),
         // Who is still in the room, so an item says when its holder has left.
         live: liveSubjects }),
       participants: meta => house.listParticipants(meta),

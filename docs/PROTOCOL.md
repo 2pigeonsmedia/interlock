@@ -577,12 +577,16 @@ every grant with its `state`: `active`, `revoked`, `expired`, or `ended` (its
 holder has left the room). Only a real departure ends a grant: the holder's own
 `leave`, or its removal, each writes a revoke row naming who and why. An AI the
 room ended on its own (24 hours without contact, or its pass running out) has
-not left: its grants stay active and its items keep it as holder, reading
-*not listening*. A grant belongs to the participant it was made for, not to a
+not left: its grants stay active and its items keep it as holder. While it is
+away it is not its project's lead for routing: that project's holder-left
+items and lead rings go to the first owner until it returns or its grant is
+revoked. A grant belongs to the participant it was made for, not to a
 name. A later AI session with the same name holds nothing by itself, but when
 the newest earlier session of that name ended by release or expiry, whoever
 lets it back in carries the earlier session over: on the Allow (the card's
-`returns` line says what it hands over, and the answer's `returned` says what
+`returns` line, judged when the list is read, says what it hands over; the
+Allow sends it back as `returns_seen` and is refused `409 returns-changed`,
+changing nothing, if it no longer matches; the answer's `returned` says what
 it carried) or later with `POST /api/people/bring-back { name }` (one fresh
 passkey step-up; `GET /api/people/returns` lists the seats with something to
 bring back). Each still-active grant is revoked with the reason

@@ -1522,6 +1522,8 @@ module.exports = Object.freeze({
   // refuse exactly what the module refuses. Never a second copy.
   isCanonicalLiveOrigin: administration.isCanonicalLiveOrigin,
   validDisplayName: subjects.validDisplayName,
+  // The one name identity: two AI names are the same name when these agree.
+  foldName: subjects.fold,
   COOKIE_NAME: IMPLEMENTED_COOKIE_NAME,
   // NOTE: deliberately no exported TENANT. A host NAMES its tenant; a constant
   // here would be a default wearing a different hat.

@@ -675,7 +675,7 @@ function renderPendingAis(rows) {
     allow.textContent = 'Allow';
     allow.setAttribute('aria-label', `Allow ${row.name} to join`);
     allow.disabled = !row.connected;
-    allow.addEventListener('click', () => decidePendingAi(row.request_id, 'allow', actions));
+    allow.addEventListener('click', () => decidePendingAi(row.request_id, 'allow', actions, row.returns));
     const decline = document.createElement('button');
     decline.type = 'button';
     decline.className = 'quiet-action decline';
@@ -728,17 +728,20 @@ async function loadPendingAis() {
   }
 }
 
-async function decidePendingAi(requestId, action, controls) {
+// An Allow names the hand-over line its card showed, so it carries exactly
+// that; the server refuses with returns-changed if it differs now.
+async function decidePendingAi(requestId, action, controls, returnsSeen = null) {
   for (const button of controls.querySelectorAll('button')) button.disabled = true;
   pendingStatus(action === 'allow' ? 'Confirm this owner action with your passkey…' : 'Declining…');
   try {
     let result;
     try {
-      result = await ownerMutation(`/api/ai/admissions/${requestId}/${action}`, {});
+      result = await ownerMutation(`/api/ai/admissions/${requestId}/${action}`,
+        action === 'allow' ? { returns_seen: returnsSeen } : {});
     } catch (error) {
       if (action !== 'allow' || error.code !== 'fresh-step-up-required') throw error;
       await freshOwnerStepUp();
-      result = await ownerMutation(`/api/ai/admissions/${requestId}/allow`, {});
+      result = await ownerMutation(`/api/ai/admissions/${requestId}/allow`, { returns_seen: returnsSeen });
     }
     await loadPendingAis();
     let joined = `${result.name} joined the room.`;
@@ -758,6 +761,8 @@ async function decidePendingAi(requestId, action, controls) {
     }
     const message = error.code === 'not-connected'
       ? 'That AI is no longer waiting. Ask it to run join again.'
+      : error.code === 'returns-changed'
+      ? 'What this Allow would hand over changed. Nothing was allowed; check the card again.'
       : ((error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
         ? 'Passkey confirmation was cancelled. Nothing was allowed.'
         : 'Interlock did not complete that decision. Refresh the list before retrying.');

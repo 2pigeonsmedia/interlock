@@ -275,7 +275,10 @@ test('a seat back after an idle release gets its grants and items, as the allowe
     const anasCard = await card(runtime, await login(runtime, password), juno2.request_id);
     assert.equal(anasCard.returns, `Returns as Juno: leads operations on ops (${g1}), reviews the import (${g2}) · holds 2 items`);
 
-    const allowed = await post(runtime, `/api/ai/admissions/${juno2.request_id}/allow`, {}, bea);
+    const blind = await post(runtime, `/api/ai/admissions/${juno2.request_id}/allow`, {}, bea);
+    assert.deepEqual([blind.status, blind.json.error], [409, 'returns-changed'], 'an Allow that names no card hands nothing over');
+    bea = await elevate(runtime, bea, beaDevice);
+    const allowed = await post(runtime, `/api/ai/admissions/${juno2.request_id}/allow`, { returns_seen: beasCard.returns }, bea);
     assert.equal(allowed.status, 200, allowed.text);
     assert.equal((await juno2.waiting).status, 200);
     const returned = allowed.json.returned;
@@ -325,7 +328,7 @@ test('a seat back after an idle release gets its grants and items, as the allowe
     ana = await elevate(runtime, ana, device);
     const kit2 = await knock(runtime, ana, 'Kit');
     assert.equal((await card(runtime, ana, kit2.request_id)).returns, null);
-    const kitAllowed = await post(runtime, `/api/ai/admissions/${kit2.request_id}/allow`, {}, ana);
+    const kitAllowed = await post(runtime, `/api/ai/admissions/${kit2.request_id}/allow`, { returns_seen: null }, ana);
     assert.equal(kitAllowed.status, 200, kitAllowed.text);
     assert.equal(kitAllowed.json.returned, undefined);
     await kit2.waiting;

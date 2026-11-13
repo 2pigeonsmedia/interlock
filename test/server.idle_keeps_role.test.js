@@ -240,11 +240,12 @@ test('an AI released after 24 hours keeps its grant and its items; only a real l
     assert.deepEqual((await item(runtime, owner, vestas.id)).holder_left, [], 'an idle holder has not left');
     assert.deepEqual((await item(runtime, owner, kits.id)).holder_left, ['Kit'], 'a real leave still is');
 
-    // Kit's item routes to its project's lead, Juno, who still holds the role:
-    // not to the first owner.
+    // Juno keeps the role, but nothing waits on a lead who is away: Kit's
+    // holder-left item is in the first owner's Needs you meanwhile. Juno's
+    // and Vesta's own items are not (they have not left).
     const needs = (await get(runtime, '/api/work/brief', owner)).json.needs_me.map(row => row.id);
-    assert.deepEqual([needs.includes(led.id), needs.includes(vestas.id), needs.includes(kits.id)], [false, false, false],
-      'nothing falls to the first owner while the lead holds the role');
+    assert.deepEqual([needs.includes(led.id), needs.includes(vestas.id), needs.includes(kits.id)], [false, false, true],
+      'only a real departure\'s item, and only while its lead is away');
 
     assert.equal((await messages(runtime, owner)).slice(before).some(message => /holder left|left the room/.test(message.text)),
       false, 'an idle release rings nobody');

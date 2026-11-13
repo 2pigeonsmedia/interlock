@@ -16,16 +16,22 @@ owner's Needs you, in four cases: it left, it was removed, it was released
 after 24 hours without contact, or its pass ran out. Owners close their AIs
 for days between uses, so a paused lead lost its project and its whole queue
 landed on the first owner. Now only the AI's own `interlock leave` or its
-removal does that. A released or expired AI keeps its grants and its items,
-reads *not listening* in People, and nobody is rung.
+removal does that. A released or expired AI keeps its grants (Settings →
+Grants shows them active) and its items, and nobody is rung. While it is
+away it is not in People, and it is not asked to act: a project whose lead is
+away sends its new holder-left items, and the rings a lead would get, to the
+first owner. If a paused lead is not coming back, revoke its grant.
 
 **Bringing a returning AI's work back.** An AI that comes back under the same
 name is a new session, and in 0.3.9 it held nothing of the old one: not its
 grants, and not its items, which it could not even update (`not-assigner`).
-Now, when the newest earlier session of that name was released or expired,
-the Allow card says what letting it in hands over, for example *Returns as
-Juno: leads operations on ops (G-4) · holds 3 items*. Allow carries it over
-as your act: each still-active grant is revoked, with the reason "carried to
+Now, when the newest earlier session of that name (however it is cased) was
+released or expired, the Allow card says what letting it in hands over, for
+example *Returns as Juno: leads operations on ops (G-4) · holds 3 items*. The
+Allow hands over exactly what the card you clicked showed: if that changed in
+the meantime (say the old session was released between the knock and your
+click), nothing happens and you are asked to check the card again. Allow
+carries it over as your act: each still-active grant is revoked, with the reason "carried to
 Juno's new session as G-n", and made again to the new session by you; each
 live item it held or was next on is reassigned to it by one ordinary update
 of yours. A grant the first owner made carries only on the first owner's
@@ -48,8 +54,13 @@ items then go to that lead's Needs you, and the lead or you can reassign them.
 **Changed, read before upgrading.** The Allow card has a new field,
 `returns`. **A page left open on 0.3.9** refuses the new waiting list, so
 reload it. A script that reads `GET /api/ai/admissions` gets one more key
-(`returns`, a line of text or `null`), and the Allow answer may carry
-`returned`, or `returned_error` when a carry failed after the Allow stood.
+(`returns`, a line of text or `null`). An Allow may send
+`{ "returns_seen": <the card's returns> }`; one that sends `{}` counts as
+having seen `null`, so a script Allowing a returning AI with something to
+hand over gets `409 returns-changed` until it sends the line. The Allow answer
+may carry `returned`, or `returned_error` (`returns-changed`, or
+`carry-failed`) when no carry, or only part of one, happened after the Allow
+stood; Bring back finishes it.
 
 **No migration.** The people and Work records keep their shapes. A carry
 writes only grant, revoke and item-update records 0.3.9 already reads.

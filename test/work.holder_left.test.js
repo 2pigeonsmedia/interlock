@@ -20,6 +20,7 @@ const { createWorkService } = require('../src/work/service.js');
 const { openPeopleStore } = require('../src/room/people_store.js');
 const { createPeopleService } = require('../src/room/people.js');
 const { REASONS, endDepartedGrants, departureNotices, standingSubjects } = require('../src/departures.js');
+const { earlierSessions, previewLine } = require('../src/returns.js');
 
 const owner = Object.freeze({ subject_id: 'p-1', name: 'Ana', kind: 'person', owner: true, first_owner: true });
 const lead = Object.freeze({ subject_id: 's-3', name: 'Lead', kind: 'seat', owner: false });
@@ -223,6 +224,30 @@ test('a return carries live work it held, and keeps an approved request and an o
   assert.deepEqual(work.carryHeld(owner, { from: [gone.subject_id], to: back, note: 'carried' }), [held.id]);
   assert.equal(work.get(owner, { id: held.id }).item.responsible.subject_id, 's-40');
   assert.equal(work.get(owner, { id: request.id }).item.responsible.subject_id, gone.subject_id, 'the approved request stays');
+});
+
+test('earlier sessions: the newest first, by name the way identity folds it, and never past a leave', () => {
+  const seat = (id, name, how, at) => ({ subject_id: id, name, kind: 'seat', ended_how: how, ended_at: at, expires_at: 99_999, created_at: at - 10 });
+  const house = rows => ({ listRecentEndedSeats: () => rows });
+  // Two releases in a row, the second spelled differently: one lineage.
+  assert.deepEqual(earlierSessions(house([seat('s-1', 'Juno', 'released', 100), seat('s-2', 'juno', 'released', 200)]), 'Juno', null, 1000),
+    ['s-2', 's-1']);
+  // A leave between them ends the run: the older release behind it is not reached.
+  assert.deepEqual(earlierSessions(house([seat('s-1', 'Juno', 'released', 100), seat('s-2', 'juno', 'left', 200)]), 'Juno', null, 1000), []);
+  assert.deepEqual(earlierSessions(house([seat('s-1', 'Juno', 'released', 100), seat('s-2', 'Juno', 'revoked', 200),
+    seat('s-3', 'JUNO', 'released', 300)]), 'Juno', null, 1000), ['s-3']);
+  // Another name is another lineage.
+  assert.deepEqual(earlierSessions(house([seat('s-1', 'Junot', 'released', 100)]), 'Juno', null, 1000), []);
+});
+
+test('the Allow card line is bounded and says what stays behind', () => {
+  const long = 'x'.repeat(300);
+  const grants = [1, 2, 3, 4, 5, 6, 7].map(n => ({ grant_id: 'G-' + n, project: 'ops', scope: long, carries: true }));
+  const line = previewLine('Juno', { grants, items: ['W-1', 'W-2'], approvals_kept: 1, asks_kept: 2 });
+  assert.ok(line.length < 500, 'never near the card\'s 2000-character limit: ' + line.length);
+  assert.match(line, /\(G-3\), and 4 more grants · holds 2 items · 1 approved request and 2 open asks stay with the earlier session$/);
+  assert.equal(previewLine('Juno', { grants: [], items: [], approvals_kept: 1, asks_kept: 0 }),
+    'Returns as Juno: 1 approved request stays with the earlier session');
 });
 
 test('a departure notice: one per recipient, listing its items by project, never to the poster', () => {

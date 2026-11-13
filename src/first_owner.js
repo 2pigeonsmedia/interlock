@@ -7,7 +7,8 @@ const path = require('node:path');
 const { clientSource } = require('./hosted.js');
 const { SETTINGS_ENDED_MS } = require('./idle.js');
 const { REASONS: DEPARTURE_REASONS, departureNotices, standingSubjects } = require('./departures.js');
-const { returnPreview, bringBack, previewLine } = require('./returns.js');
+const { returnPreview, allowPreview, bringBack, previewLine } = require('./returns.js');
+const { foldName } = require('identity');
 const { readRoomSettings, writeRoomSettings } = require('./room_settings.js');
 const { version: PACKAGE_VERSION } = require('../package.json');
 
@@ -945,7 +946,9 @@ function createFirstOwnerHandler(options) {
       }
     }
     if (!chatActor) return;
-    const live = standingSubjects(house, now, house.listParticipants({ now }).map(row => row.subject_id));
+    // A lead must be in the room to be told: a released lead keeps its role
+    // but is not rung; its project's news goes to the first owner meanwhile.
+    const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
     const first = typeof house.firstOwnerSubject === 'function' ? house.firstOwnerSubject() : null;
     const recipientOf = project => {
       const lead = people ? people.service.leadOf(project, now, live) : null;
@@ -1761,7 +1764,7 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 200, { ok: true, pending: pending.map(row => Object.freeze(Object.assign({}, row, {
         declared_project: knockFacts.has(row.request_id) ? knockFacts.get(row.request_id).project : null,
         // What Allow hands over, said before the click (ruling, 2026-11-13).
-        returns: row.reuse === 'ended' ? previewLine(row.name, previewFor(row.name, null, actors, now)) : null,
+        returns: allowLine(row.name, actors, now),
       }))) });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
@@ -2726,8 +2729,8 @@ function createFirstOwnerHandler(options) {
     if (!people) return;
     let lead = null;
     try {
-      const live = standingSubjects(house, workActor.now,
-        house.listParticipants({ now: workActor.now }).map(row => row.subject_id));
+      // Rung only while in the room (a released lead is not addressed).
+      const live = new Set(house.listParticipants({ now: workActor.now }).map(row => row.subject_id));
       lead = people.service.leadOf(item.project, workActor.now, live);
     } catch (_) { lead = null; }
     if (!lead || !lead.name || lead.subject_id === workActor.subject_id) return;
@@ -3614,12 +3617,21 @@ function createFirstOwnerHandler(options) {
 
   // The live AI seat named `name`, as a work record names a holder.
   function liveSeatRef(name, now) {
-    const seat = house.listParticipants({ now }).find(row => row.kind === 'seat' && row.name === name);
+    const folded = foldName(name);
+    const seat = house.listParticipants({ now }).find(row => row.kind === 'seat' && foldName(row.name) === folded);
     if (!seat) return null;
     const discriminator = house.aiSessionDiscriminator(seat.subject_id);
     const session = discriminator && Number.isSafeInteger(discriminator.session) ? discriminator.session : undefined;
     return Object.freeze(Object.assign({ subject_id: seat.subject_id, name: seat.name, kind: 'seat' },
       session === undefined ? {} : { session }));
+  }
+
+  // The line an Allow card shows for a knock named `name`, judged now, for
+  // the viewing administrator: exactly what that Allow would hand over.
+  function allowLine(name, actors, now) {
+    if (!people || !work || !actors) return null;
+    return previewLine(name, allowPreview({ house, people, work, name,
+      actorSubjectId: actors.people.subject_id, firstOwnerSubjectId: actors.firstOwnerSubjectId, now }));
   }
 
   function previewFor(name, exceptSubjectId, actors, now) {
@@ -3630,12 +3642,15 @@ function createFirstOwnerHandler(options) {
 
   // Carry an earlier session over to the live seat `name`, as `subjectId`'s
   // act. Returns the summary, or null when there was nothing to carry.
-  function carryToLiveSeat(name, subjectId, now) {
+  function carryToLiveSeat(name, subjectId, now, confirmedLine) {
     const actors = returnActors(subjectId, now);
     const to = liveSeatRef(name, now);
     if (!actors || !to) return null;
     const preview = previewFor(name, to.subject_id, actors, now);
-    if (!preview) return null;
+    if (!preview) return confirmedLine ? { changed: true } : null;
+    // Carry only what the owner confirmed: a change in between carries nothing.
+    if (confirmedLine !== undefined && previewLine(to.name, preview) !== confirmedLine &&
+        previewLine(name, preview) !== confirmedLine) return { changed: true };
     return bringBack({ preview, people, work, to, peopleActor: actors.people, workActor: actors.work,
       firstOwnerSubjectId: actors.firstOwnerSubjectId });
   }
@@ -3687,12 +3702,32 @@ function createFirstOwnerHandler(options) {
   }
 
   function mutateAdmission(request, response, body, requestId, action) {
-    if (!closedObject(body, [])) {
+    // An Allow says which hand-over line its card showed (null for none).
+    const seenInput = action === 'allow' ? closedObject(body, ['returns_seen']) : null;
+    if (!closedObject(body, []) && !(seenInput &&
+        (seenInput.returns_seen === null || typeof seenInput.returns_seen === 'string'))) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
       return;
     }
     const allowerSession = ownerSession(request, response, true);
     if (!allowerSession) return;
+    // The Allow hands over exactly what the card showed (cold read, H1). It
+    // is judged again now; if it differs, nothing happens and the owner
+    // looks again. A caller that names nothing saw nothing.
+    let confirmedLine = null;
+    if (action === 'allow') {
+      let knock = null;
+      try { knock = admission.list().find(row => row.request_id === requestId) || null; } catch (_) { knock = null; }
+      if (knock) {
+        const now = Date.now();
+        confirmedLine = allowLine(knock.name, returnActors(allowerSession.subject_id, now), now);
+        const seen = seenInput ? seenInput.returns_seen : null;
+        if (confirmedLine !== seen) {
+          sendJson(request, response, 409, { ok: false, error: 'returns-changed', returns: confirmedLine });
+          return;
+        }
+      }
+    }
     let result;
     try {
       result = action === 'allow'
@@ -3705,8 +3740,13 @@ function createFirstOwnerHandler(options) {
       // stands; a carry that fails says so and leaves the rest as it was.
       if (result && result.ok === true && action === 'allow') {
         try {
-          const returned = carryToLiveSeat(result.name, allowerSession.subject_id, Date.now());
-          if (returned) result = Object.freeze(Object.assign({}, result, { returned }));
+          const returned = confirmedLine === null ? null
+            : carryToLiveSeat(result.name, allowerSession.subject_id, Date.now(), confirmedLine);
+          if (returned && returned.changed === true) {
+            result = Object.freeze(Object.assign({}, result, { returned_error: 'returns-changed' }));
+          } else if (returned) {
+            result = Object.freeze(Object.assign({}, result, { returned }));
+          }
         } catch (_) {
           result = Object.freeze(Object.assign({}, result, { returned_error: 'carry-failed' }));
         }
