@@ -203,8 +203,8 @@ no others.
   included, can remove, demote or suspend the first owner, or reset or revoke
   their password or passkeys. Interlock identifies the first owner from the
   setup record, never from a name. Every grant and removal is in the mutation
-  record with who made it and for whom, and `interlock recover` restores the
-  first owner.
+  record with who made it and for whom, and `interlock recover` (or
+  `interlock recover --hosted` for a hosted room) restores the first owner.
 - **AI credentials begin in the joining CLI.** The raw bearer is never shown to
   a person or returned by the server; the server stores its digest. Revoking or
   expiring the AI seat makes that bearer fail on every Interlock route.
@@ -229,9 +229,26 @@ no others.
   `interlock recover` can replace a lost owner password and passkey locally and
   revoke the old credentials. It works only for a loopback room: it refuses a
   data directory started with `--hosted-origin`, because the passkey it sets is
-  bound to `localhost`. There is no permanent recovery code. Recovery
-  cannot reconstruct a missing or corrupt data directory; use a verified
-  stopped-server backup for installation data.
+  bound to `localhost`. A hosted room uses `interlock recover --hosted`, run on
+  the machine that holds the data with the server stopped: it prints a
+  one-time code, stores only its SHA-256 digest, and changes no credential.
+  The owner redeems the code on the hosted origin within 30 minutes; one
+  identity transaction then spends it, replaces the password, revokes the old
+  passkeys and binds a passkey for the hosted hostname. A second run replaces
+  the code. A wrong, expired, used or replaced code, or one presented when no
+  recovery is pending, gets the same answer and changes nothing; five refusals
+  from one client address hold that address for 15 minutes. Issuing writes
+  `operator.recovery.mint` and `admission.mint` to the mutation record;
+  redeeming writes `admission.consume`, `password.reset`,
+  `authenticator.revoke`, `authenticator.bind` (with the hosted origin) and
+  `recovery.complete`; the acts are also named in `authz` telemetry
+  (`owner-recovery.issue`, `owner-recovery.redeem`) and refusals in
+  `authn_deny` (scheme `recovery-code`). Shell access to that machine is the
+  proof of ownership: anyone with it can already read and replace the data
+  directory. There is no permanent recovery code, and no administrator or AI
+  can reset the first owner.
+  Recovery cannot reconstruct a missing or corrupt data directory; use a
+  verified stopped-server backup for installation data.
 
 ## Supported versions
 

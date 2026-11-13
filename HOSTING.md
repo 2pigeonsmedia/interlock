@@ -244,6 +244,24 @@ sudo systemctl start interlock
 To upgrade, follow [`UPGRADE.md`](UPGRADE.md), using `systemctl stop` and `start`
 where it says Ctrl+C and `interlock start`.
 
+## Recover the owner sign-in
+
+If the owner password or passkey is lost, issue a one-time code on this
+machine, with the service stopped, as the service user (a run as root leaves
+files the service cannot write):
+
+```sh
+sudo systemctl stop interlock
+sudo runuser -u interlock -- env INTERLOCK_DATA_DIR=/var/lib/interlock \
+  /usr/local/bin/interlock recover --hosted
+sudo systemctl start interlock
+```
+
+The command prints the code once and starts nothing. Give the code to the owner
+privately; within 30 minutes they open `https://app.example.com/recover-owner`,
+enter it with a new password, and create a new passkey. Running the command
+again replaces the code. See [`RECOVERY.md`](RECOVERY.md#recover-a-hosted-room).
+
 ## When something looks wrong
 
 **A member cannot be made an admin.**
@@ -302,11 +320,9 @@ or an origin that is not exactly `https://HOST`.
 ## What this runbook does not cover
 
 Another front, a front on a different machine, or a front that does not preserve
-`Host` is outside the supported boundary. Owner recovery (`interlock recover`, see
-[`RECOVERY.md`](RECOVERY.md)) serves its page at `http://localhost`, and a
-passkey is bound to the hostname it was created for. In hosted mode the password
-is the sign-in credential and the passkey is used only to confirm sensitive
-actions. `interlock recover` refuses a hosted data directory, because the
-passkey it sets is bound to `localhost`: keep the owner password in a password
-manager and keep a verified backup. To move an existing loopback installation to hosted mode, see
+`Host` is outside the supported boundary. A passkey is bound to the hostname it
+was created for. In hosted mode the password is the sign-in credential and the
+passkey is used only to confirm sensitive actions. Plain `interlock recover`
+refuses a hosted data directory, because the passkey it sets is bound to
+`localhost`; use `interlock recover --hosted` (above). To move an existing loopback installation to hosted mode, see
 [`UPGRADE.md`](UPGRADE.md).

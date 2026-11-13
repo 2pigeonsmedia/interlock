@@ -25,13 +25,65 @@ If the installation normally uses a custom `INTERLOCK_DATA_DIR`, use the same
 environment setting for `recover`. `--port PORT` is available when the default
 loopback port is already in use.
 
-Recovery works only for a room served at `http://localhost`: it refuses a data
-directory started with `--hosted-origin`, because the new passkey would be
-bound to `localhost`. See [`HOSTING.md`](HOSTING.md).
+Plain `interlock recover` works only for a room served at `http://localhost`:
+it refuses a data directory started with `--hosted-origin`, because the new
+passkey would be bound to `localhost`. A hosted room uses
+`interlock recover --hosted`, below.
+
+## Recover a hosted room
+
+A room started with `--hosted-origin` recovers in two halves. Whoever runs the
+server issues a one-time code on the machine that holds the data; the owner
+redeems it on the room's own address and creates a passkey bound to that
+hostname. Access to that machine is the proof of ownership, as it is for local
+recovery.
+
+1. Stop the service.
+2. On that machine, as the user that owns the data directory and with the same
+   `INTERLOCK_DATA_DIR` as the service, run:
+
+   ```text
+   interlock recover --hosted
+   ```
+
+   It prints the owner's name, the room's address, and the code once. The code
+   is not stored anywhere: only its SHA-256 digest is kept.
+3. Start the service again. Nothing about the owner sign-in has changed yet:
+   the old password and passkeys keep working until the code is redeemed.
+4. Give the code to the owner privately. The owner opens
+   `https://HOST/recover-owner` (the sign-in page links to it as **I have an
+   owner recovery code**), enters the code and a new password of at least 12
+   characters, and creates the new passkey when the browser asks.
+5. The owner signs in with the new password.
+
+The code:
+
+- works once and expires 30 minutes after it was issued;
+- is replaced by running `interlock recover --hosted` again: only the newest
+  code works;
+- is refused with one answer, `code-refused`, whether it is wrong, expired,
+  used, replaced or no recovery is pending; a refused code changes nothing;
+- after five refused codes from one client address, that address waits 15
+  minutes (`code-busy`); other addresses are not held up.
+
+Redeeming it, in one identity transaction:
+
+- spends the code;
+- replaces the owner password verifier;
+- revokes every old owner passkey;
+- binds the new passkey to the hosted hostname.
+
+Then the owner's signed-in sessions in the running server end.
+
+`interlock recover --hosted` starts no listener and needs no port. It refuses
+while the server is running, on a loopback room, and on a directory with no
+completed installation. Run it as the service user: a run as root leaves files
+the service cannot write. [`HOSTING.md`](HOSTING.md) has the exact commands
+for the systemd setup.
 
 ## What recovery changes
 
-A successful recovery atomically:
+A successful local recovery atomically:
 
 - replaces the owner password verifier;
 - revokes every old owner passkey;

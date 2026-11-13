@@ -203,13 +203,17 @@ test('the protocol names the hosted origin as the one canonical host and still b
     'and in both shapes binds only to verified loopback addresses. A request whose `Host` is not that origin is answered 421.');
 });
 
-test('HOSTING.md says what the passkey is for and how to stay recoverable while recover refuses a hosted room', () => {
+test('HOSTING.md says what the passkey is for and how a hosted room recovers its owner', () => {
   assertSentence(HOSTING,
     'In hosted mode the password is the sign-in credential and the passkey is used only to confirm sensitive actions.');
   assertSentence(HOSTING,
-    '`interlock recover` refuses a hosted data directory, because the passkey it sets is bound to `localhost`: keep the owner password in a password manager and keep a verified backup.');
+    'Plain `interlock recover` refuses a hosted data directory, because the passkey it sets is bound to `localhost`; use `interlock recover --hosted` (above).');
+  // The runbook issues the code as the service user, with the service stopped.
+  assert.match(HOSTING, /sudo systemctl stop interlock\nsudo runuser -u interlock -- env INTERLOCK_DATA_DIR=\/var\/lib\/interlock \\\n  \/usr\/local\/bin\/interlock recover --hosted\nsudo systemctl start interlock/);
   assertSentence(RECOVERY,
-    'Recovery works only for a room served at `http://localhost`: it refuses a data directory started with `--hosted-origin`, because the new passkey would be bound to `localhost`.');
+    'Plain `interlock recover` works only for a room served at `http://localhost`: it refuses a data directory started with `--hosted-origin`, because the new passkey would be bound to `localhost`.');
+  assertSentence(RECOVERY, 'works once and expires 30 minutes after it was issued;');
+  assert.doesNotMatch(HOSTING + RECOVERY + read('SECURITY.md') + read('README.md'), /no owner recovery yet/, 'the gap is closed in every document');
   assert.doesNotMatch(HOSTING, /recovery of a hosted installation is unproven/, 'recovery of a hosted room is refused, not untried');
   assert.doesNotMatch(HOSTING, /more\s+than\s+one\s+device/, 'the passkey is not the recovery path');
 });

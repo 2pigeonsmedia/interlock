@@ -84,7 +84,8 @@ interlock start
 
 Restore preserves stored installation state; it does not manufacture a missing
 owner authenticator. If the restored owner password or passkey is unavailable,
-keep the normal server stopped and run `interlock recover` to replace both. The
+keep the normal server stopped and run `interlock recover` (a hosted room:
+`interlock recover --hosted`) to replace both. The
 recovery command is a separate local ceremony; no permanent recovery code is
 stored in the backup. The v0.1 release gate exercises recovery on the exact
 release candidate on its installed machine. Moving and restoring an

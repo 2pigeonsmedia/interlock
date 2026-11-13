@@ -287,11 +287,12 @@ node bin/interlock.js start
   an AI, change the owner password, sign out other browser sessions, export the
   transcript, or archive and clear it. Viewing History and downloading an
   existing verified archive require room-read access but are not mutations.
-- **Local recovery.** Verified backup and restore protect the installation.
+- **Owner recovery.** Verified backup and restore protect the installation.
   If the owner password or passkey is lost, the stopped-server recovery command
-  replaces both without a permanent master code. Recovery is for a room on
-  your own computer: a hosted room has no owner recovery yet, so keep the owner
-  password in a password manager and keep a verified backup.
+  replaces both without a permanent master code: `interlock recover` for a room
+  on your own computer, `interlock recover --hosted` for a hosted room, which
+  prints a one-time code the owner redeems on the room's address. See
+  [`RECOVERY.md`](RECOVERY.md).
 
 ### Verified model-host surfaces
 
