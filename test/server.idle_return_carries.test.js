@@ -308,6 +308,17 @@ test('a seat back after an idle release gets its grants and items, as the allowe
     assert.equal((await item(runtime, ana, next.id)).next_to.name, 'Juno');
     assert.deepEqual((await item(runtime, ana, kits.id)).holder_left, ['Kit'], 'a real leave carries nothing');
 
+    // While the returned Juno is in the room, another knock under its name
+    // would REPLACE it (a removal, a departure): its card hands over nothing,
+    // even though an older session still holds the first owner's grant.
+    ana = await elevate(runtime, ana, device);
+    const rival = await knock(runtime, ana, 'JUNO');
+    assert.equal((await card(runtime, ana, rival.request_id)).returns, null, 'a live same-name seat: the card is silent');
+    const declined = await post(runtime, `/api/ai/admissions/${rival.request_id}/decline`, {}, ana);
+    assert.equal(declined.status, 200, declined.text);
+    await rival.waiting;
+    ana = await login(runtime, password);
+
     // The first owner brings back what only she can carry.
     const listed = await get(runtime, '/api/people/returns', ana);
     assert.equal(listed.status, 200, listed.text);
