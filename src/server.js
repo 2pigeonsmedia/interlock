@@ -235,6 +235,15 @@ function loadBrowserAssets(hosted) {
       });
     }
     if (surface === 'room') loaded['/help'] = helpPage;
+    // Hosted owner recovery: the page where the owner redeems the code that
+    // `interlock recover --hosted` printed. A loopback room has no such page.
+    if (surface === 'room' && hosted !== null) {
+      for (const [route, filename, contentType] of [
+        ['/recover-owner', 'owner_recovery.html', 'text/html; charset=utf-8'],
+        ['/owner_recovery.js', 'owner_recovery.js', 'text/javascript; charset=utf-8'],
+        ['/recovery.css', 'recovery.css', 'text/css; charset=utf-8'],
+      ]) loaded[route] = Object.freeze({ body: readPage(filename), contentType });
+    }
     assets[surface] = Object.freeze(loaded);
   }
   return Object.freeze(assets);

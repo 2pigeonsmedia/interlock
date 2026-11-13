@@ -1142,6 +1142,8 @@ function createService(opts) {
 
 module.exports = {
   createService,
+  // One definition of the WebAuthn user handle, for the hosted owner recovery.
+  userHandleFor,
   RP_ID,
   RP_NAME,
   ALLOWED_ALGORITHM_IDS,

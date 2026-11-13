@@ -233,7 +233,7 @@ continueButton.addEventListener('click', continueSetup);
       const recoveryHint = [...form.querySelectorAll('.hint')].find(hint => hint.textContent.includes('interlock recover'));
       if (recoveryHint) {
         recoveryHint.textContent =
-          'Interlock does not give you a permanent recovery code. A hosted room has no owner recovery yet: keep your password and a backup of the data directory.';
+          'Interlock does not give you a permanent recovery code. If you lose this password or passkey, whoever runs the server stops Interlock and runs interlock recover --hosted on it; that prints a one-time code you redeem on this site.';
       }
     }
     if (!window.PublicKeyCredential || !navigator.credentials) {

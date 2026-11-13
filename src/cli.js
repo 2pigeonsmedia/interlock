@@ -49,6 +49,7 @@ Usage:
   interlock --version
   interlock start [--port PORT] [--hosted-origin https://HOST]
   interlock recover [--port PORT]
+  interlock recover --hosted
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
   interlock join [--product LABEL] [--name NAME] [--url URL] [--project ID] [--model LABEL]
@@ -2914,11 +2915,70 @@ async function runStart(args, io, dependencies = {}) {
   return EXIT_OK;
 }
 
+const RECOVER_USAGE = 'interlock: usage: interlock recover [--port PORT] | interlock recover --hosted';
+
+// `recover --hosted`: the stopped-server half of owner recovery for a hosted
+// room. It issues one code, prints it once, and starts nothing.
+async function runRecoverHosted(io, dependencies) {
+  const { stdout, stderr } = io;
+  const { resolveDataDir } = dependencies.config || require('./config.js');
+  const hostedRecovery = dependencies.hostedRecovery || require('./hosted_recovery.js');
+  let dataDir;
+  try {
+    dataDir = resolveDataDir({ env: dependencies.env || process.env,
+      platform: dependencies.platform || process.platform, homedir: dependencies.homedir });
+  } catch (_) {
+    line(stderr, 'interlock: invalid data directory; INTERLOCK_DATA_DIR must be an absolute path.');
+    return EXIT_USAGE;
+  }
+  let issued;
+  try {
+    issued = await hostedRecovery.issueHostedRecoveryCode({ dataDir });
+  } catch (error) {
+    const code = error && error.code;
+    if (code === 'not-hosted') {
+      line(stderr, 'interlock: this data directory is not a hosted room. A room served at http://localhost recovers with plain `interlock recover`; `interlock recover --hosted` is for a room started with --hosted-origin.');
+    } else if (code === 'already-running') {
+      line(stderr, 'interlock: stop Interlock before recovering the owner sign-in.');
+    } else if (code === 'owner-unverifiable' || code === 'corrupt-lock') {
+      line(stderr, 'interlock: instance ownership cannot be verified safely; no recovery code was issued.');
+    } else if (code === 'data-dir-missing' || code === 'installation-missing' || code === 'installation-invalid') {
+      line(stderr, 'interlock: no completed Interlock installation was found at the configured data directory.');
+    } else if (code === 'no-owner') {
+      line(stderr, 'interlock: the first owner is not an active administrator; no recovery code was issued.');
+    } else if (code === 'audit-unhealthy') {
+      line(stderr, 'interlock: a recovery code was issued but its record did not finish writing. Run `interlock recover --hosted` again; the new code replaces this one.');
+    } else {
+      line(stderr, 'interlock: no recovery code was issued. Check that the Interlock data directory is intact.');
+    }
+    return EXIT_RUNTIME;
+  }
+  const minutes = Math.round((hostedRecovery.HOSTED_RECOVERY_TTL_MS || 0) / 60_000);
+  line(stdout, `Owner recovery code for ${issued.owner_name} (${issued.origin}):`);
+  line(stdout, '');
+  line(stdout, `    ${issued.code}`);
+  line(stdout, '');
+  line(stdout, `It works once and expires in ${minutes} minutes, at ${new Date(issued.expires_at).toISOString()}.`);
+  line(stdout, 'It is shown only here and is not stored; running this again replaces it.');
+  line(stdout, 'Nothing about the owner sign-in has changed yet. Next:');
+  line(stdout, '  1. Start Interlock again as usual.');
+  line(stdout, `  2. The owner opens ${issued.origin}/recover-owner, enters the code, sets a new password and creates a passkey.`);
+  line(stdout, '  That replaces the owner password and every old owner passkey, and signs out every old owner session.');
+  return EXIT_OK;
+}
+
 async function runRecover(args, io, dependencies = {}) {
   const { stdout, stderr } = io;
+  if (args.includes('--hosted')) {
+    if (args.length !== 1) {
+      line(stderr, RECOVER_USAGE);
+      return EXIT_USAGE;
+    }
+    return runRecoverHosted(io, dependencies);
+  }
   const requestedPort = startPort(args);
   if (requestedPort === null) {
-    line(stderr, 'interlock: usage: interlock recover [--port PORT]');
+    line(stderr, RECOVER_USAGE);
     return EXIT_USAGE;
   }
   const { resolveDataDir } = dependencies.config || require('./config.js');
@@ -2954,6 +3014,9 @@ async function runRecover(args, io, dependencies = {}) {
         ? `serves ${error.recordedOrigin}` : 'has an origin record that cannot be read';
       line(stderr, `interlock: this data directory ${served}; owner recovery works only for a room served at http://localhost.`);
       line(stderr, 'Recovery would replace the owner passkey with one bound to localhost, which this room cannot use. See HOSTING.md.');
+      if (/^https:\/\//.test(error.recordedOrigin)) {
+        line(stderr, 'For a hosted room, stop Interlock and run `interlock recover --hosted` on this machine instead. See RECOVERY.md.');
+      }
       return EXIT_RUNTIME;
     }
     if (error && (error.code === 'data-dir-missing' || error.code === 'installation-missing' ||

@@ -53,13 +53,18 @@ function hostedEdits(origin) {
       ],
       [
         '<p class="settings-note">Lost the owner password or passkey? Stop Interlock, then run <strong>interlock recover</strong> in a terminal on this computer. Recovery replaces both and signs out old sessions.</p>',
-        '<p class="settings-note">Lost the owner password or passkey? A hosted room has no owner recovery yet: keep your password and a backup of the data directory.</p>',
+        '<p class="settings-note">Lost the owner password or passkey? Whoever runs the server stops Interlock, runs <strong>interlock recover --hosted</strong> on it and starts it again; then enter the one-time code at <a href="/recover-owner">/recover-owner</a>. Recovery replaces both and signs out old sessions.</p>',
+      ],
+      [
+        '<button id="show-invite-button" class="quiet-action login-switch" type="button">I have an invite code</button>',
+        '<button id="show-invite-button" class="quiet-action login-switch" type="button">I have an invite code</button>\n' +
+          '      <a class="quiet-action login-switch" href="/recover-owner">I have an owner recovery code</a>',
       ],
     ],
     'setup.html': [
       [
         '<p class="hint">Interlock does not give you a permanent recovery code. If you lose this password or passkey, stop Interlock and run <strong>interlock recover</strong> on this computer to replace both.</p>',
-        '<p class="hint">Interlock does not give you a permanent recovery code. A hosted room has no owner recovery yet: keep your password and a backup of the data directory.</p>',
+        '<p class="hint">Interlock does not give you a permanent recovery code. If you lose this password or passkey, whoever runs the server stops Interlock and runs <strong>interlock recover --hosted</strong> on it; that prints a one-time code you redeem on this site.</p>',
       ],
       [
         '<p class="local-note">This setup page is available only on this computer. <a href="/source">',

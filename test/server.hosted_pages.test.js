@@ -108,7 +108,7 @@ test('hosted mode serves the setup, room, Help, History and Source pages with ho
     const setupText = visibleText(setup.text);
     assertNoLoopbackWording(setupText, 'the hosted setup page');
     assert.ok(setupText.includes(`This room is reachable at ${HOSTED}; keep the setup code private.`), setupText);
-    assert.ok(setupText.includes('A hosted room has no owner recovery yet: keep your password and a backup of the data directory.'), setupText);
+    assert.ok(setupText.includes('If you lose this password or passkey, whoever runs the server stops Interlock and runs interlock recover --hosted on it; that prints a one-time code you redeem on this site.'), setupText);
     const setupSource = await call(runtime, { path: '/source' });
     assertPageHeaders(setupSource, 'setup-time source page');
     assertNoLoopbackWording(visibleText(setupSource.text), 'the setup-time source page');
@@ -145,7 +145,7 @@ test('hosted mode serves the setup, room, Help, History and Source pages with ho
     assert.ok(roomText.includes(`This room is reachable at ${HOSTED}.`), roomText);
     assert.ok(roomText.includes(`Run ${JOIN} , choose a name and join the chatroom.`), roomText);
     assert.ok(roomText.includes('The AI runs that in a terminal on any machine with Interlock installed, then knocks here'), roomText);
-    assert.ok(roomText.includes('A hosted room has no owner recovery yet: keep your password and a backup of the data directory.'), roomText);
+    assert.ok(roomText.includes('Whoever runs the server stops Interlock, runs interlock recover --hosted on it and starts it again; then enter the one-time code at /recover-owner'), roomText);
     assert.match(room.text, /releases\/latest">latest release<\/a>, extract it, and run <code>npm install --global --install-links=true \.<\/code>/);
     assert.match(room.text, />Hosted: checking…</);
     assert.equal(room.text.split(`<code data-interlock-join-command>${JOIN}</code>`).length, 3,

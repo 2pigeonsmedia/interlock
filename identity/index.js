@@ -1155,8 +1155,26 @@ function create(config) {
     return { ok: true, person_id: result.person_id, room_id: result.room_id };
   }
 
+  // Hosted owner recovery: the redeem half, present only on a host served at
+  // its canonical HTTPS origin with WebAuthn. A loopback host recovers through
+  // the stopped-server createRecovery() instead and has no code route at all.
+  const ownerRecovery = authenticatorService && originClass === 'tunnel' &&
+    contained !== true && harness !== true && typeof origin === 'string' && origin.startsWith('https://')
+    ? require('./hosted_recovery.js').createRedeemService({
+      tenant,
+      origin,
+      rpId,
+      rpName: rpName === undefined ? require('./authenticators.js').RP_NAME : rpName,
+      authenticator_service: authenticatorService,
+      session_store: sessions,
+      challenge_store: challengeStore,
+      authenticators_module: require('./authenticators.js'),
+    })
+    : null;
+
   return Object.freeze({
     service,
+    ownerRecovery,
     login: loginService,
     sessions,
     // The WebAuthn ceremony surface, MODULE-BUILT. A host that had to construct
@@ -1459,9 +1477,45 @@ function createRecovery(config) {
   });
 }
 
+/**
+ * Issue a hosted owner-recovery code: the operator half, run with the normal
+ * server stopped on the machine that holds the data. Binds this process to the
+ * directory, mints one code bound to the first owner and returns its secret
+ * once. Changes no credential; the code is redeemed on the hosted origin.
+ */
+async function issueHostedRecovery(config) {
+  const c = closedBody(config, ['stateDir', 'tenant', 'origin', 'now']) ||
+    closedBody(config, ['stateDir', 'tenant', 'origin']);
+  if (!c) reject('issueHostedRecovery(config) accepts only stateDir, tenant, origin and now');
+  if (typeof c.stateDir !== 'string' || !path.isAbsolute(c.stateDir)) {
+    reject('issueHostedRecovery config.stateDir is REQUIRED and must be ABSOLUTE');
+  }
+  if (!repo.validTenantName(c.tenant)) reject('issueHostedRecovery config.tenant must be a valid tenant name');
+  if (!isCanonicalHttpsOrigin(c.origin)) {
+    reject('issueHostedRecovery config.origin must be the canonical https origin the room serves');
+  }
+  const now = c.now === undefined ? Date.now() : c.now;
+  if (typeof now !== 'number' || !Number.isFinite(now) || now < 0) reject('issueHostedRecovery config.now must be a time');
+  repo.configureStateDir(c.stateDir);
+  repo.initialize({ tenant: c.tenant });
+  return require('./hosted_recovery.js').issue({ tenant: c.tenant, origin: c.origin, now });
+}
+
+function isCanonicalHttpsOrigin(value) {
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' && parsed.origin === value;
+  } catch (_) {
+    return false;
+  }
+}
+
 module.exports = Object.freeze({
   create,
   createRecovery,
+  issueHostedRecovery,
+  HOSTED_RECOVERY_TTL_MS: require('./hosted_recovery.js').CODE_TTL_MS,
   newAiCredential,
   aiCredentialMatches,
   // One definition of the live-origin rule, re-exported so a host adapter can

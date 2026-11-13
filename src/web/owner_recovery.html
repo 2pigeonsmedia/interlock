@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recover the owner sign-in</title>
+  <link rel="stylesheet" href="/recovery.css">
+</head>
+<body>
+  <main class="card">
+    <p class="eyebrow">Owner recovery</p>
+    <h1>Use your recovery code</h1>
+    <p>Whoever runs this room's server made this code with <strong>interlock recover --hosted</strong>. It works once and expires 30 minutes after it was made.</p>
+    <p>Recovering sets a new password and creates a new passkey for this room. Every old owner passkey and signed-in session stops working.</p>
+
+    <form id="owner-recovery-form">
+      <label for="code">Recovery code</label>
+      <input id="code" name="code" autocomplete="one-time-code" spellcheck="false" maxlength="256" required>
+
+      <label for="password">New password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" aria-describedby="password-hint" required>
+      <p id="password-hint" class="note">At least 12 characters.</p>
+
+      <label for="password-confirm">Confirm new password</label>
+      <input id="password-confirm" name="password-confirm" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+
+      <button id="recover-button" type="submit">Create new passkey and recover</button>
+    </form>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <a id="login-link" class="primary-link" href="/" hidden>Sign in to Interlock</a>
+    <p class="note"><a href="/">Back to sign in</a> · <a href="/source">Source and license</a></p>
+  </main>
+  <script src="/owner_recovery.js" defer></script>
+</body>
+</html>

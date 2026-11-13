@@ -35,6 +35,7 @@ const capabilityPolicy = require('./capability_policy.js');
 // Bounds for the capability's OWN lifetime — see the header note.
 const TTL_MIN_MS = 60_000;                        // one minute
 const TTL_MAX_MS = repo.MIN_PASS_LIFETIME_MS;     // == the pass-lifetime floor (900_000)
+const OFFLINE_RECOVERY_TTL_MAX_MS = 1_800_000;    // 30 minutes: hosted owner recovery
 const HUMAN_INVITE_TTL_MS = 86_400_000;           // exactly 24 hours
 const PASSKEY_CODE_TTL_MS = 86_400_000;           // exactly 24 hours
 const DAY_PURPOSES = Object.freeze(['human_invite', 'passkey_enrolment']);
@@ -248,10 +249,14 @@ function mintOperatorInDraft(draft, opts) {
   if (intended_subject_kind !== 'person') {
     throw new Error('admission.mintOperatorInDraft: intended_subject_kind must be person');
   }
+  // An owner recovery code for a hosted room travels from the operator's
+  // terminal to the owner, so it may live up to 30 minutes; bootstrap keeps
+  // the ordinary ceiling.
+  const ttlMax = purpose === 'offline_recovery' ? OFFLINE_RECOVERY_TTL_MAX_MS : TTL_MAX_MS;
   if (!(typeof ttl_ms === 'number' && Number.isSafeInteger(ttl_ms) &&
-        ttl_ms >= TTL_MIN_MS && ttl_ms <= TTL_MAX_MS)) {
+        ttl_ms >= TTL_MIN_MS && ttl_ms <= ttlMax)) {
     throw new Error('admission.mintOperatorInDraft: ttl_ms must be a safe integer inside ' +
-      TTL_MIN_MS + '..' + TTL_MAX_MS);
+      TTL_MIN_MS + '..' + ttlMax);
   }
   if (max_seat_ttl !== null && max_seat_ttl !== undefined) {
     throw new Error('admission.mintOperatorInDraft: max_seat_ttl must be null');
@@ -549,5 +554,5 @@ module.exports = {
   mint, consume, consumeInDraft, get, forTenant,
   mintOperatorInDraft, consumeBoundPersonInDraft, consumeSeatClaimInDraft,
   consumePasskeyCodeInDraft, seatLabelFromSecret,
-  OPERATOR_PURPOSES, TTL_MIN_MS, TTL_MAX_MS, HUMAN_INVITE_TTL_MS, PASSKEY_CODE_TTL_MS,
+  OPERATOR_PURPOSES, TTL_MIN_MS, TTL_MAX_MS, OFFLINE_RECOVERY_TTL_MAX_MS, HUMAN_INVITE_TTL_MS, PASSKEY_CODE_TTL_MS,
 };

@@ -746,6 +746,70 @@ function createFirstOwnerHandler(options) {
     }, { 'set-cookie': signedIn.set_cookie });
   }
 
+  // ── Hosted owner recovery (redeem half) ─────────────────────────────────
+  // The code comes from `interlock recover --hosted`, run on the machine that
+  // holds the data. Every refusal of the code itself is the one answer
+  // `code-refused`: wrong, expired, used, replaced or none pending read alike.
+  function ownerRecoveryPassword(request, response, password) {
+    if (typeof password !== 'string' || password.length === 0 ||
+        Buffer.byteLength(password, 'utf8') > 1024 || password.includes('\0')) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return false;
+    }
+    if (password.length < HOSTED_PASSWORD_MIN) {
+      sendJson(request, response, 400, { ok: false, error: 'password-too-short' });
+      return false;
+    }
+    return true;
+  }
+
+  function ownerRecoveryRefusal(request, response, result) {
+    const reason = result && result.reason;
+    if (reason === 'code-refused') {
+      return sendJson(request, response, 403, { ok: false, error: 'code-refused' });
+    }
+    if (reason === 'code-busy') {
+      return sendJson(request, response, 429, { ok: false, error: 'code-busy' }, { 'retry-after': '900' });
+    }
+    if (reason === 'passkey-failed') {
+      return sendJson(request, response, 409, { ok: false, error: 'passkey-failed' });
+    }
+    return sendJson(request, response, 409, { ok: false, error: 'recovery-unavailable' });
+  }
+
+  async function ownerRecoveryOptions(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const input = closedObject(body, ['code', 'new_password']);
+    if (!input || typeof input.code !== 'string') {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    if (!ownerRecoveryPassword(request, response, input.new_password)) return;
+    const begun = await house.ownerRecovery.begin({
+      code: input.code, source: clientSource(request, hostedMode), now: Date.now(),
+    });
+    if (!begun || begun.ok !== true) return ownerRecoveryRefusal(request, response, begun);
+    return sendJson(request, response, 200, {
+      ok: true, ceremony_id: begun.ceremony_id, options: begun.options,
+    });
+  }
+
+  async function ownerRecoveryComplete(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const input = closedObject(body, ['code', 'new_password', 'ceremony_id', 'response']);
+    if (!input || typeof input.code !== 'string' || typeof input.ceremony_id !== 'string' ||
+        !input.response) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    if (!ownerRecoveryPassword(request, response, input.new_password)) return;
+    const finished = await house.ownerRecovery.finish({
+      code: input.code, ceremony_id: input.ceremony_id, new_password: input.new_password,
+      response: input.response, source: clientSource(request, hostedMode), now: Date.now(),
+    });
+    if (!finished || finished.ok !== true) return ownerRecoveryRefusal(request, response, finished);
+    return sendJson(request, response, 200, { ok: true, completed: true },
+      { 'set-cookie': house.clearCookie });
+  }
+
   async function logout(request, response, body) {
     if (!completed()) {
       return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -3591,6 +3655,10 @@ function createFirstOwnerHandler(options) {
     ['/api/profile', setPersonProfile],
     ['/api/people/assign', assignSeat],
   ]);
+  if (hostedMode && house.ownerRecovery) {
+    mutations.set('/api/owner-recovery/options', ownerRecoveryOptions);
+    mutations.set('/api/owner-recovery/complete', ownerRecoveryComplete);
+  }
 
   return async function firstOwnerHandler(request, response) {
     if (request.headers.host !== expectedHost) {

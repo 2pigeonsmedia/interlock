@@ -181,7 +181,7 @@ function applyHostedWording() {
     'The AI runs that in a terminal on this computer', 'The AI runs that in any terminal that can reach this room');
   const recoveryNote = document.querySelector('.settings-note');
   if (recoveryNote) {
-    recoveryNote.textContent = 'Lost the owner password or passkey? A hosted room has no owner recovery yet: keep your password and a backup of the data directory.';
+    recoveryNote.textContent = 'Lost the owner password or passkey? Whoever runs the server stops Interlock, runs interlock recover --hosted on it and starts it again; then enter the one-time code at /recover-owner. Recovery replaces both and signs out old sessions.';
   }
 }
 
