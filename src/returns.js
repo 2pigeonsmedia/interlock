@@ -8,7 +8,7 @@
 // re-join, or afterwards by the "bring back" act for a seat let in before
 // this existed. Never after a leave or a removal: those are departures.
 
-const { departedHow } = require('./departures.js');
+const { endedByRoom } = require('./departures.js');
 
 /* The earlier sessions a seat named `name` can bring back: the newest earlier
  * seat of that name, only if the room ended it on its own, and before it each
@@ -21,7 +21,7 @@ function earlierSessions(house, name, exceptSubjectId, now) {
     .sort((a, b) => (b.ended_at - a.ended_at) || (b.created_at - a.created_at));
   const run = [];
   for (const seat of ended) {
-    if (departedHow(seat.ended_how)) break;
+    if (!endedByRoom(seat)) break;
     run.push(seat.subject_id);
   }
   return run;
@@ -35,13 +35,14 @@ function returnPreview({ house, people, work, name, exceptSubjectId, actorSubjec
   const from = earlierSessions(house, name, exceptSubjectId, now);
   if (from.length === 0) return null;
   const grants = (people && people.service.activeGrantsOf(from, now)) || [];
+  const carries = grant => people.service.carryRefusal(actorSubjectId, grant.grant_id, firstOwnerSubjectId, now) === null;
   const held = (work && work.carryPreview(from)) || { items: [], approvals_kept: 0, asks_kept: 0 };
   if (grants.length === 0 && held.items.length === 0 && held.approvals_kept === 0 && held.asks_kept === 0) return null;
   return Object.freeze({
     from,
     grants: Object.freeze(grants.map(grant => Object.freeze({
       grant_id: grant.grant_id, project: grant.project, scope: grant.scope,
-      carries: grant.by_subject_id !== firstOwnerSubjectId || actorSubjectId === firstOwnerSubjectId,
+      carries: carries(grant),
     }))),
     items: held.items,
     approvals_kept: held.approvals_kept,

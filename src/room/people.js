@@ -305,6 +305,18 @@ function createPeopleService(options) {
    * The same authority as an ordinary grant: a grant the first owner made
    * carries only on the first owner's act. `context.check` writes nothing.
    * Returns the new grant row. */
+  /* Why `actorSubjectId` may not carry this grant, or null when it may: the
+   * rules of an ordinary grant. A grant the first owner made, or any grant on
+   * a project while the first owner holds a grant on it, is hers to move. */
+  function carryRefusal(actorSubjectId, grantId, firstOwnerSubjectId, now) {
+    const entry = grantsById.get(grantId);
+    if (!entry || stateOf(entry, now) !== 'active' || entry.row.holder_kind !== 'seat') return 'grant-not-active';
+    if (actorSubjectId === firstOwnerSubjectId) return null;
+    if (entry.row.by_subject_id === firstOwnerSubjectId) return 'first-owner-grant';
+    if (firstOwnerGrantOn(entry.row.project, firstOwnerSubjectId, now)) return 'first-owner-grant';
+    return null;
+  }
+
   function carryGrant(actor, input, context) {
     requireActor(actor);
     const body = request(input, ['grant_id', 'to_subject_id', 'to_name'], []);
@@ -317,8 +329,8 @@ function createPeopleService(options) {
     const entry = grantsById.get(body.grant_id);
     if (!entry || stateOf(entry, now) !== 'active' || entry.row.holder_kind !== 'seat' ||
         entry.row.holder_subject_id === body.to_subject_id) fail('grant-not-active');
-    if (entry.row.by_subject_id === context.firstOwnerSubjectId &&
-        actor.subject_id !== context.firstOwnerSubjectId) fail('first-owner-grant');
+    const refusal = carryRefusal(actor.subject_id, body.grant_id, context.firstOwnerSubjectId, now);
+    if (refusal !== null) fail(refusal);
     if (damaged()) fail('store-damaged');
     if (context.check === true) return null;
     const row = entry.row;
@@ -464,6 +476,7 @@ function createPeopleService(options) {
     revoke,
     endHeldGrants,
     carryGrant,
+    carryRefusal,
     activeGrantsOf,
     presence: presenceWrite,
     clearPresenceOnPost,

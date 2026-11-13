@@ -28,11 +28,16 @@ function reasonFor(how) {
   return Object.prototype.hasOwnProperty.call(REASONS, how) ? REASONS[how] : REASONS.expired;
 }
 
-// How a seat ended, for the two endings that are departures.
-const DEPARTED = Object.freeze(['left', 'revoked']);
-
-function departedHow(how) {
-  return DEPARTED.includes(how);
+/* Whether the room ended this seat on its own, so it has NOT left: released
+ * after 24 hours without contact, or its pass ran out (it ended exactly at its
+ * expires_at, which is how identity tells expiry). A positive list on
+ * purpose: anything else that ended a seat (its leave, a removal, a removal's
+ * cascade, or an older release's revoke with no recorded reason) is a
+ * departure, so a cause nobody named never keeps a grant alive. */
+function endedByRoom(seat) {
+  if (!seat || seat.kind !== 'seat') return false;
+  if (seat.ended_how === 'released') return true;
+  return Number.isSafeInteger(seat.expires_at) && seat.ended_at === seat.expires_at;
 }
 
 /* The subject ids still standing in the room at `now`: everyone in it, and
@@ -42,7 +47,7 @@ function departedHow(how) {
 function standingSubjects(house, now, liveIds) {
   const standing = new Set(liveIds);
   for (const seat of house.listRecentEndedSeats({ now, since: 0 })) {
-    if (seat && seat.kind === 'seat' && typeof seat.subject_id === 'string' && !departedHow(seat.ended_how)) {
+    if (seat && seat.kind === 'seat' && typeof seat.subject_id === 'string' && endedByRoom(seat)) {
       standing.add(seat.subject_id);
     }
   }
@@ -71,7 +76,7 @@ function endDepartedGrants(options) {
   const ended = [];
   for (const seat of house.listRecentEndedSeats({ now, since: 0 })) {
     if (!seat || seat.kind !== 'seat' || typeof seat.subject_id !== 'string' || !gone.has(seat.subject_id) ||
-        !departedHow(seat.ended_how)) continue;
+        endedByRoom(seat)) continue;
     const ids = people.service.endHeldGrants(Object.assign({ now }, SERVER_ACTOR),
       { holder_subject_id: seat.subject_id, reason: reasonFor(seat.ended_how) });
     for (const id of ids) ended.push({ grant_id: id, holder: seat.name });
@@ -110,5 +115,5 @@ function departureNotices(options) {
 }
 
 module.exports = Object.freeze({
-  SERVER_ACTOR, REASONS, reasonFor, departedHow, standingSubjects, endDepartedGrants, departureNotices,
+  SERVER_ACTOR, REASONS, reasonFor, endedByRoom, standingSubjects, endDepartedGrants, departureNotices,
 });

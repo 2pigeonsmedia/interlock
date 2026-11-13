@@ -19,7 +19,7 @@ const { openWorkStore } = require('../src/work/store.js');
 const { createWorkService } = require('../src/work/service.js');
 const { openPeopleStore } = require('../src/room/people_store.js');
 const { createPeopleService } = require('../src/room/people.js');
-const { REASONS, endDepartedGrants, departureNotices } = require('../src/departures.js');
+const { REASONS, endDepartedGrants, departureNotices, standingSubjects } = require('../src/departures.js');
 
 const owner = Object.freeze({ subject_id: 'p-1', name: 'Ana', kind: 'person', owner: true, first_owner: true });
 const lead = Object.freeze({ subject_id: 's-3', name: 'Lead', kind: 'seat', owner: false });
@@ -140,8 +140,9 @@ test('the sweep ends only a departure\'s grants (a leave or a removal), never a 
     listRecentEndedSeats: meta => {
       assert.deepEqual(Object.keys(meta).sort(), ['now', 'since']);
       return [
-        { subject_id: gone.subject_id, name: gone.name, kind: 'seat', ended_how: 'released' },
-        { subject_id: stay.subject_id, name: stay.name, kind: 'seat', ended_how: null },
+        { subject_id: gone.subject_id, name: gone.name, kind: 'seat', ended_how: 'released', ended_at: 3000, expires_at: 9000 },
+        // Expired: it ended exactly at its pass's end.
+        { subject_id: stay.subject_id, name: stay.name, kind: 'seat', ended_how: null, ended_at: 4000, expires_at: 4000 },
         { subject_id: leaver.subject_id, name: leaver.name, kind: 'seat', ended_how: 'left' },
         { subject_id: removed.subject_id, name: removed.name, kind: 'seat', ended_how: 'revoked' },
       ];
@@ -155,6 +156,46 @@ test('the sweep ends only a departure\'s grants (a leave or a removal), never a 
   assert.deepEqual([of(gotRemoved.grant_id).revoked_by, of(gotRemoved.grant_id).reason], ['server', 'removed from the room']);
   for (const kept of [released, expired, live]) assert.equal(of(kept.grant_id).state, 'active', kept.grant_id);
   assert.deepEqual(endDepartedGrants({ people: { service }, house, now: 7000 }), [], 'the next sweep finds nothing to end');
+});
+
+test('only a release or an expiry keeps a seat standing; a removal, a leave, or an unnamed older end is a departure', () => {
+  const rows = [
+    { subject_id: 's-21', name: 'A', kind: 'seat', ended_how: 'released', ended_at: 500, expires_at: 9000 },
+    { subject_id: 's-22', name: 'B', kind: 'seat', ended_how: null, ended_at: 9000, expires_at: 9000 },
+    { subject_id: 's-23', name: 'C', kind: 'seat', ended_how: 'left', ended_at: 500, expires_at: 9000 },
+    { subject_id: 's-24', name: 'D', kind: 'seat', ended_how: 'revoked', ended_at: 500, expires_at: 9000 },
+    // An older revoke that recorded no reason (identity reports null, like expiry).
+    { subject_id: 's-25', name: 'E', kind: 'seat', ended_how: null, ended_at: 500, expires_at: 9000 },
+  ];
+  const house = { listRecentEndedSeats: () => rows };
+  const standing = standingSubjects(house, 10_000, ['p-1']);
+  assert.deepEqual([...standing].sort(), ['p-1', 's-21', 's-22']);
+  const { service } = people();
+  const legacy = grantTo(service, { subject_id: 's-25', name: 'E', kind: 'seat' }, 'ops');
+  const ended = endDepartedGrants({ people: { service },
+    house: { listParticipants: () => [], listRecentEndedSeats: () => rows }, now: 10_000 });
+  assert.ok(ended.map(row => row.grant_id).includes(legacy.grant_id), 'an unnamed older end is swept like a departure');
+});
+
+test('carrying a grant follows the grant rules: a project the first owner holds is hers', () => {
+  const { service } = people();
+  const bea = { subject_id: 'p-2', name: 'Bea', kind: 'person', owner: true };
+  const juno = { subject_id: 's-31', name: 'Juno', kind: 'seat' };
+  // Bea's grant on ops comes first; then the first owner takes a grant on ops.
+  const beas = service.grant(Object.assign({}, bea, { now: 1000 }),
+    { holder_subject_id: juno.subject_id, holder_name: 'Juno', holder_kind: 'seat', project: 'ops', scope: 'reviews', until: null },
+    { now: 1000, firstOwnerSubjectId: owner.subject_id });
+  grantTo(service, lead, 'ops');
+  assert.equal(service.carryRefusal(bea.subject_id, beas.grant_id, owner.subject_id, 2000), 'first-owner-grant');
+  assert.equal(service.carryRefusal(owner.subject_id, beas.grant_id, owner.subject_id, 2000), null);
+  assert.throws(() => service.carryGrant(Object.assign({}, bea, { now: 2000 }),
+    { grant_id: beas.grant_id, to_subject_id: 's-32', to_name: 'Juno' }, { firstOwnerSubjectId: owner.subject_id }),
+  error => error.code === 'first-owner-grant');
+  const carried = service.carryGrant(Object.assign({}, owner, { now: 2000 }),
+    { grant_id: beas.grant_id, to_subject_id: 's-32', to_name: 'Juno' }, { firstOwnerSubjectId: owner.subject_id });
+  const rows = service.grants(3000);
+  assert.deepEqual([rows.find(row => row.grant_id === beas.grant_id).reason, rows.find(row => row.grant_id === carried.grant_id).state],
+    [`carried to Juno's new session as ${carried.grant_id}`, 'active']);
 });
 
 test('a departure notice: one per recipient, listing its items by project, never to the poster', () => {
