@@ -1869,6 +1869,18 @@ function grantFailure(error, cancelled, fallback) {
       ? cancelled : (GRANT_REFUSALS[error.code] || fallback), 'error');
 }
 
+// What a lead grant took over from a project with no lead: the waiting work
+// it inherited, and any it could not.
+function inheritedWords(result) {
+  const ids = list => (Array.isArray(list) ? list.filter(id => typeof id === 'string') : []);
+  const inherited = ids(result.inherited);
+  const missed = ids(result.not_inherited);
+  let words = '';
+  if (inherited.length) words += ` It took over ${inherited.length === 1 ? '1 waiting item' : inherited.length + ' waiting items'}: ${inherited.join(', ')}.`;
+  if (missed.length) words += ` Not moved (still "holder left"): ${missed.join(', ')}.`;
+  return words;
+}
+
 grantCreateForm.addEventListener('submit', async event => {
   event.preventDefault();
   let holder;
@@ -1900,7 +1912,8 @@ grantCreateForm.addEventListener('submit', async event => {
     grantScope.value = '';
     grantUntil.value = '';
     await refreshSettingsGrants();
-    setSettingsStatus(settingsGrantsStatus, `${result.grant.grant_id} made for ${result.grant.holder_name}.`, 'success');
+    setSettingsStatus(settingsGrantsStatus, `${result.grant.grant_id} made for ${result.grant.holder_name}.` +
+      inheritedWords(result), 'success');
   } catch (error) {
     grantFailure(error, 'Passkey confirmation was cancelled. No grant was made.',
       'Interlock did not make that grant. Refresh and try again.');
@@ -3112,6 +3125,15 @@ messageBody.addEventListener('input', updateBindVisibility);
 document.addEventListener('interlock:reply-ask', event => {
   const detail = event.detail || {};
   if (Number.isSafeInteger(detail.ask_id)) seedReply(detail.ask_id);
+});
+// The work panel's "Grant a lead" opens Settings on the grant form for that
+// project (ruling, 2026-11-14).
+document.addEventListener('interlock:grant-lead', event => {
+  const detail = event.detail || {};
+  if (typeof detail.project !== 'string' || settingsButton.disabled || !viewerIsAdmin()) return;
+  settingsButton.click();
+  if ([...grantProject.options].some(option => option.value === detail.project)) grantProject.value = detail.project;
+  grantHolder.focus();
 });
 // The work panel's inline Yes / No answers through the room, like the chip.
 document.addEventListener('interlock:answer-ask', event => {
