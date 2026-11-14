@@ -1911,10 +1911,8 @@ grantCreateForm.addEventListener('submit', async event => {
     grantHolder.value = '';
     updateGrantProjectHint();
     await refreshSettingsGrants();
-    // Seam for the waiting-items hand-over: when the server reports how many of
-    // the project's waiting items the new lead took, pass that count here.
     setSettingsStatus(settingsGrantsStatus, InterlockPeopleModel.grantMadeWords(result.grant,
-      result.grant.project === null ? null : projectName(result.grant.project), null), 'success');
+      result.grant.project === null ? null : projectName(result.grant.project)), 'success');
   } catch (error) {
     grantFailure(error, 'Passkey confirmation was cancelled. No grant was made.',
       'Interlock did not make that grant. Refresh and try again.');

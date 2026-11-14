@@ -72,19 +72,12 @@ test('the Settings renderer filters a copy and never narrows the room\'s grant l
 // The grant form says what a grant does (a whole-room grant leads nothing).
 
 test('the confirmation says what the grant changed: a project lead, or no project at all', () => {
-  assert.equal(model.grantMadeWords(grant('G-6', { holder_name: 'Morningbird' }), 'Booksteady', null),
+  assert.equal(model.grantMadeWords(grant('G-6', { holder_name: 'Morningbird' }), 'Booksteady'),
     'G-6 made. Morningbird now leads Booksteady.');
-  assert.equal(model.grantMadeWords(grant('G-5', { holder_name: 'Morningbird', project: null }), null, null),
+  assert.equal(model.grantMadeWords(grant('G-5', { holder_name: 'Morningbird', project: null }), null),
     'G-5 made. Morningbird holds a whole-room grant; leads no project.');
-  // The waiting-items count, when the server reports one, rides on a project grant only.
-  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 8),
-    'G-7 made. Wren now leads Booksteady and takes 8 waiting items.');
-  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 1),
-    'G-7 made. Wren now leads Booksteady and takes 1 waiting item.');
-  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 0),
-    'G-7 made. Wren now leads Booksteady.');
-  assert.equal(model.grantMadeWords(grant('G-8', { holder_name: 'Wren', project: null }), null, 3),
-    'G-8 made. Wren holds a whole-room grant; leads no project.');
+  // The inherited-items line belongs to the grant-create response's owner; this sentence carries no count.
+  assert.equal(model.grantMadeWords.length, 2);
 });
 
 test('a whole-room grant whose scope reads like a lead is flagged; a project grant or another scope is not', () => {
@@ -133,4 +126,21 @@ test('the page draws the placeholder selected and resets to it after a grant', (
   assert.match(ROOM_JS, /grantScope\.value = '';\s*grantUntil\.value = '';\s*grantHolder\.value = '';/);
   const ROOM = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.html'), 'utf8');
   assert.match(ROOM, /<select id="grant-holder" required><\/select>/);
+});
+
+test('the grant form is filled once, when Settings opens, so nothing re-renders it under a pick', () => {
+  // The only redraw that could undo a Holder or Project pick is fillGrantForm.
+  // It runs once, in the Settings-open handler, before the dialog shows; roster
+  // and grant refreshes never call it. If a refresh ever does, it must keep the pick.
+  const calls = ROOM_JS.match(/\bfillGrantForm\(\);/g) || [];
+  assert.equal(calls.length, 1, 'one call site');
+  const open = /settingsButton\.addEventListener\('click', async \(\) => \{([\s\S]*?)\n\}\);/.exec(ROOM_JS);
+  assert.ok(open, 'the Settings-open handler exists');
+  assert.ok(open[1].indexOf('fillGrantForm();') !== -1 &&
+    open[1].indexOf('fillGrantForm();') < open[1].indexOf('settingsDialog.showModal();'), 'filled before the dialog shows');
+  for (const name of ['drawRoster', 'refreshSettingsGrants', 'renderSettingsGrants']) {
+    const body = new RegExp(`function ${name}\\(\\) \\{([\\s\\S]*?)\\n\\}\\n`).exec(ROOM_JS);
+    assert.ok(body, `${name} exists`);
+    assert.doesNotMatch(body[1], /fillGrantForm|grantHolder\.replaceChildren|grantProject\.replaceChildren/, `${name} leaves the form alone`);
+  }
 });
