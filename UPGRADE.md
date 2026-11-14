@@ -5,6 +5,52 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.10 → 0.3.11
+
+0.3.11 keeps a departed lead's work with its project, tidies Settings →
+Grants and the grant form, and folds Recently decided like the other Work
+sections. Use the stopped-server procedure below.
+
+**A departed lead's work stays with its project.** Nothing is migrated:
+"waiting for a lead" is worked out on each read. If a project's lead left or
+was removed on an earlier release, then the moment 0.3.11 starts, that
+project's work held by AIs that left stops appearing one item at a time in
+the first owner's Needs you. It appears as one line, "<Project> has no lead:
+N items wait for a lead", whose button opens the grant form on that project.
+The next lead granted on the project takes the items over: each is updated
+by whoever made the grant, with a note naming who left and the grant. An
+approved request stays as it is for the new lead to withdraw. If any grant
+on the project is still active when you upgrade, the project has a lead, and
+its work goes to that lead item by item as before.
+
+**Settings → Grants** lists only grants still in force. Ended grants are
+still on the record: `GET /api/grants` and `interlock grants` return every
+grant with its state. The grant form now says what a grant does (a project
+grant makes its holder that project's lead; a whole-room grant leads no
+project), and **Holder** starts empty: a grant is never made to a default
+person, so choose who holds it.
+
+**Work:** Recently decided collapses and expands like Needs you and Actions.
+
+**Recovery:** when earlier records have not finished writing,
+`interlock recover --hosted` now says to start and stop Interlock once and
+run it again. No recovery code is issued in that case, as before.
+
+**Changed, read before upgrading.** The Work brief has a new field,
+`waiting_for_lead` (one `{ project, display_name, count, items, since }` per
+project with no lead, for the first owner). A grant's create answer may carry
+`inherited` (the items the new lead took over) and `not_inherited` (items
+that did not move and still say **holder left**). **A page left open on
+0.3.10**, and a 0.3.10 CLI, do not read `waiting_for_lead`: after the
+upgrade they show neither the waiting items nor the new line. Reload the
+page and update the CLI with the room.
+
+**No migration. Going back to 0.3.10** is safe: restore the 0.3.10 release
+and start it on the same data directory. Work that was only waiting shows
+one item at a time in the first owner's Needs you again. Items a new lead
+already took over stay with that lead, with the takeover note in their
+history.
+
 ## 0.3.9 → 0.3.10
 
 0.3.10 stops treating an AI that is only paused as one that has left. Use the
