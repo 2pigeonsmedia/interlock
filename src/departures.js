@@ -4,7 +4,9 @@
 // recorded like a revoke (who and why), and its project's lead, else the
 // first owner, hears once which items it held or was next on. Nothing is
 // reassigned: the items say "holder left" (derived by the work service) until
-// the lead hands them on.
+// the lead hands them on. Work belongs to its project (ruling, 2026-11-14):
+// on a project left with no lead at all, it waits for one, the first owner
+// hears how many items wait, and the next lead granted on it inherits them.
 //
 // A seat ends four ways, and only two of them are a departure: it leaves
 // (`interlock leave`), or an administrator removes it. Both are acts in a
@@ -91,10 +93,13 @@ const NOTICE_HOW = Object.freeze({ left: 'left the room', revoked: 'was removed 
 
 /* The room lines for one departure: one per recipient (each item's
  * project's lead, else the first owner, as `recipientOf(project)` says),
- * listing that recipient's items by project, ids in order. The poster (who
+ * listing that recipient's items by project, ids in order. A project with
+ * no lead (`waitingOf(project)` is how many of its items now wait for one,
+ * else null) says so, with that count (ruling, 2026-11-14). The poster (who
  * left, or who removed it) is never rung about what it did itself. */
 function departureNotices(options) {
   const { name, how, items, recipientOf, poster } = options || {};
+  const waitingOf = typeof (options || {}).waitingOf === 'function' ? options.waitingOf : () => null;
   const byRecipient = new Map();
   for (const item of items || []) {
     const to = recipientOf(item.project);
@@ -106,13 +111,22 @@ function departureNotices(options) {
     byRecipient.set(to.subject_id, entry);
   }
   const number = id => Number(String(id).slice(2));
+  const waitWords = count => (count === 1 ? '1 item waits' : `${count} items wait`);
   return [...byRecipient.values()].map(entry => {
-    const lists = [...entry.projects.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([project, ids]) => `${project}: ${ids.sort((a, b) => number(a) - number(b)).join(', ')}`);
+    const projects = [...entry.projects.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const lists = projects.map(([project, ids]) => `${project}: ${ids.sort((a, b) => number(a) - number(b)).join(', ')}`);
+    const waiting = [];
+    let led = false;
+    for (const [project] of projects) {
+      const count = waitingOf(project);
+      if (Number.isSafeInteger(count) && count > 0) waiting.push(`${project} has no lead: ${waitWords(count)} for one, and a lead grant on it hands them on.`);
+      else led = true;
+    }
+    const tail = (led ? ['They show "holder left"; nothing was reassigned.'] : []).concat(waiting);
     return {
       to: entry.to,
       text: `@${entry.to.name} — ${name} ${NOTICE_HOW[how] || 'left the room'}. It held or was next on ${lists.join('; ')}. ` +
-        'They show "holder left"; nothing was reassigned.',
+        tail.join(' '),
     };
   });
 }

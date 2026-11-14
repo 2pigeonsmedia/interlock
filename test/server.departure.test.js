@@ -2,9 +2,10 @@
 
 // When an AI leaves (ruling, 2026-11-10), through the server: on `leave` the
 // seat's own grants end, recorded as ended by it, because it left; every live
-// item it held or was next on says "holder left", is still its, and is in
-// its lead's (else the first owner's) Needs you; that recipient is rung once,
-// by the seat, with the list. Removal does the same, recorded and rung by the
+// item it held or was next on says "holder left" and is still its. Juno led
+// ops, so ops is left with no lead: its work waits on the project as one
+// line for the first owner, who is rung once, by the seat, with the list and
+// how many items wait (2026-11-14). Removal does the same, recorded and rung by the
 // administrator who removed it. A re-join under the same name is a new
 // subject and holds none of the old grants.
 
@@ -209,13 +210,19 @@ test('a seat that leaves: its grants end as its own act, its items say holder le
       'holder left, still named, not reassigned');
     assert.deepEqual((await item(runtime, owner, next.id)).holder_left, ['Juno']);
     assert.deepEqual((await item(runtime, owner, other.id)).holder_left, []);
-    const needs = (await get(runtime, '/api/work/brief', owner)).json.needs_me.map(row => row.id);
-    assert.ok(needs.includes(held.id) && needs.includes(next.id), 'no lead left: in the first owner\'s Needs you');
+    // Juno led ops: with its grant ended, ops has no lead, so its work waits
+    // on the project as one line, not one Needs-you entry each (2026-11-14).
+    const brief = (await get(runtime, '/api/work/brief', owner)).json;
+    const needs = brief.needs_me.map(row => row.id);
+    assert.ok(!needs.includes(held.id) && !needs.includes(next.id), 'no lead left: not one entry per item');
+    assert.deepEqual(brief.waiting_for_lead.map(line => [line.project, line.count, line.items]),
+      [['ops', 2, [held.id, next.id]]], 'one line for the project');
 
-    const rung = (await messages(runtime, owner)).slice(before).filter(message => /holder left/.test(message.text));
+    const rung = (await messages(runtime, owner)).slice(before).filter(message => /no lead/.test(message.text));
     assert.equal(rung.length, 1, 'rung once');
     assert.equal(rung[0].byline, 'Juno', 'by the seat that left, its own act');
-    assert.equal(rung[0].text, `@Ana — Juno left the room. It held or was next on ops: ${held.id}, ${next.id}. They show "holder left"; nothing was reassigned.`);
+    assert.equal(rung[0].text, `@Ana — Juno left the room. It held or was next on ops: ${held.id}, ${next.id}. ` +
+      'ops has no lead: 2 items wait for one, and a lead grant on it hands them on.');
 
     // A re-join under the same name is a new subject: the old grant stays ended.
     owner = await elevate(runtime, owner, device);
@@ -226,7 +233,7 @@ test('a seat that leaves: its grants end as its own act, its items say holder le
       'the item named the old session; the new one is not its holder');
     const leaveAgain = await aiPost(runtime, '/api/ai/leave', {}, again.token);
     assert.equal(leaveAgain.status, 200, leaveAgain.text);
-    assert.equal((await messages(runtime, owner)).slice(before).filter(message => /holder left/.test(message.text)).length, 1,
+    assert.equal((await messages(runtime, owner)).slice(before).filter(message => /no lead|holder left/.test(message.text)).length, 1,
       'the new session held nothing, so its leave rings nobody');
   } finally {
     await runtime.close();

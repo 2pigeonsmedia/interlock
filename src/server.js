@@ -493,7 +493,11 @@ async function startInterlockServer(options) {
         leadOf: (project, now) => people.service.leadOf(project, now,
           new Set(house.listParticipants({ now }).map(row => row.subject_id))),
         // Who is still in the room, so an item says when its holder has left.
-        live: liveSubjects }),
+        live: liveSubjects,
+        // Whether a project has a lead at all: one holding its lead grant,
+        // in the room or away. With none, its departed holders' work waits
+        // for one.
+        leadHeldOf: (project, now) => people.service.leadOf(project, now, liveSubjects(now)) }),
       participants: meta => house.listParticipants(meta),
       // A cited room message, looked up by id; null when it is not in the
       // room (never posted, or archived by a transcript clear).

@@ -954,10 +954,17 @@ function createFirstOwnerHandler(options) {
       const lead = people ? people.service.leadOf(project, now, live) : null;
       return lead && typeof lead.subject_id === 'string' ? lead : first;
     };
+    // A project left with no lead says how much of its work now waits for one.
+    const waitingOf = project => {
+      const ids = work && typeof work.waitingIds === 'function' ? work.waitingIds(project) : [];
+      return ids.length > 0 ? ids.length : null;
+    };
     const notices = [];
     for (const seat of seats) {
       const items = work && typeof work.heldBy === 'function' ? work.heldBy(seat.subject_id) : [];
-      if (items.length > 0) notices.push(...departureNotices({ name: seat.name, how, items, recipientOf, poster: chatActor.subject_id }));
+      if (items.length > 0) {
+        notices.push(...departureNotices({ name: seat.name, how, items, recipientOf, waitingOf, poster: chatActor.subject_id }));
+      }
     }
     // Then the room lines.
     for (const notice of notices) {
@@ -3304,13 +3311,41 @@ function createFirstOwnerHandler(options) {
     }
     const confirmed = house.confirmGrantAct(requestMeta(request, who.now), 'grant.create');
     if (!confirmed || confirmed.ok !== true) return sendStepUpRefusal(request, response, confirmed);
+    // What a lead grant on a project with no lead inherits, read before the
+    // grant: once it is made the project has a lead and nothing waits.
+    const waiting = body.project !== null && work ? work.waitingIds(body.project) : [];
+    let made;
     try {
       const row = people.service.grant(who.actor, input, context);
-      const made = people.service.grants(who.now).find(item => item.grant_id === row.grant_id);
-      return sendJson(request, response, 201, { ok: true, grant: made });
+      made = people.service.grants(who.now).find(item => item.grant_id === row.grant_id);
     } catch (error) {
       return sendGrantError(request, response, error);
     }
+    if (waiting.length === 0) return sendJson(request, response, 201, { ok: true, grant: made });
+    return sendJson(request, response, 201, Object.assign({ ok: true, grant: made },
+      inheritOnGrant(who, firstOwnerSubjectId, holder, made, body.project, waiting)));
+  }
+
+  /* The project's new lead inherits its waiting work (ruling, 2026-11-14),
+   * as the grantor's act, each item noting the grant and who made it. The
+   * grant stands whatever happens here: an item not moved still says "holder
+   * left", now in the new lead's Needs you. Returns {inherited} and, when an
+   * item did not move, {not_inherited} naming it. */
+  function inheritOnGrant(who, firstOwnerSubjectId, holder, made, project, ids) {
+    const to = holder.kind === 'seat' ? liveSeatRef(holder.name, who.now)
+      : Object.freeze({ subject_id: holder.subject_id, name: holder.name, kind: 'person', session: null });
+    if (!to || to.subject_id !== holder.subject_id) return { inherited: [], not_inherited: ids };
+    const actor = Object.freeze({ subject_id: who.actor.subject_id, name: who.actor.name, kind: 'person',
+      session: null, owner: true, now: who.now, first_owner: who.actor.subject_id === firstOwnerSubjectId });
+    const note = `Inherited by ${to.name} with lead grant ${made.grant_id}, made by ${who.actor.name}.`;
+    let result;
+    try {
+      result = work.inheritWaiting(actor, { project, ids, to, note });
+    } catch (_) {
+      return { inherited: [], not_inherited: ids };
+    }
+    return result.failed.length === 0 ? { inherited: result.inherited }
+      : { inherited: result.inherited, not_inherited: result.failed };
   }
 
   async function revokeGrant(request, response, body) {
