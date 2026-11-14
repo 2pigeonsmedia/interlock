@@ -134,3 +134,20 @@ test('the page draws the placeholder selected and resets to it after a grant', (
   const ROOM = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.html'), 'utf8');
   assert.match(ROOM, /<select id="grant-holder" required><\/select>/);
 });
+
+test('the grant form is filled once, when Settings opens, so nothing re-renders it under a pick', () => {
+  // The only redraw that could undo a Holder or Project pick is fillGrantForm.
+  // It runs once, in the Settings-open handler, before the dialog shows; roster
+  // and grant refreshes never call it. If a refresh ever does, it must keep the pick.
+  const calls = ROOM_JS.match(/\bfillGrantForm\(\);/g) || [];
+  assert.equal(calls.length, 1, 'one call site');
+  const open = /settingsButton\.addEventListener\('click', async \(\) => \{([\s\S]*?)\n\}\);/.exec(ROOM_JS);
+  assert.ok(open, 'the Settings-open handler exists');
+  assert.ok(open[1].indexOf('fillGrantForm();') !== -1 &&
+    open[1].indexOf('fillGrantForm();') < open[1].indexOf('settingsDialog.showModal();'), 'filled before the dialog shows');
+  for (const name of ['drawRoster', 'refreshSettingsGrants', 'renderSettingsGrants']) {
+    const body = new RegExp(`function ${name}\\(\\) \\{([\\s\\S]*?)\\n\\}\\n`).exec(ROOM_JS);
+    assert.ok(body, `${name} exists`);
+    assert.doesNotMatch(body[1], /fillGrantForm|grantHolder\.replaceChildren|grantProject\.replaceChildren/, `${name} leaves the form alone`);
+  }
+});
