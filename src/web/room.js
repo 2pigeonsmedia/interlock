@@ -1804,12 +1804,12 @@ function fillGrantForm() {
 
 function renderSettingsGrants() {
   const now = Date.now();
-  const grants = rosterGrants.slice().sort((left, right) =>
+  const grants = InterlockPeopleModel.activeGrants(rosterGrants, now).sort((left, right) =>
     Number(right.grant_id.slice(2)) - Number(left.grant_id.slice(2)));
   if (grants.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'settings-hint';
-    empty.textContent = 'No grants yet.';
+    empty.textContent = 'No active grants.';
     settingsGrantList.replaceChildren(empty);
     return;
   }
@@ -1828,11 +1828,6 @@ function renderSettingsGrants() {
     const until = grant.until === null ? 'until revoked' : `until ${formatFullTime(grant.until) || 'the stated time'}`;
     made.textContent = `by ${grant.by_name} · ${formatFullTime(grant.at) || 'time unavailable'} · ${until}`;
     facts.append(name, where, scope, made);
-    if (state === 'revoked') {
-      const revoked = document.createElement('small');
-      revoked.textContent = `revoked by ${grant.revoked_by || 'unknown'}` + (grant.reason ? ` · ${grant.reason}` : '');
-      facts.append(revoked);
-    }
     row.append(facts);
     if (state === 'active') {
       const revoke = document.createElement('button');

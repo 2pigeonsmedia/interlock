@@ -43,6 +43,13 @@
     return new Map([...leadGrants(grants, now)].map(([project, grant]) => [project, grant.holder_name]));
   }
 
+  // The grants still in force, for Settings → Grants. Revoked and expired
+  // grants stay in the record (`GET /api/grants`, `interlock grants`) but not
+  // on the list the owner scrolls.
+  function activeGrants(grants, now) {
+    return grants.filter(grant => isActive(grant, now));
+  }
+
   // The active grants a participant holds, newest first.
   function heldGrants(grants, row, now) {
     return grants.filter(grant => grant.holder_name === row.name && grant.holder_kind === row.kind &&
@@ -257,7 +264,7 @@
   }
 
   const contract = Object.freeze({
-    leads, leadGrants, heldGrants, grantLine, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    leads, leadGrants, activeGrants, heldGrants, grantLine, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {
