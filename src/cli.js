@@ -2946,6 +2946,8 @@ async function runRecoverHosted(io, dependencies) {
       line(stderr, 'interlock: no completed Interlock installation was found at the configured data directory.');
     } else if (code === 'no-owner') {
       line(stderr, 'interlock: the first owner is not an active administrator; no recovery code was issued.');
+    } else if (code === 'audit-pending') {
+      line(stderr, 'interlock: earlier records have not finished writing, so no recovery code was issued. Start and stop Interlock once, then run `interlock recover --hosted` again.');
     } else if (code === 'audit-unhealthy') {
       line(stderr, 'interlock: a recovery code was issued but its record did not finish writing. Run `interlock recover --hosted` again; the new code replaces this one.');
     } else {

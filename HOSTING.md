@@ -257,6 +257,9 @@ sudo runuser -u interlock -- env INTERLOCK_DATA_DIR=/var/lib/interlock \
 sudo systemctl start interlock
 ```
 
+If it was run as root by mistake, give the files back to the service user
+before starting it: `sudo chown -R interlock:interlock /var/lib/interlock`.
+
 The command prints the code once and starts nothing. Give the code to the owner
 privately; within 30 minutes they open `https://app.example.com/recover-owner`,
 enter it with a new password, and create a new passkey. Running the command
