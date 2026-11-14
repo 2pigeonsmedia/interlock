@@ -99,6 +99,7 @@ const grantCreateForm = document.querySelector('#grant-create-form');
 const grantHolder = document.querySelector('#grant-holder');
 const grantProject = document.querySelector('#grant-project');
 const grantScope = document.querySelector('#grant-scope');
+const grantProjectHint = document.querySelector('#grant-project-hint');
 const grantUntil = document.querySelector('#grant-until');
 const settingsGrantsStatus = document.querySelector('#settings-grants-status');
 let csrfToken = null;
@@ -1793,14 +1794,26 @@ function fillGrantForm() {
   }));
   const whole = document.createElement('option');
   whole.value = '';
-  whole.textContent = 'Whole room';
+  whole.textContent = 'Whole room (leads no project)';
   grantProject.replaceChildren(whole, ...rosterProjects.map(project => {
     const option = document.createElement('option');
     option.value = project.id;
     option.textContent = project.display_name;
     return option;
   }));
+  updateGrantProjectHint();
 }
+
+const GRANT_PROJECT_HINT = 'A project grant makes its holder that project\'s lead. Whole room makes no one a project lead.';
+
+function updateGrantProjectHint() {
+  grantProjectHint.textContent = InterlockPeopleModel.wholeRoomReadsLikeLead(grantProject.value, grantScope.value)
+    ? 'This reads like a lead, but a whole-room grant leads no project. To make a lead, choose the project.'
+    : GRANT_PROJECT_HINT;
+}
+
+grantProject.addEventListener('change', updateGrantProjectHint);
+grantScope.addEventListener('input', updateGrantProjectHint);
 
 function renderSettingsGrants() {
   const now = Date.now();
@@ -1894,8 +1907,12 @@ grantCreateForm.addEventListener('submit', async event => {
     if (!validGrant(result.grant)) throw Object.assign(new Error('malformed-response'), { code: 'malformed-response' });
     grantScope.value = '';
     grantUntil.value = '';
+    updateGrantProjectHint();
     await refreshSettingsGrants();
-    setSettingsStatus(settingsGrantsStatus, `${result.grant.grant_id} made for ${result.grant.holder_name}.`, 'success');
+    // Seam for the waiting-items hand-over: when the server reports how many of
+    // the project's waiting items the new lead took, pass that count here.
+    setSettingsStatus(settingsGrantsStatus, InterlockPeopleModel.grantMadeWords(result.grant,
+      result.grant.project === null ? null : projectName(result.grant.project), null), 'success');
   } catch (error) {
     grantFailure(error, 'Passkey confirmation was cancelled. No grant was made.',
       'Interlock did not make that grant. Refresh and try again.');

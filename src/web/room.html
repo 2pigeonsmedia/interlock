@@ -257,7 +257,8 @@
           <label for="grant-holder">Holder</label>
           <select id="grant-holder" required></select>
           <label for="grant-project">Project</label>
-          <select id="grant-project"></select>
+          <select id="grant-project" aria-describedby="grant-project-hint"></select>
+          <p id="grant-project-hint" class="settings-hint" aria-live="polite">A project grant makes its holder that project's lead. Whole room makes no one a project lead.</p>
           <label for="grant-scope">Scope</label>
           <input id="grant-scope" maxlength="300" autocomplete="off" required>
           <label for="grant-until">Until (optional)</label>

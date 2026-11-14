@@ -61,6 +61,25 @@
     return where + ' · under ' + grant.by_name + '\'s grant ' + grant.grant_id;
   }
 
+  // What a grant just made changes, said after the owner confirms it. A
+  // project grant is the newest active grant for that project, so its holder
+  // now leads it; a whole-room grant leads nothing. `waiting` is the count of
+  // the project's waiting items the new lead takes, when the server says so.
+  function grantMadeWords(grant, projectName, waiting) {
+    const what = grant.project === null
+      ? grant.holder_name + ' holds a whole-room grant; leads no project'
+      : grant.holder_name + ' now leads ' + projectName +
+        (Number.isSafeInteger(waiting) && waiting > 0
+          ? ' and takes ' + waiting + ' waiting item' + (waiting === 1 ? '' : 's') : '');
+    return grant.grant_id + ' made. ' + what + '.';
+  }
+
+  // The form's warning: a whole-room grant whose scope reads like a lead
+  // makes no one a lead. Suggest choosing the project.
+  function wholeRoomReadsLikeLead(project, scope) {
+    return project === '' && /\blead/i.test(String(scope || ''));
+  }
+
   function age(since, now) {
     if (!Number.isSafeInteger(since)) return null;
     const elapsed = now - since;
@@ -264,7 +283,7 @@
   }
 
   const contract = Object.freeze({
-    leads, leadGrants, activeGrants, heldGrants, grantLine, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {

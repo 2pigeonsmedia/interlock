@@ -68,3 +68,41 @@ test('the Settings renderer filters a copy and never narrows the room\'s grant l
   assert.match(ROOM_JS, /InterlockPeopleModel\.leads\(rosterGrants, now\)/);
   assert.match(ROOM_JS, /InterlockPeopleModel\.heldGrants\(rosterGrants, participant, now\)/);
 });
+
+// The grant form says what a grant does (a whole-room grant leads nothing).
+
+test('the confirmation says what the grant changed: a project lead, or no project at all', () => {
+  assert.equal(model.grantMadeWords(grant('G-6', { holder_name: 'Morningbird' }), 'Booksteady', null),
+    'G-6 made. Morningbird now leads Booksteady.');
+  assert.equal(model.grantMadeWords(grant('G-5', { holder_name: 'Morningbird', project: null }), null, null),
+    'G-5 made. Morningbird holds a whole-room grant; leads no project.');
+  // The waiting-items count, when the server reports one, rides on a project grant only.
+  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 8),
+    'G-7 made. Wren now leads Booksteady and takes 8 waiting items.');
+  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 1),
+    'G-7 made. Wren now leads Booksteady and takes 1 waiting item.');
+  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 0),
+    'G-7 made. Wren now leads Booksteady.');
+  assert.equal(model.grantMadeWords(grant('G-8', { holder_name: 'Wren', project: null }), null, 3),
+    'G-8 made. Wren holds a whole-room grant; leads no project.');
+});
+
+test('a whole-room grant whose scope reads like a lead is flagged; a project grant or another scope is not', () => {
+  assert.equal(model.wholeRoomReadsLikeLead('', 'Finance Lead'), true);
+  assert.equal(model.wholeRoomReadsLikeLead('', 'leads the books'), true);
+  assert.equal(model.wholeRoomReadsLikeLead('booksteady', 'Finance Lead'), false);
+  assert.equal(model.wholeRoomReadsLikeLead('', 'review the release'), false);
+  assert.equal(model.wholeRoomReadsLikeLead('', 'misleading'), false, 'a word that only contains "lead" is not a lead');
+  assert.equal(model.wholeRoomReadsLikeLead('', ''), false);
+});
+
+test('the grant form names what whole room does, warns as the scope is typed, and confirms in those words', () => {
+  const ROOM = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.html'), 'utf8');
+  assert.match(ROOM, /<select id="grant-project" aria-describedby="grant-project-hint"><\/select>\s*<p id="grant-project-hint"[^>]*aria-live="polite">[^<]*Whole room makes no one a project lead\.<\/p>/);
+  assert.match(ROOM_JS, /whole\.textContent = 'Whole room \(leads no project\)';/);
+  assert.match(ROOM_JS, /grantProject\.addEventListener\('change', updateGrantProjectHint\)/);
+  assert.match(ROOM_JS, /grantScope\.addEventListener\('input', updateGrantProjectHint\)/);
+  assert.match(ROOM_JS, /function updateGrantProjectHint[\s\S]*?wholeRoomReadsLikeLead\(grantProject\.value, grantScope\.value\)/);
+  assert.match(ROOM_JS, /InterlockPeopleModel\.grantMadeWords\(result\.grant,/);
+  assert.doesNotMatch(ROOM_JS, /made for \$\{result\.grant\.holder_name\}/, 'the old bare confirmation is gone');
+});
