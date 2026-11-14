@@ -56,6 +56,7 @@ test('recover --hosted refuses a loopback room and a running server, by name', a
     ['already-running', /[Ss]top Interlock/],
     ['installation-missing', /no completed Interlock installation/],
     ['no-owner', /first owner/],
+    ['audit-pending', /[Ss]tart and stop Interlock once, then run `interlock recover --hosted` again/],
   ]) {
     const { out, streams } = io();
     const code = await runRecover(['--hosted'], streams, {
