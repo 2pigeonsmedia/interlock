@@ -14,7 +14,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
-  item, messages, workItem, brief, grant, room, admitSeat, elevate, post,
+  item, messages, workItem, brief, grant, room, admitSeat, elevate, post, get,
 } = require('./helpers/lead_leaves_rig.js');
 
 test('a lead removed by the owner: its work waits on the project, one line, nothing per item', async () => {
@@ -35,5 +35,14 @@ test('a lead removed by the owner: its work waits on the project, one line, noth
     assert.deepEqual((await item(runtime, owner, held.id)).holder_left, ['Lead'], 'still names who held it');
     assert.equal((await messages(runtime, owner)).slice(before).filter(m => /Lead was removed/.test(m.text)).length, 0,
       'the owner removed it herself: not rung about her own act');
+    // The next lead inherits it; the record says how its holder ended.
+    owner = await elevate(runtime, owner, device);
+    await admitSeat(runtime, owner, 'Nova');
+    owner = await elevate(runtime, owner, device);
+    const made = await grant(runtime, owner, 'Nova', 'ops');
+    assert.deepEqual(made.inherited, [held.id]);
+    const history = (await get(runtime, `/api/work/items/${held.id}`, owner)).json.history;
+    assert.equal(history.filter(event => event.kind === 'updated').at(-1).note,
+      `Inherited by Nova from Lead (removed) with lead grant ${made.grant.grant_id}, made by Ana.`);
   });
 });

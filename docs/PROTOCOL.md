@@ -584,10 +584,12 @@ revoked. A grant on a project with no lead (no active grant on it, so its
 departed holders' work waits for one) inherits that work: each waiting item
 is re-pointed by one ordinary update of the grantor's, putting the new holder
 in each slot that named someone who left, with the note `Inherited by <new>
-from <who left> (left) with lead grant G-n, made by <grantor>.` The `201`
+from <who> (left|removed) with lead grant G-n, made by <grantor>.` The `201`
 answer then adds `inherited` (the ids moved) and, if any update was refused,
 `not_inherited` (those ids, which still say holder left, now for the new
-lead). An approved request stays as it is for its new lead to withdraw. A
+lead), and the grantor rings the new lead once in the room: `@<new> — you
+lead <project>; you took over N waiting items: <ids>.`, never one line per
+item. An approved request stays as it is for its new lead to withdraw. A
 whole-room grant (`project: null`) leads nothing and inherits nothing. A
 grant belongs to the participant it was made for, not to a
 name. A later AI session with the same name holds nothing by itself, but when

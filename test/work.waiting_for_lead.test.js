@@ -134,6 +134,8 @@ test('a new lead inherits the waiting work: one ordinary update each, naming the
     'only the slot that named who left changes');
   const events = work.get(owner, { id: held.id }).history.filter(event => event.kind === 'updated');
   assert.equal(events.at(-1).note, note, 'the record names who left, the grant and the grantor');
+  const hows = work.get(owner, { id: next.id }).history.filter(event => event.kind === 'updated');
+  assert.match(hows.at(-1).note, /from Lead \(left\)/, 'how it ended, "left" when not said otherwise');
   assert.equal(events.at(-1).by.name, 'Ana', 'the grantor\'s act');
   assert.equal(work.get(owner, { id: otherProject.id }).item.responsible.name, 'Lead', 'another project\'s work is untouched');
   assert.deepEqual(work.brief(owner, {}).waiting_for_lead.map(line => [line.project, line.items]), [['books', [otherProject.id]]],
@@ -176,4 +178,17 @@ test('departure notice: with no lead it names the project and how many items wai
     poster: 's-9', waitingOf: () => null });
   assert.equal(led.text, '@Lead — Juno left the room. It held or was next on ops: W-1, W-3. ' +
     'They show "holder left"; nothing was reassigned.');
+});
+
+test('the inheritance note says how each holder ended: removed, or left', () => {
+  const { work, live, state } = rig();
+  const both = filed(work, { responsible: ref(lead), next_to: ref(gone), next_action: 'check' });
+  live.delete(lead.subject_id);
+  live.delete(gone.subject_id);
+  state.grant = null;
+  const ids = work.waitingIds('ops');
+  state.grant = nova;
+  work.inheritWaiting(owner, { project: 'ops', ids, to: ref(nova), grant_id: 'G-4', ended: { [lead.subject_id]: 'removed' } });
+  const note = work.get(owner, { id: both.id }).history.filter(event => event.kind === 'updated').at(-1).note;
+  assert.equal(note, 'Inherited by Nova from Lead (removed), Juno (left) with lead grant G-4, made by Ana.');
 });
