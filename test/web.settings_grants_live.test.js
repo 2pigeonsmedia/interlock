@@ -72,19 +72,12 @@ test('the Settings renderer filters a copy and never narrows the room\'s grant l
 // The grant form says what a grant does (a whole-room grant leads nothing).
 
 test('the confirmation says what the grant changed: a project lead, or no project at all', () => {
-  assert.equal(model.grantMadeWords(grant('G-6', { holder_name: 'Morningbird' }), 'Booksteady', null),
+  assert.equal(model.grantMadeWords(grant('G-6', { holder_name: 'Morningbird' }), 'Booksteady'),
     'G-6 made. Morningbird now leads Booksteady.');
-  assert.equal(model.grantMadeWords(grant('G-5', { holder_name: 'Morningbird', project: null }), null, null),
+  assert.equal(model.grantMadeWords(grant('G-5', { holder_name: 'Morningbird', project: null }), null),
     'G-5 made. Morningbird holds a whole-room grant; leads no project.');
-  // The waiting-items count, when the server reports one, rides on a project grant only.
-  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 8),
-    'G-7 made. Wren now leads Booksteady and takes 8 waiting items.');
-  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 1),
-    'G-7 made. Wren now leads Booksteady and takes 1 waiting item.');
-  assert.equal(model.grantMadeWords(grant('G-7', { holder_name: 'Wren' }), 'Booksteady', 0),
-    'G-7 made. Wren now leads Booksteady.');
-  assert.equal(model.grantMadeWords(grant('G-8', { holder_name: 'Wren', project: null }), null, 3),
-    'G-8 made. Wren holds a whole-room grant; leads no project.');
+  // The inherited-items line belongs to the grant-create response's owner; this sentence carries no count.
+  assert.equal(model.grantMadeWords.length, 2);
 });
 
 test('a whole-room grant whose scope reads like a lead is flagged; a project grant or another scope is not', () => {

@@ -63,14 +63,11 @@
 
   // What a grant just made changes, said after the owner confirms it. A
   // project grant is the newest active grant for that project, so its holder
-  // now leads it; a whole-room grant leads nothing. `waiting` is the count of
-  // the project's waiting items the new lead takes, when the server says so.
-  function grantMadeWords(grant, projectName, waiting) {
+  // now leads it; a whole-room grant leads nothing.
+  function grantMadeWords(grant, projectName) {
     const what = grant.project === null
       ? grant.holder_name + ' holds a whole-room grant; leads no project'
-      : grant.holder_name + ' now leads ' + projectName +
-        (Number.isSafeInteger(waiting) && waiting > 0
-          ? ' and takes ' + waiting + ' waiting item' + (waiting === 1 ? '' : 's') : '');
+      : grant.holder_name + ' now leads ' + projectName;
     return grant.grant_id + ' made. ' + what + '.';
   }
 
