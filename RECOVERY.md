@@ -78,8 +78,10 @@ Then the owner's signed-in sessions in the running server end.
 `interlock recover --hosted` starts no listener and needs no port. It refuses
 while the server is running, on a loopback room, and on a directory with no
 completed installation. Run it as the service user: a run as root leaves files
-the service cannot write. [`HOSTING.md`](HOSTING.md) has the exact commands
-for the systemd setup.
+the service cannot write. If that happened, run
+`sudo chown -R interlock:interlock /var/lib/interlock` (your data directory and
+service user) before starting the service. [`HOSTING.md`](HOSTING.md) has the
+exact commands for the systemd setup.
 
 ## What recovery changes
 

@@ -50,7 +50,7 @@ Interlock prints its exact `Open:` address (default is http://localhost:8788), m
 
 **Person: set up the owner.**
 
-Open the printed URL; a new installation says **Set up your room**. The person — not the installation helper — chooses their name and password and completes the device passkey prompts. Interlock does not issue a permanent recovery code; if both owner credentials are later lost, stop the room and run `interlock recover`.
+Open the printed URL; a new installation says **Set up your room**. The person — not the installation helper — chooses their name and password and completes the device passkey prompts. No permanent recovery code exists; if both owner credentials are lost, stop Interlock and run `interlock recover` (`--hosted` for a hosted room).
 
 When the transcript appears, installation is complete.
 
