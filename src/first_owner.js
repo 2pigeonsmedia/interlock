@@ -3322,8 +3322,38 @@ function createFirstOwnerHandler(options) {
       return sendGrantError(request, response, error);
     }
     if (waiting.length === 0) return sendJson(request, response, 201, { ok: true, grant: made });
-    return sendJson(request, response, 201, Object.assign({ ok: true, grant: made },
-      inheritOnGrant(who, firstOwnerSubjectId, holder, made, body.project, waiting)));
+    const inheritance = inheritOnGrant(who, firstOwnerSubjectId, holder, made, body.project, waiting);
+    // The new lead hears once, from whoever made the grant, what it took over.
+    if (inheritance.inherited.length > 0 || (inheritance.not_inherited || []).length > 0) {
+      const at = Date.now();
+      let grantor = null;
+      try {
+        grantor = authorizedActor(request, house.authorizeWrite(authorizationMeta(request, at), 'write', CHAT_RESOURCE), at);
+      } catch (_) {
+        grantor = null;
+      }
+      if (grantor) {
+        try {
+          await chat.append({ text: inheritedLine(holder.name, body.project, inheritance) }, grantor);
+        } catch (_) {
+          // The record holds the inheritance; the room line is a courtesy that failed.
+        }
+      }
+    }
+    return sendJson(request, response, 201, Object.assign({ ok: true, grant: made }, inheritance));
+  }
+
+  // One room line to the new lead (never one per item): what it took over,
+  // and what still waits on it as "holder left".
+  function inheritedLine(name, project, inheritance) {
+    const words = count => (count === 1 ? '1 waiting item' : `${count} waiting items`);
+    const parts = [];
+    if (inheritance.inherited.length > 0) {
+      parts.push(`you took over ${words(inheritance.inherited.length)}: ${inheritance.inherited.join(', ')}`);
+    }
+    const missed = inheritance.not_inherited || [];
+    if (missed.length > 0) parts.push(`not moved, still "holder left" and yours to hand on: ${missed.join(', ')}`);
+    return `@${name} — you lead ${project}; ${parts.join('; ')}.`;
   }
 
   /* The project's new lead inherits its waiting work (ruling, 2026-11-14),
@@ -3337,9 +3367,16 @@ function createFirstOwnerHandler(options) {
     if (!to || to.subject_id !== holder.subject_id) return { inherited: [], not_inherited: ids };
     const actor = Object.freeze({ subject_id: who.actor.subject_id, name: who.actor.name, kind: 'person',
       session: null, owner: true, now: who.now, first_owner: who.actor.subject_id === firstOwnerSubjectId });
+    // How each departed holder ended, in the record's own word.
+    const ended = {};
+    for (const seat of house.listRecentEndedSeats({ now: who.now, since: 0 })) {
+      if (seat && typeof seat.subject_id === 'string' && (seat.ended_how === 'left' || seat.ended_how === 'revoked')) {
+        ended[seat.subject_id] = seat.ended_how === 'left' ? 'left' : 'removed';
+      }
+    }
     let result;
     try {
-      result = work.inheritWaiting(actor, { project, ids, to, grant_id: made.grant_id });
+      result = work.inheritWaiting(actor, { project, ids, to, grant_id: made.grant_id, ended });
     } catch (_) {
       return { inherited: [], not_inherited: ids };
     }

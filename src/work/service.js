@@ -791,17 +791,19 @@ function createWorkService(options) {
   /* The new lead `to` inherits its project's waiting work (ruling,
    * 2026-11-14): for each id still on `project` with a holder or next who has
    * left, one ordinary update by `actor` (who made the grant), putting `to`
-   * in each slot that named someone who left, its note naming who left, the
-   * grant `grant_id` and who made it. What stays as it is: an approved request (what was
+   * in each slot that named someone who left, its note naming who left and
+   * how (`ended`, by subject id: "left" or "removed"; "left" when not
+   * known), the grant `grant_id` and who made it. What stays as it is: an approved request (what was
    * approved was its asker doing it; its lead withdraws it), and an item no
    * longer on the project or whose holder is back. Returns {inherited,
    * failed}: the ids moved, and the ids whose update was refused, each left
    * as it was. */
   function inheritWaiting(actor, input) {
     requireActor(actor);
-    const body = closedObject(input, ['project', 'ids', 'to', 'grant_id']);
+    const body = closedObject(input, ['project', 'ids', 'to', 'grant_id', 'ended']);
     if (!body || typeof body.project !== 'string' || !Array.isArray(body.ids) || !validRef(body.to) ||
-        typeof body.grant_id !== 'string') fail('invalid-input');
+        typeof body.grant_id !== 'string' || (body.ended !== undefined && !plainObject(body.ended))) fail('invalid-input');
+    const how = ref => (body.ended && body.ended[ref.subject_id] === 'removed' ? 'removed' : 'left');
     const inherited = [];
     const failed = [];
     for (const id of body.ids) {
@@ -809,8 +811,14 @@ function createWorkService(options) {
       if (!draft) fail('store-damaged');
       const item = draft.items.find(row => row.id === id);
       if (!item || item.project !== body.project || item.approval || holderLeft(item).length === 0) continue;
-      const note = `Inherited by ${body.to.name} from ${holderLeft(item).join(', ')} (left) ` +
-        `with lead grant ${body.grant_id}, made by ${actor.name}.`;
+      const seen = new Set();
+      const gone = [];
+      for (const ref of [item.responsible, item.next_to]) {
+        if (!departed(ref) || seen.has(ref.subject_id)) continue;
+        seen.add(ref.subject_id);
+        gone.push(`${ref.name} (${how(ref)})`);
+      }
+      const note = `Inherited by ${body.to.name} from ${gone.join(', ')} with lead grant ${body.grant_id}, made by ${actor.name}.`;
       const update = { operation_id: crypto.randomUUID(), id, note, expected_revision: item.revision };
       if (departed(item.responsible)) update.responsible = body.to;
       if (departed(item.next_to)) update.next_to = body.to;

@@ -14,7 +14,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
-  item, workItem, brief, grant, room, admitSeat, elevate, get, aiPost,
+  messages, item, workItem, brief, grant, room, admitSeat, elevate, get, aiPost,
 } = require('./helpers/lead_leaves_rig.js');
 
 test('a lead grant on the project inherits its waiting work, recorded; a whole-room grant inherits nothing', async () => {
@@ -30,15 +30,21 @@ test('a lead grant on the project inherits its waiting work, recorded; a whole-r
     assert.equal((await aiPost(runtime, '/api/ai/leave', {}, lead.token)).status, 200);
     assert.deepEqual((await brief(runtime, owner)).waiting_for_lead.map(line => line.count), [2], 'ARRANGEMENT: two wait');
 
+    const quiet = (await messages(runtime, owner)).length;
     owner = await elevate(runtime, owner, device);
     const whole = await grant(runtime, owner, 'Nova', null);
     assert.equal(whole.inherited, undefined, 'a whole-room grant leads nothing and inherits nothing');
     assert.deepEqual((await brief(runtime, owner)).waiting_for_lead.map(line => line.count), [2], 'still waiting');
+    assert.equal((await messages(runtime, owner)).length, quiet, 'nothing inherited: nobody rung');
 
     owner = await elevate(runtime, owner, device);
     const made = await grant(runtime, owner, 'Nova', 'ops');
     assert.deepEqual(made.inherited, [held.id, next.id]);
     assert.equal(made.not_inherited, undefined);
+    const told = (await messages(runtime, owner)).slice(quiet).filter(m => /took over/.test(m.text));
+    assert.equal(told.length, 1, 'one line to the new lead, never one per item');
+    assert.equal(told[0].byline, 'Ana', 'from whoever made the grant');
+    assert.equal(told[0].text, `@Nova — you lead ops; you took over 2 waiting items: ${held.id}, ${next.id}.`);
     const a = await item(runtime, owner, held.id);
     assert.deepEqual([a.responsible.name, a.holder_left], ['Nova', []]);
     const b = await item(runtime, owner, next.id);
