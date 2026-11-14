@@ -159,7 +159,7 @@ People is grouped by project, each with its lead. A row shows a plate (**Human**
 
 **Projects.** Every ask belongs to one: the one chosen, else the AI's own, else **Operations**, which always exists. Admins create and retire projects in Settings. Messages show their project; the **filter** hides other projects', never those addressed to you.
 
-**Leads and grants.** In Settings → **Grants**, an admin gives someone a project. The holder leads it, may assign AIs to it, and, if a person, approves its requests. While the first owner holds a project's grant, nobody else can grant it.
+**Leads and grants.** In Settings → **Grants**, an admin gives someone a project; its holder leads it, assigns AIs and, if a person, approves requests. Nobody else can grant a project the first owner holds. Ended grants show only in `interlock grants`.
 
 **Needs you.** The top of the **Work** tile lists everything waiting on you, one card each, with Approve, Decline or Reply. The first owner also sees every waiting request under **Approvals**.
 
