@@ -250,6 +250,7 @@
   function renderDecided(brief) {
     const rows = Array.isArray(brief.recently_decided) ? brief.recently_decided : [];
     element('decided-section').hidden = rows.length === 0;
+    element('decided-count').textContent = String(rows.length);
     element('decided-list').replaceChildren(...rows.map(row => {
       const card = make('div', 'work-row');
       const facts = make('p', 'work-tree-facts', model().decidedWords(row.decided) + ' · ');
@@ -599,6 +600,13 @@
     const expanded = toggle.getAttribute('aria-expanded') !== 'false';
     toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
     element('actions-list').hidden = expanded;
+  }
+
+  function toggleDecided() {
+    const toggle = element('decided-toggle');
+    const expanded = toggle.getAttribute('aria-expanded') !== 'false';
+    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    element('decided-list').hidden = expanded;
   }
 
   function showNeedsYou() {
@@ -1564,12 +1572,16 @@
 
   // A signed-out page keeps nothing of the last viewer's record on screen.
   function resetTile() {
-    for (const id of ['needs-you-list', 'reported-list', 'actions-list', 'project-list']) element(id).replaceChildren();
+    for (const id of ['needs-you-list', 'decided-list', 'reported-list', 'actions-list', 'project-list']) element(id).replaceChildren();
+    element('decided-section').hidden = true;
     element('needs-you-count').textContent = '0';
+    element('decided-count').textContent = '0';
     element('actions-count').textContent = '0';
     element('work-count-button').textContent = 'Needs you · 0';
     element('needs-you-toggle').setAttribute('aria-expanded', 'true');
     element('needs-you-list').hidden = false;
+    element('decided-toggle').setAttribute('aria-expanded', 'true');
+    element('decided-list').hidden = false;
     element('actions-toggle').setAttribute('aria-expanded', 'true');
     element('actions-list').hidden = false;
     element('settings-project-list').replaceChildren();
@@ -1588,6 +1600,7 @@
     session = state;
     const signal = state.listeners.signal;
     element('needs-you-toggle').addEventListener('click', toggleNeedsYou, { signal });
+    element('decided-toggle').addEventListener('click', toggleDecided, { signal });
     element('actions-toggle').addEventListener('click', toggleActions, { signal });
     element('work-count-button').addEventListener('click', showNeedsYou, { signal });
     element('work-drawer').addEventListener('close', scheduleOpenerFocus, { signal });
