@@ -153,7 +153,7 @@
           <div id="needs-you-list" class="work-list"></div>
         </section>
         <section id="decided-section" class="work-section" aria-labelledby="decided-heading" hidden>
-          <h3 id="decided-heading">Recently decided</h3>
+          <h3 id="decided-heading"><button id="decided-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="decided-list">Recently decided <span id="decided-count" class="work-count">0</span></button></h3>
           <div id="decided-list" class="work-list"></div>
         </section>
         <section id="approvals-section" class="work-section" aria-labelledby="approvals-heading" hidden>
@@ -257,7 +257,8 @@
           <label for="grant-holder">Holder</label>
           <select id="grant-holder" required></select>
           <label for="grant-project">Project</label>
-          <select id="grant-project"></select>
+          <select id="grant-project" aria-describedby="grant-project-hint"></select>
+          <p id="grant-project-hint" class="settings-hint" aria-live="polite">A project grant makes its holder that project's lead. Whole room makes no one a project lead.</p>
           <label for="grant-scope">Scope</label>
           <input id="grant-scope" maxlength="300" autocomplete="off" required>
           <label for="grant-until">Until (optional)</label>

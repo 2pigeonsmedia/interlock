@@ -99,6 +99,7 @@ const grantCreateForm = document.querySelector('#grant-create-form');
 const grantHolder = document.querySelector('#grant-holder');
 const grantProject = document.querySelector('#grant-project');
 const grantScope = document.querySelector('#grant-scope');
+const grantProjectHint = document.querySelector('#grant-project-hint');
 const grantUntil = document.querySelector('#grant-until');
 const settingsGrantsStatus = document.querySelector('#settings-grants-status');
 let csrfToken = null;
@@ -1782,34 +1783,47 @@ function grantState(grant, now) {
 }
 
 function fillGrantForm() {
-  const holders = rosterParticipants.slice()
-    .sort((left, right) => (left.kind === right.kind ? 0 : (left.kind === 'person' ? -1 : 1)) ||
-      left.name.localeCompare(right.name));
-  grantHolder.replaceChildren(...holders.map(row => {
+  grantHolder.replaceChildren(...InterlockPeopleModel.grantHolderOptions(rosterParticipants).map(row => {
     const option = document.createElement('option');
-    option.value = JSON.stringify([row.kind, row.name]);
-    option.textContent = `${row.name} · ${row.kind === 'person' ? 'Human' : 'AI'}`;
+    option.value = row.value;
+    option.textContent = row.label;
+    if (row.placeholder) {
+      option.disabled = true;
+      option.selected = true;
+    }
     return option;
   }));
   const whole = document.createElement('option');
   whole.value = '';
-  whole.textContent = 'Whole room';
+  whole.textContent = 'Whole room (leads no project)';
   grantProject.replaceChildren(whole, ...rosterProjects.map(project => {
     const option = document.createElement('option');
     option.value = project.id;
     option.textContent = project.display_name;
     return option;
   }));
+  updateGrantProjectHint();
 }
+
+const GRANT_PROJECT_HINT = 'A project grant makes its holder that project\'s lead. Whole room makes no one a project lead.';
+
+function updateGrantProjectHint() {
+  grantProjectHint.textContent = InterlockPeopleModel.wholeRoomReadsLikeLead(grantProject.value, grantScope.value)
+    ? 'This reads like a lead, but a whole-room grant leads no project. To make a lead, choose the project.'
+    : GRANT_PROJECT_HINT;
+}
+
+grantProject.addEventListener('change', updateGrantProjectHint);
+grantScope.addEventListener('input', updateGrantProjectHint);
 
 function renderSettingsGrants() {
   const now = Date.now();
-  const grants = rosterGrants.slice().sort((left, right) =>
+  const grants = InterlockPeopleModel.activeGrants(rosterGrants, now).sort((left, right) =>
     Number(right.grant_id.slice(2)) - Number(left.grant_id.slice(2)));
   if (grants.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'settings-hint';
-    empty.textContent = 'No grants yet.';
+    empty.textContent = 'No active grants.';
     settingsGrantList.replaceChildren(empty);
     return;
   }
@@ -1828,11 +1842,6 @@ function renderSettingsGrants() {
     const until = grant.until === null ? 'until revoked' : `until ${formatFullTime(grant.until) || 'the stated time'}`;
     made.textContent = `by ${grant.by_name} · ${formatFullTime(grant.at) || 'time unavailable'} · ${until}`;
     facts.append(name, where, scope, made);
-    if (state === 'revoked') {
-      const revoked = document.createElement('small');
-      revoked.textContent = `revoked by ${grant.revoked_by || 'unknown'}` + (grant.reason ? ` · ${grant.reason}` : '');
-      facts.append(revoked);
-    }
     row.append(facts);
     if (state === 'active') {
       const revoke = document.createElement('button');
@@ -1899,8 +1908,13 @@ grantCreateForm.addEventListener('submit', async event => {
     if (!validGrant(result.grant)) throw Object.assign(new Error('malformed-response'), { code: 'malformed-response' });
     grantScope.value = '';
     grantUntil.value = '';
+    grantHolder.value = '';
+    updateGrantProjectHint();
     await refreshSettingsGrants();
-    setSettingsStatus(settingsGrantsStatus, `${result.grant.grant_id} made for ${result.grant.holder_name}.`, 'success');
+    // Seam for the waiting-items hand-over: when the server reports how many of
+    // the project's waiting items the new lead took, pass that count here.
+    setSettingsStatus(settingsGrantsStatus, InterlockPeopleModel.grantMadeWords(result.grant,
+      result.grant.project === null ? null : projectName(result.grant.project), null), 'success');
   } catch (error) {
     grantFailure(error, 'Passkey confirmation was cancelled. No grant was made.',
       'Interlock did not make that grant. Refresh and try again.');

@@ -342,6 +342,23 @@ test('an Actions section every participant sees, between Reported to you and Pro
   assert.match(WORK_PANEL_JS, /const OPENER_LISTS = Object\.freeze\(\[[^\]]*'actions-list'/);
 });
 
+test('Recently decided collapses like Needs you and Actions, its heading carrying the count', () => {
+  for (const id of ['decided-heading', 'decided-toggle', 'decided-count', 'decided-list']) {
+    assert.equal(ROOM.split(`id="${id}"`).length, 2, `${id} must be present exactly once`);
+  }
+  assert.match(ROOM, /<button id="decided-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="decided-list">Recently decided <span id="decided-count" class="work-count">0<\/span><\/button>/);
+  assert.match(WORK_PANEL_JS, /function renderDecided\(brief\)[\s\S]*?element\('decided-count'\)\.textContent = String\(rows\.length\)/);
+  assert.match(WORK_PANEL_JS, /element\('decided-toggle'\)\.addEventListener\('click', toggleDecided/);
+  assert.match(WORK_PANEL_JS, /function toggleDecided[\s\S]*?setAttribute\('aria-expanded'[\s\S]*?element\('decided-list'\)\.hidden = expanded/);
+  // Sign-out leaves nothing of the last viewer's decisions, and reopens the section like its siblings.
+  const reset = /function resetTile\(\) \{([\s\S]*?)\n  \}\n/.exec(WORK_PANEL_JS);
+  assert.ok(reset, 'resetTile must exist');
+  assert.match(reset[1], /'decided-list'/);
+  assert.match(reset[1], /element\('decided-count'\)\.textContent = '0'/);
+  assert.match(reset[1], /element\('decided-toggle'\)\.setAttribute\('aria-expanded', 'true'\)/);
+  assert.match(reset[1], /element\('decided-list'\)\.hidden = false/);
+});
+
 test('Actions group headings keep names as stored, and the drawer\'s actions are named apart from the section', () => {
   assert.match(WORK_PANEL_JS, /make\('h4', 'work-tree-facts', group\.who \+ ' holds ' \+ group\.rows\.length\)/);
   // Everyone's view is a strip of names and counts; a name opens its rows.

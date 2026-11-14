@@ -43,6 +43,13 @@
     return new Map([...leadGrants(grants, now)].map(([project, grant]) => [project, grant.holder_name]));
   }
 
+  // The grants still in force, for Settings → Grants. Revoked and expired
+  // grants stay in the record (`GET /api/grants`, `interlock grants`) but not
+  // on the list the owner scrolls.
+  function activeGrants(grants, now) {
+    return grants.filter(grant => isActive(grant, now));
+  }
+
   // The active grants a participant holds, newest first.
   function heldGrants(grants, row, now) {
     return grants.filter(grant => grant.holder_name === row.name && grant.holder_kind === row.kind &&
@@ -52,6 +59,38 @@
   function grantLine(grant, projectName) {
     const where = grant.project === null ? 'holds a whole-room grant' : 'leads ' + projectName;
     return where + ' · under ' + grant.by_name + '\'s grant ' + grant.grant_id;
+  }
+
+  // What a grant just made changes, said after the owner confirms it. A
+  // project grant is the newest active grant for that project, so its holder
+  // now leads it; a whole-room grant leads nothing. `waiting` is the count of
+  // the project's waiting items the new lead takes, when the server says so.
+  function grantMadeWords(grant, projectName, waiting) {
+    const what = grant.project === null
+      ? grant.holder_name + ' holds a whole-room grant; leads no project'
+      : grant.holder_name + ' now leads ' + projectName +
+        (Number.isSafeInteger(waiting) && waiting > 0
+          ? ' and takes ' + waiting + ' waiting item' + (waiting === 1 ? '' : 's') : '');
+    return grant.grant_id + ' made. ' + what + '.';
+  }
+
+  // The grant form's Holder choices: a placeholder first, so no participant
+  // is the default (a default holder once took a grant meant for an AI),
+  // then people before AIs, each by name.
+  function grantHolderOptions(participants) {
+    const holders = participants.slice().sort((left, right) =>
+      (left.kind === right.kind ? 0 : (left.kind === 'person' ? -1 : 1)) || left.name.localeCompare(right.name));
+    return [{ value: '', label: 'Choose who holds it', placeholder: true }, ...holders.map(row => ({
+      value: JSON.stringify([row.kind, row.name]),
+      label: row.name + ' · ' + (row.kind === 'person' ? 'Human' : 'AI'),
+      placeholder: false,
+    }))];
+  }
+
+  // The form's warning: a whole-room grant whose scope reads like a lead
+  // makes no one a lead. Suggest choosing the project.
+  function wholeRoomReadsLikeLead(project, scope) {
+    return project === '' && /\blead/i.test(String(scope || ''));
   }
 
   function age(since, now) {
@@ -257,7 +296,7 @@
   }
 
   const contract = Object.freeze({
-    leads, leadGrants, heldGrants, grantLine, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {
