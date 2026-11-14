@@ -18,8 +18,9 @@ project's work held by AIs that left stops appearing one item at a time in
 the first owner's Needs you. It appears as one line, "<Project> has no lead:
 N items wait for a lead", whose button opens the grant form on that project.
 The next lead granted on the project takes the items over: each is updated
-by whoever made the grant, with a note naming who left and the grant. An
-approved request stays as it is for the new lead to withdraw. If any grant
+by whoever made the grant, with a note naming who left and the grant. The
+new lead is told once, in the room, which items it took over. An approved
+request stays as it is for the new lead to withdraw. If any grant
 on the project is still active when you upgrade, the project has a lead, and
 its work goes to that lead item by item as before.
 
