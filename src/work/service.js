@@ -254,8 +254,9 @@ function createWorkService(options) {
     return liveCache.set;
   }
   /* Who of a live work item's holder and next has left the room (ruling,
-   * 2026-11-10), by name, once each: an AI seat whose session ended (it
-   * left, was removed, released or expired). Derived on each read, never
+   * 2026-11-10), by name, once each: an AI seat that left or was removed. A
+   * seat the room released (a day without contact) or whose pass ran out has
+   * not left: `live` counts it as still standing. Derived on each read, never
    * stored; nothing is reassigned. A done or withdrawn item says nothing. */
   // An AI seat that is no longer in the room.
   function departed(ref) {
@@ -790,17 +791,17 @@ function createWorkService(options) {
   /* The new lead `to` inherits its project's waiting work (ruling,
    * 2026-11-14): for each id still on `project` with a holder or next who has
    * left, one ordinary update by `actor` (who made the grant), putting `to`
-   * in each slot that named someone who left, with `note` saying which grant
-   * and who made it. What stays as it is: an approved request (what was
+   * in each slot that named someone who left, its note naming who left, the
+   * grant `grant_id` and who made it. What stays as it is: an approved request (what was
    * approved was its asker doing it; its lead withdraws it), and an item no
    * longer on the project or whose holder is back. Returns {inherited,
    * failed}: the ids moved, and the ids whose update was refused, each left
    * as it was. */
   function inheritWaiting(actor, input) {
     requireActor(actor);
-    const body = closedObject(input, ['project', 'ids', 'to', 'note']);
+    const body = closedObject(input, ['project', 'ids', 'to', 'grant_id']);
     if (!body || typeof body.project !== 'string' || !Array.isArray(body.ids) || !validRef(body.to) ||
-        typeof body.note !== 'string') fail('invalid-input');
+        typeof body.grant_id !== 'string') fail('invalid-input');
     const inherited = [];
     const failed = [];
     for (const id of body.ids) {
@@ -808,7 +809,9 @@ function createWorkService(options) {
       if (!draft) fail('store-damaged');
       const item = draft.items.find(row => row.id === id);
       if (!item || item.project !== body.project || item.approval || holderLeft(item).length === 0) continue;
-      const update = { operation_id: crypto.randomUUID(), id, note: body.note, expected_revision: item.revision };
+      const note = `Inherited by ${body.to.name} from ${holderLeft(item).join(', ')} (left) ` +
+        `with lead grant ${body.grant_id}, made by ${actor.name}.`;
+      const update = { operation_id: crypto.randomUUID(), id, note, expected_revision: item.revision };
       if (departed(item.responsible)) update.responsible = body.to;
       if (departed(item.next_to)) update.next_to = body.to;
       try {

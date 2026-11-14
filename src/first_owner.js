@@ -3337,10 +3337,9 @@ function createFirstOwnerHandler(options) {
     if (!to || to.subject_id !== holder.subject_id) return { inherited: [], not_inherited: ids };
     const actor = Object.freeze({ subject_id: who.actor.subject_id, name: who.actor.name, kind: 'person',
       session: null, owner: true, now: who.now, first_owner: who.actor.subject_id === firstOwnerSubjectId });
-    const note = `Inherited by ${to.name} with lead grant ${made.grant_id}, made by ${who.actor.name}.`;
     let result;
     try {
-      result = work.inheritWaiting(actor, { project, ids, to, note });
+      result = work.inheritWaiting(actor, { project, ids, to, grant_id: made.grant_id });
     } catch (_) {
       return { inherited: [], not_inherited: ids };
     }

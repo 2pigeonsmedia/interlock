@@ -97,11 +97,18 @@ that also carries `approval` (`state`: `awaiting`, `approved` or `declined`;
   work, in `list`, `brief` and `items/<id>` reads: its blocker was dropped,
   not finished. Derived on each read; unlinking clears it.
 - A live work item whose holder or next is an AI that has left the room (it
-  ran `interlock leave`, was removed, was released after 24 hours without
-  contact, or its connection's pass ran out) carries `holder_left`, the names
-  of those who left, in `list`, `brief` and `items/<id>` reads. Nothing is
-  reassigned: the item still names them, and is in its project's live lead's
-  Needs you (else the first owner's) until someone hands it on. Derived on
+  ran `interlock leave` or was removed; an AI the room released after 24
+  hours without contact, or whose connection's pass ran out, has not left)
+  carries `holder_left`, the names of those who left, in `list`, `brief` and
+  `items/<id>` reads. Nothing is reassigned: the item still names them, and
+  is in its project's live lead's Needs you (else the first owner's) until
+  someone hands it on. Work belongs to its project: on a project nobody holds
+  a lead grant on (its lead left or was removed), such an item waits for a
+  lead instead. It is in nobody's `needs_me`; the first owner's brief lists
+  the project once in `waiting_for_lead`, and the next lead grant on the
+  project inherits it (see the grants paragraph in PROTOCOL.md). A lead that
+  is only away (released or expired) still holds its grant, so its project's
+  holder-left work goes to the first owner item by item meanwhile. Derived on
   each read, never stored; `[]` otherwise. A later AI of the same name is a
   new participant and is not its holder. An approved request for approval
   counts too (its asker holds it); one still awaiting is next to its approver
@@ -288,7 +295,10 @@ recorded only.
   its objective and today line), `needs_me` (each decision or request carrying `blocks`: the
   ids of open work linked to it, derived), `reported_to_me`, open work,
   decisions, `recently_decided` (the viewer's last five answers on the record,
-  each with `decided`: `choice`, `text`, `at`), and the `cursor` a later
+  each with `decided`: `choice`, `text`, `at`), `waiting_for_lead` (for the
+  first owner: one `{ project, display_name, count, items, since }` per
+  active project with no lead whose work waits for one, `since` the oldest
+  last change among those items; `[]` otherwise), and the `cursor` a later
   `changes` call continues from.
 - `list[?project=ID&needs_me=1&after=N&limit=N]` — rows with a `total` and a
   `next` continuation; never a silent cap. Retired projects are omitted unless
@@ -372,7 +382,10 @@ Five sections, in this order:
   holder or next has left (its own `leave`, or a removal; an AI the room
   released or whose pass ran out has not left), marked `holder left`, for
   its project's lead, else the first owner; a decision awaiting their answer; a request awaiting their
-  approval) with room asks where it is the
+  approval) and, for the first owner, one card per project with no lead
+  (`<project> has no lead`, how many items wait and their ids; its act,
+  **Grant a lead**, opens Settings on the grant form with that project
+  chosen) with room asks where it is the
   viewer's turn and asks the viewer made that came back to them. A record and
   the room ask bound to it are one card, never two. A card's head shows who,
   the turn in words (`your turn`, `waiting on Ana`, `approved → you are on

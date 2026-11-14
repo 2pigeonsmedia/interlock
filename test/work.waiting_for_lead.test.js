@@ -124,8 +124,8 @@ test('a new lead inherits the waiting work: one ordinary update each, naming the
   const ids = work.waitingIds('ops');
   assert.deepEqual(ids, [held.id, next.id]);
   state.grant = nova; // the grant is made
-  const note = 'Inherited by Nova with lead grant G-2, made by Ana.';
-  const result = work.inheritWaiting(owner, { project: 'ops', ids, to: ref(nova), note });
+  const note = 'Inherited by Nova from Lead (left) with lead grant G-2, made by Ana.';
+  const result = work.inheritWaiting(owner, { project: 'ops', ids, to: ref(nova), grant_id: 'G-2' });
   assert.deepEqual(result, { inherited: [held.id, next.id], failed: [] });
   const a = work.get(owner, { id: held.id }).item;
   assert.deepEqual([a.responsible.name, a.holder_left], ['Nova', []], 'holder slot now the new lead');
@@ -133,7 +133,7 @@ test('a new lead inherits the waiting work: one ordinary update each, naming the
   assert.deepEqual([b.responsible.name, b.next_to.name, b.holder_left], ['Stay', 'Nova', []],
     'only the slot that named who left changes');
   const events = work.get(owner, { id: held.id }).history.filter(event => event.kind === 'updated');
-  assert.equal(events.at(-1).note, note, 'the record names the grant and the grantor');
+  assert.equal(events.at(-1).note, note, 'the record names who left, the grant and the grantor');
   assert.equal(events.at(-1).by.name, 'Ana', 'the grantor\'s act');
   assert.equal(work.get(owner, { id: otherProject.id }).item.responsible.name, 'Lead', 'another project\'s work is untouched');
   assert.deepEqual(work.brief(owner, {}).waiting_for_lead.map(line => [line.project, line.items]), [['books', [otherProject.id]]],
@@ -155,11 +155,11 @@ test('inheritance leaves an approved request alone (its new lead withdraws it), 
   assert.deepEqual(ids, [held.id, request.id], 'ARRANGEMENT: both wait, the approved request counted');
   live.add(gone.subject_id); // its holder is back before the grant lands
   state.grant = nova;
-  assert.deepEqual(work.inheritWaiting(owner, { project: 'ops', ids, to: ref(nova), note: 'n' }),
+  assert.deepEqual(work.inheritWaiting(owner, { project: 'ops', ids, to: ref(nova), grant_id: 'G-2' }),
     { inherited: [], failed: [] });
   assert.equal(work.get(owner, { id: held.id }).item.responsible.name, 'Juno', 'back: nothing to inherit');
   live.delete(gone.subject_id);
-  assert.deepEqual(work.inheritWaiting(owner, { project: 'ops', ids, to: ref(nova), note: 'n' }),
+  assert.deepEqual(work.inheritWaiting(owner, { project: 'ops', ids, to: ref(nova), grant_id: 'G-2' }),
     { inherited: [held.id], failed: [] }, 'gone again: the work moves, the approved request does not');
   assert.equal(work.get(owner, { id: request.id }).item.responsible.subject_id, gone.subject_id);
   assert.equal(needs(work, nova).includes(request.id), true, 'the new lead sees it, holder left, to withdraw');

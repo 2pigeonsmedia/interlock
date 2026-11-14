@@ -45,7 +45,7 @@ test('a lead grant on the project inherits its waiting work, recorded; a whole-r
     assert.deepEqual([b.responsible.name, b.next_to.name, b.holder_left], ['Ana', 'Nova', []], 'only the slot that named Lead');
     const history = (await get(runtime, `/api/work/items/${held.id}`, owner)).json.history;
     const update = history.filter(event => event.kind === 'updated').at(-1);
-    assert.equal(update.note, `Inherited by Nova with lead grant ${made.grant.grant_id}, made by Ana.`);
+    assert.equal(update.note, `Inherited by Nova from Lead (left) with lead grant ${made.grant.grant_id}, made by Ana.`);
     assert.equal(update.by.name, 'Ana');
     assert.deepEqual((await brief(runtime, owner)).waiting_for_lead, []);
   });
