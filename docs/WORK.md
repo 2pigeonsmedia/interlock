@@ -400,8 +400,9 @@ Five sections, in this order:
 - **Projects** — each active project in place, with no pop-up for a
   project. Its heading is the project's name with its open, blocked, ready
   and awaiting counts; under it, its objective, today's-focus note and who
-  last changed them, with an **Edit** button that opens a form for those two
-  right there (Save, Cancel). Any participant may edit them. Then the
+  last changed them. An administrator, the first owner or the project's live
+  lead also sees an **Edit** button that opens a form for those two right
+  there (Save, Cancel); no one else may edit them. Then the
   project's open work and live decisions, nested one level under their
   parent (a follow-up whose parent is done lists at top level). Each row is a
   button (`Open W-12: …`) with its id and state, and under it one line of the
