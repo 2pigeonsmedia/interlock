@@ -14,6 +14,8 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const audit = require('../identity/audit.js');
+const repo = require('../identity/repo.js');
 const { startInterlockServer } = require('../src/server.js');
 const { issueHostedRecoveryCode, HOSTED_RECOVERY_TTL_MS } = require('../src/hosted_recovery.js');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
@@ -130,7 +132,11 @@ test('hosted owner recovery: issue offline, redeem on the hosted origin', async 
     await setUpOwner(runtime, oldDevice);
 
     // No recovery pending: a code is refused with the same answer as a wrong
-    // one, and nothing on disk changes.
+    // one, and nothing on disk changes. The server's flusher writes delivered
+    // outbox rows back into the state file once a second, so drain it first:
+    // with nothing pending, its later ticks write nothing.
+    await audit.flushOutbox();
+    assert.equal(repo.pendingOutbox().length, 0, 'ARRANGEMENT: no outbox row is pending before the read');
     const before = stateBytes(dataDir);
     const none = await post(runtime, '/api/owner-recovery/options',
       { code: 'not-a-real-code', new_password: NEW_PASSWORD }, {}, '203.0.113.50');
