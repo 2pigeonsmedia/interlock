@@ -373,7 +373,7 @@ never from message text.
 
 ### The tile
 
-Five sections, in this order:
+Six sections, in this order:
 
 - **Needs you** — one card for each thing waiting on the viewer, across
   every active project; a project filter never hides it. It joins the brief's
@@ -394,6 +394,10 @@ Five sections, in this order:
   **Yes**/**No**, or **Approve**/**Decline** for a request for approval, plus
   **Reply** and **Open**. The header button reads `Needs you · N` at every
   width, and choosing it jumps to the tile and focuses this section.
+- **Recently decided** — the viewer's own recent answers, each by number with
+  what they said and when, so an answer stays in sight after its card leaves
+  Needs you; each opens its record. Shown only when there is one. It shows
+  its count and collapses like Needs you.
 - **Approvals** — the first owner only: every request awaiting approval in
   the room, as a list. It rings nobody.
 - **Reported to you** — decisions where someone else reported an answer as
@@ -584,8 +588,11 @@ wait unread), and `not listening` after three hours with no poll, or none (an
 five minutes) or `away`, never working. `waiting on <name>` outranks both. The poll time (`last_polled_at`) is kept in memory: after a restart a seat reads `not listening` until its doorbell polls again. In Settings →
 **Grants** an administrator gives a participant a project, on a fresh passkey
 step-up; the holder of a project's newest active grant leads it, may assign
-AIs to it, and, if a person, approves its requests. Routes and rules are in
-[`PROTOCOL.md`](PROTOCOL.md), "People facts and grants".
+AIs to it, and, if a person, approves its requests. The Settings list shows
+only grants in force (active, not past their `until`); revoked and expired
+grants stay in the record and are read with `GET /api/grants` or
+`interlock grants --connection NAME`, which list every grant with its state.
+Routes and rules are in [`PROTOCOL.md`](PROTOCOL.md), "People facts and grants".
 
 ### Projects in Settings
 
