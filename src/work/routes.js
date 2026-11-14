@@ -404,13 +404,22 @@ function createWorkRoutes(options) {
     return typeof work.carryPreview === 'function' ? work.carryPreview(fromIds) : null;
   }
 
+  // A project's work waiting for a lead, by id: what a lead grant inherits.
+  function waitingIds(project) {
+    try { return typeof work.waitingIds === 'function' ? work.waitingIds(project) : []; }
+    catch (_) { return []; }
+  }
+  function inheritWaiting(actor, input) {
+    if (typeof work.inheritWaiting !== 'function') throw new Error('work: inherit unavailable');
+    return work.inheritWaiting(actor, input);
+  }
   function carryHeld(actor, input) {
     if (typeof work.carryHeld !== 'function') throw new Error('work: carry unavailable');
     return work.carryHeld(actor, input);
   }
 
   return Object.freeze({
-    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, heldBy, carryPreview, carryHeld, lastWriteOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
+    mutate, read, ownerStepUpRequired, answerFromRoom, bindAsk, waitingOf, workingOf, heldBy, carryPreview, carryHeld, waitingIds, inheritWaiting, lastWriteOf, priorDiscussion, recordDiscussion, priorResult, reviseScope, followAsk, createApproval, closeApproval, projectTakesWork, approvalOf, decisionOf, recordProject,
     MUTATION_OPS: Object.freeze(Object.keys(MUTATIONS)),
   });
 }

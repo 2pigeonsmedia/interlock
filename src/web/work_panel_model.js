@@ -159,6 +159,18 @@
     return !!row && Number.isSafeInteger(row.updated_at) && row.updated_at !== updatedAt;
   }
 
+  // The brief's projects with no lead, each {project, display_name, count,
+  // items, since}; nothing from a server that does not send them.
+  function leadLines(brief) {
+    return (Array.isArray(brief.waiting_for_lead) ? brief.waiting_for_lead : [])
+      .filter(line => line && typeof line.project === 'string' && Number.isSafeInteger(line.count) && line.count > 0 &&
+        Array.isArray(line.items) && Number.isSafeInteger(line.since));
+  }
+
+  function waitingWords(count) {
+    return count === 1 ? '1 item waits' : count + ' items wait';
+  }
+
   function needsYou(brief, now, asks = [], answered = new Set()) {
     const names = projectNames(brief);
     // An ask bound to a decision is that decision's row, never a second one.
@@ -183,7 +195,14 @@
         action: decision ? 'Answer' : 'Open work',
       }, kill === null ? {} : { kill }, room) };
     });
-    const rows = workRows.concat(asks.filter(ask => !cited.has(ask.ask_id))
+    const leadRows = leadLines(brief).map(line => ({ at: line.since, row: {
+      id: line.project, kind: 'lead',
+      projectName: names.has(line.project) ? names.get(line.project) : line.project,
+      title: (line.display_name || line.project) + ' has no lead',
+      ask: waitingWords(line.count) + ' for a lead: ' + line.items.join(', '),
+      by: 'no lead', waiting: waitingLabel(line.since, now), action: 'Grant a lead',
+    } }));
+    const rows = workRows.concat(leadRows, asks.filter(ask => !cited.has(ask.ask_id))
       .map(ask => ({ at: ask.asked_at, row: askRow(ask, now, names) })))
       .sort((a, b) => a.at - b.at).map(entry => entry.row);
     return { count: rows.length, rows };
@@ -337,6 +356,18 @@
       if (decision && answeredInRoom(row, answered)) card.note = ROOM_NOT_RECORDED;
       else if (decision && recordBehind(row, bound)) card.note = RECORD_BEHIND;
       cards.push(card);
+    }
+    // A project with no lead: one card for all of its waiting work, whose act
+    // is a lead grant on it (ruling, 2026-11-14).
+    for (const line of leadLines(brief)) {
+      cards.push({
+        key: 'lead-' + line.project, kind: 'lead', id: line.project, at: line.since, who: null,
+        question: (line.display_name || project(line.project)) + ' has no lead',
+        means: null, approval: false,
+        detail: waitingWords(line.count) + ' for a lead: ' + line.items.join(', '),
+        project: project(line.project), askId: null, revision: null, blocks: [], unassigned: false,
+        blockerWithdrawn: [], holderLeft: [], grantProject: line.project,
+      });
     }
     for (const ask of askById.values()) {
       cards.push({

@@ -180,6 +180,11 @@
     document.dispatchEvent(new CustomEvent('interlock:reply-ask', { detail: { ask_id: askId } }));
   }
 
+  // The room's Settings owns the grant form; this asks it to open on a project.
+  function grantLead(project) {
+    document.dispatchEvent(new CustomEvent('interlock:grant-lead', { detail: { project } }));
+  }
+
   function cardButton(text, label, onClick) {
     const button = make('button', 'quiet-action', text);
     button.type = 'button';
@@ -211,6 +216,18 @@
     element('needs-you-list').replaceChildren(...(needs.count ? needs.cards.map(card => {
       const node = make('div', 'work-row work-card');
       const head = make('p', 'work-card-head');
+      // A project with no lead opens the grant form on it (ruling, 2026-11-14).
+      if (card.kind === 'lead') {
+        const grant = () => grantLead(card.grantProject);
+        head.append(ageNode(card.at));
+        node.append(head, openButton('work-open', card.question, 'Grant a lead on ' + card.project, grant, card.key));
+        node.append(make('p', 'work-card-detail', card.detail));
+        node.append(make('p', 'work-tree-facts', card.project));
+        const actions = make('div', 'work-card-actions');
+        actions.append(cardButton('Grant a lead', 'Grant a lead on ' + card.project, grant));
+        node.append(actions);
+        return node;
+      }
       head.append(idBadge(card.kind === 'ask' ? '#' + card.askId : card.id));
       if (card.turn) head.append(make('span', 'work-turn', card.turn));
       head.append(ageNode(card.at));

@@ -580,7 +580,16 @@ room ended on its own (24 hours without contact, or its pass running out) has
 not left: its grants stay active and its items keep it as holder. While it is
 away it is not its project's lead for routing: that project's holder-left
 items and lead rings go to the first owner until it returns or its grant is
-revoked. A grant belongs to the participant it was made for, not to a
+revoked. A grant on a project with no lead (no active grant on it, so its
+departed holders' work waits for one) inherits that work: each waiting item
+is re-pointed by one ordinary update of the grantor's, putting the new holder
+in each slot that named someone who left, with the note `Inherited by <new>
+from <who left> (left) with lead grant G-n, made by <grantor>.` The `201`
+answer then adds `inherited` (the ids moved) and, if any update was refused,
+`not_inherited` (those ids, which still say holder left, now for the new
+lead). An approved request stays as it is for its new lead to withdraw. A
+whole-room grant (`project: null`) leads nothing and inherits nothing. A
+grant belongs to the participant it was made for, not to a
 name. A later AI session with the same name holds nothing by itself, but when
 the newest earlier session of that name ended by release or expiry, whoever
 lets it back in carries the earlier session over: on the Allow (the card's

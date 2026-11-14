@@ -3585,7 +3585,13 @@ function needsRow(row) {
 }
 
 function renderBrief(stdout, brief, connection) {
-  line(stdout, `Needs you (${brief.needs_me.length})`);
+  // A project with no lead is one line, not one per item (ruling, 2026-11-14).
+  const leadLines = Array.isArray(brief.waiting_for_lead) ? brief.waiting_for_lead : [];
+  line(stdout, `Needs you (${brief.needs_me.length + leadLines.length})`);
+  for (const entry of leadLines) {
+    line(stdout, `  ${entry.project} · ${terminalSafe(entry.display_name || entry.project)} has no lead — ` +
+      `${entry.count === 1 ? '1 item waits' : entry.count + ' items wait'} for one (${entry.items.join(', ')}); a lead grant on ${entry.project} hands them on`);
+  }
   for (const row of brief.needs_me) line(stdout, '  ' + needsRow(row));
   if (brief.reported_to_me.length) {
     line(stdout, `Reported to you (${brief.reported_to_me.length}) — answers relayed in your name, confirm or correct them`);

@@ -223,7 +223,7 @@ function stripIds(value) {
 }
 
 function createWorkService(options) {
-  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf', 'live']);
+  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf', 'live', 'leadHeldOf']);
   const store = input && input.store;
   if (!store || typeof store.read !== 'function' || typeof store.commit !== 'function' ||
       typeof store.nextId !== 'function' || typeof store.nextEvent !== 'function') {
@@ -234,6 +234,11 @@ function createWorkService(options) {
   // A project's live lead `{subject_id, ...}` or null (server-internal);
   // without it no one moves a record as its project's lead.
   const leadOf = typeof input.leadOf === 'function' ? input.leadOf : null;
+  // A project's lead by grant, `{subject_id, ...}` or null (server-internal):
+  // the holder of its active lead grant, in the room or away (a released
+  // lead keeps its grant). Null means the project has no lead at all; without
+  // it, no project reads as having none.
+  const leadHeldOf = typeof input.leadHeldOf === 'function' ? input.leadHeldOf : null;
   // The subject ids still in the room at `now`, as a Set (server-internal);
   // without it nobody reads as having left.
   const liveOf = typeof input.live === 'function' ? input.live : null;
@@ -249,8 +254,9 @@ function createWorkService(options) {
     return liveCache.set;
   }
   /* Who of a live work item's holder and next has left the room (ruling,
-   * 2026-11-10), by name, once each: an AI seat whose session ended (it
-   * left, was removed, released or expired). Derived on each read, never
+   * 2026-11-10), by name, once each: an AI seat that left or was removed. A
+   * seat the room released (a day without contact) or whose pass ran out has
+   * not left: `live` counts it as still standing. Derived on each read, never
    * stored; nothing is reassigned. A done or withdrawn item says nothing. */
   // An AI seat that is no longer in the room.
   function departed(ref) {
@@ -268,6 +274,25 @@ function createWorkService(options) {
     }
     return names;
   }
+  /* Whether a project has no lead at all (ruling, 2026-11-14): nobody holds
+   * an active lead grant on it. A lead who is only away still holds one. When
+   * the answer cannot be read, the project counts as led, so its work goes to
+   * the first owner one item at a time as before, never out of sight. */
+  function leaderless(project, now) {
+    if (!leadHeldOf) return false;
+    let lead;
+    try { lead = leadHeldOf(project, now); } catch (_) { return false; }
+    return !(lead && typeof lead.subject_id === 'string');
+  }
+  /* Work belongs to its project; a lead holds it on the project's behalf
+   * (ruling, 2026-11-14). A live item whose holder or next has left, on a
+   * project with no lead, waits for one: it stays as it is, the first owner
+   * sees one line for the project instead of one per item, and the next lead
+   * granted on the project inherits it. Derived on each read, never stored. */
+  function waitsForLead(item, now) {
+    return holderLeft(item).length > 0 && leaderless(item.project, now);
+  }
+
   /* An approved request whose asker has left (ruling, 2026-11-10): its lead
    * must have a way out. It is withdrawn, never handed on (what was approved
    * was its asker doing it) and never marked done for them. */
@@ -732,6 +757,73 @@ function createWorkService(options) {
     return Object.freeze(carried);
   }
 
+  /* The projects whose work waits for a lead, for `subjectId` when the line
+   * is theirs (the first owner's, as an item with no lead routes): one entry
+   * per project, {project, display_name, count, items, since}, ids in order,
+   * `since` the oldest of their last changes. Active projects only. */
+  function waitingForLead(subjectId) {
+    const draft = store.read();
+    if (!draft || typeof subjectId !== 'string') return [];
+    const now = clock();
+    const active = draft.projects.filter(row => row.retired_at === null);
+    const out = [];
+    for (const project of active) {
+      const items = draft.items.filter(item => item.project === project.id && waitsForLead(item, now))
+        .sort((a, b) => idNumber(a.id) - idNumber(b.id));
+      if (items.length === 0 || leadOrOwner(items[0]) !== subjectId) continue;
+      out.push({ project: project.id, display_name: project.display_name, count: items.length,
+        items: items.map(item => item.id), since: Math.min(...items.map(item => item.updated_at)) });
+    }
+    return out;
+  }
+
+  /* The ids of a project's work that waits for a lead now: what a lead grant
+   * on it would inherit. Read before the grant is made, since once it is
+   * made the project has a lead and nothing waits. */
+  function waitingIds(project) {
+    const draft = store.read();
+    if (!draft || typeof project !== 'string') return [];
+    const now = clock();
+    return draft.items.filter(item => item.project === project && waitsForLead(item, now))
+      .sort((a, b) => idNumber(a.id) - idNumber(b.id)).map(item => item.id);
+  }
+
+  /* The new lead `to` inherits its project's waiting work (ruling,
+   * 2026-11-14): for each id still on `project` with a holder or next who has
+   * left, one ordinary update by `actor` (who made the grant), putting `to`
+   * in each slot that named someone who left, its note naming who left, the
+   * grant `grant_id` and who made it. What stays as it is: an approved request (what was
+   * approved was its asker doing it; its lead withdraws it), and an item no
+   * longer on the project or whose holder is back. Returns {inherited,
+   * failed}: the ids moved, and the ids whose update was refused, each left
+   * as it was. */
+  function inheritWaiting(actor, input) {
+    requireActor(actor);
+    const body = closedObject(input, ['project', 'ids', 'to', 'grant_id']);
+    if (!body || typeof body.project !== 'string' || !Array.isArray(body.ids) || !validRef(body.to) ||
+        typeof body.grant_id !== 'string') fail('invalid-input');
+    const inherited = [];
+    const failed = [];
+    for (const id of body.ids) {
+      const draft = store.read();
+      if (!draft) fail('store-damaged');
+      const item = draft.items.find(row => row.id === id);
+      if (!item || item.project !== body.project || item.approval || holderLeft(item).length === 0) continue;
+      const note = `Inherited by ${body.to.name} from ${holderLeft(item).join(', ')} (left) ` +
+        `with lead grant ${body.grant_id}, made by ${actor.name}.`;
+      const update = { operation_id: crypto.randomUUID(), id, note, expected_revision: item.revision };
+      if (departed(item.responsible)) update.responsible = body.to;
+      if (departed(item.next_to)) update.next_to = body.to;
+      try {
+        updateWork(actor, update);
+        inherited.push(id);
+      } catch (_) {
+        failed.push(id);
+      }
+    }
+    return Object.freeze({ inherited: Object.freeze(inherited), failed: Object.freeze(failed) });
+  }
+
   function heldBy(subjectId) {
     const mine = ownWork(subjectId);
     return mine ? mine.map(entry => ({ id: entry.item.id, project: entry.item.project })) : [];
@@ -760,7 +852,9 @@ function createWorkService(options) {
     }
     if (unowned(item)) return unassignedTo(item) === subjectId;
     // Its holder or next has left: its lead (else the first owner) decides.
-    if (holderLeft(item).length > 0 && leadOrOwner(item) === subjectId) return true;
+    // On a project with no lead it waits for one: the first owner sees the
+    // project's one line (waitingForLead), not this item.
+    if (holderLeft(item).length > 0 && !waitsForLead(item, clock()) && leadOrOwner(item) === subjectId) return true;
     // Next to the viewer; or, with nobody next, held by the viewer: a record
     // made someone's is theirs to act on until someone else is named next.
     const holds = !item.next_to && item.responsible && item.responsible.subject_id === subjectId;
@@ -1916,6 +2010,9 @@ function createWorkService(options) {
       })),
       needs_me: mine.filter(item => needsMe(item, me))
         .map(item => Object.assign(row(draft, item), { blocks: blocksOf(draft, item) })),
+      // A project with no lead, whose work waits for one: one line each for
+      // the first owner, whose act is a lead grant (ruling, 2026-11-14).
+      waiting_for_lead: waitingForLead(me),
       reported_to_me: mine.filter(item => item.kind === 'decision' && !item.withdrawn && item.answer &&
         item.answer.kind === 'reported' && item.answer.attributed_to.subject_id === me).map(item => row(draft, item)),
       open: items.filter(item => item.kind !== 'decision' && LIVE_WORK_STATES.includes(item.state)).map(item => row(draft, item)),
@@ -2074,7 +2171,7 @@ function createWorkService(options) {
 
   return Object.freeze({
     createProject, retireProject, updateProject,
-    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, heldBy, carryPreview, carryHeld, lastWriteOf, attachEvidence, addNote, share,
+    createItem, updateWork, moveItem, checkOnly, waitingOf, workingOf, heldBy, carryPreview, carryHeld, waitingForLead, waitingIds, inheritWaiting, lastWriteOf, attachEvidence, addNote, share,
     answer, reportAnswer, confirmReported, reopen, withdraw, withdrawItem, revise, followAsk, recordDiscussion, priorDiscussion, killAsk, killReply, answerFromRoom, bindAsk, decisionOf, priorResult, reviseScope,
     createApproval, closeApproval, projectTakesWork, approvalOf, recordProject,
     list, get, brief, changes, exportRecords,
