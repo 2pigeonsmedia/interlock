@@ -106,3 +106,31 @@ test('the grant form names what whole room does, warns as the scope is typed, an
   assert.match(ROOM_JS, /InterlockPeopleModel\.grantMadeWords\(result\.grant,/);
   assert.doesNotMatch(ROOM_JS, /made for \$\{result\.grant\.holder_name\}/, 'the old bare confirmation is gone');
 });
+
+// A grant never goes to a holder the owner did not choose. On 11-14 the owner
+// meant to grant a lead to an AI; the Holder list opened on the first person
+// (the owner herself) and the grant landed on her.
+
+test('the Holder list opens on a choose-someone placeholder, never on a participant', () => {
+  const participants = [
+    { kind: 'seat', name: 'Boubou' }, { kind: 'person', name: 'Patti' }, { kind: 'person', name: 'Bea' },
+  ];
+  const options = model.grantHolderOptions(participants);
+  // Arrange: there really are participants to default to.
+  assert.equal(options.length, 4);
+  assert.deepEqual(options[0], { value: '', label: 'Choose who holds it', placeholder: true });
+  assert.deepEqual(options.slice(1).map(row => row.label), ['Bea · Human', 'Patti · Human', 'Boubou · AI']);
+  assert.ok(options.slice(1).every(row => row.placeholder === false));
+  assert.deepEqual(JSON.parse(options[3].value), ['seat', 'Boubou']);
+});
+
+test('the page draws the placeholder selected and resets to it after a grant', () => {
+  const body = /function fillGrantForm\(\) \{([\s\S]*?)\n\}\n/.exec(ROOM_JS);
+  assert.ok(body, 'fillGrantForm must exist');
+  assert.match(body[1], /InterlockPeopleModel\.grantHolderOptions\(rosterParticipants\)/);
+  assert.match(body[1], /option\.disabled = true/);
+  assert.match(body[1], /option\.selected = true/);
+  assert.match(ROOM_JS, /grantScope\.value = '';\s*grantUntil\.value = '';\s*grantHolder\.value = '';/);
+  const ROOM = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.html'), 'utf8');
+  assert.match(ROOM, /<select id="grant-holder" required><\/select>/);
+});

@@ -1783,13 +1783,14 @@ function grantState(grant, now) {
 }
 
 function fillGrantForm() {
-  const holders = rosterParticipants.slice()
-    .sort((left, right) => (left.kind === right.kind ? 0 : (left.kind === 'person' ? -1 : 1)) ||
-      left.name.localeCompare(right.name));
-  grantHolder.replaceChildren(...holders.map(row => {
+  grantHolder.replaceChildren(...InterlockPeopleModel.grantHolderOptions(rosterParticipants).map(row => {
     const option = document.createElement('option');
-    option.value = JSON.stringify([row.kind, row.name]);
-    option.textContent = `${row.name} · ${row.kind === 'person' ? 'Human' : 'AI'}`;
+    option.value = row.value;
+    option.textContent = row.label;
+    if (row.placeholder) {
+      option.disabled = true;
+      option.selected = true;
+    }
     return option;
   }));
   const whole = document.createElement('option');
@@ -1907,6 +1908,7 @@ grantCreateForm.addEventListener('submit', async event => {
     if (!validGrant(result.grant)) throw Object.assign(new Error('malformed-response'), { code: 'malformed-response' });
     grantScope.value = '';
     grantUntil.value = '';
+    grantHolder.value = '';
     updateGrantProjectHint();
     await refreshSettingsGrants();
     // Seam for the waiting-items hand-over: when the server reports how many of

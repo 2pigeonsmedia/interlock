@@ -74,6 +74,19 @@
     return grant.grant_id + ' made. ' + what + '.';
   }
 
+  // The grant form's Holder choices: a placeholder first, so no participant
+  // is the default (a default holder once took a grant meant for an AI),
+  // then people before AIs, each by name.
+  function grantHolderOptions(participants) {
+    const holders = participants.slice().sort((left, right) =>
+      (left.kind === right.kind ? 0 : (left.kind === 'person' ? -1 : 1)) || left.name.localeCompare(right.name));
+    return [{ value: '', label: 'Choose who holds it', placeholder: true }, ...holders.map(row => ({
+      value: JSON.stringify([row.kind, row.name]),
+      label: row.name + ' · ' + (row.kind === 'person' ? 'Human' : 'AI'),
+      placeholder: false,
+    }))];
+  }
+
   // The form's warning: a whole-room grant whose scope reads like a lead
   // makes no one a lead. Suggest choosing the project.
   function wholeRoomReadsLikeLead(project, scope) {
@@ -283,7 +296,7 @@
   }
 
   const contract = Object.freeze({
-    leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {
