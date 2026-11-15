@@ -26,6 +26,17 @@ const { openWebhookStore } = require('./webhooks/store.js');
 const { createWebhookDelivery } = require('./webhooks/deliver.js');
 const PACKAGE_VERSION = require('../package.json').version;
 
+/* A20 (an addition, Patti's yes at the GO): the seats idle release passes
+ * over. An admitted seat with a webhook whose last delivery did not fail
+ * needs no contact to stay: the room reaches it. Once its webhook is
+ * unreachable, idle release applies again. Its pass expiry ends it either
+ * way (an expired seat is not in the roster at all). A delivered ring is
+ * never contact. */
+function webhookIdleExempt(participants, hasWebhook) {
+  return new Set(participants.filter(row => row && row.kind === 'seat' && hasWebhook(row.subject_id) &&
+    !(row.presence_kind && row.presence_kind.kind === 'unreachable')).map(row => row.subject_id));
+}
+
 // Tests shorten webhook retries and timeouts, and only in test mode
 // (INTERLOCK_TEST_MODE=1): a running room keeps the contract's 10 s and three
 // retries whatever else its environment says. Only short lists of positive
@@ -562,7 +573,9 @@ async function startInterlockServer(options) {
       if (idleBusy) return idleBusy;
       // Then any seat the room has ended (released now, or expired since the
       // last pass) has its grants ended by the server, recorded with how.
-      idleBusy = Promise.resolve(releaseIdleSeats({ house, store: chatStore, now }))
+      idleBusy = Promise.resolve(chat.listParticipants())
+        .then(rows => webhookIdleExempt(rows, subjectId => webhooks.has(subjectId)), () => new Set())
+        .then(kept => releaseIdleSeats({ house, store: chatStore, now, exempt: kept }))
         .then(released => {
           // Never fails a read that waits on the release: the grant still
           // reads as ended (its holder is not in the room), and the next
@@ -721,5 +734,6 @@ module.exports = Object.freeze({
   recordedDataDirOrigin,
   startHealthServer,
   startInterlockServer,
+  webhookIdleExempt,
   webhookTiming,
 });

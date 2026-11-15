@@ -21,8 +21,12 @@ async function releaseIdleSeats(options) {
   }
   const roster = house.listParticipants({ now });
   if (!Array.isArray(roster)) throw fail('invalid-roster');
+  // Seats the caller keeps out of idle release (A20: a webhook seat whose
+  // last delivery did not fail). Their pass expiry still ends them.
+  const exempt = options.exempt instanceof Set ? options.exempt : new Set();
   const seats = roster.filter(row => row && row.kind === 'seat' &&
-    typeof row.subject_id === 'string' && Number.isSafeInteger(row.created_at));
+    typeof row.subject_id === 'string' && Number.isSafeInteger(row.created_at) &&
+    !exempt.has(row.subject_id));
   if (seats.length === 0) return 0;
   return store.coordinateIdleRelease({
     seats: seats.map(row => ({ subject_id: row.subject_id, created_at: row.created_at })),
