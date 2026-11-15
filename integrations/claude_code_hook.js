@@ -191,7 +191,9 @@ async function runStop(options) {
         return;
       }
     }
-    await sleep(Number(process.env.INTERLOCK_CLAUDE_HOOK_RETRY_MS) > 0 ? Number(process.env.INTERLOCK_CLAUDE_HOOK_RETRY_MS) : FAILURE_RETRY_MS);
+    // Tests shorten the retry; a value can only shorten it.
+    const asked = Number(process.env.INTERLOCK_CLAUDE_HOOK_RETRY_MS);
+    await sleep(Number.isSafeInteger(asked) && asked > 0 ? Math.min(asked, FAILURE_RETRY_MS) : FAILURE_RETRY_MS);
   }
   wake(`Interlock doorbell for ${options.connection}: this waiter reached its time limit. Nothing is wrong; ` +
     'end your turn and a fresh waiter starts.');

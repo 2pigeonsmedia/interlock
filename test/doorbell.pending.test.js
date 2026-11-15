@@ -219,3 +219,19 @@ test('a candidate past its window is never re-posted, even to a room that would 
     server.close();
   }
 });
+
+test('the test waits can only shorten the contract: a long INTERLOCK_DOORBELL_PENDING_TTL_MS is clamped', () => {
+  const doorbellModule = require('../integrations/doorbell.js');
+  const saved = process.env.INTERLOCK_DOORBELL_PENDING_TTL_MS;
+  try {
+    process.env.INTERLOCK_DOORBELL_PENDING_TTL_MS = String(1_000_000_000);  // about 11.5 days
+    assert.equal(doorbellModule.positiveEnv('INTERLOCK_DOORBELL_PENDING_TTL_MS', doorbellModule.PENDING_TTL_MS),
+      doorbellModule.PENDING_TTL_MS);
+    process.env.INTERLOCK_DOORBELL_PENDING_TTL_MS = '600';
+    assert.equal(doorbellModule.positiveEnv('INTERLOCK_DOORBELL_PENDING_TTL_MS', doorbellModule.PENDING_TTL_MS), 600);
+    assert.equal(doorbellModule.PENDING_TTL_MS, 15 * 60 * 1000 + 30 * 1000);
+  } finally {
+    if (saved === undefined) delete process.env.INTERLOCK_DOORBELL_PENDING_TTL_MS;
+    else process.env.INTERLOCK_DOORBELL_PENDING_TTL_MS = saved;
+  }
+});

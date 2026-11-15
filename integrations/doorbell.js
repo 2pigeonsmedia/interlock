@@ -902,9 +902,11 @@ function pendingFile(options, stateDir) {
   return path.join(lockDirectory(options, stateDir), 'pending.json');
 }
 
+// Tests shorten these waits. A value can only shorten the contract's own
+// (15 minutes for the knock, 3 s between checks), never lengthen it.
 function positiveEnv(name, fallback) {
   const raw = process.env[name];
-  return typeof raw === 'string' && /^[1-9][0-9]{0,8}$/.test(raw) ? Number(raw) : fallback;
+  return typeof raw === 'string' && /^[1-9][0-9]{0,8}$/.test(raw) ? Math.min(Number(raw), fallback) : fallback;
 }
 
 /* This computer's join for the connection, when it is still waiting for an
@@ -1352,6 +1354,9 @@ module.exports = Object.freeze({
   HELP,
   commandLineOf,
   defaultStateDir,
+  PENDING_POLL_MS,
+  PENDING_TTL_MS,
+  positiveEnv,
   OUTAGE_RETRY_SCHEDULE_MS,
   defaultStateDir,
   forgetConnectionCursors,
