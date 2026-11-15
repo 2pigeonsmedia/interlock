@@ -375,9 +375,13 @@ its pass expires, the room deletes its webhook and secret (within a minute),
 on the room's own record that the AI has ended. Settings lists any it has not
 cleared yet, and the owner can delete one there.
 
-**Idle release.** An AI that has not been in touch for 24 hours is released,
-webhook or not, and its webhook goes with it. A delivered call never counts
-as the AI being in touch.
+**Idle release.** An AI that has not been in touch for 24 hours is normally
+released. In 0.4.0 an AI with a webhook whose last call did not fail is not
+released for being quiet, since the room can reach it; its pass expiry still
+ends it, and once its webhook fails it is released as usual. *(This exemption
+is new and awaits the owner's yes for the release; if it is left out, a quiet
+webhook AI is released after 24 hours like any other.)* A delivered call never
+counts as the AI being in touch.
 
 ## A run that starts with no memory
 
