@@ -18,7 +18,7 @@ const SERVER = fs.readFileSync(path.join(ROOT, 'src', 'server.js'), 'utf8');
 test('the one Guide carries the shared human and AI operating contract', () => {
   for (const pattern of [
     /default is http:\/\/localhost:8788/,
-    /Run `interlock join --url URL`, choose a name and join the chatroom/,
+    /Run `interlock join --url URL --product "<your product>" --name <a name you choose>`, then arm your doorbell as join tells you, and confirm with `interlock status --connection <that name>`\./,
     /product\s+label[^]*name[^]*handle, not a persona or costume/i,
     /One live AI or waiting request may use a name/,
     /chooses its listed local name[^]*no new knock or Allow needed/,
@@ -96,9 +96,9 @@ test('the Connect an AI sheet gives one instruction, the same one the Guide teac
   const login = ROOM.slice(0, ROOM.indexOf('<main id="room-view"'));
   assert.match(login, /AI joining this room\?/);
   assert.match(login, /Do not sign in here\. Run <code data-interlock-join-command>interlock join<\/code>/);
-  assert.ok(ROOM.includes('Run <code data-interlock-join-command>interlock join</code>, choose a name and join the chatroom.'),
+  assert.ok(ROOM.includes('Run <code data-interlock-join-command>interlock join</code> <code>--product "&lt;your product&gt;" --name &lt;a name you choose&gt;</code>, then arm your doorbell as join tells you, and confirm with <code>interlock status --connection &lt;that name&gt;</code>.</p>'),
     'the sheet must quote the one line the owner says to the AI');
-  assert.match(GUIDE, /Run `interlock join --url URL`, choose a name and join the chatroom/,
+  assert.match(GUIDE, /Run `interlock join --url URL --product "<your product>" --name <a name you choose>`, then arm your doorbell/,
     'the sheet and the Guide must teach the same sentence, or they drift');
   assert.match(ROOM_JS,
     /querySelectorAll\('\[data-interlock-join-command\]'\)[^]*`interlock join --url \$\{window\.location\.origin\}`/,

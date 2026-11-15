@@ -215,6 +215,33 @@ function adapterStateName(adapter, connection, session) {
   return `doorbell-${key}.json`;
 }
 
+// Removes the adapter cursors that belong to one ended connection: the
+// state files in stateDir whose connection name and admission request match.
+// Called by leave, so a later join under the same name starts clean instead
+// of tripping the replaced-connection guard. Anything else is left alone.
+// Answers the number of files removed.
+function forgetConnectionCursors(stateDir, connection, requestId) {
+  let entries;
+  try { entries = fs.readdirSync(stateDir); }
+  catch (error) {
+    if (error && error.code === 'ENOENT') return 0;
+    throw error;
+  }
+  let removed = 0;
+  for (const entry of entries) {
+    if (!/^doorbell-[0-9a-f]{24}\.json$/.test(entry)) continue;
+    const file = path.join(stateDir, entry);
+    let value;
+    try { value = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { continue; }
+    if (!value || value.schema !== SCHEMA || typeof value.connection !== 'string' ||
+        value.connection.toLowerCase() !== String(connection).toLowerCase() ||
+        value.connection_request_id !== requestId) continue;
+    try { fs.unlinkSync(file); removed += 1; }
+    catch (error) { if (!error || error.code !== 'ENOENT') throw error; }
+  }
+  return removed;
+}
+
 function stateFile(options) {
   return path.join(options.stateDir || defaultStateDir(),
     adapterStateName(options.adapter, options.connection, options.session));
@@ -787,6 +814,8 @@ function main(argv = process.argv.slice(2)) {
     process.stdout.write(helpFor(argv));
     return;
   }
+  // The doorbell reaches the room through HTTPS_PROXY/HTTP_PROXY when set.
+  require('../src/client/proxy.js').useEnvProxy(process.env);
   if (argv[0] === 'run') {
     runAdapter(argv.slice(1));
     return;
@@ -818,6 +847,8 @@ module.exports = Object.freeze({
   FRESH_MS,
   HELP,
   OUTAGE_RETRY_SCHEDULE_MS,
+  defaultStateDir,
+  forgetConnectionCursors,
   inspectStatus,
   main,
   parseArgs,

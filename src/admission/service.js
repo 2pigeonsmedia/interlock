@@ -16,6 +16,12 @@ const COOLDOWN_MS = 60 * 1000;
 const TERMINAL_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_PENDING = 8;
 const MAX_WAIT_MS = 20_000;
+// The knock that creates a request is answered at once. Its client knocks
+// again to wait, after one check of its own credential. Until that re-knock
+// arrives, and for no longer than this, the request still counts as
+// connected, so the owner's card and Allow never read a request made a
+// moment ago as gone.
+const JUST_ANSWERED_MS = 10_000;
 const STATES = Object.freeze(['pending', 'allowed', 'declined', 'expired']);
 const CANDIDATE_KEYS = Object.freeze([
   'request_id', 'name', 'product', 'product_provenance', 'selector', 'digest',
@@ -315,6 +321,19 @@ function openAdmissionService(optionsIn) {
 
   let closed = false;
   const waiters = new Map();
+  // request_id -> when its creating knock was answered (in memory only).
+  const justAnswered = new Map();
+
+  // A request is connected while a knock for it is held, or for a short
+  // while after its creating knock was answered.
+  function connected(requestId, at) {
+    if ((waiters.get(requestId) || new Set()).size > 0) return true;
+    const answeredAt = justAnswered.get(requestId);
+    if (answeredAt === undefined) return false;
+    if (at - answeredAt < JUST_ANSWERED_MS) return true;
+    justAnswered.delete(requestId);
+    return false;
+  }
 
   function now() {
     const value = clock();
@@ -336,6 +355,7 @@ function openAdmissionService(optionsIn) {
   }
 
   function settle(requestId) {
+    justAnswered.delete(requestId);
     const listeners = waiters.get(requestId);
     if (!listeners) return;
     for (const listener of [...listeners]) listener.changed();
@@ -460,6 +480,8 @@ function openAdmissionService(optionsIn) {
         return Promise.resolve(Object.freeze({ ok: false, reason: 'request-id-collision' }));
       }
       if (prior.state !== 'pending') return Promise.resolve(publicOutcome(prior));
+      // The re-knock carries the connection from here.
+      justAnswered.delete(prior.request_id);
       return attach(prior, waitOptions);
     }
 
@@ -504,7 +526,11 @@ function openAdmissionService(optionsIn) {
       enrollment: null,
     }));
     save([...records, pending]);
-    return attach(pending, waitOptions);
+    justAnswered.set(pending.request_id, at);
+    // The knock that creates a request answers at once: the room has it, so
+    // the client can show its match code while the owner sees the same code
+    // on the card. Knocks for a request already waiting are held as before.
+    return Promise.resolve(Object.freeze(Object.assign({}, publicOutcome(pending), { state: 'waiting' })));
   }
 
   // True when `token` is the bearer of a knock still waiting for the owner.
@@ -519,7 +545,8 @@ function openAdmissionService(optionsIn) {
 
   function list() {
     requireOpen();
-    cleanup(now());
+    const at = now();
+    cleanup(at);
     return Object.freeze(records.filter(record => record.state === 'pending').map(record =>
       Object.freeze({
         request_id: record.request_id,
@@ -533,7 +560,7 @@ function openAdmissionService(optionsIn) {
         created_at: record.created_at,
         expires_at: record.expires_at,
         match_code: matchCode(record.selector),
-        connected: (waiters.get(record.request_id) || new Set()).size > 0,
+        connected: connected(record.request_id, at),
       })));
   }
 
@@ -545,7 +572,7 @@ function openAdmissionService(optionsIn) {
     if (position === -1) return Object.freeze({ ok: false, reason: 'not-found' });
     const record = records[position];
     if (record.state !== 'pending') return publicOutcome(record);
-    if (!(waiters.get(requestId) || new Set()).size) {
+    if (!connected(requestId, at)) {
       return Object.freeze({ ok: false, reason: 'not-connected' });
     }
     if (record.reuse === 'ended' && typeof options.endedReuseAllowed === 'function' &&
@@ -606,6 +633,7 @@ function openAdmissionService(optionsIn) {
       for (const listener of [...listeners]) listener.stop();
     }
     waiters.clear();
+    justAnswered.clear();
   }
 
   cleanup(now());

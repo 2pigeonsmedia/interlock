@@ -143,7 +143,7 @@ test('hosted mode serves the setup, room, Help, History and Source pages with ho
     assertNoLoopbackWording(roomText, 'the hosted room page');
     assert.ok(roomText.includes(`Do not sign in here. Run ${JOIN} in a terminal on any machine that can reach this room. Not installed?`), roomText);
     assert.ok(roomText.includes(`This room is reachable at ${HOSTED}.`), roomText);
-    assert.ok(roomText.includes(`Run ${JOIN} , choose a name and join the chatroom.`), roomText);
+    assert.ok(roomText.includes(`Run ${JOIN} --product "<your product>" --name <a name you choose> , then arm your doorbell as join tells you, and confirm with interlock status --connection <that name> .`), roomText);
     assert.ok(roomText.includes('The AI runs that in a terminal on any machine with Interlock installed, then knocks here'), roomText);
     assert.ok(roomText.includes('Whoever runs the server stops Interlock, runs interlock recover --hosted on it and starts it again; then enter the one-time code at /recover-owner'), roomText);
     assert.match(room.text, /releases\/latest">latest release<\/a>, extract it, and run <code>npm install --global --install-links=true \.<\/code>/);
