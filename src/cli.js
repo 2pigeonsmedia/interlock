@@ -487,17 +487,33 @@ function runRestore(args, io, dependencies = {}) {
 }
 
 function joinOptions(args) {
-  const options = { name: null, product: null, url: DEFAULT_URL, project: null, model: null };
+  const options = { name: null, product: null, url: DEFAULT_URL, project: null, model: null, mode: 'join' };
   const seen = new Set();
-  for (let index = 0; index < args.length; index += 2) {
-    const flag = args[index];
-    const value = args[index + 1];
+  // --resume and --discard take no value; each names one unfinished candidate.
+  const rest = [];
+  for (const arg of args) {
+    if (arg === '--resume' || arg === '--discard') {
+      if (options.mode !== 'join') return null;
+      options.mode = arg.slice(2);
+    } else {
+      rest.push(arg);
+    }
+  }
+  for (let index = 0; index < rest.length; index += 2) {
+    const flag = rest[index];
+    const value = rest[index + 1];
     if (!['--name', '--product', '--url', '--project', '--model'].includes(flag) || seen.has(flag) ||
         typeof value !== 'string' || value.length === 0) return null;
     seen.add(flag);
     options[flag.slice(2)] = flag === '--url' ? rootSlashDropped(value) : value;
   }
-  return args.length % 2 === 0 ? Object.freeze(options) : null;
+  if (rest.length % 2 !== 0) return null;
+  // The candidate carries its room and product; --resume and --discard take
+  // only its name (and, for --resume, what the knock may declare).
+  if (options.mode !== 'join' &&
+      (options.name === null || seen.has('--url') || seen.has('--product') ||
+       (options.mode === 'discard' && (seen.has('--project') || seen.has('--model'))))) return null;
+  return Object.freeze(options);
 }
 
 // A room address copied with its root slash (`https://host/`) names the same
@@ -2321,17 +2337,33 @@ async function inspectCandidate(fetcher, serverUrl, token) {
 async function candidateConfirmation(fetcher, serverUrl, profile) {
   try {
     const connected = await inspectCandidate(fetcher, serverUrl, profile.token);
+    const valid = validConnection(connected, profile);
     return Object.freeze({
-      connected: validConnection(connected, profile) ? connected : null,
+      connected: valid ? connected : null,
       exactInvalid: false,
+      why: valid ? null : 'the room answered with a different connection',
     });
   } catch (error) {
     return Object.freeze({
       connected: null,
       exactInvalid: Boolean(error && error.status === 401 &&
         error.code === 'invalid-connection' && error.exact),
+      why: confirmationWhy(error),
     });
   }
+}
+
+// Why the room did not confirm a candidate, in a few words.
+function confirmationWhy(error) {
+  if (!error || !Number.isSafeInteger(error.status)) return `the room could not be reached: ${networkCause(error)}`;
+  if (error.status === 401 && error.code === 'invalid-connection') return 'the room has not admitted it';
+  return `the room answered ${error.status} ${typeof error.code === 'string' ? error.code : 'unavailable'}`;
+}
+
+function unconfirmedRefusal(stderr, profile, why) {
+  line(stderr, `interlock: the exact unfinished candidate ${terminalSafe(profile.name)} was not confirmed (${why}). It was kept and no new admission was created.`);
+  line(stderr, `Resume it: interlock join --resume --name ${terminalSafe(profile.name)}`);
+  line(stderr, `Or drop it: interlock join --discard --name ${terminalSafe(profile.name)}`);
 }
 
 function validConnection(value, profile) {
@@ -2382,12 +2414,59 @@ async function settleCandidate(profiles, name, fetcher, serverUrl, clock = Date.
   if (!confirmation.connected) {
     return Object.freeze({
       outcome: 'not-admitted', candidate, staged,
-      exactInvalid: confirmation.exactInvalid, wrote: false,
+      exactInvalid: confirmation.exactInvalid, why: confirmation.why, wrote: false,
     });
   }
   const recorded = profiles.admitCandidate(candidate.name, Object.assign(
     { request_id: candidate.request_id, admitted_at: clock() }, confirmation.connected));
   return Object.freeze({ outcome: 'admitted', profile: recorded.profile, wrote: recorded.wrote, staged });
+}
+
+// The unfinished candidate by this name, in either form, or null. An
+// admitted profile with no staged replacement is not a candidate.
+function unfinishedCandidate(profiles, name) {
+  if (profiles.stagedExists(name)) {
+    try { return { profile: profiles.loadStaged(name), staged: true }; }
+    catch (error) { if (!error || error.code !== 'staged-profile-not-found') throw error; }
+  }
+  if (!profiles.exists(name)) return null;
+  const profile = profiles.load(name);
+  return profile.state === 'admitted' ? null : { profile, staged: false };
+}
+
+// join --discard: removes an unfinished candidate only once the room has
+// said it does not hold it as admitted. If the room did admit it, that is
+// recorded and kept, and the way to end it is leave.
+async function runDiscard(profiles, name, fetcher, clock, io) {
+  const found = unfinishedCandidate(profiles, name);
+  if (!found) {
+    line(io.stderr, profiles.exists(name)
+      ? `interlock: ${terminalSafe(name)} is admitted, not an unfinished candidate. To end it: interlock leave --connection ${terminalSafe(name)}`
+      : `interlock: there is no unfinished candidate named ${terminalSafe(name)} in this connection directory.`);
+    return EXIT_RUNTIME;
+  }
+  const { profile, staged } = found;
+  const settled = await settleCandidate(profiles, name, fetcher, profile.server_url, clock);
+  if (settled.outcome === 'admitted') {
+    line(io.stderr, `interlock: the room had admitted ${terminalSafe(name)}, so it was kept and is now saved as connected. To end it: interlock leave --connection ${terminalSafe(name)}`);
+    return EXIT_RUNTIME;
+  }
+  if (settled.outcome !== 'not-admitted' || !settled.exactInvalid) {
+    line(io.stderr, `interlock: could not confirm that ${terminalSafe(profile.server_url)} never admitted ${terminalSafe(name)} (${settled.why || 'no answer'}). The candidate was kept.`);
+    line(io.stderr, 'Run --discard again once the room is reachable, or join under another name.');
+    return EXIT_RUNTIME;
+  }
+  try {
+    removeJoinCandidate(profiles, profile, staged);
+  } catch (error) {
+    if (error && error.code === 'profile-collision') {
+      line(io.stderr, `interlock: ${terminalSafe(name)} changed while discarding (another join or doorbell may have finished it). Nothing was removed; run interlock status --connection ${terminalSafe(name)}.`);
+      return EXIT_RUNTIME;
+    }
+    throw error;
+  }
+  line(io.stdout, `Discarded the unfinished candidate ${terminalSafe(name)}. The room had not admitted it${staged ? '; the admitted connection it would have replaced is unchanged' : ''}.`);
+  return EXIT_OK;
 }
 
 // The project and model a seat declares travel on the knock only when given,
@@ -2496,7 +2575,7 @@ async function reconnectStaged(profiles, profile, product, serverUrl, fetcher, c
     return completedJoinDecision(EXIT_OK);
   }
   if (!confirmation.exactInvalid) {
-    line(io.stderr, `interlock: the exact unfinished candidate ${terminalSafe(profile.name)} was not confirmed. It was kept and no new admission was created.`);
+    unconfirmedRefusal(io.stderr, profile, confirmation.why);
     return completedJoinDecision(EXIT_RUNTIME);
   }
   return Object.freeze({ action: 'resume', profile, staged: true });
@@ -2520,7 +2599,7 @@ async function reconnectExisting(profiles, profile, product, serverUrl, fetcher,
     if (confirmation.exactInvalid) {
       return Object.freeze({ action: 'resume', profile, staged: false });
     }
-    line(io.stderr, `interlock: the exact unfinished candidate ${terminalSafe(profile.name)} was not confirmed. It was kept and no new admission was created.`);
+    unconfirmedRefusal(io.stderr, profile, confirmation.why);
     return completedJoinDecision(EXIT_RUNTIME);
   }
   if (profile.expires_at <= clock()) {
@@ -2611,13 +2690,15 @@ function removeJoinCandidate(profiles, profile, staged) {
 
 async function runJoin(args, io, dependencies = {}) {
   const { stdout, stderr } = io;
-  const parsed = joinOptions(args);
+  let parsed = joinOptions(args);
   if (!parsed) {
-    line(stderr, 'interlock: usage: interlock join [--product LABEL] [--name NAME] [--url URL]');
+    line(stderr, 'interlock: usage: interlock join --product LABEL --name NAME [--url URL]');
+    line(stderr, '       interlock join --resume --name NAME     (finish an unfinished join)');
+    line(stderr, '       interlock join --discard --name NAME    (drop an unfinished join)');
     return EXIT_USAGE;
   }
   const promptInput = io.stdin || process.stdin;
-  if (!dependencies.ask && (parsed.product === null || parsed.name === null) &&
+  if (parsed.mode === 'join' && !dependencies.ask && (parsed.product === null || parsed.name === null) &&
       (!promptInput || promptInput.isTTY !== true)) {
     line(stderr, 'interlock: join cannot prompt without an interactive terminal.');
     line(stderr, 'Use: interlock join --product "PRODUCT" --name NAME');
@@ -2628,7 +2709,7 @@ async function runJoin(args, io, dependencies = {}) {
     line(stderr, 'interlock: join accepts only http://localhost or a canonical https origin.');
     return EXIT_USAGE;
   }
-  line(stdout, `Interlock target: ${terminalSafe(parsed.url)}`);
+  if (parsed.mode === 'join') line(stdout, `Interlock target: ${terminalSafe(parsed.url)}`);
   const config = dependencies.config || require('./config.js');
   const identity = dependencies.identity || require('identity');
   const { matchCode } = require('./admission/match_code.js');
@@ -2655,6 +2736,37 @@ async function runJoin(args, io, dependencies = {}) {
   catch (error) {
     line(stderr, directoryRefusal(error) || 'interlock: could not open the protected local connection directory.');
     return EXIT_RUNTIME;
+  }
+  if (!profileModule.validName(parsed.name) && parsed.mode !== 'join') {
+    line(stderr, 'interlock: use 2–24 letters or digits, with single hyphens if needed.');
+    return EXIT_USAGE;
+  }
+  if (parsed.mode === 'discard') {
+    try { return await runDiscard(profiles, parsed.name, fetcher, clock, io); }
+    catch (_) {
+      line(stderr, 'interlock: the unfinished candidate could not be read safely; nothing was removed.');
+      return EXIT_RUNTIME;
+    }
+  }
+  if (parsed.mode === 'resume') {
+    let found;
+    try { found = unfinishedCandidate(profiles, parsed.name); }
+    catch (_) {
+      line(stderr, 'interlock: the unfinished candidate could not be read safely; nothing was changed.');
+      return EXIT_RUNTIME;
+    }
+    if (!found) {
+      line(stderr, profiles.exists(parsed.name)
+        ? `interlock: ${terminalSafe(parsed.name)} is already admitted; there is nothing to resume. Check it: interlock status --connection ${terminalSafe(parsed.name)}`
+        : `interlock: there is no unfinished candidate named ${terminalSafe(parsed.name)} in this connection directory.`);
+      return profiles.exists(parsed.name) ? EXIT_OK : EXIT_RUNTIME;
+    }
+    // The candidate's own room and product: nothing to remember or retype.
+    parsed = Object.freeze(Object.assign({}, parsed, {
+      url: found.profile.server_url, product: found.profile.product,
+    }));
+    line(stdout, `Interlock target: ${terminalSafe(parsed.url)}`);
+    line(stdout, `Resuming the unfinished candidate ${terminalSafe(parsed.name)} (${terminalSafe(parsed.product)}).`);
   }
 
   let promptInterface = null;
@@ -2884,7 +2996,7 @@ async function runJoin(args, io, dependencies = {}) {
       return EXIT_RUNTIME;
     }
     if (error && error.code === 'staged-profile-exists') {
-      line(stderr, 'interlock: an unfinished candidate for that connection already exists; run join again and select that exact name to confirm it.');
+      line(stderr, 'interlock: an unfinished candidate for that connection already exists. Resume it: interlock join --resume --name NAME (or drop it with --discard).');
       return EXIT_RUNTIME;
     }
     line(stderr, 'interlock: the AI connection could not be prepared safely.');
