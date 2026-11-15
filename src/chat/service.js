@@ -316,9 +316,18 @@ function createChatService(options) {
           .map(asker => Object.assign({}, asker, { kind: kindOf.get(asker.subject_id) || null }));
       }
     }
+    // A post that names its audience rings that audience only: an @mention
+    // of anyone in the room (a person, an AI, or @all), an ask, or an answer
+    // to or discussion of an ask. The reply ring is for a post that names
+    // nobody. Otherwise a lead's @ of one seat wakes every seat that
+    // reported to the lead since its last post.
+    const targeted = askTarget !== null ||
+      (annotationIn !== null && (annotationIn.answers.length > 0 || annotationIn.discusses !== null)) ||
+      InterlockMentions.resolve(body && body.text,
+        everyone.filter(row => row.subject_id !== (actor && actor.subject_id)).map(row => row.name)).length > 0;
     const recipients = ringRecipients(
       body && body.text, roster, actor && actor.subject_id, askTarget, deliver,
-      askers.concat(await addressersOf(actor, everyone)),
+      targeted ? askers : askers.concat(await addressersOf(actor, everyone)),
     );
     // The log's head before this post: a retried post answered by its first
     // save comes back at or below it, and is not handed to webhooks again.

@@ -199,3 +199,55 @@ test('addressedSince: an ask counts, and a ring for another cause does not', asy
   assert.equal(await chat.addressedSince(back, ANA.subject_id), false, 'a plain reply is not an address');
   await chat.close();
 });
+
+// A post that names its audience rings that audience only. The reply ring is
+// for a post that names nobody: a lead's @ of one seat must not wake every
+// seat that reported to it since the lead's last post.
+test('arrangement + rule: a lead\'s @ of one seat does not ring the other seats that @mentioned it', async () => {
+  const chat = service();
+  const one = await chat.append({ text: '@Lead Rowan here, ready for an assignment' }, rowan());
+  const two = await chat.append({ text: '@Lead Pip here, ready for an assignment' }, pip());
+  assert.deepEqual(rung(one), ['Lead'], 'arrangement: Rowan addressed the lead');
+  assert.deepEqual(rung(two), ['Lead'], 'arrangement: Pip addressed the lead');
+  const assign = await chat.append({ text: '@Rowan W-1 is yours' }, lead());
+  assert.equal(await chat.addressedSince(assign, PIP_ID), true,
+    'arrangement: as the room stood at this post, Pip had addressed the lead');
+  assert.deepEqual(rung(assign), ['Rowan']);
+  await chat.close();
+});
+
+test('a lead\'s @ of a person rings none of the seats that @mentioned the lead', async () => {
+  const chat = service();
+  await chat.append({ text: '@Lead ready' }, rowan());
+  await chat.append({ text: '@Lead ready' }, pip());
+  const toAna = await chat.append({ text: 're #1 @Ana two seats are in' }, lead());
+  assert.deepEqual(rung(toAna), []);
+  await chat.close();
+});
+
+test('an ask of one seat rings that seat only, not the seats that @mentioned the asker', async () => {
+  const chat = service();
+  await chat.append({ text: '@Lead ready' }, pip());
+  const ask = await chat.appendAnnotated({ text: 'Rerun the suite?' }, lead(), { ask: { of: 'Rowan' } });
+  assert.deepEqual(rung(ask), ['Rowan']);
+  await chat.close();
+});
+
+test('an answer to an ask rings its asker only, not other seats that @mentioned the answerer', async () => {
+  const chat = service();
+  const ask = await chat.appendAnnotated({ text: 'May I merge?' }, rowan(), { ask: { of: 'Lead' } });
+  await chat.append({ text: '@Lead also ready' }, pip());
+  const answer = await chat.appendAnnotated({ text: 'yes' }, lead(),
+    { answers: [{ ask_id: ask.id, choice: 'yes' }] });
+  assert.deepEqual(rung(answer), ['Rowan']);
+  await chat.close();
+});
+
+test('an untagged post still rings every seat that addressed its author (the reply ring stands)', async () => {
+  const chat = service();
+  await chat.append({ text: '@Lead ready' }, rowan());
+  await chat.append({ text: '@Lead ready' }, pip());
+  const plain = await chat.append({ text: 'thanks both, assignments coming' }, lead());
+  assert.deepEqual(rung(plain), ['Pip', 'Rowan']);
+  await chat.close();
+});
