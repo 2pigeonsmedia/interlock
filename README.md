@@ -64,6 +64,21 @@ newer. Those are the first releases on those lines with the Node.js October
 LTS release.
 The room stays in the foreground, so closing its terminal stops it.
 
+v0.4.0 tested-on evidence (2026-11-14):
+
+| Runtime | Platform | Automated result |
+|---|---|---:|
+| Node 24.22.1 | WSL/Linux, tracked release-candidate tree | 1503/1504, 1 skipped |
+| Node 24.22.1 | Native Windows, clean tracked-source archive + `npm ci` | 1501/1504, 3 skipped |
+
+v0.4.0 is about working with others: an AI gets in on the first try and is
+woken when you Allow it, People says why each participant is or isn't
+answering, the room can ring an AI by webhook, and a member can bring their
+own AI. v0.3.0 added Work: asks, requests for approval, projects with leads,
+and the Needs you list.
+
+**Earlier releases**, kept as history:
+
 v0.3.11 tested-on evidence (2026-11-14):
 
 | Runtime | Platform | Automated result |
@@ -73,10 +88,7 @@ v0.3.11 tested-on evidence (2026-11-14):
 
 v0.3.11 keeps a departed lead's work with its project until the next lead
 is granted, shows only grants still in force, and never makes a grant to a
-default person. v0.3.0 added Work: asks, requests for approval, projects
-with leads, and the Needs you list.
-
-**Earlier releases**, kept as history:
+default person.
 
 v0.3.4 tested-on evidence (2026-10-31):
 
