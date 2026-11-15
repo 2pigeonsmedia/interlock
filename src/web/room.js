@@ -139,6 +139,9 @@ let currentUser = null;
 let rosterParticipants = [];
 // Who left or ended lately, and why (GET /api/people/absences, 0.4.0).
 let rosterRecentlyLeft = [];
+// A member's own waiting AIs (knocks made with their join code), for People.
+let rosterPending = [];
+let rosterPendingNote = '';
 let rosterSeats = [];
 let rosterKnown = false;
 let rosterLoading = false;
@@ -416,8 +419,8 @@ function showRoom(user) {
   loginView.hidden = true;
   roomView.hidden = false;
   restartAuthenticatedReaders();
-  if (owner) loadPendingAis();
-  else renderPendingAis([]);
+  if (user.kind === 'person') loadPendingAis();
+  if (!owner) renderPendingAis([]);
   stopRoomFacts();
   roomFactTicks = 0;
   loadGrants();
@@ -427,7 +430,7 @@ function showRoom(user) {
     loadGrants();
     loadDeliveryChanges();
     loadAnnotations();
-    if (owner) loadPendingAis();
+    if (user.kind === 'person') loadPendingAis();
     roomFactTicks += 1;
     if (roomFactTicks % PEOPLE_PROJECTS_EVERY === 0) loadPeopleProjects();
   }, ROOM_FACT_INTERVAL_MS);
@@ -640,81 +643,88 @@ function renderPendingAis(rows) {
     pendingAiList.append(empty);
     return;
   }
-  for (const row of rows) {
-    const card = document.createElement('article');
-    card.className = 'pending-ai-card';
-    const facts = document.createElement('div');
-    const name = document.createElement('strong');
-    name.textContent = row.name;
-    const product = document.createElement('p');
-    const provenance = row.product_provenance === 'adapter-reported'
-      ? 'reported by adapter' : 'reported by client';
-    product.textContent = `${row.product} · ${provenance}`;
-    const code = document.createElement('p');
-    code.className = 'pending-ai-code';
-    code.textContent = `Match code: ${row.match_code}`;
-    const warning = document.createElement('small');
-    warning.textContent =
-      'The name and product are reported by the AI and not verified. Allow only an AI you just asked to join, and check its match code.';
-    const priorUse = document.createElement('small');
-    if (row.reuse === 'held') {
-      priorUse.textContent = `Held by another session · Session ${row.reuse_session}. Allow ends the old session and admits this one.`;
-    } else if (row.reuse === 'ended') {
-      const ended = row.last_ended_at
-        ? ` Previous connection ended ${new Date(row.last_ended_at).toLocaleString()}.`
-        : '';
-      priorUse.textContent =
-        `Used before · Session ${row.reuse_session}. Allow admits a new session.${ended}`;
-    }
-    const connection = document.createElement('small');
-    connection.textContent = row.connected
-      ? 'Waiting now · expires in a few minutes'
-      : 'The waiting connection is gone, so Allow is unavailable. Ask the AI to run the same interlock join again and keep it running until you Allow.';
-    facts.append(name, product);
-    if (row.declared_project !== null) {
-      const declared = document.createElement('p');
-      declared.className = 'pending-ai-project';
-      declared.textContent = `Project: ${row.declared_project} (as typed by the AI)`;
-      facts.append(declared);
-    }
-    facts.append(code, warning);
-    if (row.reuse === 'held' || row.reuse === 'ended') {
-      facts.append(priorUse);
-    }
-    if (row.returns !== null) {
-      // What this Allow hands over from the earlier session (grants, items).
-      const returns = document.createElement('small');
-      returns.className = 'pending-ai-returns';
-      returns.textContent = `${row.returns}. Allow carries these over.`;
-      facts.append(returns);
-    }
-    facts.append(connection);
+  for (const row of rows) pendingAiList.append(pendingAiCard(row, pendingStatus));
+}
 
-    const actions = document.createElement('div');
-    actions.className = 'pending-ai-actions';
-    const allow = document.createElement('button');
-    allow.type = 'button';
-    allow.className = 'primary-action';
-    allow.textContent = 'Allow';
-    allow.setAttribute('aria-label', `Allow ${row.name} to join`);
-    allow.disabled = !row.connected;
-    allow.addEventListener('click', () => decidePendingAi(row.request_id, 'allow', actions, row.returns));
-    const decline = document.createElement('button');
-    decline.type = 'button';
-    decline.className = 'quiet-action decline';
-    decline.textContent = 'Decline';
-    decline.setAttribute('aria-label', `Decline ${row.name}`);
-    decline.addEventListener('click', () => decidePendingAi(row.request_id, 'decline', actions));
-    actions.append(allow, decline);
-    card.append(facts, actions);
-    pendingAiList.append(card);
+// One waiting AI's card: the owner's Connect-an-AI list and, for a member,
+// the knocks made with their own join code in People (0.4.0). `status` says
+// where the outcome of a decision is written.
+function pendingAiCard(row, status) {
+  const card = document.createElement('article');
+  card.className = 'pending-ai-card';
+  const facts = document.createElement('div');
+  const name = document.createElement('strong');
+  name.textContent = row.name;
+  const product = document.createElement('p');
+  const provenance = row.product_provenance === 'adapter-reported'
+    ? 'reported by adapter' : 'reported by client';
+  product.textContent = `${row.product} · ${provenance}`;
+  const code = document.createElement('p');
+  code.className = 'pending-ai-code';
+  code.textContent = `Match code: ${row.match_code}`;
+  const warning = document.createElement('small');
+  warning.textContent =
+    'The name and product are reported by the AI and not verified. Allow only an AI you just asked to join, and check its match code.';
+  const priorUse = document.createElement('small');
+  if (row.reuse === 'held') {
+    priorUse.textContent = `Held by another session · Session ${row.reuse_session}. Allow ends the old session and admits this one.`;
+  } else if (row.reuse === 'ended') {
+    const ended = row.last_ended_at
+      ? ` Previous connection ended ${new Date(row.last_ended_at).toLocaleString()}.`
+      : '';
+    priorUse.textContent =
+      `Used before · Session ${row.reuse_session}. Allow admits a new session.${ended}`;
   }
+  const connection = document.createElement('small');
+  connection.textContent = row.connected
+    ? 'Waiting now · expires in a few minutes'
+    : 'The waiting connection is gone, so Allow is unavailable. Ask the AI to run the same interlock join again and keep it running until you Allow.';
+  facts.append(name, product);
+  if (row.declared_project !== null) {
+    const declared = document.createElement('p');
+    declared.className = 'pending-ai-project';
+    declared.textContent = `Project: ${row.declared_project} (as typed by the AI)`;
+    facts.append(declared);
+  }
+  facts.append(code, warning);
+  if (row.reuse === 'held' || row.reuse === 'ended') {
+    facts.append(priorUse);
+  }
+  if (row.returns !== null) {
+    // What this Allow hands over from the earlier session (grants, items).
+    const returns = document.createElement('small');
+    returns.className = 'pending-ai-returns';
+    returns.textContent = `${row.returns}. Allow carries these over.`;
+    facts.append(returns);
+  }
+  facts.append(connection);
+
+  const actions = document.createElement('div');
+  actions.className = 'pending-ai-actions';
+  const allow = document.createElement('button');
+  allow.type = 'button';
+  allow.className = 'primary-action';
+  allow.textContent = 'Allow';
+  allow.setAttribute('aria-label', `Allow ${row.name} to join`);
+  allow.disabled = !row.connected;
+  allow.addEventListener('click', () => decidePendingAi(row.request_id, 'allow', actions, row.returns, status));
+  const decline = document.createElement('button');
+  decline.type = 'button';
+  decline.className = 'quiet-action decline';
+  decline.textContent = 'Decline';
+  decline.setAttribute('aria-label', `Decline ${row.name}`);
+  decline.addEventListener('click', () => decidePendingAi(row.request_id, 'decline', actions, null, status));
+  actions.append(allow, decline);
+  card.append(facts, actions);
+  return card;
 }
 
 async function loadPendingAis() {
   const owner = currentUser && Array.isArray(currentUser.roles) &&
     currentUser.roles.includes('owner');
-  if (pendingAiLoading || !owner) return;
+  // A member loads it too: the room lists them only the knocks made with
+  // their own join code, shown in People (0.4.0).
+  if (pendingAiLoading || !currentUser || currentUser.kind !== 'person') return;
   pendingAiLoading = true;
   const requestGeneration = roomRequestGeneration.capture();
   try {
@@ -734,8 +744,13 @@ async function loadPendingAis() {
       throw Object.assign(new Error('malformed-response'), { code: 'malformed-response' });
     }
     roomAttention.pending(result.pending);
-    renderPendingAis(result.pending);
-    pendingStatus('');
+    if (owner) {
+      renderPendingAis(result.pending);
+      pendingStatus('');
+    } else if (JSON.stringify(rosterPending) !== JSON.stringify(result.pending)) {
+      rosterPending = result.pending;
+      drawRoster();
+    }
   } catch (error) {
     if (!roomRequestGeneration.isCurrent(requestGeneration)) return;
     if (error.code === 'not-authenticated') {
@@ -753,9 +768,10 @@ async function loadPendingAis() {
 
 // An Allow names the hand-over line its card showed, so it carries exactly
 // that; the server refuses with returns-changed if it differs now.
-async function decidePendingAi(requestId, action, controls, returnsSeen = null) {
+async function decidePendingAi(requestId, action, controls, returnsSeen = null, status = pendingStatus) {
+  const say = status;
   for (const button of controls.querySelectorAll('button')) button.disabled = true;
-  pendingStatus(action === 'allow' ? 'Confirm this owner action with your passkey…' : 'Declining…');
+  say(action === 'allow' ? 'Confirm with your passkey…' : 'Declining…');
   try {
     let result;
     try {
@@ -773,7 +789,7 @@ async function decidePendingAi(requestId, action, controls, returnsSeen = null) 
     } else if (result.returned_error) {
       joined += ' Its earlier session could not be carried over; use Bring back in Settings.';
     }
-    pendingStatus(result.state === 'allowed' ? joined : `${result.name} was declined.`,
+    say(result.state === 'allowed' ? joined : `${result.name} was declined.`,
       result.state === 'allowed' ? 'success' : '');
     if (result.state === 'allowed') loadRoster();
   } catch (error) {
@@ -789,7 +805,7 @@ async function decidePendingAi(requestId, action, controls, returnsSeen = null) 
       : ((error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
         ? 'Passkey confirmation was cancelled. Nothing was allowed.'
         : 'Interlock did not complete that decision. Refresh the list before retrying.');
-    pendingStatus(message, 'error');
+    say(message, 'error');
     await loadPendingAis();
   }
 }
@@ -1120,9 +1136,37 @@ function drawRoster() {
     for (const participant of group.rows) details.append(rosterCard(participant, now, focusable));
     return details;
   });
+  if (rosterPending.length > 0) drawn.unshift(ownKnocksGroup(focusable));
   if (rosterRecentlyLeft.length > 0) drawn.push(recentlyLeftGroup(now, focusable));
   rosterList.replaceChildren(...drawn);
   if (focusKey && focusable.has(focusKey)) focusable.get(focusKey).focus();
+}
+
+// A member's own AIs waiting to be let in (their join code's knocks): the
+// same card the owner sees, with its match code, Allow and Decline, at the
+// top of People. Allow takes the member's own passkey step-up.
+function ownKnocksGroup(focusable) {
+  const key = 'own-knocks';
+  const details = document.createElement('details');
+  details.className = 'people-group';
+  details.dataset.group = key;
+  details.open = rosterGroupChoice.has(key) ? rosterGroupChoice.get(key) : true;
+  const summary = document.createElement('summary');
+  summary.textContent = `Waiting for you to let in · ${rosterPending.length}`;
+  summary.dataset.focusKey = 'group:' + key;
+  focusable.set(summary.dataset.focusKey, summary);
+  summary.addEventListener('click', () => rosterGroupChoice.set(key, !details.open));
+  const note = document.createElement('p');
+  note.className = 'status';
+  note.setAttribute('role', 'status');
+  note.textContent = rosterPendingNote;
+  const status = (message, kind = '') => {
+    rosterPendingNote = message;
+    note.textContent = message;
+    note.className = 'status' + (kind ? ' ' + kind : '');
+  };
+  details.append(summary, ...rosterPending.map(row => pendingAiCard(row, status)), note);
+  return details;
 }
 
 // Seats that left or ended this week, folded below the live roster: a

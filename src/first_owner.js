@@ -1912,23 +1912,50 @@ function createFirstOwnerHandler(options) {
     sendJson(request, response, 200, result);
   }
 
+  /* Who is reading the waiting list, and which knocks they may see: the
+   * first owner and administrators see every knock; a member sees only the
+   * knocks made with their own join code (S4), which are theirs to Allow.
+   * Read passively: the list is polled and must not keep a session alive. */
+  function admissionViewer(request, response) {
+    const at = Date.now();
+    const authorized = house.authorizeRead(authorizationMeta(request, at), 'read', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) {
+      refuseAuthorization(request, response, authorized, null);
+      return null;
+    }
+    const who = house.whoami({ cookie_header: request.headers.cookie, activity: 'passive-delivery', now: at });
+    if (!who || who.subject_id !== authorized.subject_id || who.kind !== 'person' || !Array.isArray(who.roles)) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return null;
+    }
+    const all = who.first_owner === true || who.roles.some(role => role && role.slug === 'administrator');
+    return Object.freeze({
+      subject_id: authorized.subject_id,
+      all,
+      sees: row => all || (knockIssuer(row.request_id) || {}).subject_id === authorized.subject_id,
+    });
+  }
+
   function listAdmissions(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
     }
-    const viewer = ownerSession(request, response, false);
+    const viewer = admissionViewer(request, response);
     if (!viewer) return;
     try {
-      const pending = admission.list();
-      const live = new Set(pending.map(row => row.request_id));
+      const listed = admission.list();
+      const pending = listed.filter(viewer.sees);
+      const live = new Set(listed.map(row => row.request_id));
       for (const id of knockFacts.keys()) if (!live.has(id)) knockFacts.delete(id);
       const now = Date.now();
       const actors = viewer ? returnActors(viewer.subject_id, now) : null;
       sendJson(request, response, 200, { ok: true, pending: pending.map(row => Object.freeze(Object.assign({}, row, {
         declared_project: knockFacts.has(row.request_id) ? knockFacts.get(row.request_id).project : null,
         // What Allow hands over, said before the click (ruling, 2026-11-13).
-        returns: allowLine(row.name, actors, now),
+        // A knock made with a member's code carries nothing over (its Allow
+        // skips the check), so its card promises nothing.
+        returns: knockIssuer(row.request_id) ? null : allowLine(row.name, actors, now),
       }))) });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
@@ -3762,10 +3789,12 @@ function createFirstOwnerHandler(options) {
             presence_kind: PresenceKind.endedKind(how, seat.ended_at, work.holder),
           });
         });
-      const pending = mayAllow ? admission.list().map(row => Object.freeze({
+      // A member also sees the knocks made with their own join code (S4).
+      const ownCode = row => (knockIssuer(row.request_id) || {}).subject_id === authorized.subject_id;
+      const pending = admission.list().filter(row => mayAllow || ownCode(row)).map(row => Object.freeze({
         name: row.name, created_at: row.created_at,
         presence_kind: PresenceKind.pendingKind(row.created_at, null),
-      })) : [];
+      }));
       return sendJson(request, response, 200, { ok: true, recently_left: recentlyLeft, pending });
     } catch (_) {
       return sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
