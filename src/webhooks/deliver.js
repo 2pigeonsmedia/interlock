@@ -162,6 +162,7 @@ function createWebhookDelivery(options) {
   }
 
   function wait(milliseconds) {
+    if (closed) return Promise.resolve();
     return new Promise(resolve => {
       const timer = setTimeout(() => { timers.delete(timer); resolve(); }, milliseconds);
       timers.set(timer, resolve);
@@ -240,7 +241,7 @@ function createWebhookDelivery(options) {
       const current = store.signingRecord(subjectId);
       if (!current) return;
       failure = await attempt(current, body, deliveryId);
-      if (failure === null) break;
+      if (failure === null || closed) break;
       if (index < delays.length) await wait(delays[index]);
     }
     if (closed) return;

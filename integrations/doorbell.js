@@ -728,9 +728,12 @@ function commandLineOf(pid) {
     try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean); }
     catch (_) { return null; }
   }
+  // On Windows the query goes as -EncodedCommand: quotes passed through
+  // -Command arrive escaped and the filter silently matches nothing.
+  const query = `(Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`;
   const read = process.platform === 'win32'
-    ? childProcess.spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-      `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+    ? childProcess.spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+      Buffer.from(query, 'utf16le').toString('base64')],
     { encoding: 'utf8', timeout: 20_000, windowsHide: true, maxBuffer: MAX_OUTPUT })
     : childProcess.spawnSync('ps', ['-o', 'command=', '-p', String(pid)],
       { encoding: 'utf8', timeout: 10_000, maxBuffer: MAX_OUTPUT });
@@ -812,6 +815,9 @@ function replaceStaleOwner(options, lockDir, stateDir) {
     return `the owner (${described}) could not be confirmed as this connection's doorbell on this computer; stop it where it runs`;
   }
   if (!isDoorbellFor(commandLineOf(pid), options.connection)) {
+    // The owner may have exited while it was being checked: then there is
+    // nothing to stop, and the lock is free to take.
+    if (waitForRelease(lockDir, 0)) return null;
     return `pid ${pid} could not be confirmed as this connection's doorbell from its command line, so it was not stopped; stop it yourself if it is`;
   }
   try { process.kill(pid, 'SIGTERM'); } catch (error) {

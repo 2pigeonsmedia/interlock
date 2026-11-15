@@ -121,10 +121,13 @@ test('an adapter whose starting process is gone exits by itself, releases its lo
   // A stand-in for the host's shell: it starts the adapter with the shell's
   // own stdout (which this test keeps reading), says the adapter's pid, and
   // waits. Killing it leaves the adapter with an open output and no parent,
-  // the Monitor-expiry shape.
+  // the Monitor-expiry shape. On Windows a Node parent's children share a job
+  // that dies with it, so the stand-in starts the adapter detached, as a
+  // shell that is not Node would leave it.
   const shell = room.track(childProcess.spawn(process.execPath, ['-e', `
     const child = require('node:child_process').spawn(process.execPath, ${JSON.stringify(room.adapterArgs(world))},
-      { cwd: ${JSON.stringify(room.ROOT)}, stdio: ['ignore', 'inherit', 'inherit'] });
+      { cwd: ${JSON.stringify(room.ROOT)}, stdio: ['ignore', 'inherit', 'inherit'],
+        detached: process.platform === 'win32', windowsHide: true });
     process.stderr.write('ADAPTER_PID ' + child.pid + '\\n');
     setInterval(() => {}, 1 << 30);
   `], { cwd: room.ROOT, env: world.env, stdio: ['ignore', 'pipe', 'pipe'] }));
@@ -145,16 +148,27 @@ test('an adapter whose starting process is gone exits by itself, releases its lo
     const parent = ppidOf(adapterPid);
     assert.ok(parent === null || parent !== shell.pid, 'arrangement: the adapter was re-parented');
   }
-  assert.equal(shell.stdout.destroyed, false, 'arrangement: this test still holds the output open');
+  // On Linux the output stays open (this test holds it), so only the parent
+  // check can be what ends the adapter. Windows closes this end with the
+  // shell; there the message below says which check fired.
+  if (process.platform === 'linux') {
+    assert.equal(shell.stdout.destroyed, false, 'arrangement: this test still holds the output open');
+  }
 
   const exited = await room.waitUntil(() => !room.pidAlive(adapterPid), 20_000);
   assert.ok(exited, `the orphaned adapter kept running: ${shellErr}`);
-  assert.equal(room.lockHeld(world), false, 'the orphan released its lock');
   assert.equal(room.savedCursor(world.stateDir), 5);
-  assert.match(shellErr, /process that started (it|this adapter) is gone/i, shellErr);
   assert.equal(shellOut, '', 'no ring was claimed');
   const { json } = await room.status(world);
+  assert.equal(json.deaf_reason, 'parent-gone', JSON.stringify(json));
   assert.match(json.detail, /output closed at /, json.detail);
+  if (process.platform === 'linux') {
+    assert.equal(room.lockHeld(world), false, 'the orphan released its lock');
+    assert.match(shellErr, /process that started (it|this adapter) is gone/i, shellErr);
+  }
+  // Whatever the platform left behind, the next adapter takes over.
+  const next = await exitOf(room.startAdapter(world, ['--once']));
+  assert.equal(next.code, 0, next.stderr);
 });
 
 test('the lock refusal names the owner and the way to replace it', async () => {
@@ -186,7 +200,12 @@ test('--replace-stale stops the adapter that owns this connection and takes over
   // Deaf in the way nothing can detect before a ring: its reader is gone.
   first.child.stdout.destroy();
 
-  fake.respond = after => room.ringsAfter(after, RING_SIX, 6, 50);
+  // The ring is offered only to the adapter that replaced the first one.
+  fake.respond = after => {
+    const owner = room.runtimeOf(world);
+    return owner && owner.pid !== first.child.pid
+      ? room.ringsAfter(after, RING_SIX, 6, 50) : room.ringsAfter(after, [], 5, 50);
+  };
   const second = await exitOf(room.startAdapter(world, ['--replace-stale', '--once']));
   assert.equal(second.code, 0, second.stderr);
   assert.match(second.stderr, new RegExp(`stopped .*pid ${first.child.pid}\\b`), second.stderr);

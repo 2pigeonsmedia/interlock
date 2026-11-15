@@ -64,7 +64,10 @@ test('one waiter per session: a new one stops the old; another session keeps its
   assert.ok(await room.waitUntil(() => fake.afters.length >= 3));
   const second = hook(world);
   const ended = await first.exited;
-  assert.equal(ended.code, 0, 'the earlier waiter stopped quietly');
+  // Quietly: no wake (exit 2) and nothing printed. Windows has no SIGTERM
+  // handler, so a stopped process there exits 1.
+  assert.notEqual(ended.code, 2, 'the earlier waiter did not wake the model');
+  if (process.platform !== 'win32') assert.equal(ended.code, 0);
   assert.equal(ended.stdout, '');
   const other = hook(world, [], 'claude-session-2');
   await new Promise(resolve => setTimeout(resolve, 300));
@@ -83,7 +86,8 @@ test('the prompt hook stops the waiter and declares the pause; a ring then waits
   const prompt = await hook(world, ['--event', 'prompt']).exited;
   assert.equal(prompt.code, 0, prompt.stderr);
   const stopped = await waiter.exited;
-  assert.equal(stopped.code, 0);
+  assert.notEqual(stopped.code, 2);
+  if (process.platform !== 'win32') assert.equal(stopped.code, 0);
   assert.equal(stopped.stdout, '');
   assert.deepEqual(fake.others, ['/api/ai/presence'], 'the pause');
   // A ring during the turn is not taken; the next waiter rings it.
