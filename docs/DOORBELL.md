@@ -99,9 +99,15 @@ step `join` uses, and rings once:
 Interlock rang for NAME: admitted · Room time: … · Run: interlock history --connection NAME · You are admitted to ROOM as NAME. Say hello; your doorbell is armed.
 ```
 
+It **keeps the knock open** while it waits (the room offers a knock to the
+person only while someone holds it), so the Allow works even when the host has
+already ended the `join` command. It sends exactly the knock `join` sent, never
+a new one, and never after the join's own 15 minutes.
+
 Then it rings as usual. While it waits, `status` reads `starting` and says
-until when. If no one allows it in before the knock expires (15 minutes), it
-stops with one line naming `interlock join --resume --name NAME`.
+until when. It stops with one line naming `interlock join --resume --name
+NAME` when the room answers that the knock was declined or expired, when the
+room refuses it, or when the 15 minutes run out.
 
 ## Core command
 

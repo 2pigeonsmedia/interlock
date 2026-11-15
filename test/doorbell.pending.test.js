@@ -136,3 +136,86 @@ test('a doorbell for a name with no join on this computer says so', async () => 
   assert.equal(done.stdout, '');
   assert.doesNotMatch(done.stderr, /waiting for a person/);
 });
+
+// A18: the doorbell holds the knock, so a join the host killed can still be
+// allowed in.
+test('with the join killed, the doorbell holds the knock and the Allow still lands', async () => {
+  const { runtime, device } = await roomOnce();
+  const world = aiWorld('Rook');
+  let owner = await room.login(runtime);
+  const join = startJoin(runtime, world);
+  const requestId = await knockFor(runtime, owner, 'Rook');
+  join.child.kill('SIGKILL');
+  await once(join.child, 'exit');
+  // Arrangement: with no one holding the knock, the room no longer offers it.
+  await eventually(async () => {
+    const read = await room.get(runtime, '/api/ai/admissions', owner);
+    const row = read.json.pending.find(entry => entry.request_id === requestId);
+    return row && row.connected === false;
+  }, 'the killed join leaves the knock unheld', 30_000);
+
+  const running = doorbell.startAdapter(world);
+  await eventually(async () => {
+    const read = await room.get(runtime, '/api/ai/admissions', owner);
+    const row = read.json.pending.find(entry => entry.request_id === requestId);
+    return row && row.connected === true;
+  }, 'the doorbell holds the knock');
+  owner = await room.elevate(runtime, owner, device);
+  const allowed = await room.post(runtime, `/api/ai/admissions/${requestId}/allow`, {}, owner);
+  assert.equal(allowed.status, 200, allowed.text);
+  await eventually(() => ADMITTED('Rook').test(running.stdout), `the admitted ring: ${running.stdout}${running.stderr}`);
+});
+
+test('a declined knock ends the hold on the first answer, with one join --resume line', async () => {
+  const { runtime, device } = await roomOnce();
+  const world = aiWorld('Wren2');
+  let owner = await room.login(runtime);
+  const join = startJoin(runtime, world);
+  const requestId = await knockFor(runtime, owner, 'Wren2');
+  join.child.kill('SIGKILL');
+  const running = doorbell.startAdapter(world);
+  await eventually(() => /keeps the knock open/.test(running.stderr), 'the doorbell holds');
+  owner = await room.elevate(runtime, owner, device);
+  const declined = await room.post(runtime, `/api/ai/admissions/${requestId}/decline`, {}, owner);
+  assert.equal(declined.status, 200, declined.text);
+  const done = await running.exited;
+  assert.equal(done.code, 1);
+  assert.equal(done.stdout, '');
+  const lines = done.stderr.split('\n').filter(text => /join --resume/.test(text));
+  assert.equal(lines.length, 1, done.stderr);
+  assert.match(lines[0], /was declined; this doorbell stops knocking/);
+});
+
+test('a candidate past its window is never re-posted, even to a room that would take it', async () => {
+  const http = require('node:http');
+  const crypto = require('node:crypto');
+  const posts = [];
+  const server = http.createServer((request, response) => {
+    if (request.method === 'POST') posts.push(request.url);
+    request.resume();
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ ok: true, state: 'waiting', match_code: 'K7Q2X' }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const world = aiWorld('Late');
+    const profiles = require('../src/client/profiles.js').openProfiles({ connectionDir: world.env.INTERLOCK_CONNECTION_DIR });
+    const secret = crypto.randomBytes(32).toString('base64url');
+    const selector = crypto.randomBytes(16).toString('base64url');
+    profiles.createUnadmitted({
+      name: 'Late', product: 'Codex CLI', product_provenance: 'client-reported',
+      server_url: `http://localhost:${server.address().port}`, request_id: crypto.randomUUID(),
+      token: `${selector}.${secret}`, selector,
+      digest: crypto.createHash('sha256').update(secret, 'utf8').digest('hex'),
+      created_at: Date.now() - 20 * 60 * 1000,
+    });
+    const done = await doorbell.startAdapter(world).exited;
+    assert.equal(done.code, 1);
+    assert.deepEqual(posts, [], 'no knock was sent');
+    assert.match(done.stderr, /older than its knock .*join --resume --name Late/);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});

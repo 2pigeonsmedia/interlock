@@ -945,19 +945,44 @@ async function admittedRoomTime(profile) {
 /* Waits for the Allow. { room } once admitted; null after saying why it
  * stopped. */
 async function waitForAdmission(options, stateDir, runtime, pending, watch, deaf) {
-  const { settleCandidate } = require('../src/cli.js');
+  const { settleCandidate, knockCandidate } = require('../src/cli.js');
   const since = Date.now();
-  const until = Math.max(since, pending.candidate.created_at) + positiveEnv('INTERLOCK_DOORBELL_PENDING_TTL_MS', PENDING_TTL_MS);
+  // The candidate's own window, by this computer's clock (A18): its knock is
+  // never re-posted after created_at + 15 minutes (plus a margin). Past
+  // that, a room that has forgotten the request would make a new one.
+  const until = pending.candidate.created_at + positiveEnv('INTERLOCK_DOORBELL_PENDING_TTL_MS', PENDING_TTL_MS);
   const poll = positiveEnv('INTERLOCK_DOORBELL_PENDING_POLL_MS', PENDING_POLL_MS);
+  const resume = `run interlock join --resume --name ${options.connection}`;
+  // A knock still held when the wait ends is abandoned at once, so the
+  // process does not linger for the room's answer.
+  const abandon = new AbortController();
+  const knockFetch = (url, init = {}) => globalThis.fetch(url, Object.assign({}, init, {
+    signal: init.signal ? AbortSignal.any([init.signal, abandon.signal]) : abandon.signal,
+  }));
+  const done = () => {
+    abandon.abort();
+    try { fs.unlinkSync(pendingFile(options, stateDir)); } catch (_) { /* gone */ }
+  };
+  if (since >= until) {
+    fail(`the join for ${options.connection} is older than its knock (15 minutes), so this doorbell does not knock again; ${resume}`);
+    return null;
+  }
   try {
     atomicJson(pendingFile(options, stateDir),
       { schema: 1, pid: runtime.pid, started_at: runtime.started_at, since, until });
   } catch (_) { /* optional evidence */ }
   process.stderr.write(`interlock doorbell adapter: waiting for a person to Allow ${options.connection} in the room ` +
-    `(until ${iso(until)}); this doorbell rings once when they do, then as usual.\n`);
-  const done = () => { try { fs.unlinkSync(pendingFile(options, stateDir)); } catch (_) { /* gone */ } };
+    `(until ${iso(until)}); this doorbell keeps the knock open and rings once when they do, then as usual.\n`);
+  // The knock held open (A18): the identical knock, through join's own
+  // function, so the person's Allow works even when join is no longer
+  // running. One at a time; the room holds each for a while and answers.
+  let held = null;
   for (;;) {
     if (watch && watch.parentGone()) { done(); deaf('parent-gone'); return null; }
+    if (held === null && Date.now() < until) {
+      held = knockCandidate(knockFetch, pending.candidate)
+        .then(answer => ({ answer }), error => ({ error }));
+    }
     let result = null;
     try {
       result = await settleCandidate(pending.profiles, options.connection, globalThis.fetch,
@@ -974,10 +999,30 @@ async function waitForAdmission(options, stateDir, runtime, pending, watch, deaf
     }
     if (Date.now() >= until) {
       done();
-      fail(`no one allowed ${options.connection} in before the knock expired; run interlock join --resume --name ${options.connection}`);
+      fail(`no one allowed ${options.connection} in before the knock expired; ${resume}`);
       return null;
     }
-    await waitMs(poll);
+    const knocked = held === null ? null
+      : await Promise.race([held, waitMs(poll).then(() => null)]);
+    if (knocked === null) continue;
+    held = null;
+    const state = knocked.answer && knocked.answer.state;
+    if (state === 'allowed') continue;            // settled on the next pass
+    if (state === 'declined' || state === 'expired') {
+      // The first terminal answer ends the hold.
+      done();
+      fail(`the room answered that the knock for ${options.connection} was ${state}; this doorbell stops knocking; ${resume}`);
+      return null;
+    }
+    if (knocked.error) {
+      const status = knocked.error.status;
+      if (Number.isSafeInteger(status) && status >= 400 && status < 500) {
+        done();
+        fail(`the room refused the knock for ${options.connection} (${knocked.error.code || status}); this doorbell stops knocking; ${resume}`);
+        return null;
+      }
+      await waitMs(poll);                          // unreachable for now: knock again
+    }
   }
 }
 
