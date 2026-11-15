@@ -214,6 +214,11 @@ test('Interlock admission seam — client-held credential, chosen name, fresh L2
   assert.strictEqual(seat.session_ordinal, 1);
   assert.deepStrictEqual(house.aiSessionDiscriminator(seat.id), { session: null },
     'a lone generation needs no visible discriminator');
+  const principal = state.subjects.find(s => s.id === world.person_id);
+  assert.deepStrictEqual(house.principalOf(seat.id), { subject_id: world.person_id, name: principal.name },
+    'principalOf reads the person the seat was admitted for');
+  assert.strictEqual(house.principalOf(world.person_id), null, 'a person has no principal');
+  assert.strictEqual(house.principalOf('no-such-subject'), null);
 
   const seatCredentials = state.credentials.filter(c => c.subject_id === seat.id);
   assert.strictEqual(seatCredentials.length, 1, 'the seat receives exactly one historical pass');

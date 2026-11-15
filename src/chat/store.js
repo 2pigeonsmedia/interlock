@@ -1340,6 +1340,18 @@ function openStore(opts) {
     });
   }
 
+  /* When a person last posted in this era, or null: the room's sense of how
+   * long the people in it have been quiet. */
+  function lastPersonMessageAt() {
+    return exclusive(() => {
+      requireOpen();
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        if (messages[index].kind === 'person') return messages[index].ts;
+      }
+      return null;
+    });
+  }
+
   function notePoll(subjectId, now) {
     if (!boundedString(subjectId, 64) || !Number.isSafeInteger(now) || now < 0) fail('invalid-activity');
     const prior = polls.get(subjectId);
@@ -1516,7 +1528,7 @@ function openStore(opts) {
   }
 
   return Object.freeze({
-    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch, notePoll,
+    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch, notePoll, lastPersonMessageAt,
     participantState, coordinateIdleRelease, deliveryChanges, close,
     annotate, stamp, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf, repliedAskProject,
   });

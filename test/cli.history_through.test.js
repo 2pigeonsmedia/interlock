@@ -17,6 +17,7 @@ const { createDevice } = require('../identity/test/step_up_fixture.js');
 
 const { LOOPBACK_HOST, startInterlockServer } = require('../src/server.js');
 const { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, run } = require('../src/cli.js');
+const { splitRoomTime } = require('./helpers/room_time.js');
 
 const { reserveTestPort } = require('./helpers/reserve_port.js');
 
@@ -210,7 +211,12 @@ async function cli(seat, argv) {
     stdout: { write: value => { stdout += String(value); } },
     stderr: { write: value => { stderr += String(value); } },
   }, seat.dependencies);
-  return { code, stdout, stderr };
+  // A real room leads a history read with its room time line (0.4.0).
+  const split = splitRoomTime(stdout);
+  if (argv[0] === 'history' && !argv.includes('--json') && !argv.includes('--skip-to-current')) {
+    assert.match(String(split.line), /^Room time: time zone not set · /, 'a history read leads with the room time');
+  }
+  return { code, stdout: split.rest, stderr, roomTime: split.line };
 }
 
 test('history --through N reads up to N in a real room, acknowledges exactly what it printed, and refuses N past the end', async () => {

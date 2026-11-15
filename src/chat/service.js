@@ -685,6 +685,11 @@ function createChatService(options) {
   }
 
 
+  async function lastPersonMessageAt() {
+    requireOpen();
+    return typeof store.lastPersonMessageAt === 'function' ? await store.lastPersonMessageAt() : null;
+  }
+
   async function listParticipants() {
     requireOpen();
     return await participantSnapshot(Date.now());
@@ -785,7 +790,7 @@ function createChatService(options) {
     append, appendAnnotated, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
-    touchParticipant, notePoll, notePause, noteWebhookDelivery, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
+    touchParticipant, notePoll, notePause, noteWebhookDelivery, lastPersonMessageAt, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });
 }
 

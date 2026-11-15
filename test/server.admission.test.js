@@ -11,6 +11,7 @@ const test = require('node:test');
 const identity = require('identity');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
 const { EXIT_OK, run, runJoin } = require('../src/cli.js');
+const { splitRoomTime } = require('./helpers/room_time.js');
 const { openProfiles } = require('../src/client/profiles.js');
 const { AI_MESSAGE_WAIT_MS } = require('../src/first_owner.js');
 const { LOOPBACK_HOST, startInterlockServer } = require('../src/server.js');
@@ -457,7 +458,12 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       }, Object.assign({
         config: { resolveConnectionDir: () => connectionDir },
       }, extra));
-      return { code, stdout: commandOut, stderr: commandErr };
+      // A history read leads with the room time (0.4.0); the rest is as before.
+      const split = splitRoomTime(commandOut);
+      if (argv[0] === 'history' && !argv.includes('--json')) {
+        assert.match(String(split.line), /^Room time: /, 'a history read leads with the room time');
+      }
+      return { code, stdout: split.rest, stderr: commandErr };
     }
 
     const beforePeekCursor = profiles.load('Marlow').cursor;

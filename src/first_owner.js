@@ -3,6 +3,8 @@ const { createApproverRule } = require('./work/approver.js');
 const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
 const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
 const PresenceKind = require('./chat/presence_kind.js');
+const Ring = require('./ring.js');
+const TimeZones = require('./time_zones.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -2350,7 +2352,15 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
     }
-    const query = messageQuery(target);
+    // `facts=1` (0.4.0) adds the one ring shape (C4) to each ring. An older
+    // room refuses the unknown parameter, and the client falls back.
+    const withFacts = target.searchParams.getAll('facts').length === 1 && target.searchParams.get('facts') === '1';
+    let queryTarget = target;
+    if (withFacts) {
+      queryTarget = new URL(target.href);
+      queryTarget.searchParams.delete('facts');
+    }
+    const query = messageQuery(queryTarget);
     if (!query) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-ring-query' });
       return;
@@ -2415,10 +2425,26 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
-    const rings = result.messages.map(publicRing);
+    let rings = result.messages.map(publicRing);
     if (rings.some(ring => ring === null) || !Number.isSafeInteger(result.cursor)) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
+    }
+    if (withFacts) {
+      try {
+        const now = Date.now();
+        const clock = await roomClockFor(reauthorized.subject_id);
+        rings = rings.map((ring, index) => Object.freeze(Object.assign({}, ring, {
+          ring: Ring.buildRing({
+            kind: ringKindFor(result.messages[index], reauthorized.subject_id),
+            message_id: ring.id, from: ring.byline, at: ring.ts, connection: clock.connection,
+            now, person: clock.person, last_person_message_at: clock.last_person_message_at,
+          }),
+        })));
+      } catch (_) {
+        sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+        return;
+      }
     }
     sendJson(request, response, 200, {
       ok: true,
@@ -3525,6 +3551,79 @@ function createFirstOwnerHandler(options) {
 
   /* The seat's own last answered mention, read without touching its
    * doorbell poll. */
+  /* Whose clock a seat's rings and reads carry (C4, A2): its principal, the
+   * person it was admitted for, in the zone that person set; and when any
+   * person last posted. */
+  async function roomClockFor(seatSubjectId) {
+    const principal = typeof house.principalOf === 'function' ? house.principalOf(seatSubjectId) : null;
+    const seat = house.listParticipants({ now: Date.now() }).find(row => row.subject_id === seatSubjectId);
+    return Object.freeze({
+      connection: seat ? seat.name : 'NAME',
+      person: principal ? Object.freeze({ name: principal.name, time_zone: TimeZones.timeZoneOf(dataDir, principal.subject_id) }) : null,
+      last_person_message_at: typeof chat.lastPersonMessageAt === 'function' ? await chat.lastPersonMessageAt() : null,
+    });
+  }
+
+  /* Which kind of ring a message is for this seat (A12). Every ring the
+   * room makes today is a message addressed to the seat: a mention. The
+   * reply rule (A4) adds its own. */
+  function ringKindFor(_message, _subjectId) {
+    return Ring.ringKind({ mentioned: true });
+  }
+
+  // The room time line that leads `work brief`, `history` and each ring.
+  async function readAiRoomTime(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let clock;
+    try {
+      clock = await roomClockFor(authorized.subject_id);
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    const now = Date.now();
+    sendJson(request, response, 200, {
+      ok: true,
+      room_time: Ring.roomTime(now, clock.person),
+      last_person_message_ago: Ring.ago(clock.last_person_message_at, now),
+      line: Ring.roomTimeLine(now, clock.person, clock.last_person_message_at),
+    });
+  }
+
+  // A person's own time zone, as they set it in Settings (null: not set).
+  function readOwnTimeZone(request, response) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const actor = browserWorkActor(request, response, false);
+    if (!actor) return undefined;
+    if (actor.kind !== 'person') return sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+    let zone;
+    try { zone = TimeZones.timeZoneOf(dataDir, actor.subject_id); }
+    catch (_) { return sendJson(request, response, 503, { ok: false, error: 'unavailable' }); }
+    return sendJson(request, response, 200, { ok: true, time_zone: zone });
+  }
+
+  function updateOwnTimeZone(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!closedObject(body, ['time_zone']) ||
+        !(body.time_zone === null || Ring.validTimeZone(body.time_zone))) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    const actor = browserWorkActor(request, response, true);
+    if (!actor) return undefined;
+    if (actor.kind !== 'person') return sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+    try { TimeZones.writeTimeZone(dataDir, actor.subject_id, body.time_zone); }
+    catch (_) { return sendJson(request, response, 503, { ok: false, error: 'unavailable' }); }
+    return sendJson(request, response, 200, { ok: true, time_zone: body.time_zone });
+  }
+
   async function readAiLastAnswered(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -3898,6 +3997,7 @@ function createFirstOwnerHandler(options) {
     ['/api/account/passkey/begin', accountPasskeyBegin],
     ['/api/account/passkey/finish', accountPasskeyFinish],
     ['/api/settings/reuse', updateEndedReuse],
+    ['/api/settings/time-zone', updateOwnTimeZone],
     ['/api/owner/password', changeOwnerPassword],
     ['/api/owner/sessions/revoke-others', signOutOtherSessions],
     ['/api/transcript/export', exportTranscript],
@@ -4041,6 +4141,24 @@ function createFirstOwnerHandler(options) {
           return;
         }
         listAdmissions(request, response);
+        return;
+      }
+      if (pathname === '/api/ai/room-time') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-connection-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        await readAiRoomTime(request, response);
+        return;
+      }
+      if (pathname === '/api/settings/time-zone' && request.method === 'GET') {
+        if (target.search !== '') {
+          sendJson(request, response, 400, { ok: false, error: 'invalid-settings-query' });
+          return;
+        }
+        readOwnTimeZone(request, response);
         return;
       }
       if (pathname === '/api/ai/last-answered') {
