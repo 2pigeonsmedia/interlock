@@ -944,6 +944,21 @@ function validWorkingOn(value) {
       typeof value.blocked.name === 'string' && typeof value.blocked.item === 'string'));
 }
 
+// Why a participant is or isn't answering, as the room computed it (0.4.0;
+// src/chat/presence_kind.js holds the rules). The page renders it, never infers it.
+const PRESENCE_KINDS = Object.freeze([
+  'listening', 'working', 'rung', 'pending', 'away', 'left', 'ended', 'unreachable', 'unknown', 'here',
+]);
+
+function validPresenceKind(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === 3 && ['kind', 'since', 'next'].every(key => keys.includes(key)) &&
+    PRESENCE_KINDS.includes(value.kind) &&
+    (value.since === null || (Number.isSafeInteger(value.since) && value.since >= 0)) &&
+    (value.next === null || (typeof value.next === 'string' && value.next.length <= 200));
+}
+
 function validParticipant(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
@@ -959,8 +974,10 @@ function validParticipant(value) {
   const wrote = keys.includes('last_work_at');
   // `last_answered` (0.3.8): {ring_id, reply_id, replied_at}, or null.
   const woke = keys.includes('last_answered');
+  // `presence_kind` (0.4.0): {kind, since, next} computed by the room, or null.
+  const kinded = keys.includes('presence_kind');
   if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) + (works ? 1 : 0) + (wrote ? 1 : 0) +
-      (woke ? 1 : 0) || ![
+      (woke ? 1 : 0) + (kinded ? 1 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
@@ -975,7 +992,8 @@ function validParticipant(value) {
     (woke && !(value.last_answered === null || (value.last_answered && typeof value.last_answered === 'object' &&
       Object.keys(value.last_answered).length === 3 && Number.isSafeInteger(value.last_answered.ring_id) &&
       Number.isSafeInteger(value.last_answered.reply_id) &&
-      Number.isSafeInteger(value.last_answered.replied_at))))) return false;
+      Number.isSafeInteger(value.last_answered.replied_at)))) ||
+    (kinded && !(value.presence_kind === null || validPresenceKind(value.presence_kind)))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'

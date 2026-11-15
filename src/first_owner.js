@@ -2,6 +2,7 @@
 const { createApproverRule } = require('./work/approver.js');
 const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
 const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
+const PresenceKind = require('./chat/presence_kind.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -278,6 +279,7 @@ function publicParticipant(participant) {
       !(participant.last_answered === undefined || participant.last_answered === null ||
         validLastAnswered(participant.last_answered)) ||
       typeof participant.present !== 'boolean' ||
+      !(participant.presence_kind === undefined || PresenceKind.validPresenceKind(participant.presence_kind)) ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
     name: participant.name,
@@ -293,6 +295,7 @@ function publicParticipant(participant) {
     last_posted_at: participant.last_posted_at === undefined ? null : participant.last_posted_at,
     last_polled_at: participant.last_polled_at === undefined ? null : participant.last_polled_at,
     last_answered: participant.last_answered === undefined ? null : participant.last_answered,
+    presence_kind: participant.presence_kind === undefined ? null : participant.presence_kind,
   });
 }
 
@@ -1679,6 +1682,10 @@ function createFirstOwnerHandler(options) {
 
   // An AI's own presence line and its own project.
   function setAiPresence(request, response, body) {
+    if (body !== null && typeof body === 'object' && !Array.isArray(body) && Object.hasOwn(body, 'pause')) {
+      setAiPause(request, response, body);
+      return;
+    }
     if (!peopleBody(request, response, body, ['middle', 'waiting_on', 'need'])) return;
     const authorized = seatAuthorization(request, 'write');
     if (!authorized || authorized.allow !== true) {
@@ -1687,6 +1694,35 @@ function createFirstOwnerHandler(options) {
     }
     const actor = Object.assign({ owner: false, now: Date.now() }, seatActor(authorized, null));
     sendPeopleResult(request, response, () => people.service.presence(actor, body));
+  }
+
+  // `{ pause: { reason } }` while the seat works a turn; `{ pause: null }` when
+  // it is back. Sent on its own, never with the presence line: it is held in
+  // memory and never written to the people store (0.3.11 must still open it).
+  function setAiPause(request, response, body) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    if (!closedObject(body, ['pause']) ||
+        !(body.pause === null || closedObject(body.pause, ['reason']))) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'write');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let pause;
+    try {
+      pause = chat.notePause(authorized.subject_id, body.pause, Date.now());
+    } catch (error) {
+      sendJson(request, response, error && error.code === 'invalid-pause' ? 400 : 503,
+        { ok: false, error: error && error.code === 'invalid-pause' ? 'invalid-request' : 'chat-unavailable' });
+      return;
+    }
+    sendJson(request, response, 200, { ok: true, pause });
   }
 
   // `{ project }` sets the AI's own project; `{ seat_name, project }` is a lead

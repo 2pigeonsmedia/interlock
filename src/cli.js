@@ -65,6 +65,8 @@ Usage:
   interlock ask revise N --means-file PATH|--means-stdin --connection NAME [--json]
   interlock listen --connection NAME [--json]
   interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
+  interlock doorbell pause --connection NAME [--reason turn] [--json]
+  interlock doorbell resume --connection NAME [--json]
   interlock status --connection NAME [--state-dir ABSOLUTE_PATH] [--json]
   interlock leave --connection NAME [--json]
   interlock presence --connection NAME --file PATH | --clear [--json]
@@ -1634,7 +1636,76 @@ async function runStatus(args, io, dependencies = {}) {
   return facts.admitted.state === 'yes' ? EXIT_OK : EXIT_RUNTIME;
 }
 
+const PAUSE_USAGE = 'interlock: usage: interlock doorbell pause --connection NAME [--reason turn] [--json] | ' +
+  'interlock doorbell resume --connection NAME [--json]';
+
+/* The seat tells the room it is working a turn (pause) or is back (resume).
+ * Called by whatever knows when a turn starts and ends: a host hook or a
+ * waiter. A room that predates the pause (0.3.11 and older) refuses the field;
+ * that is said once and is not a failure, so a hook carries on. */
+async function runDoorbellPause(verb, args, io, dependencies = {}) {
+  let connection = null;
+  let reason = null;
+  let json = false;
+  const seen = new Set();
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (seen.has(flag)) return usage();
+    seen.add(flag);
+    if (flag === '--json') { json = true; continue; }
+    const value = args[index + 1];
+    if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) return usage();
+    index += 1;
+    if (flag === '--connection') connection = value;
+    else if (flag === '--reason' && verb === 'pause' && value === 'turn') reason = value;
+    else return usage();
+  }
+  if (connection === null) return usage();
+  function usage() {
+    line(io.stderr, PAUSE_USAGE);
+    return EXIT_USAGE;
+  }
+  let selected;
+  try { selected = selectedConnection(connection, dependencies); }
+  catch (error) {
+    reportConnectionError(io.stderr, error, connection);
+    return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+  }
+  const { profile } = selected;
+  const pause = verb === 'pause' ? { reason: reason || 'turn' } : null;
+  let result;
+  try {
+    result = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/presence', {
+      method: 'POST', body: { pause }, stderr: io.stderr,
+    });
+    const shaped = exactObject(result, ['ok', 'pause']);
+    if (!shaped || !(result.pause === null || (exactObject(result.pause, ['reason', 'since', 'expires_at']) &&
+        Number.isSafeInteger(result.pause.since) && Number.isSafeInteger(result.pause.expires_at)))) {
+      throw incompatibleResponse();
+    }
+  } catch (error) {
+    if (error && error.status === 400 && error.code === 'invalid-request') {
+      const said = 'this room does not support pause (Interlock 0.3.11 or older); nothing changed';
+      if (json) line(io.stdout, JSON.stringify({ ok: true, connection: profile.name, supported: false, pause: null }));
+      else line(io.stdout, said + '.');
+      return EXIT_OK;
+    }
+    reportRequestError(io.stderr, error, profile);
+    return roomUnreachable(error) ? EXIT_UNREACHABLE : EXIT_RUNTIME;
+  }
+  if (json) {
+    line(io.stdout, JSON.stringify({ ok: true, connection: profile.name, supported: true, pause: result.pause }));
+  } else if (result.pause) {
+    line(io.stdout, `Paused for a turn: the room shows ${terminalSafe(profile.name)} as working until it polls ` +
+      `again, for up to 3 hours (until ${new Date(result.pause.expires_at).toISOString()}).`);
+  } else {
+    line(io.stdout, `Resumed: the room no longer shows ${terminalSafe(profile.name)} as working.`);
+  }
+  return EXIT_OK;
+}
+
 async function runDoorbell(args, io, dependencies = {}) {
+  if (args[0] === 'pause' || args[0] === 'resume') return runDoorbellPause(args[0], args.slice(1), io, dependencies);
   const parsed = commandOptions('doorbell', args);
   if (!parsed) {
     line(io.stderr,
