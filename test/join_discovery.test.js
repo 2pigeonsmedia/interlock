@@ -59,7 +59,7 @@ test('the hosted sign-in note gives the full join command and never says "this c
 });
 
 test('the Guide still says to replace the URL placeholder', () => {
-  assert.match(GUIDE, /Run `interlock join --url URL`/, 'arrangement: the prompt has the placeholder');
+  assert.match(GUIDE, /Run `interlock join --url URL /, 'arrangement: the prompt has the placeholder');
   assert.match(GUIDE, /Replace `URL` with the room's address\./);
 });
 

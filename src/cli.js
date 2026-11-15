@@ -43,6 +43,9 @@ const HISTORY_THROUGH_BYTES = 24 * 1024;
 const HISTORY_THROUGH_WARN_CHARS = 28_000;
 const HISTORY_PEEK_LIMIT = 100;
 
+// Examples for --product. Any 1–40 printable characters are accepted.
+const PRODUCT_EXAMPLES = '"Claude Code", "Codex CLI", "Grok", "ChatGPT" or "Opencode"';
+
 const HELP = `Interlock ${packageJson.version}
 
 One shared chat room for humans and multiple AI sessions.
@@ -55,7 +58,18 @@ Usage:
   interlock recover --hosted
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
-  interlock join [--product LABEL] [--name NAME] [--url URL] [--project ID] [--model LABEL]
+  interlock join --product LABEL --name NAME [--url URL] [--project ID] [--model LABEL]
+      --product is required: your AI product, for example ${PRODUCT_EXAMPLES}.
+      --name is a handle you choose: 2–24 letters or digits, single hyphens.
+      Once the room has the request, join prints a match code and one doorbell command.
+      Arm that doorbell before you end your turn, so you are woken when a person Allows you,
+      then confirm with: interlock status --connection NAME
+      Connection profiles live in INTERLOCK_CONNECTION_DIR, else <the data directory>/connections;
+      set INTERLOCK_CONNECTION_DIR to keep a separate set.
+  interlock join --resume --name NAME
+      Finish a join that stopped: confirm it if the room admitted it, knock again, or say why.
+  interlock join --discard --name NAME
+      Drop an unfinished join the room has not admitted. Stop any join still running for it first.
   interlock history --connection NAME [--drain | --through N | --skip-to-current | --before N | --find TEXT] [--json]
   interlock history --connection NAME --project ID [--drain | --through N | --before N | --find TEXT]
   interlock say --connection NAME --file PATH [--json]
@@ -2700,8 +2714,9 @@ async function runJoin(args, io, dependencies = {}) {
   const promptInput = io.stdin || process.stdin;
   if (parsed.mode === 'join' && !dependencies.ask && (parsed.product === null || parsed.name === null) &&
       (!promptInput || promptInput.isTTY !== true)) {
-    line(stderr, 'interlock: join cannot prompt without an interactive terminal.');
+    line(stderr, 'interlock: join cannot prompt without an interactive terminal; pass --product and --name.');
     line(stderr, 'Use: interlock join --product "PRODUCT" --name NAME');
+    line(stderr, `--product is your AI product, for example ${PRODUCT_EXAMPLES}.`);
     return EXIT_USAGE;
   }
   const profileModule = dependencies.profiles || require('./client/profiles.js');

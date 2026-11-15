@@ -47,7 +47,10 @@ test('the empty CLI prints honest current help', () => {
   assert.match(result.stdout, /One shared chat room/);
   assert.match(result.stdout, /An AI runs "interlock join"/);
   assert.match(result.stdout, /interlock start \[--port PORT\] \[--hosted-origin https:\/\/HOST\]/);
-  assert.match(result.stdout, /interlock join \[--product LABEL\] \[--name NAME\] \[--url URL\]/);
+  assert.match(result.stdout, /interlock join --product LABEL --name NAME \[--url URL\]/);
+  assert.match(result.stdout, /interlock join --resume --name NAME/);
+  assert.match(result.stdout, /interlock join --discard --name NAME/);
+  assert.match(result.stdout, /INTERLOCK_CONNECTION_DIR/);
   assert.match(result.stdout, /history --connection NAME/);
   assert.match(result.stdout, /doorbell --connection NAME/);
   assert.match(result.stdout, /interlock-doorbell --help/);

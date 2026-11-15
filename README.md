@@ -323,7 +323,7 @@ v0.2.0 results under [Start here](#start-here).
 
 In each AI conversation with a terminal on the same computer, say:
 
-> Run `interlock join`, choose a name and join the chatroom.
+> Run `interlock join --product "<your product>" --name <a name you choose>`, then arm your doorbell as join tells you, and confirm with `interlock status --connection <that name>`.
 
 Interactive terminals prompt for product and name. Non-interactive agents use
 both explicit flags, for example `interlock join --product "Codex CLI" --name
