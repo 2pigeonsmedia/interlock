@@ -409,82 +409,121 @@ function openProfiles(options) {
     });
   }
 
-  function markAdmitted(name, body) {
-    const admission = closedObject(body, ADMIT_KEYS, true);
-    if (!admission) throw failure('invalid-admission');
+  // Both admission forms answer { profile, wrote }. They run under the
+  // profile lock, so when two callers settle one candidate at once (join and
+  // a doorbell waiting on it), the first writes and the second reads that
+  // record back with wrote: false. A different admission for the same
+  // candidate is a collision, never a second write.
+  function admitUnadmittedLocked(name, admission) {
+    const prior = readProfile(name).profile;
+    if (prior.state === 'admitted') {
+      const exact = admission.request_id === prior.request_id && admission.name === prior.name &&
+        admission.subject_id === prior.subject_id && admission.product === prior.product &&
+        admission.product_provenance === prior.product_provenance &&
+        admission.expires_at === prior.expires_at;
+      if (!exact) throw failure('profile-collision');
+      return { profile: prior, wrote: false };
+    }
+    if (admission.request_id !== prior.request_id || admission.name !== prior.name ||
+        admission.product !== prior.product ||
+        admission.product_provenance !== prior.product_provenance ||
+        typeof admission.subject_id !== 'string' || admission.subject_id.length < 1 ||
+        !validTime(admission.admitted_at) || !validTime(admission.expires_at)) {
+      throw failure('profile-collision');
+    }
+    const next = Object.assign({}, prior, {
+      state: 'admitted',
+      admitted_at: admission.admitted_at,
+      subject_id: admission.subject_id,
+      expires_at: admission.expires_at,
+    });
+    parseProfile(JSON.stringify(next));
+    writeAtomic(fileFor(name), next, directory);
+    return { profile: Object.freeze(next), wrote: true };
+  }
+
+  function admitStagedLocked(name, staged, admission) {
+    const prior = staged.candidate;
+    const replaced = readProfile(name).profile;
+    if (admission.request_id !== prior.request_id || admission.name !== prior.name ||
+        admission.product !== prior.product ||
+        admission.product_provenance !== prior.product_provenance ||
+        typeof admission.subject_id !== 'string' || admission.subject_id.length < 1 ||
+        !validTime(admission.admitted_at) || !validTime(admission.expires_at)) {
+      throw failure('profile-collision');
+    }
+    if (replaced.request_id === prior.request_id) {
+      const exact = replaced.state === 'admitted' && replaced.name === prior.name &&
+        replaced.product === prior.product &&
+        replaced.product_provenance === prior.product_provenance &&
+        replaced.server_url === prior.server_url && replaced.token === prior.token &&
+        replaced.selector === prior.selector && replaced.digest === prior.digest &&
+        replaced.created_at === prior.created_at &&
+        replaced.subject_id === admission.subject_id &&
+        replaced.expires_at === admission.expires_at;
+      if (!exact) throw failure('profile-collision');
+      fs.unlinkSync(stagedFileFor(name));
+      fsyncDirectory(directory);
+      return { profile: replaced, wrote: false };
+    }
+    if (replaced.state !== 'admitted' ||
+        replaced.request_id !== staged.replaces_request_id ||
+        replaced.name !== prior.name || replaced.product !== prior.product ||
+        replaced.product_provenance !== prior.product_provenance ||
+        replaced.server_url !== prior.server_url) throw failure('profile-collision');
+    const next = Object.assign({}, prior, {
+      state: 'admitted',
+      admitted_at: admission.admitted_at,
+      subject_id: admission.subject_id,
+      expires_at: admission.expires_at,
+    });
+    parseProfile(JSON.stringify(next));
+    writeAtomic(fileFor(name), next, directory);
+    fs.unlinkSync(stagedFileFor(name));
+    fsyncDirectory(directory);
+    return { profile: Object.freeze(next), wrote: true };
+  }
+
+  function admission(body) {
+    const value = closedObject(body, ADMIT_KEYS, true);
+    if (!value) throw failure('invalid-admission');
+    return value;
+  }
+
+  // The one admission write for a candidate in either form. It decides the
+  // form under the lock: a staged file for this request is the staged form;
+  // otherwise the main profile must carry this request.
+  function admitCandidate(name, body) {
+    const value = admission(body);
     return withProfileLock(name, () => {
-      const prior = readProfile(name).profile;
-      if (prior.state === 'admitted') {
-        const exact = admission.request_id === prior.request_id && admission.name === prior.name &&
-          admission.subject_id === prior.subject_id && admission.product === prior.product &&
-          admission.product_provenance === prior.product_provenance &&
-          admission.expires_at === prior.expires_at;
-        if (!exact) throw failure('profile-collision');
-        return prior;
+      if (stagedExists(name)) {
+        const staged = readStaged(name);
+        if (staged.candidate.request_id === value.request_id) {
+          return admitStagedLocked(name, staged, value);
+        }
       }
-      if (admission.request_id !== prior.request_id || admission.name !== prior.name ||
-          admission.product !== prior.product ||
-          admission.product_provenance !== prior.product_provenance ||
-          typeof admission.subject_id !== 'string' || admission.subject_id.length < 1 ||
-          !validTime(admission.admitted_at) || !validTime(admission.expires_at)) {
-        throw failure('profile-collision');
-      }
-      const next = Object.assign({}, prior, {
-        state: 'admitted',
-        admitted_at: admission.admitted_at,
-        subject_id: admission.subject_id,
-        expires_at: admission.expires_at,
-      });
-      parseProfile(JSON.stringify(next));
-      writeAtomic(fileFor(name), next, directory);
-      return Object.freeze(next);
+      return admitUnadmittedLocked(name, value);
     });
   }
 
+  function markAdmitted(name, body) {
+    const value = admission(body);
+    return withProfileLock(name, () => admitUnadmittedLocked(name, value).profile);
+  }
+
   function markStagedAdmitted(name, body) {
-    const admission = closedObject(body, ADMIT_KEYS, true);
-    if (!admission) throw failure('invalid-admission');
+    const value = admission(body);
     return withProfileLock(name, () => {
-      const staged = readStaged(name);
-      const prior = staged.candidate;
-      const replaced = readProfile(name).profile;
-      if (admission.request_id !== prior.request_id || admission.name !== prior.name ||
-          admission.product !== prior.product ||
-          admission.product_provenance !== prior.product_provenance ||
-          typeof admission.subject_id !== 'string' || admission.subject_id.length < 1 ||
-          !validTime(admission.admitted_at) || !validTime(admission.expires_at)) {
-        throw failure('profile-collision');
+      // Another caller may have finished this staged admission already. Only
+      // the exact admitted record for this request is read back.
+      if (!stagedExists(name)) {
+        const current = readProfile(name).profile;
+        if (current.state !== 'admitted' || current.request_id !== value.request_id) {
+          throw failure('staged-profile-not-found');
+        }
+        return admitUnadmittedLocked(name, value).profile;
       }
-      if (replaced.request_id === prior.request_id) {
-        const exact = replaced.state === 'admitted' && replaced.name === prior.name &&
-          replaced.product === prior.product &&
-          replaced.product_provenance === prior.product_provenance &&
-          replaced.server_url === prior.server_url && replaced.token === prior.token &&
-          replaced.selector === prior.selector && replaced.digest === prior.digest &&
-          replaced.created_at === prior.created_at &&
-          replaced.subject_id === admission.subject_id &&
-          replaced.expires_at === admission.expires_at;
-        if (!exact) throw failure('profile-collision');
-        fs.unlinkSync(stagedFileFor(name));
-        fsyncDirectory(directory);
-        return replaced;
-      }
-      if (replaced.state !== 'admitted' ||
-          replaced.request_id !== staged.replaces_request_id ||
-          replaced.name !== prior.name || replaced.product !== prior.product ||
-          replaced.product_provenance !== prior.product_provenance ||
-          replaced.server_url !== prior.server_url) throw failure('profile-collision');
-      const next = Object.assign({}, prior, {
-        state: 'admitted',
-        admitted_at: admission.admitted_at,
-        subject_id: admission.subject_id,
-        expires_at: admission.expires_at,
-      });
-      parseProfile(JSON.stringify(next));
-      writeAtomic(fileFor(name), next, directory);
-      fs.unlinkSync(stagedFileFor(name));
-      fsyncDirectory(directory);
-      return Object.freeze(next);
+      return admitStagedLocked(name, readStaged(name), value).profile;
     });
   }
 
@@ -533,7 +572,7 @@ function openProfiles(options) {
 
   return Object.freeze({
     createUnadmitted, createStaged, exists, stagedExists, load, loadStaged, summaries,
-    markAdmitted, markStagedAdmitted, removeUnadmitted, removeStaged, updateCursor,
+    admitCandidate, markAdmitted, markStagedAdmitted, removeUnadmitted, removeStaged, updateCursor,
     forgetAdmitted, acquireReadLease,
   });
 }
