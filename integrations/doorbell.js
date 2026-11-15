@@ -434,6 +434,8 @@ function statusResult(options, overrides) {
     // When an adapter run exited because nothing could read its output.
     deaf_at: null,
     deaf_reason: null,
+    // Set while the adapter waits for a person's Allow (C6).
+    pending_until: null,
   }, overrides);
 }
 
@@ -518,6 +520,17 @@ function inspectStatus(options, clock = Date.now, namespaceOf = processNamespace
   }
   const statePath = path.join(stateDir, runtime.state_file);
   const stateRead = readStatusJson(statePath);
+  // Armed before the Allow (C6): healthy, and waiting.
+  const waiting = recordFor(pendingFile(options, stateDir), ['schema', 'pid', 'started_at', 'since', 'until'], runtime);
+  if (waiting && Number.isSafeInteger(waiting.until)) {
+    return statusResult(options, Object.assign(common, {
+      state: 'starting',
+      detail: `waiting for a person to Allow ${options.connection} in the room, since ${iso(waiting.since)}, ` +
+        `until ${iso(waiting.until)}; it rings once when they do`,
+      recovery: null,
+      pending_until: waiting.until,
+    }));
+  }
   if (stateRead.kind === 'absent') {
     const age = clock() - runtime.started_at;
     return statusResult(options, Object.assign(common, {
@@ -831,6 +844,116 @@ function writeLine(fd, text) {
   return null;
 }
 
+// ---- Pending mode (C6): a doorbell armed before the person's Allow ----
+//
+// An AI that knocked in the background and ended its turn arms its doorbell
+// at once. The doorbell waits for the Allow, settles the join's candidate
+// through the same step `join` uses (never a second knock), and rings ONCE
+// with kind `admitted`, whoever wrote the admitted profile. Then it rings as
+// usual. A knock the room keeps for 15 minutes is waited for that long; then
+// it says, in one line, how to resume.
+const PENDING_TTL_MS = 15 * 60 * 1000 + 30 * 1000;
+const PENDING_POLL_MS = 3_000;
+
+function pendingFile(options, stateDir) {
+  return path.join(lockDirectory(options, stateDir), 'pending.json');
+}
+
+function positiveEnv(name, fallback) {
+  const raw = process.env[name];
+  return typeof raw === 'string' && /^[1-9][0-9]{0,8}$/.test(raw) ? Number(raw) : fallback;
+}
+
+/* This computer's join for the connection, when it is still waiting for an
+ * Allow: { profiles, candidate }. null when the connection is admitted, or
+ * when there is no join to wait for (the ordinary poll then says why). */
+function pendingJoin(name) {
+  let profiles;
+  try {
+    const connectionDir = require('../src/config.js').resolveConnectionDir({ env: process.env, platform: process.platform });
+    profiles = require('../src/client/profiles.js').openProfiles({ connectionDir });
+  } catch (_) { return null; }
+  try {
+    if (profiles.stagedExists(name)) return { profiles, candidate: profiles.loadStaged(name) };
+    if (!profiles.exists(name)) return null;
+    const current = profiles.load(name);
+    return current.state === 'admitted' ? null : { profiles, candidate: current };
+  } catch (_) { return null; }
+}
+
+function waitMs(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+/* The room's time for the admitted ring (A16), read once with the new
+ * connection, so the ring goes out at once rather than after the first long
+ * poll. null when the room does not say: the ring then reads "room time
+ * unavailable". */
+async function admittedRoomTime(profile) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await globalThis.fetch(profile.server_url + '/api/ai/room-time', {
+      headers: { authorization: 'Bearer ' + profile.token }, signal: controller.signal,
+    });
+    const body = await response.json();
+    if (!response.ok || !body || body.ok !== true || typeof body.room_time !== 'string' ||
+        body.room_time.length === 0 || body.room_time.length > 120 ||
+        !(body.last_person_message_ago === null || typeof body.last_person_message_ago === 'string')) return null;
+    return { room_time: body.room_time, last_person_message_ago: body.last_person_message_ago };
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* Waits for the Allow. { room } once admitted; null after saying why it
+ * stopped. */
+async function waitForAdmission(options, stateDir, runtime, pending, watch, deaf) {
+  const { settleCandidate } = require('../src/cli.js');
+  const since = Date.now();
+  const until = Math.max(since, pending.candidate.created_at) + positiveEnv('INTERLOCK_DOORBELL_PENDING_TTL_MS', PENDING_TTL_MS);
+  const poll = positiveEnv('INTERLOCK_DOORBELL_PENDING_POLL_MS', PENDING_POLL_MS);
+  try {
+    atomicJson(pendingFile(options, stateDir),
+      { schema: 1, pid: runtime.pid, started_at: runtime.started_at, since, until });
+  } catch (_) { /* optional evidence */ }
+  process.stderr.write(`interlock doorbell adapter: waiting for a person to Allow ${options.connection} in the room ` +
+    `(until ${iso(until)}); this doorbell rings once when they do, then as usual.\n`);
+  const done = () => { try { fs.unlinkSync(pendingFile(options, stateDir)); } catch (_) { /* gone */ } };
+  for (;;) {
+    if (watch && watch.parentGone()) { done(); deaf('parent-gone'); return null; }
+    let result = null;
+    try {
+      result = await settleCandidate(pending.profiles, options.connection, globalThis.fetch,
+        pending.candidate.server_url);
+    } catch (_) { result = null; /* the room or the store did not answer: wait and ask again */ }
+    if (result && result.outcome === 'admitted') {
+      done();
+      return { room: result.profile ? await admittedRoomTime(result.profile) : null };
+    }
+    if (result && result.outcome === 'none') {
+      done();
+      fail(`there is no join for ${options.connection} on this computer to wait for; run interlock join first`);
+      return null;
+    }
+    if (Date.now() >= until) {
+      done();
+      fail(`no one allowed ${options.connection} in before the knock expired; run interlock join --resume --name ${options.connection}`);
+      return null;
+    }
+    await waitMs(poll);
+  }
+}
+
+function admittedLine(options, room, serverUrl) {
+  const ring = Ring.buildRing({ kind: 'admitted', message_id: null, from: null, at: Date.now(),
+    connection: options.connection, room });
+  return `${Ring.ringLine(options.connection, ring)} · You are admitted to ${serverUrl} as ${options.connection}. ` +
+    'Say hello; your doorbell is armed.';
+}
+
 function replacementRecoveryHint(state, replacementPending, firstPoll) {
   if (!firstPoll || state === null || replacementPending) return '';
   return '\nIf this immediately follows an intentional Interlock connection ' +
@@ -839,7 +962,7 @@ function replacementRecoveryHint(state, replacementPending, firstPoll) {
     'the adapter state was not changed.';
 }
 
-function runAdapter(argv) {
+async function runAdapter(argv) {
   const options = parseArgs(argv);
   if (!options) {
     fail('usage: interlock-doorbell run --adapter codex|stdout --connection NAME ' +
@@ -870,6 +993,8 @@ function runAdapter(argv) {
   const codex = process.env.INTERLOCK_DOORBELL_CODEX ||
     (process.platform === 'win32' ? 'codex.exe' : 'codex');
   const lockDir = lockDirectory(options, stateDir);
+  // A join still waiting for its Allow: this run waits with it (C6).
+  const pending = pendingJoin(options.connection);
   warnSameSession(options, sameSessionOtherConnections(options, stateDir));
   fs.mkdirSync(lockDir, { recursive: true, mode: 0o700 });
   let adapterLock;
@@ -941,6 +1066,27 @@ function runAdapter(argv) {
         : `this adapter's output is closed (${code}), so nothing can read its rings; it exits and releases ` +
           `connection ${options.connection}. The cursor is ${cursor}: the ring stays eligible for the next ` +
           'doorbell. Start a new doorbell where its output is read.');
+    }
+    if (pending) {
+      const admitted = await waitForAdmission(options, stateDir, runtime, pending, watch, deaf);
+      if (!admitted) return;
+      // The admitted ring (C6, A11): once, at once, before the first poll.
+      if (watch && watch.parentGone()) { deaf('parent-gone'); return; }
+      const line = admittedLine(options, admitted.room, pending.candidate.server_url);
+      if (options.adapter === 'codex') {
+        const delivered = command(codex, ['queue', '--thread', options.session, '--message', line]);
+        if (delivered.error || delivered.status !== 0) {
+          const saved = saveFailure(stateDir, delivered.stdout || '',
+            (delivered.stderr || '') + (delivered.error ? `\n${delivered.error.message}` : ''));
+          fail(`Codex rejected the admitted nudge; output is at ${saved}. The seat is admitted: rerun this doorbell.`);
+          return;
+        }
+        prove('delivered_at');
+      } else {
+        const refused = writeLine(process.stdout.fd, line + '\n');
+        if (refused) { deaf('output-closed', refused); return; }
+        prove('written_at');
+      }
     }
     let outageStarted = null;
     let retries = 0;
@@ -1080,10 +1226,7 @@ function main(argv = process.argv.slice(2)) {
     process.stdout.write(helpFor(argv));
     return;
   }
-  if (argv[0] === 'run') {
-    runAdapter(argv.slice(1));
-    return;
-  }
+  if (argv[0] === 'run') return runAdapter(argv.slice(1)).catch(reportCrash);
   if (argv[0] === 'status') {
     const options = parseStatusArgs(argv.slice(1));
     if (!options) {
@@ -1104,7 +1247,11 @@ function main(argv = process.argv.slice(2)) {
     printGuide();
     return;
   }
-  runAdapter(argv);
+  return runAdapter(argv).catch(reportCrash);
+}
+
+function reportCrash(error) {
+  fail(`stopped unexpectedly (${error && (error.code || error.message) || 'unknown'})`);
 }
 
 module.exports = Object.freeze({
