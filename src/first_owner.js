@@ -3324,7 +3324,8 @@ function createFirstOwnerHandler(options) {
     if (waiting.length === 0) return sendJson(request, response, 201, { ok: true, grant: made });
     const inheritance = inheritOnGrant(who, firstOwnerSubjectId, holder, made, body.project, waiting);
     // The new lead hears once, from whoever made the grant, what it took over.
-    if (inheritance.inherited.length > 0 || (inheritance.not_inherited || []).length > 0) {
+    if (inheritance.inherited.length > 0 || (inheritance.not_inherited || []).length > 0 ||
+        (inheritance.unassigned || []).length > 0) {
       const at = Date.now();
       let grantor = null;
       try {
@@ -3350,6 +3351,10 @@ function createFirstOwnerHandler(options) {
     const parts = [];
     if (inheritance.inherited.length > 0) {
       parts.push(`you took over ${words(inheritance.inherited.length)}: ${inheritance.inherited.join(', ')}`);
+    }
+    const loose = inheritance.unassigned || [];
+    if (loose.length > 0) {
+      parts.push(`${loose.length === 1 ? '1 unassigned item waits' : `${loose.length} unassigned items wait`} in your Needs you: ${loose.join(', ')}`);
     }
     const missed = inheritance.not_inherited || [];
     if (missed.length > 0) parts.push(`not moved, still "holder left" and yours to hand on: ${missed.join(', ')}`);
@@ -3380,8 +3385,10 @@ function createFirstOwnerHandler(options) {
     } catch (_) {
       return { inherited: [], not_inherited: ids };
     }
-    return result.failed.length === 0 ? { inherited: result.inherited }
+    const out = result.failed.length === 0 ? { inherited: result.inherited }
       : { inherited: result.inherited, not_inherited: result.failed };
+    if (Array.isArray(result.unassigned) && result.unassigned.length > 0) out.unassigned = result.unassigned;
+    return out;
   }
 
   async function revokeGrant(request, response, body) {
