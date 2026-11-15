@@ -126,14 +126,29 @@ test('a waiter whose session is gone exits without taking a ring', async t => {
   assert.doesNotMatch(out, /Interlock rang/);
 });
 
-test('a waiter at its time limit wakes the model once to say so', async () => {
+test('a waiter at its time limit says so before the host timeout would stop it', async () => {
   const fake = room.fakeRoom();
   await fake.listen(0);
   const world = room.roomWorld(fake.port);
   await seeded(fake, world);
-  const done = await hook(world, ['--max-seconds', '1']).exited;
-  assert.equal(done.code, 2);
+  // The host kills the hook at its timeout, 4 s here; the waiter's limit is 2 s.
+  const started = Date.now();
+  const waiter = hook(world, ['--max-seconds', '2']);
+  const killer = setTimeout(() => waiter.child.kill('SIGKILL'), 4_000);
+  const done = await waiter.exited;
+  clearTimeout(killer);
+  assert.equal(done.code, 2, 'it left by itself, with a wake, before the kill');
+  assert.ok(Date.now() - started < 4_000);
+  assert.equal(done.stdout.split('\n').filter(Boolean).length, 1, 'one line');
   assert.match(done.stdout, /reached its time limit\. Nothing is wrong; end your turn and a fresh waiter starts\./);
+  assert.equal(room.savedCursor(world.stateDir), 5, 'no ring was taken on the way out');
+});
+
+test('the default limit is one hour under the recipe\'s 7-day timeout', () => {
+  const { DEFAULT_MAX_SECONDS } = require('../integrations/claude_code_hook.js');
+  assert.equal(DEFAULT_MAX_SECONDS, 604800 - 3600);
+  const doc = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'docs', 'DOORBELL.md'), 'utf8');
+  assert.match(doc, /"timeout": 604800/);
 });
 
 test('a failing doorbell wakes once with the reason, then retries quietly', async () => {

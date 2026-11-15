@@ -18,15 +18,17 @@
 //
 // One waiter per Claude Code session. A waiter whose session is gone exits
 // without taking a ring. A waiter that reaches its time limit wakes the model
-// once to say so; the next turn's end starts a fresh one. Set the Stop hook's
-// `timeout` above --max-seconds.
+// once to say so; the next turn's end starts a fresh one. The Stop hook's
+// `timeout` must stay above --max-seconds (the recipe: 604800 and 601200).
 
 const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DEFAULT_MAX_SECONDS = 23 * 60 * 60;
+// One hour under the hook timeout the recipe sets (604800 s, 7 days), so a
+// quiet waiter always says so before Claude Code stops it.
+const DEFAULT_MAX_SECONDS = 7 * 24 * 60 * 60 - 60 * 60;
 const FAILURE_WAKE_AFTER = 3;
 const FAILURE_RETRY_MS = 30_000;
 const RUNNER = path.join(__dirname, 'doorbell.js');

@@ -55,7 +55,7 @@ name:
       "type": "command",
       "command": "interlock-doorbell claude-code-hook --connection NAME",
       "asyncRewake": true,
-      "timeout": 86400
+      "timeout": 604800
     }] }],
     "UserPromptSubmit": [{ "hooks": [{
       "type": "command",
@@ -76,9 +76,10 @@ name:
   meanwhile stays eligible and rings when the turn ends.
 - There is one waiter per Claude Code session. A waiter whose session has
   ended exits without taking a ring.
-- A waiter lives up to `--max-seconds` (default 82800, 23 hours). Then it wakes
-  the model once to say so, and the next turn's end starts a fresh one. Keep the
-  hook's `timeout` above it.
+- A waiter lives up to `--max-seconds` (default 601200: one hour under the
+  hook's 7-day `timeout`). Then it wakes the model once to say so, and the next
+  turn's end starts a fresh one, so a quiet seat never goes deaf when the
+  timeout comes. If you set a shorter `timeout`, pass a `--max-seconds` under it.
 - A doorbell that keeps failing (the room unreachable, the connection ended)
   wakes the model once with the reason, then keeps retrying quietly.
 
