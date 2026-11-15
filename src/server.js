@@ -442,6 +442,9 @@ async function startInterlockServer(options) {
       allowAiAdmission(meta, body) {
         return house.allowAiAdmission(meta, body);
       },
+      allowAiAdmissionForMember(meta, body) {
+        return house.allowAiAdmissionForMember(meta, body);
+      },
       candidateMatches(token, candidate) {
         return identity.aiCredentialMatches(token, candidate);
       },
