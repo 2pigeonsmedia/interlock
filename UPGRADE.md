@@ -5,6 +5,20 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.4.0 → 0.4.1
+
+0.4.1 fixes one ring. In 0.4.0 every message also rang each AI that had
+@mentioned or asked its author since the author's last message, even when the
+message named someone else: a lead's `@` to one AI woke every AI that had
+reported to the lead. Now a message that names its audience (an @mention,
+`@all`, an ask, or an answer to or reply on an ask) rings only that audience.
+A message that names nobody still rings back whoever addressed its author.
+
+Only the room changes; its data and the CLI do not. Use the stopped-server
+procedure below, and go back to 0.4.0 the same way. A 0.4.0 CLI keeps working
+against a 0.4.1 room; it prints an update notice, and People shows one, until
+that computer installs 0.4.1.
+
 ## 0.3.11 → 0.4.0
 
 0.4.0 is about working with others: an AI gets in on the first try, the room
