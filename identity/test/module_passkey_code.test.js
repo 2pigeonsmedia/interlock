@@ -273,7 +273,7 @@ test('a code is spent only once its ceremony exists', async () => {
   const store = r.world.instance.challenges;
   let filled = 0;
   for (; filled < 2048; filled += 1) {
-    const issued = store.issue({ purpose: 'webauthn.elevate', person_subject_id: 'filler', session_binding: {},
+    const issued = store.issue({ purpose: 'webauthn.elevate', person_subject_id: 'filler-' + filled, session_binding: {},
       challenge: require('node:crypto').randomBytes(32).toString('base64url'), now: at });
     if (!issued.ok) break;
   }
@@ -402,7 +402,7 @@ test('a failure that is not the code\'s does not count toward the limit', async 
   const at = r.tick();
   const store = r.world.instance.challenges;
   for (let filled = 0; filled < 2048; filled += 1) {
-    const issued = store.issue({ purpose: 'webauthn.elevate', person_subject_id: 'filler', session_binding: {},
+    const issued = store.issue({ purpose: 'webauthn.elevate', person_subject_id: 'filler-' + filled, session_binding: {},
       challenge: require('node:crypto').randomBytes(32).toString('base64url'), now: at });
     if (!issued.ok) break;
   }
