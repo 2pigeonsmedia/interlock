@@ -16,6 +16,7 @@ const crypto = require('node:crypto');
 const test = require('node:test');
 
 const identity = require('identity');
+const audit = require('../identity/audit.js');
 const { createDevice } = require('../identity/test/step_up_fixture.js');
 const { call, post, room, elevate, waitForPending, admitSeat } = require('./helpers/lead_leaves_rig.js');
 
@@ -94,7 +95,14 @@ test('a member brings their own AI: switch, code, knock, the member\'s Allow, an
     const on = await post(runtime, '/api/settings/member-codes', { enabled: true }, owner);
     assert.equal(on.status, 200, on.text);
 
+    // An ordinary session cannot make a code: it takes Bea's own fresh step-up.
+    const plainIssue = await post(runtime, '/api/member-codes/issue', {}, bea);
+    assert.equal(plainIssue.status, 403, plainIssue.text);
+    assert.equal(plainIssue.json.error, 'fresh-step-up-required');
     // Bea makes a code; she sees it, and so does the owner.
+    await audit.drain();
+    const auditBefore = audit.read('authz', { limit: 1000 }).length;
+    bea = await elevate(runtime, bea, beaDevice);
     const issued = await post(runtime, '/api/member-codes/issue', {}, bea);
     assert.equal(issued.status, 201, issued.text);
     assert.match(issued.json.code, /^[0-9A-Z]{5}-[0-9A-Z]{5}$/);
@@ -150,6 +158,18 @@ test('a member brings their own AI: switch, code, knock, the member\'s Allow, an
     assert.equal(allowed.status, 200, allowed.text);
     const joined = await waiting;
     assert.equal(joined.status, 200, joined.text);
+    // The audit trail has one row for the issue and one for the use, naming
+    // the code's id and Bea as principal, and never the code.
+    await audit.drain();
+    const rows = audit.read('authz', { limit: 1000 }).slice(auditBefore)
+      .filter(row => typeof row.capability === 'string' && row.capability.startsWith('member-code.'));
+    assert.deepEqual(rows.map(row => row.capability), ['member-code.confirm', 'member-code.issue', 'member-code.use'],
+      'the step-up spent on the issue, then the issue, then the use');
+    const events = rows.slice(1);
+    assert.ok(events.every(row => row.resource === 'member-code:' + issued.json.id), JSON.stringify(rows));
+    assert.equal(events[0].principal, events[1].principal);
+    assert.equal(rows[0].result, 'allow');
+    assert.equal(JSON.stringify(rows).includes(issued.json.code.replace('-', '')), false, 'no code in the audit');
     assert.ok((await participants(runtime, owner)).includes('Kestrel'), 'Kestrel is in the room');
 
     // A knock without her code is not hers to Allow, even elevated.
@@ -178,14 +198,19 @@ test('a member brings their own AI: switch, code, knock, the member\'s Allow, an
     assert.ok((await participants(runtime, owner)).includes('Kestrel'), 'Kestrel is still in');
 
     // Cancel: Bea's unused code is hers or an admin's to cancel, not another member's.
+    bea = await elevate(runtime, bea, beaDevice);
     const second = await post(runtime, '/api/member-codes/issue', {}, bea);
     assert.equal(second.status, 201, second.text);
+    owner = await elevate(runtime, owner, ownerDevice);
     const ownerCode = await post(runtime, '/api/member-codes/issue', {}, owner);
     assert.equal(ownerCode.status, 201, ownerCode.text);
     const crossCancel = await post(runtime, '/api/member-codes/cancel', { id: ownerCode.json.id }, bea);
     assert.equal(crossCancel.status, 403, crossCancel.text);
     const ownCancel = await post(runtime, '/api/member-codes/cancel', { id: second.json.id }, bea);
     assert.equal(ownCancel.status, 200, ownCancel.text);
+    await audit.drain();
+    assert.ok(audit.read('authz', { limit: 1000 }).some(row => row.capability === 'member-code.cancel' &&
+      row.resource === 'member-code:' + second.json.id), 'the cancel is in the audit');
     const cancelledKnock = knockBody('Merlin', { join_code: second.json.code });
     const cancelled = await post(runtime, '/api/ai/admissions', cancelledKnock.body);
     assert.equal(cancelled.status, 400, 'a cancelled code admits nothing: ' + cancelled.text);

@@ -1070,6 +1070,23 @@ function createService(opts) {
       Object.freeze({ ok: true }));
   }
 
+  /* A member makes a one-time AI join code (#821) on their own fresh
+   * step-up. A code admits nothing alone, but an administrator may Allow a
+   * code-bound knock trusting "brought by <member>", so the code must come
+   * from the member at full strength, never from an ordinary session alone.
+   * Who may: any active person with an active membership, for themselves. */
+  function confirmMemberCodeIssue(optsIn) {
+    if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn) ||
+        Reflect.ownKeys(optsIn).some(key =>
+          typeof key !== 'string' || !TRANSCRIPT_CLEAR_KEYS.includes(key))) return FAIL;
+    function gate(actorId, assurance) {
+      if (assurance !== 2) return { allow: false, reason: 'admin-l2-required' };
+      return principalStanding(repo.read(), actorId) ? { allow: true } : { allow: false, reason: 'not-administrator' };
+    }
+    return withFreshAdmin(optsIn, 'member-code.confirm', 'membership', ({ actorId }) =>
+      Object.freeze({ ok: true, subject_id: actorId }), gate);
+  }
+
   // ── Authenticator self-management ─────────────────────────────────────────
   async function beginAdditionalAuthenticator(optsIn) {
     // Requires L2 + at least one existing usable authenticator; uses the WebAuthn service.
@@ -1382,6 +1399,7 @@ function createService(opts) {
     inspectAiAdmission,
     allowAiAdmission,
     allowAiAdmissionForMember,
+    confirmMemberCodeIssue,
     grantRoomAccess,
     redeemHumanInvite,
     changeOwnPassword,

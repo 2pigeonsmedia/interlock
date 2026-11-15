@@ -233,3 +233,21 @@ test('refused: no one but the first owner may make the first owner an AI\'s prin
   assert.strictEqual(own.ok, true, 'the first owner may name herself: ' + JSON.stringify(own));
   assert.strictEqual(seatNamed(r.repo, 'Kestrel').principal, r.owner.id);
 });
+
+test('a member\'s code needs their own fresh step-up: L1 refused, L2 confirmed for themselves, suspended refused', async () => {
+  const r = await room();
+  assert.deepStrictEqual(r.house.confirmMemberCodeIssue(r.plainAs(r.member.subject_id)),
+    { ok: false, reason: 'fresh-step-up-required' });
+  assert.deepStrictEqual(r.house.confirmMemberCodeIssue(await r.asMember()),
+    { ok: true, subject_id: r.member.subject_id });
+  const suspended = r.world.service.suspendMembership(Object.assign(await r.asOwner(),
+    { target_person_subject_id: r.member.subject_id }));
+  assert.strictEqual(suspended.ok, true, 'ARRANGEMENT: suspended');
+  // Suspended: no session issues at all, so no step-up and no code.
+  const blocked = r.world.session_store.issue({ subject_id: r.member.subject_id, now: Date.now() });
+  assert.strictEqual(blocked.ok, false, 'a suspended member gets no session to make a code with');
+  // The service's own body is closed; the house wrapper passes only the
+  // envelope fields, as for every confirm act.
+  const extra = r.world.service.confirmMemberCodeIssue(Object.assign(await r.asOwner(), { extra: 1 }));
+  assert.strictEqual(extra.ok, false, 'closed body at the service: ' + JSON.stringify(extra));
+});

@@ -459,7 +459,8 @@ function createFirstOwnerHandler(options) {
   const expectedHost = parsedOrigin.host;
   let bootstrapSecret = null;
   // Member-issued AI join codes (#821): their own files, never 0.3.11's.
-  const memberCodes = createMemberCodes({ dataDir });
+  const memberCodes = createMemberCodes({ dataDir,
+    onEvent: typeof house.recordMemberCodeEvent === 'function' ? event => house.recordMemberCodeEvent(event) : undefined });
   /* The member a pending knock is for, or null. The pending list uses it to
    * show a member the knocks bound to their own code. */
   function knockIssuer(requestId) {
@@ -1801,6 +1802,8 @@ function createFirstOwnerHandler(options) {
     // A knock refused outright did not spend the code it just reserved.
     if (reservation && reservation.fresh === true && (!result || result.ok !== true)) {
       try { memberCodes.release(split.knock.request_id, reservation.id); } catch (_) { /* the code stays spent */ }
+    } else if (reservation && reservation.fresh === true) {
+      try { memberCodes.used(split.knock.request_id, reservation.id); } catch (_) { /* the record is best-effort */ }
     }
     if (response.destroyed) return;
     if (!result || result.ok !== true) {
@@ -3698,6 +3701,21 @@ function createFirstOwnerHandler(options) {
     if (!closedObject(body, [])) return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
     const person = personSession(request, response, true);
     if (!person) return undefined;
+    // Refusals that need no passkey come first; then the member's own fresh
+    // step-up, which an ordinary session alone can never supply.
+    let allowed;
+    try { allowed = memberCodes.canIssue(person.subject_id); } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'member-codes-unavailable' });
+    }
+    if (!allowed.ok) {
+      return sendJson(request, response, allowed.reason === 'code-cap' ? 429 : 403, { ok: false, error: allowed.reason });
+    }
+    const confirmed = typeof house.confirmMemberCodeIssue === 'function'
+      ? house.confirmMemberCodeIssue(requestMeta(request, Date.now())) : null;
+    if (!confirmed || confirmed.ok !== true) return sendStepUpRefusal(request, response, confirmed);
+    if (confirmed.subject_id !== person.subject_id) {
+      return sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+    }
     let made;
     try { made = memberCodes.issue({ subject_id: person.subject_id, name: person.name }); } catch (_) {
       return sendJson(request, response, 503, { ok: false, error: 'member-codes-unavailable' });

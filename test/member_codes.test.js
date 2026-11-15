@@ -100,3 +100,30 @@ test('one knock, one code: a request id another code holds takes no second one',
   assert.deepEqual(codes.issuerOf(requestId), { subject_id: 'bea-1', name: 'Bea' }, 'still Bea\'s alone');
   assert.equal(codes.list('cal-1')[0].state, 'unused', 'Cal\'s code was not spent');
 });
+
+test('the audit events: one each for issue, use, cancel and expiry; a released knock records nothing', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-member-codes-'));
+  const clock = { now: 1_800_000_000_000 };
+  const events = [];
+  const codes = createMemberCodes({ dataDir, clock: () => clock.now, onEvent: event => events.push(event) });
+  codes.setEnabled(true);
+  const a = codes.issue(BEA);
+  const b = codes.issue(BEA);
+  const c = codes.issue(BEA);
+  const knock = crypto.randomUUID();
+  const held = codes.reserve(a.code, knock);
+  assert.equal(events.filter(e => e.event === 'use').length, 0, 'reserving is not yet a use');
+  codes.release(knock, held.id);
+  const again = codes.reserve(a.code, knock);
+  codes.used(knock, again.id);
+  codes.cancel(b.id, 'admin-1');
+  clock.now += CODE_TTL_MS;
+  codes.list();
+  codes.list();
+  assert.deepEqual(events.map(e => [e.event, e.code_id]), [
+    ['issue', a.id], ['issue', b.id], ['issue', c.id], ['use', a.id], ['cancel', b.id], ['expire', c.id],
+  ], 'expiry recorded once, on the first read after it');
+  assert.equal(events.find(e => e.event === 'use').request_id, knock);
+  assert.equal(events.find(e => e.event === 'cancel').actor_subject_id, 'admin-1');
+  assert.equal(JSON.stringify(events).includes(a.code.replace('-', '')), false, 'no code in any event');
+});

@@ -25,7 +25,7 @@ const KEEP_ENDED_MS = 24 * 60 * 60 * 1000;
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_CHARS = 10;
 const ROW_KEYS = Object.freeze(['id', 'digest', 'issuer_subject_id', 'issuer_name', 'created_at',
-  'expires_at', 'request_id', 'used_at', 'cancelled_at', 'cancelled_by']);
+  'expires_at', 'request_id', 'used_at', 'cancelled_at', 'cancelled_by', 'expiry_logged']);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function fail(code) {
@@ -69,7 +69,8 @@ function validRow(row) {
     time(row.created_at) && time(row.expires_at) &&
     (row.request_id === null || UUID_V4.test(row.request_id)) &&
     timeOrNull(row.used_at) && timeOrNull(row.cancelled_at) &&
-    (row.cancelled_by === null || typeof row.cancelled_by === 'string');
+    (row.cancelled_by === null || typeof row.cancelled_by === 'string') &&
+    typeof row.expiry_logged === 'boolean';
 }
 
 function atomicWrite(file, value) {
@@ -91,6 +92,15 @@ function createMemberCodes(options) {
   }
   const clock = options.clock === undefined ? Date.now : options.clock;
   if (typeof clock !== 'function') throw fail('invalid-options');
+  // One audit event per issue, use, cancel and expiry (the host writes it to
+  // identity's audit stream). Never the code itself.
+  const onEvent = typeof options.onEvent === 'function' ? options.onEvent : () => {};
+  function emit(event, row, actorSubjectId) {
+    try {
+      onEvent({ event, actor_subject_id: actorSubjectId, issuer_subject_id: row.issuer_subject_id,
+        code_id: row.id, request_id: row.request_id });
+    } catch (_) { /* the record is best-effort; the code's own state stands */ }
+  }
   const codesPath = path.join(dataDir, CODES_FILE);
   const settingsPath = path.join(dataDir, SETTINGS_FILE);
 
@@ -105,7 +115,16 @@ function createMemberCodes(options) {
     if (!raw || raw.schema !== SCHEMA || !Array.isArray(raw.codes) || !raw.codes.every(validRow)) {
       throw fail('invalid-state');
     }
-    return raw.codes.map(row => Object.assign({}, row));
+    const rows = raw.codes.map(row => Object.assign({}, row));
+    // A code that ran out unused is recorded once, when the room next reads.
+    const now = clock();
+    const lapsed = rows.filter(row => !row.expiry_logged && row.used_at === null &&
+      row.cancelled_at === null && row.expires_at <= now);
+    if (lapsed.length > 0) {
+      for (const row of lapsed) { row.expiry_logged = true; emit('expire', row, null); }
+      atomicWrite(codesPath, { schema: SCHEMA, codes: rows });
+    }
+    return rows;
   }
 
   function writeRows(rows) {
@@ -157,6 +176,15 @@ function createMemberCodes(options) {
 
   /* A signed-in person makes one. Refused while the switch is off, and past
    * MAX_UNUSED_PER_MEMBER unused codes of theirs. */
+  /* Whether `subjectId` may make a code now: checked before a passkey is
+   * asked for, so a refusal costs no step-up. */
+  function canIssue(subjectId) {
+    if (!enabled()) return Object.freeze({ ok: false, reason: 'member-codes-off' });
+    const now = clock();
+    const unused = readRows().filter(row => row.issuer_subject_id === subjectId && stateOf(row, now) === 'unused');
+    return unused.length >= MAX_UNUSED_PER_MEMBER ? Object.freeze({ ok: false, reason: 'code-cap' }) : Object.freeze({ ok: true });
+  }
+
   function issue(issuer) {
     if (!issuer || typeof issuer.subject_id !== 'string' || typeof issuer.name !== 'string' ||
         issuer.subject_id.length === 0 || issuer.name.length === 0) throw fail('invalid-issuer');
@@ -169,10 +197,11 @@ function createMemberCodes(options) {
     const row = {
       id: crypto.randomUUID(), digest: digestOf(flat), issuer_subject_id: issuer.subject_id,
       issuer_name: issuer.name, created_at: now, expires_at: now + CODE_TTL_MS,
-      request_id: null, used_at: null, cancelled_at: null, cancelled_by: null,
+      request_id: null, used_at: null, cancelled_at: null, cancelled_by: null, expiry_logged: false,
     };
     rows.push(row);
     writeRows(rows);
+    emit('issue', row, issuer.subject_id);
     return Object.freeze({ ok: true, id: row.id, code: display(flat), expires_at: row.expires_at });
   }
 
@@ -198,6 +227,7 @@ function createMemberCodes(options) {
     row.cancelled_at = now;
     row.cancelled_by = bySubjectId;
     writeRows(rows);
+    emit('cancel', row, bySubjectId);
     return Object.freeze({ ok: true, id: row.id });
   }
 
@@ -235,6 +265,14 @@ function createMemberCodes(options) {
     return Object.freeze({ ok: true, id: match.id, issuer, fresh: true });
   }
 
+  /* The knock that reserved this code was taken: record its use, once. A
+   * knock refused for its own reason releases instead and records nothing. */
+  function used(requestId, id) {
+    const row = readRows().find(candidate => candidate.id === id && candidate.request_id === requestId);
+    if (row) emit('use', row, null);
+    return Boolean(row);
+  }
+
   /* Undo a reservation this knock just made, when the knock itself was
    * refused (name taken, cooling down, pending cap): the code was not spent. */
   function release(requestId, id) {
@@ -258,7 +296,7 @@ function createMemberCodes(options) {
     return Object.freeze({ subject_id: bound[0].issuer_subject_id, name: bound[0].issuer_name });
   }
 
-  return Object.freeze({ enabled, setEnabled, issue, list, cancel, reserve, release, issuerOf });
+  return Object.freeze({ enabled, setEnabled, canIssue, issue, list, cancel, reserve, used, release, issuerOf });
 }
 
 module.exports = Object.freeze({

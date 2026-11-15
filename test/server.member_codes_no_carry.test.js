@@ -63,6 +63,7 @@ test('a member\'s code-bound AI under a released lead\'s name carries nothing of
     // Bea's AI knocks as "Juno" with Bea's code.
     let bea = await post(runtime, '/api/login', { name: 'Bea', password: beaPassword });
     bea = sessionFrom(bea);
+    bea = await elevate(runtime, bea, beaDevice);
     const issued = await post(runtime, '/api/member-codes/issue', {}, bea);
     assert.equal(issued.status, 201, issued.text);
     const candidate = identity.newAiCredential();
