@@ -22,6 +22,22 @@
     return Object.freeze(known.filter(name => selected.has(name)));
   }
 
+  // The names a text @mentions one by one, without @all's expansion. An
+  // @Name reaches its AI whether or not it is present (the ring waits for
+  // its next poll); @all reaches the present ones only.
+  function named(text, names) {
+    if (typeof text !== 'string' || !Array.isArray(names)) return Object.freeze([]);
+    const known = names.filter(name => typeof name === 'string' && name.length > 0);
+    const byFoldedName = new Map(known.map(name => [name.toLowerCase(), name]));
+    const selected = new Set();
+    for (const match of text.matchAll(HANDLE)) {
+      if (match[2] === 'all') continue;
+      const name = byFoldedName.get(match[2].toLowerCase());
+      if (name !== undefined) selected.add(name);
+    }
+    return Object.freeze(known.filter(name => selected.has(name)));
+  }
+
   function tokens(text) {
     if (typeof text !== 'string') return Object.freeze([]);
     const found = [];
@@ -34,7 +50,7 @@
     return Object.freeze(found);
   }
 
-  const contract = Object.freeze({ resolve, tokens });
+  const contract = Object.freeze({ resolve, named, tokens });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockMentions', {
     configurable: false, enumerable: false, writable: false, value: contract,

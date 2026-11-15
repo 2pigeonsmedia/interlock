@@ -248,7 +248,12 @@ function createChatService(options) {
     const everyone = await participantSnapshot(now);
     // A seat the room rings by webhook has no poller, so it is never
     // "present" by its polls; it is rung while it is admitted (A8).
-    const roster = everyone.filter(row => row.present || (row.kind === 'seat' && hasWebhook(row.subject_id)));
+    // An @Name reaches an admitted AI whether or not it is present: an AI in
+    // a long turn has not polled, and its ring waits for its next poll.
+    // @all reaches the present ones (and the webhook ones) only.
+    const named = new Set(InterlockMentions.named(body && body.text, everyone.map(row => row.name)));
+    const roster = everyone.filter(row => row.present || (row.kind === 'seat' &&
+      (hasWebhook(row.subject_id) || named.has(row.name))));
     // A message that starts with "re #N", N an ask in this era, is a reply on
     // that ask, exactly as the Reply button makes it (Patti, 2026-10-30): a
     // deterministic prefix like an @mention, never a reading of the text.

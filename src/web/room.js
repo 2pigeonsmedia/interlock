@@ -143,6 +143,7 @@ let rosterRecentlyLeft = [];
 let rosterPending = [];
 let rosterPendingNote = '';
 let rosterSeats = [];
+let rosterAllSeats = [];
 let rosterKnown = false;
 let rosterLoading = false;
 // People facts beside the roster: the room's grants and its live projects.
@@ -381,6 +382,7 @@ function showLogin(message = '') {
   currentUser = null;
   rosterParticipants = [];
   rosterSeats = [];
+  rosterAllSeats = [];
   rosterKnown = false;
   rosterGrants = [];
   rosterProjects = [];
@@ -1097,6 +1099,7 @@ function projectName(id) {
 function renderRoster(participants) {
   rosterParticipants = participants.slice();
   rosterSeats = participants.filter(row => row.kind === 'seat' && row.present);
+  rosterAllSeats = participants.filter(row => row.kind === 'seat');
   rosterKnown = true;
   drawRoster();
   renderMentionSuggestions();
@@ -2164,8 +2167,12 @@ async function revokeGrant(grant, button) {
   }
 }
 
+// As the room rings: @all reaches the present AIs, and an @Name any
+// admitted AI, present or not (its ring waits for its next poll).
 function mentionRecipients(text) {
-  return InterlockMentions.resolve(text, rosterSeats.map(seat => seat.name));
+  const named = new Set(InterlockMentions.named(text, rosterAllSeats.map(seat => seat.name)));
+  const ringable = rosterAllSeats.filter(seat => seat.present || named.has(seat.name));
+  return InterlockMentions.resolve(text, ringable.map(seat => seat.name));
 }
 
 function updateMentionPreview() {
@@ -2188,13 +2195,13 @@ function insertMention(name) {
 
 function renderMentionSuggestions() {
   mentionSuggestions.replaceChildren();
-  if (rosterSeats.length === 0) {
+  if (rosterAllSeats.length === 0) {
     const none = document.createElement('span');
     none.textContent = 'Connect an AI to address it.';
     mentionSuggestions.append(none);
     return;
   }
-  for (const name of ['all', ...rosterSeats.map(seat => seat.name)]) {
+  for (const name of ['all', ...rosterAllSeats.map(seat => seat.name)]) {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = '@' + name;

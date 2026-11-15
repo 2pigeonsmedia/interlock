@@ -213,17 +213,24 @@ test('a ring-only client touch restores addressability without claiming delivery
   assert.equal((await chat.listParticipants()).find(row => row.name === 'Marlow').present, true);
   clock += 2;
   assert.equal((await chat.listParticipants()).find(row => row.name === 'Marlow').present, false);
-  const whileStale = await chat.append({ text: '@Marlow not eligible yet' }, ACTOR);
-  assert.deepEqual(whileStale.recipients, []);
+  // An @ of an admitted AI that is not present is held for it, not dropped:
+  // an AI in a long turn has not polled, and its ring waits for its next poll.
+  const whileStale = await chat.append({ text: '@Marlow held while stale' }, ACTOR);
+  assert.deepEqual(whileStale.recipients.map(row => row.name), ['Marlow']);
 
   await chat.touchParticipant(marlow.subject_id, clock);
-  const secondWait = chat.waitForSeatRings(
+  const secondRing = await chat.waitForSeatRings(
     { after: ring.cursor, limit: 10 }, marlow.subject_id, { timeoutMs: 50 },
   );
+  assert.deepEqual(secondRing.messages.map(message => message.id), [whileStale.id],
+    'the next poll rings for the held @');
+  const thirdWait = chat.waitForSeatRings(
+    { after: secondRing.cursor, limit: 10 }, marlow.subject_id, { timeoutMs: 50 },
+  );
   const eligibleAgain = await chat.append({ text: '@Marlow eligible again' }, ACTOR);
-  const secondRing = await secondWait;
-  assert.deepEqual(secondRing.messages.map(message => message.id), [eligibleAgain.id]);
-  assert.equal((await chat.participantState([marlow.subject_id]))[0].outstanding, 2);
+  const thirdRing = await thirdWait;
+  assert.deepEqual(thirdRing.messages.map(message => message.id), [eligibleAgain.id]);
+  assert.equal((await chat.participantState([marlow.subject_id]))[0].outstanding, 3);
   await chat.close();
 });
 

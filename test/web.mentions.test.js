@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { resolve, tokens } = require('../src/web/mentions.js');
+const { resolve, tokens, named } = require('../src/web/mentions.js');
 
 const NAMES = Object.freeze(['Marlow', 'Codex-One']);
 
@@ -38,4 +38,12 @@ test('tokens reports the exact @handle spans the resolver reads, and nothing els
     assert.equal('ping @Codex-One.'.slice(token.start, token.end), '@' + token.handle,
       'a span must cover the literal @handle so text splitting loses no characters');
   }
+});
+
+test('named lists the handles a text @mentions one by one, without @all expanding', () => {
+  assert.deepEqual(named('@marlow and @all', NAMES), ['Marlow']);
+  assert.deepEqual(named('@all', NAMES), []);
+  assert.deepEqual(named('@CODEX-one, @nobody', NAMES), ['Codex-One']);
+  assert.deepEqual(named('x@Marlow @Marlow_', NAMES), [], 'the same token boundaries as resolve');
+  assert.deepEqual(named(null, NAMES), []);
 });

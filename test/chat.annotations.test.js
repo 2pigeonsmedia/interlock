@@ -79,10 +79,12 @@ test('a hold never rings its addressee, even named with @; others named still ri
   assert.equal(asks.addressed[0].deliver, 'later');
 });
 
-test('an ask rings an AI that is not present; a bare @ to it does not', async () => {
+test('an ask and a bare @ both ring an AI that is not present; @all does not', async () => {
   const { chat } = room();
+  const all = await chat.append({ text: '@all are you there?' }, PERSON);
+  assert.deepEqual(ringed(all).filter(name => name === 'Iris'), []);
   const plain = await chat.append({ text: '@Iris are you there?' }, PERSON);
-  assert.deepEqual(ringed(plain), []);
+  assert.deepEqual(ringed(plain), ['Iris']);
   const asked = await chat.appendAnnotated({ text: 'are you there?' }, PERSON, { ask: { of: 'Iris' } });
   assert.deepEqual(ringed(asked), ['Iris']);
 });

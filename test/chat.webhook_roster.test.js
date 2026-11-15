@@ -32,19 +32,22 @@ function service(options = {}) {
   return createChatService(Object.assign({ store: openStore({ dataDir: dir }), participants: () => ROSTER }, options));
 }
 
-test('arrangement: with no webhook, a seat absent for over five minutes is not rung', async () => {
+test('arrangement: with no webhook, a seat absent for over five minutes is not rung by @all', async () => {
   const chat = service();
   const participants = await chat.listParticipants();
   assert.deepEqual(participants.filter(row => row.kind === 'seat').map(row => row.present), [false, false]);
-  const saved = await chat.append({ text: '@Hooked @Quiet hello' }, ANA);
+  const saved = await chat.append({ text: '@all hello' }, ANA);
   assert.deepEqual(saved.recipients, []);
+  // An @Name reaches an admitted seat whether or not it is present.
+  const named = await chat.append({ text: '@Hooked @Quiet hello' }, ANA);
+  assert.deepEqual(named.recipients.map(row => row.name), ['Hooked', 'Quiet']);
   await chat.close();
 });
 
-test('a seat with a webhook is rung however long since it polled; others are not', async () => {
+test('@all rings a seat with a webhook however long since it polled; others are not', async () => {
   const handed = [];
   const chat = service({ hasWebhook: id => id === HOOKED, onSaved: message => handed.push(message) });
-  const saved = await chat.append({ text: '@Hooked @Quiet hello' }, ANA);
+  const saved = await chat.append({ text: '@all hello' }, ANA);
   assert.deepEqual(saved.recipients.map(row => row.name), ['Hooked']);
   assert.equal(handed.length, 1);
   assert.equal(handed[0].id, saved.id);

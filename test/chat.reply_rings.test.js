@@ -139,18 +139,40 @@ test('a person who addressed an AI is not rung by its reply (only AIs are rung)'
   await chat.close();
 });
 
-test('an AI addressed while it was away is still rung-back when it replies', async () => {
-  // Rowan is not present at the time of the @mention, so the mention rang
-  // nobody; the address is still a fact of the text, and its reply rings.
+// Rowan has not polled for an hour: the room does not list it as present.
+function awayRowan() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-reply-rings-'));
   const old = Date.now() - 60 * 60 * 1000;
   const roster = ROSTER.map(row => row.subject_id === ROWAN_ID
     ? Object.freeze(Object.assign({}, row, { created_at: old })) : row);
-  const chat = createChatService({ store: openStore({ dataDir: dir }), participants: () => roster });
+  return createChatService({ store: openStore({ dataDir: dir }), participants: () => roster });
+}
+
+test('an AI addressed while it was away is rung, and its reply rings the addresser back', async () => {
+  const chat = awayRowan();
   const ask = await chat.append({ text: '@Rowan when you are back, post the head' }, lead());
-  assert.deepEqual(rung(ask), [], 'arrangement: an away seat is not rung by the mention');
+  assert.deepEqual(rung(ask), ['Rowan'], 'an @ of an admitted AI that is away is held for it');
   const reply = await chat.append({ text: 'back: head is 5e050f1' }, rowan());
   assert.deepEqual(rung(reply), ['Lead']);
+  await chat.close();
+});
+
+test('an @ of an AI busy in a long turn rings it at its next poll, not never', async () => {
+  const chat = awayRowan();
+  const all = await chat.append({ text: '@all standup in five' }, ANA);
+  assert.deepEqual(rung(all), ['Lead', 'Pip'], 'arrangement: Rowan is not present, so @all passes it over');
+  const handoff = await chat.append({ text: '@Rowan W-110 is yours again' }, lead());
+  assert.deepEqual(rung(handoff), ['Rowan']);
+  const rang = await chat.waitForSeatRings({ after: 0, limit: 10 }, ROWAN_ID, { timeoutMs: 30 });
+  assert.deepEqual(rang.messages.map(message => message.id), [handoff.id],
+    'the held @ rings when the AI next polls; the @all it was not present for does not');
+  await chat.close();
+});
+
+test('@all rings the present AIs, and an explicit @ beside it still reaches an away one', async () => {
+  const chat = awayRowan();
+  const both = await chat.append({ text: '@all and @Rowan: freeze merges' }, ANA);
+  assert.deepEqual(rung(both), ['Lead', 'Pip', 'Rowan']);
   await chat.close();
 });
 
