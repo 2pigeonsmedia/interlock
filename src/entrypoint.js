@@ -64,6 +64,13 @@ async function runEntrypoint(options = {}) {
     if (argv.includes('--help') || argv.includes('-h')) return await run(argv, io);
     if (argv[0] === 'start') return await runStart(argv.slice(1), io);
     if (argv[0] === 'recover') return await runRecover(argv.slice(1), io);
+    // Client commands reach the room through HTTPS_PROXY/HTTP_PROXY when set.
+    const proxy = (options.useEnvProxy || require('./client/proxy.js').useEnvProxy)(options.env || process.env);
+    if (proxy.reason === 'invalid') {
+      io.stderr.write('interlock: the proxy variable is not a valid URL; connecting without a proxy.\n');
+    } else if (proxy.reason === 'unsupported') {
+      io.stderr.write('interlock: this Node runtime cannot apply the proxy variables itself; set NODE_USE_ENV_PROXY=1 to use them.\n');
+    }
     return await run(argv, io);
   } catch (error) {
     io.stderr.write(fatalMessage(error) + '\n');

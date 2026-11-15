@@ -18,6 +18,9 @@ const DEFAULT_URL = 'http://localhost:8788';
 const WRONG_SETUP_CODE_REPORT_MS = 1_000;
 const JOIN_WINDOW_MS = 15 * 60 * 1000;
 const JOIN_RETRY_MS = 1_000;
+// A join whose room has never answered stops this long after its first
+// failed attempt and says why, instead of waiting out the whole join window.
+const JOIN_UNREACHED_MS = 30_000;
 const JOIN_FETCH_TIMEOUT_MS = 25_000;
 const JOIN_CONFIRM_TIMEOUT_MS = 5_000;
 const COMMAND_FETCH_TIMEOUT_MS = 25_000;
@@ -2547,6 +2550,39 @@ async function reconnectExisting(profiles, profile, product, serverUrl, fetcher,
   return completedJoinDecision(EXIT_OK);
 }
 
+// Why a request got no HTTP answer, in a few words.
+function networkCause(error) {
+  if (error && error.name === 'AbortError') return 'no answer in time';
+  const code = error && error.cause && typeof error.cause.code === 'string' ? error.cause.code : null;
+  if (code === 'ECONNREFUSED') return 'connection refused';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'host name not found';
+  if (code === 'ECONNRESET') return 'connection reset';
+  if (code === 'UND_ERR_CONNECT_TIMEOUT' || code === 'ETIMEDOUT') return 'connection timed out';
+  if (code && /CERT|TLS|SSL/.test(code)) return 'TLS failed: ' + code;
+  return code ? 'network error ' + code : 'network error';
+}
+
+function loopbackUrl(url) {
+  try { return require('./client/proxy.js').LOOPBACK.includes(new URL(url).hostname); }
+  catch (_) { return false; }
+}
+
+function unreachableRefusal(stderr, url, error, profile, env) {
+  const proxy = require('./client/proxy.js');
+  line(stderr, `interlock: could not reach ${terminalSafe(url)} (${networkCause(error)}). The room has not answered, so nobody has been asked to Allow this yet.`);
+  if (!loopbackUrl(url)) {
+    const settings = proxy.proxySettings(env);
+    const shown = settings && proxy.describeProxy(settings, new URL(url).protocol);
+    if (shown) {
+      line(stderr, `This computer sets ${terminalSafe(shown)}, and Interlock sent the request through it. Check that the proxy lets this host through.`);
+    } else {
+      line(stderr, 'If this computer reaches the internet only through a proxy, set HTTPS_PROXY to it (and NO_PROXY for exceptions), then try again.');
+    }
+  }
+  line(stderr, `The unfinished candidate ${terminalSafe(profile.name)} was kept. When the room is reachable, run: interlock join --resume --name ${terminalSafe(profile.name)}`);
+  line(stderr, `To drop it instead: interlock join --discard --name ${terminalSafe(profile.name)}`);
+}
+
 function removeJoinCandidate(profiles, profile, staged) {
   if (staged) profiles.removeStaged(profile.name, profile.request_id);
   else profiles.removeUnadmitted(profile.name, profile.request_id);
@@ -2698,12 +2734,16 @@ async function runJoin(args, io, dependencies = {}) {
       let lastNetworkFailure = false;
       let honoredCooldown = false;
       let firstAttempt = resumed;
+      let unreachedSince = null;
+      let reached = false;
+      let statedUnreached = false;
       line(stdout, `Requesting admission as ${terminalSafe(profile.name)}. Match code: ${matchCode(profile.selector)}`);
 
       while (firstAttempt || clock() < deadline) {
         firstAttempt = false;
         try {
           const result = await knock(fetcher, parsed.url, admissionBody(profile, parsed));
+          reached = true;
           lastNetworkFailure = false;
           if (result.state === 'waiting') {
             if (Number.isSafeInteger(result.expires_at) && result.expires_at > deadline) {
@@ -2737,6 +2777,7 @@ async function runJoin(args, io, dependencies = {}) {
           }
           throw responseError({ error: 'malformed-response' }, 200);
         } catch (error) {
+          if (Number.isSafeInteger(error.status)) reached = true;
           if (error.code === 'cooldown' && !honoredCooldown) {
             const retryAt = error.retry_after;
             const at = clock();
@@ -2782,8 +2823,18 @@ async function runJoin(args, io, dependencies = {}) {
             await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher, dependencies.doorbellStateDir || null);
             return EXIT_OK;
           }
-          if (!statedWaiting) {
-            line(stdout, 'Waiting for Interlock and the owner…');
+          if (!reached) {
+            if (unreachedSince === null) unreachedSince = clock();
+            else if (clock() - unreachedSince >= JOIN_UNREACHED_MS) {
+              unreachableRefusal(stderr, parsed.url, error, profile, dependencies.env || process.env);
+              return EXIT_RUNTIME;
+            }
+            if (!statedUnreached) {
+              line(stdout, `Interlock has not reached ${terminalSafe(parsed.url)} yet (${networkCause(error)}). Retrying for up to ${JOIN_UNREACHED_MS / 1000} seconds…`);
+              statedUnreached = true;
+            }
+          } else if (!statedWaiting) {
+            line(stdout, 'Lost contact with the room; retrying. Waiting for Interlock and the owner…');
             statedWaiting = true;
           }
           await sleep(JOIN_RETRY_MS);

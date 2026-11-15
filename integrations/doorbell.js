@@ -787,6 +787,8 @@ function main(argv = process.argv.slice(2)) {
     process.stdout.write(helpFor(argv));
     return;
   }
+  // The doorbell reaches the room through HTTPS_PROXY/HTTP_PROXY when set.
+  require('../src/client/proxy.js').useEnvProxy(process.env);
   if (argv[0] === 'run') {
     runAdapter(argv.slice(1));
     return;
