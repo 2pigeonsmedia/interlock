@@ -15,6 +15,8 @@ const { run, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } = require('../src/cli.js');
 const { openProfiles } = require('../src/client/profiles.js');
 
 const ROOM = 'https://room.example';
+// Past the time a candidate's request could still be waiting on the card.
+const LATE = 40 * 60_000;
 
 function json(status, body) {
   return { ok: status >= 200 && status < 300, status, async json() { return body; } };
@@ -177,7 +179,7 @@ for (const make of [orphanWorld, stagedWorld]) {
     const world = make();
     const result = await join(world, ['--discard', '--name', 'Wren-Two'], answers({
       '/api/ai/session': () => json(401, { ok: false, error: 'invalid-connection' }),
-    }));
+    }), { clock: () => LATE });
     assert.equal(result.code, EXIT_OK, result.stderr);
     assert.equal(knocks(result.requests).length, 0);
     assert.ok(result.requests.some(r => r.url === ROOM + '/api/ai/session'),
@@ -196,7 +198,7 @@ for (const make of [orphanWorld, stagedWorld]) {
     const world = make();
     const result = await join(world, ['--discard', '--name', 'Wren-Two'], answers({
       '/api/ai/session': () => json(200, { ok: true, connection: connectionFor(world.candidate) }),
-    }));
+    }), { clock: () => LATE });
     assert.equal(result.code, EXIT_RUNTIME);
     assert.match(result.stderr, /the room had admitted Wren-Two, so it was kept and is now saved as connected/);
     assert.match(result.stderr, /interlock leave --connection Wren-Two/);
@@ -208,7 +210,7 @@ for (const make of [orphanWorld, stagedWorld]) {
   test(`--discard against an unreachable room keeps the candidate (${form})`, async () => {
     const world = make();
     const before = fs.readdirSync(world.dir).sort();
-    const result = await join(world, ['--discard', '--name', 'Wren-Two'], async () => { throw refused(); });
+    const result = await join(world, ['--discard', '--name', 'Wren-Two'], async () => { throw refused(); }, { clock: () => LATE });
     assert.equal(result.code, EXIT_RUNTIME);
     assert.match(result.stderr, /could not confirm that https:\/\/room\.example never admitted Wren-Two \(the room could not be reached: connection refused\)/);
     assert.deepEqual(fs.readdirSync(world.dir).sort(), before);
@@ -218,7 +220,7 @@ for (const make of [orphanWorld, stagedWorld]) {
     const world = make();
     const result = await join(world, ['--discard', '--name', 'Wren-Two'], answers({
       '/api/ai/session': () => json(503, { ok: false, error: 'chat-unavailable' }),
-    }));
+    }), { clock: () => LATE });
     assert.equal(result.code, EXIT_RUNTIME);
     assert.match(result.stderr, /\(the room answered 503 chat-unavailable\)/);
     assert.ok(world.staged ? world.profiles.stagedExists('Wren-Two') : world.profiles.exists('Wren-Two'));
@@ -233,7 +235,7 @@ test('--discard that loses a race to a finishing doorbell removes nothing', asyn
       world.profiles.admitCandidate('Wren-Two', admission(world.candidate, 'seat-race'));
       return json(401, { ok: false, error: 'invalid-connection' });
     },
-  }));
+  }), { clock: () => LATE });
   assert.equal(world.profiles.load('Wren-Two').state, 'admitted', 'ARRANGEMENT: the other writer finished first');
   assert.equal(result.code, EXIT_RUNTIME);
   assert.match(result.stderr, /changed while discarding/);

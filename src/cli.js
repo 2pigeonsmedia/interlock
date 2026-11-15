@@ -17,6 +17,13 @@ const EXIT_UNREACHABLE = 3;
 const DEFAULT_URL = 'http://localhost:8788';
 const WRONG_SETUP_CODE_REPORT_MS = 1_000;
 const JOIN_WINDOW_MS = 15 * 60 * 1000;
+// A candidate's request can still be waiting on the owner's card until this
+// long after the candidate was made: a knock that creates the request can
+// come as late as the end of the join window, and the room keeps a waiting
+// request for 15 minutes from then. The room answers a waiting candidate's
+// own credential exactly like one it never admitted, so until this has
+// passed, "not admitted" proves nothing and the candidate is not discarded.
+const CANDIDATE_MAY_BE_WAITING_MS = JOIN_WINDOW_MS + 15 * 60 * 1000 + 2 * 60 * 1000;
 const JOIN_RETRY_MS = 1_000;
 // A join whose room has never answered stops this long after its first
 // failed attempt and says why, instead of waiting out the whole join window.
@@ -2475,6 +2482,13 @@ async function runDiscard(profiles, name, fetcher, clock, io) {
     line(io.stderr, `interlock: the room had admitted ${terminalSafe(name)}, so it was kept and is now saved as connected. To end it: interlock leave --connection ${terminalSafe(name)}`);
     return EXIT_RUNTIME;
   }
+  const waitingUntil = profile.created_at + CANDIDATE_MAY_BE_WAITING_MS;
+  if (settled.outcome === 'not-admitted' && clock() < waitingUntil) {
+    line(io.stderr, `interlock: ${terminalSafe(name)}'s request may still be waiting on the owner's card until ${new Date(waitingUntil).toISOString()}, and an Allow before then would admit it. The candidate was kept.`);
+    line(io.stderr, 'The room answers a waiting request exactly like one it never admitted, so that answer cannot show it is safe to drop.');
+    line(io.stderr, `Run --discard again after that time. The owner can Decline it in People meanwhile, so it cannot be allowed.`);
+    return EXIT_RUNTIME;
+  }
   if (settled.outcome !== 'not-admitted' || !settled.exactInvalid) {
     line(io.stderr, `interlock: could not confirm that ${terminalSafe(profile.server_url)} never admitted ${terminalSafe(name)} (${settled.why || 'no answer'}). The candidate was kept.`);
     line(io.stderr, 'Run --discard again once the room is reachable, or join under another name.');
@@ -2955,6 +2969,15 @@ async function runJoin(args, io, dependencies = {}) {
         profile = staged
           ? profiles.createStaged(candidateBody)
           : profiles.createUnadmitted(candidateBody);
+      }
+      // A candidate past its own join window is never knocked again: once the
+      // room has forgotten an ended request, the same knock would put a new
+      // one on the owner's card, even one she declined. Settling (above)
+      // already confirmed it if the room admitted it.
+      if (resumed && clock() >= profile.created_at + JOIN_WINDOW_MS) {
+        line(stderr, `interlock: the unfinished candidate ${terminalSafe(profile.name)} is past its join window (it started at ${new Date(profile.created_at).toISOString()}), so it is not sent again. The room has not admitted it.`);
+        line(stderr, `To ask again, start over: interlock join --discard --name ${terminalSafe(profile.name)}, then interlock join --product "${terminalSafe(profile.product)}" --name ${terminalSafe(profile.name)}`);
+        return EXIT_RUNTIME;
       }
       let deadline = profile.created_at + JOIN_WINDOW_MS;
       let statedWaiting = false;
