@@ -47,6 +47,13 @@
       secretBox.hidden = true;
     }
 
+    // Settings opened or closed: no secret on screen, and no line that asks
+    // the owner to copy one.
+    function reset() {
+      hideSecret();
+      say('');
+    }
+
     async function act(path, body, done) {
       say('Saving…');
       try {
@@ -85,6 +92,8 @@
       form.append(url, excerptLabel, save);
       form.addEventListener('submit', event => {
         event.preventDefault();
+        // Replacing makes a new secret too: the old one stops working at once.
+        if (hook && !root.confirm(`Replace ${seat.name}'s webhook? A new secret is made, and the receiver must be given it; the old one stops working at once.`)) return;
         act('/api/settings/webhooks/set', { name: seat.name, url: url.value.trim(), excerpt: excerpt.checked },
           `${seat.name}'s webhook is set. Copy the secret now.`);
       });
@@ -136,13 +145,15 @@
         const remove = element('button', 'quiet-action danger', 'Delete webhook');
         remove.type = 'button';
         remove.addEventListener('click', () => act('/api/settings/webhooks/delete', { ended: leftover.id }, 'Deleted.'));
-        item.append(remove);
+        const actions = element('div', 'settings-row-actions');
+        actions.append(remove);
+        item.append(actions);
         rows.push(item);
       }
       list.replaceChildren(...rows);
     }
 
-    return Object.freeze({ refresh, hideSecret });
+    return Object.freeze({ refresh, hideSecret, reset });
   }
 
   root.InterlockWebhooksPanel = Object.freeze({ create });

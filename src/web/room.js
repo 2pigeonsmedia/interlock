@@ -3244,9 +3244,9 @@ function openWebhooksPanel() {
       mutate: ownerMutation,
     });
     // A secret stays on screen only while Settings is open.
-    settingsDialog.addEventListener('close', () => webhooksPanel.hideSecret());
+    settingsDialog.addEventListener('close', () => webhooksPanel.reset());
   }
-  webhooksPanel.hideSecret();
+  webhooksPanel.reset();
   webhooksPanel.refresh();
 }
 

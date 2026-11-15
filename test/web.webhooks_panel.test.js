@@ -115,6 +115,7 @@ test('a refused address reads as plain words; a declined confirm changes nothing
   const remove = buttons.find(node => node.textContent === 'Delete webhook');
   remove.listeners.click[0]();
   assert.deepEqual(calls, [], 'the delete waited for a yes that never came');
+  window.confirm = () => true;   // yes to replacing, to reach the refusal
   const form = find(p.list, node => node.tagName === 'form')[0];
   await form.listeners.submit[0]({ preventDefault() {} });
   await new Promise(resolve => setImmediate(resolve));
@@ -135,4 +136,33 @@ test('a webhook left by an AI that has gone is listed and deletes by its id', as
   const remove = find(p.list, node => node.tagName === 'button' && node.textContent === 'Delete webhook')[0];
   await remove.listeners.click[0]();
   assert.equal(JSON.stringify(calls), JSON.stringify([['/api/settings/webhooks/delete', { ended: 'seat-gone' }]]));
+});
+
+test('reopening Settings clears the secret and the line that asks to copy it', async () => {
+  const { window } = load(() => ({ ok: true, https_only: false, seats: [{ name: 'Scout', webhook: null }] }));
+  const p = parts();
+  const panel = window.InterlockWebhooksPanel.create(Object.assign(p, {
+    mutate: async () => ({ ok: true, name: 'Scout', secret: 'ilwh_' + 'S'.repeat(43) }),
+  }));
+  await panel.refresh();
+  const form = find(p.list, node => node.tagName === 'form')[0];
+  await form.listeners.submit[0]({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(p.status.textContent, /Copy the secret now/);
+  panel.reset();
+  assert.equal(p.status.textContent, '');
+  assert.equal(p.secretValue.value, '');
+  assert.equal(p.secretBox.hidden, true);
+});
+
+test('replacing an existing webhook asks first; a no changes nothing', async () => {
+  const seats = [{ name: 'Scout', webhook: { target: 'https://hooks.example', excerpt: false, created_at: 1, updated_at: 2 } }];
+  const { window } = load(() => ({ ok: true, https_only: false, seats }), false);
+  const p = parts();
+  const calls = [];
+  const panel = window.InterlockWebhooksPanel.create(Object.assign(p, { mutate: async route => { calls.push(route); return {}; } }));
+  await panel.refresh();
+  const form = find(p.list, node => node.tagName === 'form')[0];
+  await form.listeners.submit[0]({ preventDefault() {} });
+  assert.deepEqual(calls, []);
 });
