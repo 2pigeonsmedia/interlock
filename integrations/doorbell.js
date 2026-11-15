@@ -30,7 +30,7 @@ const SLEEPER = new Int32Array(new SharedArrayBuffer(4));
 const HELP = `Interlock doorbell adapter
 
 Usage:
-  interlock-doorbell run --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--replace-connection] [--once]
+  interlock-doorbell run --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--replace-connection] [--replace-stale] [--once]
   interlock-doorbell status --connection NAME [--adapter codex|stdout --session HOST_SESSION] [--state-dir ABSOLUTE_PATH] [--json]
   interlock-doorbell guide
 
@@ -58,15 +58,16 @@ function validAbsolutePath(value) {
 function parseArgs(argv) {
   const result = {
     adapter: null, connection: null, session: null, stateDir: null,
-    replaceConnection: false, once: false,
+    replaceConnection: false, replaceStale: false, once: false,
   };
   const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
-    if (flag === '--once' || flag === '--replace-connection') {
+    if (flag === '--once' || flag === '--replace-connection' || flag === '--replace-stale') {
       if (seen.has(flag)) return null;
       seen.add(flag);
       if (flag === '--once') result.once = true;
+      else if (flag === '--replace-stale') result.replaceStale = true;
       else result.replaceConnection = true;
       continue;
     }
@@ -238,6 +239,70 @@ function ownerFile(options, stateDir) {
   return path.join(lockDirectory(options, stateDir), 'owner.json');
 }
 
+// How far this adapter's rings are proven to have gone, and when its output
+// closed. Separate files beside the runtime manifest, so a release that does
+// not know them reads the manifest exactly as before.
+function proofFile(options, stateDir) {
+  return path.join(lockDirectory(options, stateDir), 'proof.json');
+}
+
+function deafFile(options, stateDir) {
+  return path.join(lockDirectory(options, stateDir), 'deaf.json');
+}
+
+// A record in one of those files counts only for the adapter run that wrote
+// it: the same pid and the same start time as the runtime manifest.
+function recordFor(file, keys, runtime) {
+  let read;
+  try { read = readStatusJson(file); } catch (_) { return null; }
+  const value = read.kind === 'value' ? exactObject(read.value, keys) : null;
+  return value && value.schema === 1 && value.pid === runtime.pid &&
+    value.started_at === runtime.started_at ? value : null;
+}
+
+function proofFor(options, stateDir, runtime) {
+  const proof = recordFor(proofFile(options, stateDir),
+    ['schema', 'pid', 'started_at', 'written_at', 'delivered_at'], runtime);
+  return proof &&
+    (proof.written_at === null || Number.isSafeInteger(proof.written_at)) &&
+    (proof.delivered_at === null || Number.isSafeInteger(proof.delivered_at)) ? proof : null;
+}
+
+const DEAF_REASONS = Object.freeze({
+  'output-closed': 'its output is closed',
+  'parent-gone': 'the process that started it is gone',
+});
+
+function deafFor(options, stateDir, runtime) {
+  const deaf = recordFor(deafFile(options, stateDir),
+    ['schema', 'pid', 'started_at', 'at', 'reason'], runtime);
+  return deaf && Number.isSafeInteger(deaf.at) &&
+    Object.prototype.hasOwnProperty.call(DEAF_REASONS, deaf.reason) ? deaf : null;
+}
+
+/* What can be known about the stdout adapter's reader. A pipe, socket or
+ * terminal belongs to the process that started the adapter: when that
+ * process is gone (a Monitor that expired, a closed window), nothing reads
+ * it any more, even if the handle stays open. A regular file is its own
+ * reader: a redirect to a log is never second-guessed. */
+function outputWatch(adapter) {
+  if (adapter !== 'stdout') return null;
+  let stat;
+  try { stat = fs.fstatSync(process.stdout.fd); } catch (_) { return null; }
+  if (stat.isFile()) return null;
+  const parent = process.ppid;
+  if (!Number.isSafeInteger(parent) || parent <= 1) return null;
+  return Object.freeze({
+    parentGone() {
+      if (process.platform !== 'win32') return process.ppid !== parent;
+      // Windows does not re-parent an orphan; the recorded parent's pid is
+      // checked instead.
+      try { process.kill(parent, 0); return false; }
+      catch (error) { return !!error && error.code === 'ESRCH'; }
+    },
+  });
+}
+
 // The process namespace this process sees its peers in: on Linux the PID
 // namespace link; null elsewhere, or when it cannot be read (a sandbox
 // without /proc).
@@ -349,6 +414,15 @@ function statusResult(options, overrides) {
     state_dir: options.stateDir || defaultStateDir(),
     detail: '',
     recovery: null,
+    // The furthest point the adapter has proven: polling (its polls reach
+    // the room) · writing (a ring was written to its output) · delivered (the
+    // host accepted a ring). null unless it is running.
+    proven: null,
+    written_at: null,
+    delivered_at: null,
+    // When an adapter run exited because nothing could read its output.
+    deaf_at: null,
+    deaf_reason: null,
   }, overrides);
 }
 
@@ -406,12 +480,16 @@ function inspectStatus(options, clock = Date.now, namespaceOf = processNamespace
   }
   if (lock.state === 'absent' || lock.state === 'stale') {
     const currentSessionSupplied = options.adapter !== null && options.session !== null;
+    const deaf = deafFor(options, stateDir, runtime);
+    const why = deaf ? `; it exited because ${DEAF_REASONS[deaf.reason]}: output closed at ${iso(deaf.at)}` : '';
     return statusResult(options, Object.assign(common, {
       state: 'stale',
-      detail: currentSessionSupplied ?
+      detail: (currentSessionSupplied ?
         'the recorded adapter owner is no longer active; recovery uses the supplied current host session' :
-        'the recorded adapter owner is no longer active; supply the current host session with --adapter and --session before recovery',
+        'the recorded adapter owner is no longer active; supply the current host session with --adapter and --session before recovery') + why,
       recovery: currentSessionSupplied ? recoveryCommand(options, null, stateDir) : null,
+      deaf_at: deaf ? deaf.at : null,
+      deaf_reason: deaf ? deaf.reason : null,
     }));
   }
   if ((options.adapter && options.adapter !== runtime.adapter) ||
@@ -469,10 +547,19 @@ function inspectStatus(options, clock = Date.now, namespaceOf = processNamespace
       recovery: null,
     }));
   }
+  const proof = proofFor(options, stateDir, runtime);
+  const proven = proof && proof.delivered_at !== null ? 'delivered'
+    : proof && proof.written_at !== null ? 'writing' : 'polling';
+  const provenText = proven === 'delivered' ? `the host accepted a ring at ${iso(proof.delivered_at)}`
+    : proven === 'writing' ? `a ring was written to the adapter's output at ${iso(proof.written_at)}`
+      : 'no ring has been handed over since it started';
   return statusResult(options, Object.assign(common, {
     state: 'ready', updated_at: Math.max(runtime.updated_at, Math.trunc(stateMtime)),
-    detail: `adapter recently completed a successful poll at cursor ${state.cursor}`,
+    detail: `adapter recently completed a successful poll at cursor ${state.cursor}; proven: ${proven} (${provenText})`,
     recovery: null,
+    proven,
+    written_at: proof ? proof.written_at : null,
+    delivered_at: proof ? proof.delivered_at : null,
   }));
 }
 
@@ -589,6 +676,139 @@ function warnSameSession(options, others) {
   }
 }
 
+/* A process's arguments, for confirming that a pid holding this connection's
+ * lock is really its doorbell before --replace-stale stops it. null when the
+ * platform will not say. */
+function splitCommandLine(text) {
+  const args = [];
+  const pattern = /"((?:[^"\\]|\\.)*)"|(\S+)/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) args.push(match[1] !== undefined ? match[1] : match[2]);
+  return args;
+}
+
+function commandLineOf(pid) {
+  if (process.platform === 'linux') {
+    try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean); }
+    catch (_) { return null; }
+  }
+  const read = process.platform === 'win32'
+    ? childProcess.spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+    { encoding: 'utf8', timeout: 20_000, windowsHide: true, maxBuffer: MAX_OUTPUT })
+    : childProcess.spawnSync('ps', ['-o', 'command=', '-p', String(pid)],
+      { encoding: 'utf8', timeout: 10_000, maxBuffer: MAX_OUTPUT });
+  if (read.error || read.status !== 0) return null;
+  const text = String(read.stdout || '').trim();
+  return text ? splitCommandLine(text) : null;
+}
+
+const DOORBELL_SCRIPTS = Object.freeze(['doorbell.js', 'interlock-doorbell', 'interlock-doorbell.js']);
+
+// The interpreter, then this adapter's script, then --connection NAME.
+function isDoorbellFor(args, connection) {
+  if (!Array.isArray(args) || args.length < 2) return false;
+  const script = String(args[1]).split(/[\\/]/).pop();
+  if (!DOORBELL_SCRIPTS.includes(script)) return false;
+  const at = args.indexOf('--connection', 2);
+  return at > 0 && args[at + 1] === connection;
+}
+
+function iso(milliseconds) {
+  return Number.isSafeInteger(milliseconds) ? new Date(milliseconds).toISOString() : 'an unknown time';
+}
+
+function liveOwner(options, lockDir, stateDir) {
+  let lock;
+  try { lock = inspectInstanceLock({ dataDir: lockDir }); } catch (_) { return null; }
+  let read;
+  try { read = readStatusJson(runtimeFile(options, stateDir)); } catch (_) { read = { kind: 'invalid' }; }
+  const runtime = read.kind === 'value' ? validRuntime(read.value) : null;
+  return { lock, runtime };
+}
+
+// "pid 1157 (stdout adapter, session S), started 2026-11-14T17:04:00.000Z,
+// last successful poll …": what is true about the owner, from its own files.
+function describeOwner(options, stateDir, owner) {
+  const pid = owner.lock.owner ? owner.lock.owner.pid : null;
+  const runtime = owner.runtime && owner.runtime.pid === pid ? owner.runtime : null;
+  const parts = [`pid ${pid === null ? 'unknown' : pid}`];
+  if (runtime) {
+    parts[0] += ` (${runtime.adapter} adapter, session ${runtime.session})`;
+    parts.push(`started ${iso(runtime.started_at)}`);
+    try {
+      const polled = fs.statSync(path.join(stateDir, runtime.state_file)).mtimeMs;
+      parts.push(`last successful poll ${iso(Math.trunc(polled))}`);
+    } catch (_) { /* never polled */ }
+    const deaf = deafFor(options, stateDir, runtime);
+    if (deaf) parts.push(`output closed since ${iso(deaf.at)}`);
+  } else if (owner.lock.owner) {
+    parts.push(`started ${iso(owner.lock.owner.started_at)}`);
+  }
+  return parts.join(', ');
+}
+
+function waitForRelease(lockDir, milliseconds) {
+  const deadline = Date.now() + milliseconds;
+  for (;;) {
+    let state;
+    try { state = inspectInstanceLock({ dataDir: lockDir }).state; } catch (_) { state = 'unknown'; }
+    if (state === 'absent' || state === 'stale') return true;
+    if (Date.now() >= deadline) return false;
+    sleep(50);
+  }
+}
+
+/* --replace-stale: stop the adapter that holds this connection's lock on this
+ * computer, so this one can take over. Only a process confirmed, from its own
+ * command line, to be this connection's doorbell is stopped; anything else is
+ * a refusal that names the pid. Returns null on success, else the reason. */
+function replaceStaleOwner(options, lockDir, stateDir) {
+  const owner = liveOwner(options, lockDir, stateDir);
+  if (!owner) return 'the current owner could not be read';
+  if (owner.lock.state === 'absent' || owner.lock.state === 'stale') return null;
+  const record = owner.lock.owner;
+  const pid = record && record.pid;
+  const described = describeOwner(options, stateDir, owner);
+  if (owner.lock.state !== 'active' || !Number.isSafeInteger(pid) || pid <= 1 || pid === process.pid ||
+      record.hostname !== os.hostname() || !owner.runtime || owner.runtime.pid !== pid ||
+      owner.runtime.connection !== options.connection) {
+    return `the owner (${described}) could not be confirmed as this connection's doorbell on this computer; stop it where it runs`;
+  }
+  if (!isDoorbellFor(commandLineOf(pid), options.connection)) {
+    return `pid ${pid} could not be confirmed as this connection's doorbell from its command line, so it was not stopped; stop it yourself if it is`;
+  }
+  try { process.kill(pid, 'SIGTERM'); } catch (error) {
+    if (!error || error.code !== 'ESRCH') return `pid ${pid} could not be stopped (${error && error.code || 'unknown'})`;
+  }
+  if (!waitForRelease(lockDir, 5_000)) {
+    try { process.kill(pid, 'SIGKILL'); } catch (_) { /* gone */ }
+    if (!waitForRelease(lockDir, 5_000)) return `pid ${pid} did not stop`;
+  }
+  process.stderr.write(`interlock doorbell adapter: stopped the doorbell adapter that owned ${options.connection} ` +
+    `(${described}); this adapter takes over.\n`);
+  return null;
+}
+
+// Writes every byte of one ring line. A reader that is merely slow (the pipe
+// is full) is waited for, within a bound; any other refusal means nothing
+// reads the output.
+const SLOW_READER_MS = 30_000;
+function writeLine(fd, text) {
+  const buffer = Buffer.from(text, 'utf8');
+  let offset = 0;
+  const deadline = Date.now() + SLOW_READER_MS;
+  while (offset < buffer.length) {
+    try {
+      offset += fs.writeSync(fd, buffer, offset, buffer.length - offset);
+    } catch (error) {
+      if (error && error.code === 'EAGAIN' && Date.now() < deadline) { sleep(20); continue; }
+      return (error && error.code) || 'unknown';
+    }
+  }
+  return null;
+}
+
 function replacementRecoveryHint(state, replacementPending, firstPoll) {
   if (!firstPoll || state === null || replacementPending) return '';
   return '\nIf this immediately follows an intentional Interlock connection ' +
@@ -601,7 +821,7 @@ function runAdapter(argv) {
   const options = parseArgs(argv);
   if (!options) {
     fail('usage: interlock-doorbell run --adapter codex|stdout --connection NAME ' +
-      '--session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--replace-connection] [--once]');
+      '--session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--replace-connection] [--replace-stale] [--once]');
     return;
   }
   const file = stateFile(options);
@@ -634,10 +854,29 @@ function runAdapter(argv) {
   try {
     adapterLock = acquireInstanceLock({ dataDir: lockDir });
   } catch (error) {
-    fail(error && error.code === 'already-running'
-      ? `another doorbell adapter already owns connection ${options.connection}`
-      : `adapter ownership could not be established safely (${error && error.code || 'unknown'})`);
-    return;
+    if (!(error && error.code === 'already-running')) {
+      fail(`adapter ownership could not be established safely (${error && error.code || 'unknown'})`);
+      return;
+    }
+    if (!options.replaceStale) {
+      const owner = liveOwner(options, lockDir, stateDir);
+      fail(`another doorbell adapter already owns connection ${options.connection}` +
+        (owner ? `: ${describeOwner(options, stateDir, owner)}` : '') +
+        '. If that adapter can no longer wake anyone (the window, monitor or session that started it ' +
+        'has closed), rerun this command with --replace-stale to stop it and take over.');
+      return;
+    }
+    const refused = replaceStaleOwner(options, lockDir, stateDir);
+    if (refused) {
+      fail(`--replace-stale: ${refused}`);
+      return;
+    }
+    try {
+      adapterLock = acquireInstanceLock({ dataDir: lockDir });
+    } catch (again) {
+      fail(`adapter ownership could not be established after replacing the old owner (${again && again.code || 'unknown'})`);
+      return;
+    }
   }
 
   try {
@@ -656,9 +895,35 @@ function runAdapter(argv) {
           { schema: 1, pid: runtime.pid, started_at: runtime.started_at, pid_namespace: namespace });
       } catch (_) { /* optional evidence */ }
     }
+    // How far rings are proven to go, for status; optional evidence.
+    let proof = { schema: 1, pid: runtime.pid, started_at: runtime.started_at, written_at: null, delivered_at: null };
+    function prove(field) {
+      proof = Object.assign({}, proof, { [field]: Date.now() });
+      try { atomicJson(proofFile(options, stateDir), proof); } catch (_) { /* optional evidence */ }
+    }
+    try { atomicJson(proofFile(options, stateDir), proof); } catch (_) { /* optional evidence */ }
+    const watch = outputWatch(options.adapter);
+    // Nothing can read this adapter's rings any more: it says why, records
+    // when, and exits so its lock is free. The cursor is never moved for a
+    // ring it could not hand over.
+    function deaf(reason, code) {
+      try {
+        atomicJson(deafFile(options, stateDir),
+          { schema: 1, pid: runtime.pid, started_at: runtime.started_at, at: Date.now(), reason });
+      } catch (_) { /* the exit below still says it */ }
+      const cursor = after === null ? 'not yet set' : `unchanged at ${after}`;
+      fail(reason === 'parent-gone'
+        ? `the process that started this adapter is gone, so nothing reads its output; it exits and releases ` +
+          `connection ${options.connection}. The cursor is ${cursor}: no ring was marked seen. ` +
+          'Start a new doorbell from the host that should be woken.'
+        : `this adapter's output is closed (${code}), so nothing can read its rings; it exits and releases ` +
+          `connection ${options.connection}. The cursor is ${cursor}: the ring stays eligible for the next ` +
+          'doorbell. Start a new doorbell where its output is read.');
+    }
     let outageStarted = null;
     let retries = 0;
     while (true) {
+      if (watch && watch.parentGone()) { deaf('parent-gone'); return; }
       const args = ['doorbell', '--connection', options.connection, '--json'];
       if (after !== null) args.push('--after', String(after));
       const pollStarted = Date.now();
@@ -718,6 +983,9 @@ function runAdapter(argv) {
         return;
       }
       if (page.rings.length > 0) {
+        // The poll may have waited a long time: check the reader again
+        // before handing it a ring.
+        if (watch && watch.parentGone()) { deaf('parent-gone'); return; }
         const message = nudge(options, page.rings);
         if (options.adapter === 'codex') {
           const delivered = command(codex,
@@ -728,8 +996,11 @@ function runAdapter(argv) {
             fail(`Codex rejected the nudge; ring remains eligible and output is at ${saved}`);
             return;
           }
+          prove('delivered_at');
         } else {
-          fs.writeSync(process.stdout.fd, message + '\n');
+          const refused = writeLine(process.stdout.fd, message + '\n');
+          if (refused) { deaf('output-closed', refused); return; }
+          prove('written_at');
         }
       }
       const nextState = {
