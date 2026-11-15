@@ -22,6 +22,23 @@ const { createWorkRoutes } = require('./work/routes.js');
 const { releaseIdleSeats } = require('./idle.js');
 const { endDepartedGrants, standingSubjects } = require('./departures.js');
 const { readRoomSettings } = require('./room_settings.js');
+const { openWebhookStore } = require('./webhooks/store.js');
+const { createWebhookDelivery } = require('./webhooks/deliver.js');
+const { webhookRing } = require('./webhooks/ring.js');
+const PACKAGE_VERSION = require('../package.json').version;
+
+// Tests shorten webhook retries and timeouts; only short lists of positive
+// millisecond delays are accepted, and anything else keeps the defaults.
+function webhookTiming(env) {
+  const timing = {};
+  const schedule = env.INTERLOCK_WEBHOOK_RETRY_SCHEDULE_MS;
+  if (typeof schedule === 'string' && /^[1-9][0-9]{0,5}(,[1-9][0-9]{0,5}){0,7}$/.test(schedule)) {
+    timing.retryDelaysMs = schedule.split(',').map(Number);
+  }
+  const timeout = env.INTERLOCK_WEBHOOK_TIMEOUT_MS;
+  if (typeof timeout === 'string' && /^[1-9][0-9]{0,5}$/.test(timeout)) timing.timeoutMs = Number(timeout);
+  return timing;
+}
 const { renderGuidePage } = require('./guide.js');
 const { acquireInstanceLock } = require('./instance_lock.js');
 const { parseHostedOrigin, makeSetupCode, setupCodeMatches } = require('./hosted.js');
@@ -395,6 +412,7 @@ async function startInterlockServer(options) {
   let admission = null;
   let chat = null;
   let archive = null;
+  let webhookDelivery = null;
   try {
     const recordOrigin = checkDataDirOrigin(dataDir, origin);
     const stateDir = path.join(dataDir, 'identity');
@@ -455,9 +473,23 @@ async function startInterlockServer(options) {
       dataDir,
       aiSessionDiscriminator: subjectId => house.aiSessionDiscriminator(subjectId),
     });
+    // Webhook registrations (C5) live in a file of their own, which an
+    // earlier release never opens. The chat service asks it, and only it,
+    // whether a seat is rung by webhook; delivery reports back to the chat
+    // service once per ring.
+    const webhooks = openWebhookStore({ dataDir, hosted: Boolean(hosted) });
+    webhookDelivery = createWebhookDelivery(Object.assign(webhookTiming(process.env), {
+      store: webhooks,
+      hosted: Boolean(hosted),
+      ringFor: webhookRing,
+      noteDelivery: (subjectId, outcome) => chat.noteWebhookDelivery(subjectId, outcome),
+      version: PACKAGE_VERSION,
+    }));
     chat = createChatService({
       store: chatStore,
       participants: meta => house.listParticipants(meta),
+      hasWebhook: subjectId => webhooks.has(subjectId),
+      onSaved: message => webhookDelivery.deliver(message),
     });
     archive = createArchiveService({ dataDir, store: chatStore });
     // The Work record shares the process, the identity house and the data
@@ -569,6 +601,7 @@ async function startInterlockServer(options) {
     }) : null;
     const handler = createFirstOwnerHandler({
       house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler, work, people,
+      webhooks,
     });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));
@@ -621,6 +654,7 @@ async function startInterlockServer(options) {
         clearInterval(outboxTimer);
         clearInterval(idleTimer);
         let shutdownFailure = null;
+        webhookDelivery.close();
         try { admission.close(); }
         catch (error) { shutdownFailure = error; }
         try { await chat.close(); }
@@ -640,6 +674,7 @@ async function startInterlockServer(options) {
     });
   } catch (error) {
     const cleanupErrors = [];
+    if (webhookDelivery !== null) webhookDelivery.close();
     if (admission !== null) {
       try { admission.close(); } catch (caught) { cleanupErrors.push(caught); }
     }

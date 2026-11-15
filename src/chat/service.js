@@ -12,7 +12,7 @@ const MAX_WAIT_MS = 45_000;
 const DEFAULT_ASK_PROJECT = 'ops';
 const PARTICIPANT_STATE_BATCH = 64;   // the store's per-call limit
 const AI_PRESENCE_WINDOW_MS = 5 * 60 * 1000;
-const OPTION_KEYS = Object.freeze(['store', 'participants', 'hasWebhook']);
+const OPTION_KEYS = Object.freeze(['store', 'participants', 'hasWebhook', 'onSaved']);
 const WAIT_OPTION_KEYS = Object.freeze(['signal', 'timeoutMs']);
 
 function fail(code) {
@@ -109,7 +109,8 @@ function createChatService(options) {
       typeof store.touch !== 'function' || typeof store.participantState !== 'function' ||
       typeof store.deliveryChanges !== 'function' ||
       typeof input.participants !== 'function' ||
-      !(input.hasWebhook === undefined || typeof input.hasWebhook === 'function')) {
+      !(input.hasWebhook === undefined || typeof input.hasWebhook === 'function') ||
+      !(input.onSaved === undefined || typeof input.onSaved === 'function')) {
     throw fail('invalid-options');
   }
   // Whether a seat has a webhook registered: one lookup in the webhook
@@ -217,7 +218,9 @@ function createChatService(options) {
     const now = Date.now();
     await store.touch(actor.subject_id, now);
     const everyone = await participantSnapshot(now);
-    const roster = everyone.filter(row => row.present);
+    // A seat the room rings by webhook has no poller, so it is never
+    // "present" by its polls; it is rung while it is admitted (A8).
+    const roster = everyone.filter(row => row.present || (row.kind === 'seat' && hasWebhook(row.subject_id)));
     // A message that starts with "re #N", N an ask in this era, is a reply on
     // that ask, exactly as the Reply button makes it (Patti, 2026-10-30): a
     // deterministic prefix like an @mention, never a reading of the text.
@@ -292,6 +295,12 @@ function createChatService(options) {
     // Store append resolves only after its durable commit. A waiter can never
     // observe a wake for a message the append caller has not durably earned.
     for (const waiter of [...waiters]) waiter.notify();
+    // The same durable moment hands the message to the room's webhook
+    // delivery, which rings only its frozen recipients. Never awaited: a slow
+    // receiver cannot hold a post.
+    if (input.onSaved !== undefined) {
+      try { input.onSaved(saved); } catch (_) { /* delivery reports its own outcome */ }
+    }
     return saved;
   }
 

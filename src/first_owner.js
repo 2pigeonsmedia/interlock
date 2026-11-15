@@ -251,6 +251,18 @@ function publicRing(message) {
   });
 }
 
+// A webhook as the page sees it: where it points (scheme, host, port; a
+// path can carry a token), whether it sends an excerpt, and when it was set.
+// Never the secret.
+function publicWebhook(view) {
+  return Object.freeze({
+    target: view.target,
+    excerpt: view.excerpt,
+    created_at: view.created_at,
+    updated_at: view.updated_at,
+  });
+}
+
 function publicParticipant(participant) {
   if (!participant || typeof participant.name !== 'string' ||
       (participant.kind !== 'person' && participant.kind !== 'seat') ||
@@ -381,7 +393,7 @@ function deliveryQuery(target) {
 }
 
 function createFirstOwnerHandler(options) {
-  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people } = options || {};
+  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people, webhooks } = options || {};
   const hostedMode = hosted ? hosted : null;
   if (!house || !house.firstOwner || !house.authenticators || !house.sessions || !house.login ||
       typeof house.authorizeRead !== 'function' || typeof house.authorizeWrite !== 'function' ||
@@ -409,6 +421,13 @@ function createFirstOwnerHandler(options) {
       typeof work.ownerStepUpRequired !== 'function' || !Array.isArray(work.MUTATION_OPS) ||
       typeof house.confirmWorkProjectAct !== 'function')) {
     throw new TypeError('first owner transport: a complete work service is required');
+  }
+  // Webhook registrations are optional: without them their routes answer
+  // not-found.
+  if (webhooks !== undefined && (!webhooks || typeof webhooks.register !== 'function' ||
+      typeof webhooks.regenerate !== 'function' || typeof webhooks.setExcerpt !== 'function' ||
+      typeof webhooks.remove !== 'function' || typeof webhooks.view !== 'function')) {
+    throw new TypeError('first owner transport: a complete webhook store is required');
   }
   // The people record is optional like the Work record: without it the grant
   // routes answer not-found.
@@ -3672,6 +3691,90 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // ---- Webhooks (C5): the room calls an AI seat's URL when it is rung ----
+  // Owner or admin only, as for the room's other settings. The secret is in
+  // exactly two answers, the set and the regenerate that made it; every other
+  // read shows only where the webhook points.
+  const WEBHOOK_REFUSALS = Object.freeze({
+    'invalid-request': [400, 'invalid-webhook'],
+    'invalid-url': [400, 'invalid-webhook-url'],
+    'not-found': [404, 'no-webhook'],
+    'too-many': [409, 'too-many-webhooks'],
+  });
+
+  // A live AI seat by its exact name, or a refusal already sent.
+  function webhookSeat(request, response, name) {
+    if (typeof name !== 'string' || name.length === 0 || Buffer.byteLength(name, 'utf8') > 256 ||
+        name.includes('\0')) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-participant' });
+      return null;
+    }
+    const seats = house.listParticipants({ now: Date.now() })
+      .filter(row => row && row.kind === 'seat' && row.name === name);
+    if (seats.length !== 1) {
+      sendJson(request, response, seats.length === 0 ? 404 : 409,
+        { ok: false, error: seats.length === 0 ? 'not-found' : 'ambiguous-participant' });
+      return null;
+    }
+    return seats[0];
+  }
+
+  function webhookAnswer(request, response, name, act) {
+    try {
+      const result = act();
+      if (result && typeof result.secret === 'string') {
+        return sendJson(request, response, 200, { ok: true, name, webhook: publicWebhook(result.webhook), secret: result.secret });
+      }
+      return sendJson(request, response, 200, { ok: true, name, webhook: result ? publicWebhook(result) : null });
+    } catch (error) {
+      const [status, code] = WEBHOOK_REFUSALS[error && error.code] || [503, 'webhooks-unavailable'];
+      return sendJson(request, response, status, { ok: false, error: code });
+    }
+  }
+
+  // keySets: the exact bodies this act accepts (an optional key is a second set).
+  function webhookMutation(keySets, act) {
+    return function (request, response, body) {
+      if (!webhooks) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+      if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      if (!ownerSession(request, response, true)) return;
+      const input = keySets.map(keys => closedObject(body, keys)).find(Boolean) || null;
+      if (!input || (input.excerpt !== undefined && typeof input.excerpt !== 'boolean') ||
+          (input.url !== undefined && typeof input.url !== 'string')) return sendJson(request, response, 400, { ok: false, error: 'invalid-webhook' });
+      const seat = webhookSeat(request, response, input.name);
+      if (!seat) return;
+      return webhookAnswer(request, response, seat.name, () => act(seat.subject_id, input));
+    };
+  }
+
+  const setWebhook = webhookMutation([['name', 'url'], ['name', 'url', 'excerpt']], (subjectId, input) =>
+    webhooks.register(subjectId, input.excerpt === undefined ? { url: input.url } : { url: input.url, excerpt: input.excerpt }));
+  const regenerateWebhookSecret = webhookMutation([['name']], subjectId => webhooks.regenerate(subjectId));
+  const setWebhookExcerpt = webhookMutation([['name', 'excerpt']], (subjectId, input) => webhooks.setExcerpt(subjectId, input.excerpt));
+  const deleteWebhook = webhookMutation([['name']], subjectId => {
+    if (!webhooks.remove(subjectId)) { const error = new Error('not-found'); error.code = 'not-found'; throw error; }
+    return null;
+  });
+
+  function listWebhooks(request, response) {
+    if (!webhooks) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!ownerSession(request, response, false)) return;
+    try {
+      const seats = house.listParticipants({ now: Date.now() }).filter(row => row && row.kind === 'seat');
+      return sendJson(request, response, 200, {
+        ok: true,
+        https_only: Boolean(hostedMode),
+        seats: seats.map(row => Object.freeze({
+          name: row.name,
+          webhook: webhooks.view(row.subject_id) ? publicWebhook(webhooks.view(row.subject_id)) : null,
+        })),
+      });
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'webhooks-unavailable' });
+    }
+  }
+
   async function readDeliveryChanges(request, response, target) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -3898,6 +4001,10 @@ function createFirstOwnerHandler(options) {
     ['/api/account/passkey/begin', accountPasskeyBegin],
     ['/api/account/passkey/finish', accountPasskeyFinish],
     ['/api/settings/reuse', updateEndedReuse],
+    ['/api/settings/webhooks/set', setWebhook],
+    ['/api/settings/webhooks/regenerate', regenerateWebhookSecret],
+    ['/api/settings/webhooks/excerpt', setWebhookExcerpt],
+    ['/api/settings/webhooks/delete', deleteWebhook],
     ['/api/owner/password', changeOwnerPassword],
     ['/api/owner/sessions/revoke-others', signOutOtherSessions],
     ['/api/transcript/export', exportTranscript],
@@ -4059,6 +4166,16 @@ function createFirstOwnerHandler(options) {
           return;
         }
         await aiSession(request, response);
+        return;
+      }
+      if (pathname === '/api/settings/webhooks') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-settings-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        listWebhooks(request, response);
         return;
       }
       if (pathname === '/api/settings/participants') {
