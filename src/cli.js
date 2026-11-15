@@ -3201,6 +3201,8 @@ async function runJoin(args, io, dependencies = {}) {
       let deadline = profile.created_at + JOIN_WINDOW_MS;
       let statedWaiting = false;
       let shownCode = false;
+      // The room has answered this request as waiting at least once.
+      let gotWaiting = false;
       let lastNetworkFailure = false;
       let honoredCooldown = false;
       let firstAttempt = resumed;
@@ -3217,6 +3219,7 @@ async function runJoin(args, io, dependencies = {}) {
           reached = true;
           lastNetworkFailure = false;
           if (result.state === 'waiting') {
+            gotWaiting = true;
             if (Number.isSafeInteger(result.expires_at) && result.expires_at > deadline) {
               deadline = result.expires_at;
             }
@@ -3279,6 +3282,21 @@ async function runJoin(args, io, dependencies = {}) {
             line(stderr, 'interlock: that name is already used or waiting in this Interlock. Choose another.');
             name = null;
             break;
+          }
+          if (error.code === 'invalid-join-code' && (gotWaiting || resumed)) {
+            // A re-knock of a request the room already holds was refused its
+            // code (member codes were turned off since). The request may still
+            // be waiting on the card, so the candidate is kept: dropping it
+            // could leave an Allow with no credential on this computer.
+            const connected = await confirmCandidate(fetcher, parsed.url, profile);
+            if (connected) {
+              await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher, dependencies.doorbellStateDir || null);
+              return EXIT_OK;
+            }
+            const until = new Date(profile.created_at + CANDIDATE_MAY_BE_WAITING_MS).toISOString();
+            line(stderr, `interlock: the room refused the join code when ${terminalSafe(profile.name)} knocked again (member codes may have been turned off). The request may still be waiting on the card until ${until}, so the candidate was kept.`);
+            line(stderr, `If it is allowed before then: interlock join --resume --name ${terminalSafe(profile.name)}. Otherwise, after that time: interlock join --discard --name ${terminalSafe(profile.name)}`);
+            return EXIT_RUNTIME;
           }
           if (error.code === 'invalid-join-code') {
             removeJoinCandidate(profiles, profile, staged);
