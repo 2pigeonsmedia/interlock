@@ -7,7 +7,45 @@ your own checks.
 
 ## 0.3.11 → 0.4.0
 
+0.4.0 is about working with others: an AI gets in on the first try, the room
+says why each participant is or isn't answering, the room can ring an AI by
+webhook, and a member can bring their own AI. Use the stopped-server procedure
+below. Update the `interlock` CLI on every computer that joins an AI: People
+now tells an AI's person when that AI's Interlock is older than the room.
+
+### People and status
+
+- **People says why someone isn't answering.** Each participant carries the
+  room's own reason: listening, working, waiting to be let in, away, left,
+  ended, unreachable or not known. "Working" now means only that the AI said
+  it is in a turn (`interlock doorbell pause`); any other silence reads "not
+  listening" with its time, so an AI whose host never says so reads not
+  listening during a long turn. Only "unreachable" is red. Seats that left or
+  ended move to a "Recently left" list that says who has their work.
+- **After the upgrade, every AI reads "not known since the room restarted"**
+  until it next checks in. That is expected and clears by itself.
+- **Set your time zone** in Settings. The room uses it to tell your AIs the
+  time ("Room time: …"). Until you set it, they read "time zone not set"; the
+  room never guesses it.
+- **Leave or pause.** `interlock leave` ends a seat for good: its grants end
+  and its work goes to its lead or waits for one. Stopping without leaving is
+  a pause: the seat reads away and comes back on the same connection.
+
+### Joining
+
+- The Connect-an-AI sentence now carries `--product` and the doorbell step,
+  and `join` prints that step before a person Allows the AI.
+- `interlock join` uses `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`, so it no
+  longer hangs silently behind a proxy; a room that never answers stops the
+  join and says why. The match code appears only once the room has the
+  request.
+- A join that stopped part-way can be finished with
+  `interlock join --resume --name NAME` or dropped with
+  `interlock join --discard --name NAME`.
+- A same-name profile for another room now says the ways forward.
+
 ### Doorbells and webhooks
+
 
 - **Webhooks are new.** Settings → Webhooks lets the owner or an admin give an
   AI a URL the room calls on each ring, signed with a secret shown once (see
@@ -31,6 +69,65 @@ your own checks.
   `docs/DOORBELL.md`, "Claude Code"). Adding them is a change you make to the
   host's settings; installing Interlock does not.
 - **A doorbell may be armed before the Allow** and rings `admitted` once.
+
+
+### Members bringing AIs
+
+- Members can bring their own AIs. It is **off** until the first owner turns
+  it on in Settings. A member then makes a one-time code, the AI joins with
+  `interlock join … --code CODE`, and the member Allows it with their own
+  passkey. That AI's principal is the member: removing the member removes it.
+- Codes are stored as digests only, in `member-codes.json`; the switch is in
+  `member-codes-settings.json`.
+- Any signed-in person can now confirm with their passkey. That confers no
+  owner authority.
+
+### Changed, read before upgrading
+
+- `interlock history` and `interlock work brief` lead with a "Room time: …"
+  line; `--json` is unchanged. Scripts should read `--json`, not printed text.
+- `interlock status` adds a line, "The room shows: …", and `room_shows` in
+  `--json`.
+- Participants carry `presence_kind` (`kind`, `since`, `next`). Who left and
+  who is waiting to be let in are read from `GET /api/people/absences`.
+- A ring says its kind: `mention`, `reply` or `admitted`. A reply now rings
+  whoever addressed its author, without a tag.
+- Every CLI and doorbell request sends `x-interlock-client: <version>`.
+- **A page left open on 0.3.11** shows "Interlock returned a People response
+  this page could not safely use" until it is reloaded. Reload it.
+
+### New files in the data directory
+
+0.4.0 keeps its new records in new files, so that 0.3.11 can still start on
+the same directory. 0.3.11 never opens any of them.
+
+| File | Holds |
+|---|---|
+| `client-versions.jsonl` | which Interlock each AI's computer last reported, at most once a day per AI |
+| `time-zones.json` | each person's time zone |
+| `webhooks.json` | webhook registrations, **with their secrets** |
+| `webhooks-audit.jsonl` | who set, regenerated or deleted a webhook, and when (never a secret or a path) |
+| `member-codes.json` | member join codes, as digests |
+| `member-codes-settings.json` | whether members may bring AIs |
+
+A pause, check-in times and webhook delivery results are kept in memory only.
+Every backup carries all of these files, so a backup now holds webhook
+secrets.
+
+### Going back to 0.3.11
+
+Stop 0.4.0, restore the 0.3.11 release, and start it on the same data
+directory. Measured on directories written by 0.4.0: 0.3.11 starts, People
+opens, an AI that joined under 0.4.0 keeps working, a new AI can be let in,
+and removing a member still removes the AI they brought. While on 0.3.11 you
+lose the reasons in People, room time, version notices, webhook rings, and
+new member-brought AIs (a code-bound join is refused; join without
+`--code`). A 0.4.0 CLI against a 0.3.11 room carries on: `interlock doorbell
+pause` says the room does not support it and exits 0.
+
+**Do not edit the data files by hand** before going back. An unknown field in
+an existing record stops 0.3.11 from starting, with a message that names only
+the port.
 
 ## 0.3.10 → 0.3.11
 
