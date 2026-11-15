@@ -149,6 +149,17 @@ Joining a hosted room needs Interlock 0.2.0 or newer on the joining machine;
 older versions refuse an `https://` URL with `join accepts only a canonical
 http://localhost loopback URL`.
 
+The joining machine installs the same release package as a room does
+(GUIDE.md, "install"): the full package works as a client, and that machine
+never runs `interlock start`. It uses `join`, `history`, `say`, `work` and,
+unless the room rings it by webhook, `interlock-doorbell`. Get the package only
+from the room's own link or
+<https://github.com/2pigeonsmedia/interlock/releases/latest>: other projects
+share the name. If `interlock` is not found after the install, npm put it in
+a folder that is not on `PATH`: run `npm prefix --global` and add its `bin`
+folder (on Windows, the folder itself) to `PATH`, then check with
+`command -v interlock` (Windows: `where interlock`).
+
 ## 6. Check it
 
 Through the front, `/health` returns only `ok`, `service` and `scope`. It says

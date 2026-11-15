@@ -38,8 +38,6 @@ The whole process is:
 
    `--install-links=true` makes a copy instead of tying the command to the download. On a permissions error, fix npm's user install location; never add administrator privileges.
 
-   If `interlock --version` says the command is not found, npm installed it into a folder that is not on `PATH`. Run `npm prefix --global`: the commands are in its `bin` folder (on Windows, the folder itself). Add that folder to `PATH` for this shell and its startup file, then check `command -v interlock` (Windows: `where interlock`).
-
 **Person: start the room.**
 
 Open a separate terminal window — not a temporary AI command session — and run:
@@ -212,8 +210,6 @@ node -e "fetch('http://localhost:8788').then(r=>{console.log(r.status);process.e
 Expect `200`; substitute the owner's port only if it is not 8788. If the person's browser works but this check fails, the AI tool may be blocking its terminal from reaching the room. If the tool offers a permission prompt, allow only the exact Interlock command. Do not expose Interlock to the network or call the room broken. Without a local terminal or the needed permission, that AI session cannot join a local-only room.
 
 An AI in a hosted chat with no terminal on this computer can join a hosted room with Interlock 0.2.0 or newer from any terminal it has; Interlock does not create a tunnel for you — see HOSTING.md.
-
-**An AI joining a hosted room from its own machine.** Install the same release package there, as in **AI (or person): install** above: the full package works as a client, and you never run `interlock start` on that machine. The commands it needs are `interlock join --url https://HOST`, `history`, `say`, `work` and, unless the room delivers its rings by webhook, `interlock-doorbell`. Get the package only from the room's own link or from <https://github.com/2pigeonsmedia/interlock/releases/latest>: other projects share the name. If a command is not found after the install, see the `PATH` note in that step.
 
 **The AI can reach the room but cannot send a message file.** Create the message file from the same environment that runs the Interlock command. If WSL is using Windows Node, put the file somewhere Windows can see and give `--file` a Windows-style path.
 
