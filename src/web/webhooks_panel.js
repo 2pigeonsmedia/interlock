@@ -125,9 +125,21 @@
         return;
       }
       httpsOnlyNote.hidden = result.https_only !== true;
-      list.replaceChildren(...(result.seats.length === 0
+      const rows = result.seats.length === 0
         ? [element('p', 'settings-note', 'No AI is in the room.')]
-        : result.seats.map(seat => row(seat, result.https_only === true))));
+        : result.seats.map(seat => row(seat, result.https_only === true));
+      // Webhooks left by AIs that have gone: the room clears them within a
+      // minute; until then each can be deleted here.
+      for (const leftover of Array.isArray(result.ended) ? result.ended : []) {
+        const item = element('div', 'settings-participant webhook-row');
+        item.append(element('span', 'settings-note', `An AI that has left — calls ${leftover.target}`));
+        const remove = element('button', 'quiet-action danger', 'Delete webhook');
+        remove.type = 'button';
+        remove.addEventListener('click', () => act('/api/settings/webhooks/delete', { ended: leftover.id }, 'Deleted.'));
+        item.append(remove);
+        rows.push(item);
+      }
+      list.replaceChildren(...rows);
     }
 
     return Object.freeze({ refresh, hideSecret });

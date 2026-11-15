@@ -121,3 +121,18 @@ test('a refused address reads as plain words; a declined confirm changes nothing
   assert.match(p.status.textContent, /not one the room can call/);
   assert.equal(p.secretBox.hidden, true);
 });
+
+test('a webhook left by an AI that has gone is listed and deletes by its id', async () => {
+  const { window } = load(() => ({ ok: true, https_only: false, seats: [],
+    ended: [{ id: 'seat-gone', target: 'https://hooks.example', excerpt: false, created_at: 1, updated_at: 2 }] }));
+  const p = parts();
+  const calls = [];
+  const panel = window.InterlockWebhooksPanel.create(Object.assign(p, {
+    mutate: async (route, body) => { calls.push([route, body]); return { ok: true, name: null, webhook: null }; },
+  }));
+  await panel.refresh();
+  assert.match(p.list.textContent, /An AI that has left — calls https:\/\/hooks\.example/);
+  const remove = find(p.list, node => node.tagName === 'button' && node.textContent === 'Delete webhook')[0];
+  await remove.listeners.click[0]();
+  assert.equal(JSON.stringify(calls), JSON.stringify([['/api/settings/webhooks/delete', { ended: 'seat-gone' }]]));
+});
