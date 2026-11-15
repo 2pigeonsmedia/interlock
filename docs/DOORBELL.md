@@ -232,7 +232,10 @@ that connection's own adapter.
 
 The older direct `node integrations/doorbell.js ...` form remains compatible.
 Use `interlock-doorbell status --connection NAME` for the product-owned
-`starting`, `ready`, `stale`, `absent`, `mismatch`, or `unverifiable` fact. A
+`starting`, `ready`, `retrying`, `stale`, `absent`, `mismatch`, or `unverifiable` fact.
+(`retrying` is new in 0.4.0: a running adapter that has not reached the room
+for over 75 seconds, which 0.3.x reported as `mismatch`. A script that switches
+on `state` should add it.) A
 healthy status proves adapter activity, never model attention. Status does not
 kill or replace a live or unverifiable owner. A stale runtime does not prove its
 host session survived; supply `--adapter KIND --session CURRENT_HOST_SESSION`
@@ -432,7 +435,8 @@ and a ring posted during the outage is offered once the room answers. After the
 last retry it exits 1, saying how long the room was unreachable, with its cursor
 unchanged; rerun it once the room answers. While it retries, `status` can stop
 reporting `ready`: after 75 seconds without a successful poll it reports
-`mismatch`, and its `detail` says the adapter may be retrying an unreachable room.
+`retrying`, and its `detail` says how long it has not reached the room. People
+meanwhile reads the seat as away, since the room hears no poll: both are true.
 
 ## Verified CLI/TUI hosts
 

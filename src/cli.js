@@ -1608,7 +1608,9 @@ function doorbellFact(connection, stateDir, inspect = null) {
   const where = typeof status.state_dir === 'string' ? status.state_dir : stateDir || 'the default state directory';
   if (status.state === 'ready') return { state: 'running', label: 'running', detail: status.detail };
   // A live adapter retrying an unreachable room, or a refused credential.
-  if (status.state === 'mismatch' && /^no successful poll in the last /.test(status.detail)) {
+  // (`retrying` from 0.4.0; an older adapter said `mismatch` with this detail.)
+  if (status.state === 'retrying' ||
+      (status.state === 'mismatch' && /^no successful poll in the last /.test(status.detail))) {
     return { state: 'running', label: 'running, polls failing', detail: status.detail };
   }
   if (status.state === 'absent') {

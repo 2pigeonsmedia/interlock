@@ -450,10 +450,10 @@ test('status explains a live adapter with no recent successful poll', async () =
     const status = inspectStatus({
       adapter: null, connection: 'Marlow', session: null, stateDir: world.stateDir,
     }, () => later);
-    assert.equal(status.state, 'mismatch',
-      'the state word is a documented value and stays the same');
-    assert.match(status.detail, /no successful poll in the last 75 s/);
-    assert.match(status.detail, /may be retrying an unreachable room/);
+    // #815: its own word, no longer mismatch.
+    assert.equal(status.state, 'retrying');
+    assert.match(status.detail, /the adapter is running but has not reached the room for \d+ s; it keeps retrying/);
+    assert.match(status.detail, /Check the room's address and network/);
   } finally {
     await stopChild(child);
   }

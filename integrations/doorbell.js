@@ -590,12 +590,21 @@ function inspectStatus(options, clock = Date.now, namespaceOf = processNamespace
     }));
   }
   const age = now - stateMtime;
-  if (age < -60_000 || age > FRESH_MS) {
+  if (age > FRESH_MS) {
+    // Alive, holding the connection, and not reaching the room: the outage
+    // retries (#815). The room meanwhile hears no poll and reads the seat as
+    // away; both are true.
+    return statusResult(options, Object.assign(common, {
+      state: 'retrying',
+      detail: `the adapter is running but has not reached the room for ${Math.round(age / 1000)} s; ` +
+        'it keeps retrying. Nothing to do unless this lasts. Check the room\'s address and network',
+      recovery: null,
+    }));
+  }
+  if (age < -60_000) {
     return statusResult(options, Object.assign(common, {
       state: 'mismatch',
-      detail: age > FRESH_MS ?
-        `no successful poll in the last ${FRESH_MS / 1000} s; the adapter may be retrying an unreachable room` :
-        'adapter state is dated in the future; check the system clock',
+      detail: 'adapter state is dated in the future; check the system clock',
       recovery: null,
     }));
   }
