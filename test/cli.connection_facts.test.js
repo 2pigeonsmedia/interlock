@@ -36,6 +36,9 @@ function roomFetch(answers) {
   return async (target, options) => {
     if (target.endsWith('/api/ai/session')) return answers.session();
     if (target.endsWith('/api/ai/last-answered')) return answers.wake();
+    if (target.endsWith('/api/ai/presence-kind')) {
+      return answers.kind ? answers.kind() : fakeResponse(404, { ok: false, error: 'not-found' });
+    }
     if (target.endsWith('/api/ai/head')) return fakeResponse(200, { ok: true, head: 3, connection_session: null });
     const body = JSON.parse(options.body);
     return fakeResponse(200, {
@@ -89,10 +92,12 @@ test('status names each fact from its own evidence, and says how it knows', asyn
     'arrangement: an admitted local profile');
 
   const proven = await status(place, { session: ADMITTED,
-    wake: () => fakeResponse(200, { ok: true, last_answered: { ring_id: 4, reply_id: 6, replied_at: 1_800_000_000_000 } }) });
+    wake: () => fakeResponse(200, { ok: true, last_answered: { ring_id: 4, reply_id: 6, replied_at: 1_800_000_000_000 } }),
+    kind: () => fakeResponse(200, { ok: true, presence_kind: { kind: 'working', since: 1_800_000_000_000, next: 'picks up after its turn' } }) });
   assert.equal(proven.code, EXIT_OK, proven.io.err);
   assert.deepEqual(proven.io.out.trimEnd().split('\n').map(text => text.split(' — ')[0]), [
     'Admitted: yes',
+    'The room shows: working since 2027-01-15T08:00:00.000Z',
     'Last answered mention: #4 → reply #6 (2027-01-15T08:00:00.000Z).',
     '  (A read-and-reply, not proof the doorbell rang.)',
     `Doorbell: none in ${place.stateDir}`,
@@ -101,13 +106,16 @@ test('status names each fact from its own evidence, and says how it knows', asyn
   const older = await status(place, { session: ADMITTED,
     wake: () => fakeResponse(404, { ok: false, error: 'not-found' }) });
   assert.match(older.io.out, /^Last answered mention: unknown — this room does not report it/m);
+  assert.match(older.io.out, /^The room shows: this room does not report it \(Interlock 0\.3\.11 or older\)\./m,
+    'an older room has no presence-kind route');
+  assert.match(proven.io.out, /^The room shows: working since 2027-01-15T08:00:00\.000Z — picks up after its turn\.$/m);
 
   const refused = await status(place, { session: () => fakeResponse(401, { ok: false, error: 'invalid-connection' }),
     wake: () => fakeResponse(401, { ok: false, error: 'invalid-connection' }) }, ['--json']);
   assert.equal(refused.code, EXIT_RUNTIME);
   const json = JSON.parse(refused.io.out);
-  assert.deepEqual([json.facts.admitted.state, json.facts.last_answered.state, json.facts.doorbell.state],
-    ['no', 'unknown', 'none']);
+  assert.deepEqual([json.facts.admitted.state, json.facts.last_answered.state, json.facts.doorbell.state, json.facts.room_shows.state],
+    ['no', 'unknown', 'none', 'unknown']);
 });
 
 test('interlock-doorbell status prints the three facts after the adapter line', () => {

@@ -175,6 +175,11 @@ test('a declared pause reads working, a poll clears it, nothing reaches the peop
     assert.deepEqual(Object.keys(paused.json).sort(), ['ok', 'pause']);
     assert.deepEqual(Object.keys(paused.json.pause).sort(), ['expires_at', 'reason', 'since']);
     assert.equal((await kindOf('Cue')).kind, 'working');
+    const own = await aiGet(runtime, '/api/ai/presence-kind', cue.token);
+    assert.equal(own.status, 200, own.text);
+    assert.deepEqual(own.json.presence_kind, await kindOf('Cue'), 'status reads the same field People does');
+    assert.equal((await call(runtime, { path: '/api/ai/presence-kind' })).status, 401);
+    assert.equal((await aiGet(runtime, '/api/ai/presence-kind?x=1', cue.token)).status, 400);
     assert.deepEqual(peopleFile(dataDir), before, 'A7: the pause never reaches people.jsonl');
 
     const rang = await aiGet(runtime, '/api/ai/rings?after=0&limit=5&wait=0', cue.token);

@@ -1584,12 +1584,41 @@ function joinedAdmission(profile) {
   return { state: 'yes', detail: `the room accepts this connection until ${new Date(profile.expires_at).toISOString()}` };
 }
 
-async function connectionFacts(fetcher, profile, stateDir, admitted = null, inspect = null) {
-  return {
+// What the room itself shows for this seat (0.4.0): the reason it is or is
+// not answering, as the room computes it, and what would change it.
+const ROOM_KINDS = Object.freeze(['listening', 'working', 'rung', 'pending', 'away', 'left', 'ended', 'unreachable', 'unknown']);
+async function roomShowsFact(fetcher, profile) {
+  const blank = { kind: null, since: null, next: null };
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/presence-kind', { timeoutMs: FACTS_TIMEOUT_MS });
+    const kind = exactObject(result, ['ok', 'presence_kind']) ? exactObject(result.presence_kind, ['kind', 'since', 'next']) : null;
+    if (!kind || !ROOM_KINDS.includes(kind.kind) || !(kind.since === null || Number.isSafeInteger(kind.since)) ||
+        !(kind.next === null || typeof kind.next === 'string')) throw incompatibleResponse();
+    const since = kind.since === null ? '' : ` since ${new Date(kind.since).toISOString()}`;
+    return {
+      state: kind.kind, kind: kind.kind, since: kind.since, next: kind.next,
+      detail: `${kind.kind}${since}${kind.next === null ? '' : ` — ${kind.next}`}`,
+    };
+  } catch (error) {
+    if (error && error.status === 404) {
+      return Object.assign({ state: 'unknown', detail: 'this room does not report it (Interlock 0.3.11 or older)' }, blank);
+    }
+    return Object.assign({
+      state: 'unknown', detail: roomUnreachable(error) ? 'the room could not be reached' : 'the room did not answer usably',
+    }, blank);
+  }
+}
+
+// `withRoom`: also ask the room what it shows for this seat (status and the
+// doorbell's status do; join's closing summary does not).
+async function connectionFacts(fetcher, profile, stateDir, admitted = null, inspect = null, withRoom = false) {
+  const facts = {
     admitted: admitted || await admittedFact(fetcher, profile),
     last_answered: await lastAnsweredFact(fetcher, profile),
     doorbell: doorbellFact(profile.name, stateDir, inspect),
   };
+  if (withRoom) facts.room_shows = await roomShowsFact(fetcher, profile);
+  return facts;
 }
 
 // For `interlock-doorbell status`: the three facts for a connection name,
@@ -1610,21 +1639,23 @@ async function connectionFactsFor(name, options = {}) {
       admitted: { state: 'unknown', detail: why },
       last_answered: { state: 'unknown', ring_id: null, reply_id: null, replied_at: null, detail: why },
       doorbell: doorbellFact(name, stateDir, options.inspect),
+      room_shows: { state: 'unknown', kind: null, since: null, next: null, detail: why },
     };
   }
   return await connectionFacts(dependencies.fetch || globalThis.fetch, selected.profile, stateDir,
-    null, options.inspect);
+    null, options.inspect, true);
 }
 
 function factLines(facts) {
   return [
     `Admitted: ${facts.admitted.state} — ${facts.admitted.detail}.`,
+  ].concat(facts.room_shows ? [`The room shows: ${terminalSafe(facts.room_shows.detail)}.`] : [], [
     facts.last_answered.state === 'found'
       ? `Last answered mention: ${facts.last_answered.detail}.`
       : `Last answered mention: ${facts.last_answered.state} — ${facts.last_answered.detail}.`,
     '  (A read-and-reply, not proof the doorbell rang.)',
     `Doorbell: ${terminalSafe(facts.doorbell.label || facts.doorbell.state)} — ${terminalSafe(facts.doorbell.detail)}.`,
-  ];
+  ]);
 }
 
 async function runStatus(args, io, dependencies = {}) {
@@ -1655,7 +1686,7 @@ async function runStatus(args, io, dependencies = {}) {
     return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
   }
   const facts = await connectionFacts(dependencies.fetch || globalThis.fetch, selected.profile,
-    stateDir || dependencies.doorbellStateDir || null);
+    stateDir || dependencies.doorbellStateDir || null, null, null, true);
   if (json) line(io.stdout, JSON.stringify({ ok: true, connection: selected.profile.name, facts }));
   else for (const text of factLines(facts)) line(io.stdout, text);
   return facts.admitted.state === 'yes' ? EXIT_OK : EXIT_RUNTIME;

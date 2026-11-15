@@ -3604,6 +3604,29 @@ function createFirstOwnerHandler(options) {
     return Ring.ringKind(causes) || 'mention';
   }
 
+  // What the room shows for this seat (C2): `interlock status` prints it.
+  async function readAiPresenceKind(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let kind;
+    try {
+      const row = (await chat.listParticipants()).find(entry => entry.subject_id === authorized.subject_id);
+      kind = row && PresenceKind.validPresenceKind(row.presence_kind) ? row.presence_kind : null;
+      if (!kind) throw new Error('no presence kind');
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    sendJson(request, response, 200, { ok: true, presence_kind: kind });
+  }
+
   // The room time line that leads `work brief`, `history` and each ring.
   async function readAiRoomTime(request, response) {
     if (!completed()) {
@@ -4178,6 +4201,16 @@ function createFirstOwnerHandler(options) {
           return;
         }
         listAdmissions(request, response);
+        return;
+      }
+      if (pathname === '/api/ai/presence-kind') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-connection-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        await readAiPresenceKind(request, response);
         return;
       }
       if (pathname === '/api/ai/room-time') {
