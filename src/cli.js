@@ -3120,7 +3120,16 @@ async function runJoin(args, io, dependencies = {}) {
       // already confirmed it if the room admitted it.
       if (resumed && clock() >= profile.created_at + JOIN_WINDOW_MS) {
         line(stderr, `interlock: the unfinished candidate ${terminalSafe(profile.name)} is past its join window (it started at ${new Date(profile.created_at).toISOString()}), so it is not sent again. The room has not admitted it.`);
-        line(stderr, `To ask again, start over: interlock join --discard --name ${terminalSafe(profile.name)}, then interlock join --product "${terminalSafe(profile.product)}" --name ${terminalSafe(profile.name)}`);
+        const waitingUntil = profile.created_at + CANDIDATE_MAY_BE_WAITING_MS;
+        const startOver = `interlock join --discard --name ${terminalSafe(profile.name)}, then interlock join --product "${terminalSafe(profile.product)}" --name ${terminalSafe(profile.name)}`;
+        if (clock() < waitingUntil) {
+          // --discard would still refuse: say when it will not.
+          const at = new Date(waitingUntil).toISOString();
+          line(stderr, `The owner may still see it until ${at}. After ${at}, start over: ${startOver}`);
+          line(stderr, 'Or ask the owner to Decline it in People now.');
+        } else {
+          line(stderr, `To ask again, start over: ${startOver}`);
+        }
         return EXIT_RUNTIME;
       }
       let deadline = profile.created_at + JOIN_WINDOW_MS;

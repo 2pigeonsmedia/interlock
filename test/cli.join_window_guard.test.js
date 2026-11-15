@@ -188,3 +188,21 @@ test('control: inside its window, --resume still re-knocks', async () => {
   assert.equal(knocked, 1, 'ARRANGEMENT/OUTCOME: the knock was sent');
   assert.match(result.stderr, /owner declined/);
 });
+
+test('between the join window and the discard bound, --resume names when --discard will work, not a refusing one', async () => {
+  const world = orphan(1_000);
+  const room = async url => url.endsWith('/api/ai/session')
+    ? json(401, { ok: false, error: 'invalid-connection' }) : json(404, { ok: false, error: 'not-found' });
+  const bound = new Date(1_000 + 32 * MIN).toISOString();
+  const mid = await join(world, ['--resume', '--name', 'Rowan'], room, 1_000 + 20 * MIN);
+  assert.equal(mid.code, EXIT_RUNTIME);
+  assert.equal(mid.knocks, 0);
+  assert.ok(mid.stderr.includes(`The owner may still see it until ${bound}. After ${bound}, start over: interlock join --discard --name Rowan`), mid.stderr);
+  assert.match(mid.stderr, /ask the owner to Decline it in People now/);
+  assert.doesNotMatch(mid.stderr, /To ask again, start over/);
+  // The advice holds: --discard at that moment refuses, and at the bound it works.
+  assert.equal((await join(world, ['--discard', '--name', 'Rowan'], room, 1_000 + 20 * MIN)).code, EXIT_RUNTIME);
+  const late = await join(world, ['--resume', '--name', 'Rowan'], room, 1_000 + 32 * MIN);
+  assert.match(late.stderr, /To ask again, start over: interlock join --discard --name Rowan/);
+  assert.equal((await join(world, ['--discard', '--name', 'Rowan'], room, 1_000 + 32 * MIN)).code, EXIT_OK);
+});
