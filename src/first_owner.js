@@ -1800,7 +1800,7 @@ function createFirstOwnerHandler(options) {
     }
     // A knock refused outright did not spend the code it just reserved.
     if (reservation && reservation.fresh === true && (!result || result.ok !== true)) {
-      try { memberCodes.release(split.knock.request_id); } catch (_) { /* the code stays spent */ }
+      try { memberCodes.release(split.knock.request_id, reservation.id); } catch (_) { /* the code stays spent */ }
     }
     if (response.destroyed) return;
     if (!result || result.ok !== true) {
@@ -3948,7 +3948,10 @@ function createFirstOwnerHandler(options) {
     // is judged again now; if it differs, nothing happens and the owner
     // looks again. A caller that names nothing saw nothing.
     let confirmedLine = null;
-    if (action === 'allow') {
+    // A member's code-bound knock is a different principal's AI: its Allow,
+    // by the member or an administrator, carries no earlier session of that
+    // name (security review, 11-14). Nothing to confirm, nothing to carry.
+    if (action === 'allow' && !issuer) {
       let knock = null;
       try { knock = admission.list().find(row => row.request_id === requestId) || null; } catch (_) { knock = null; }
       if (knock) {
@@ -3971,7 +3974,7 @@ function createFirstOwnerHandler(options) {
       // A re-join after an idle release or expiry: what the earlier session
       // held carries to this one, as the allower's act. The Allow already
       // stands; a carry that fails says so and leaves the rest as it was.
-      if (result && result.ok === true && action === 'allow') {
+      if (result && result.ok === true && action === 'allow' && !issuer) {
         try {
           const returned = confirmedLine === null ? null
             : carryToLiveSeat(result.name, allowerSession.subject_id, Date.now(), confirmedLine);

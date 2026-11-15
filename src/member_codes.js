@@ -219,21 +219,27 @@ function createMemberCodes(options) {
       if (crypto.timingSafeEqual(Buffer.from(row.digest, 'hex'), wanted)) match = row;
     }
     if (!match) return Object.freeze({ ok: false, reason: 'invalid-join-code' });
+    const issuer = Object.freeze({ subject_id: match.issuer_subject_id, name: match.issuer_name });
     if (match.request_id === requestId && match.cancelled_at === null) {
-      return Object.freeze({ ok: true, issuer: Object.freeze({ subject_id: match.issuer_subject_id, name: match.issuer_name }), fresh: false });
+      return Object.freeze({ ok: true, id: match.id, issuer, fresh: false });
     }
     if (stateOf(match, now) !== 'unused') return Object.freeze({ ok: false, reason: 'invalid-join-code' });
+    // One knock, one code: a request id another code already holds takes no
+    // second one, so a knock can never be two members' (security review).
+    if (rows.some(row => row !== match && row.request_id === requestId)) {
+      return Object.freeze({ ok: false, reason: 'invalid-join-code' });
+    }
     match.request_id = requestId;
     match.used_at = now;
     writeRows(rows);
-    return Object.freeze({ ok: true, issuer: Object.freeze({ subject_id: match.issuer_subject_id, name: match.issuer_name }), fresh: true });
+    return Object.freeze({ ok: true, id: match.id, issuer, fresh: true });
   }
 
   /* Undo a reservation this knock just made, when the knock itself was
    * refused (name taken, cooling down, pending cap): the code was not spent. */
-  function release(requestId) {
+  function release(requestId, id) {
     const rows = readRows();
-    const row = rows.find(candidate => candidate.request_id === requestId);
+    const row = rows.find(candidate => candidate.id === id && candidate.request_id === requestId);
     if (!row) return false;
     row.request_id = null;
     row.used_at = null;
@@ -245,8 +251,11 @@ function createMemberCodes(options) {
    * A15). A cancelled code's knock is no member's. */
   function issuerOf(requestId) {
     if (typeof requestId !== 'string') return null;
-    const row = readRows().find(candidate => candidate.request_id === requestId && candidate.cancelled_at === null);
-    return row ? Object.freeze({ subject_id: row.issuer_subject_id, name: row.issuer_name }) : null;
+    const bound = readRows().filter(candidate => candidate.request_id === requestId);
+    // Fail closed: a knock bound to more than one code, or to a cancelled
+    // one, is no member's.
+    if (bound.length !== 1 || bound[0].cancelled_at !== null) return null;
+    return Object.freeze({ subject_id: bound[0].issuer_subject_id, name: bound[0].issuer_name });
   }
 
   return Object.freeze({ enabled, setEnabled, issue, list, cancel, reserve, release, issuerOf });

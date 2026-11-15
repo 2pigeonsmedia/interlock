@@ -56,7 +56,8 @@ test('one knock per code; the same request id reads back the same issuer; a canc
   const other = codes.issue(BEA);
   const otherId = crypto.randomUUID();
   assert.equal(codes.reserve(other.code, otherId).ok, true);
-  assert.equal(codes.release(otherId), true);
+  assert.equal(codes.release(otherId, 'not-that-row'), false, 'release clears only the row it was handed');
+  assert.equal(codes.release(otherId, other.id), true);
   assert.equal(codes.issuerOf(otherId), null, 'released: not bound');
   assert.equal(codes.reserve(other.code, otherId).ok, true, 'and usable again');
 });
@@ -86,4 +87,16 @@ test('on disk: only digests, in files of their own', () => {
   const raw = fs.readFileSync(path.join(dataDir, CODES_FILE), 'utf8');
   assert.equal(raw.includes(made.code.replace('-', '')), false, 'the code itself is never written');
   assert.equal(raw.includes(made.code), false);
+});
+
+test('one knock, one code: a request id another code holds takes no second one', () => {
+  const { codes } = rig();
+  codes.setEnabled(true);
+  const beas = codes.issue(BEA);
+  const cals = codes.issue({ subject_id: 'cal-1', name: 'Cal' });
+  const requestId = crypto.randomUUID();
+  assert.equal(codes.reserve(beas.code, requestId).ok, true, 'ARRANGEMENT: bound to Bea\'s code');
+  assert.deepEqual(codes.reserve(cals.code, requestId), { ok: false, reason: 'invalid-join-code' });
+  assert.deepEqual(codes.issuerOf(requestId), { subject_id: 'bea-1', name: 'Bea' }, 'still Bea\'s alone');
+  assert.equal(codes.list('cal-1')[0].state, 'unused', 'Cal\'s code was not spent');
 });
