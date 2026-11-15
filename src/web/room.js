@@ -397,8 +397,10 @@ function showRoom(user) {
   }]);
   connectAiButton.disabled = !owner;
   connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
-  settingsButton.disabled = !owner;
-  settingsButton.title = owner ? '' : 'Only the owner or an admin can manage this Interlock';
+  // Every signed-in person has Settings (their status, their own AI, #821);
+  // the sections that manage the room are shown to the owner and admins only.
+  settingsButton.disabled = user.kind !== 'person';
+  settingsButton.title = '';
   // A person without a passkey can add one with a code from the owner.
   addPasskeyButton.hidden = user.kind !== 'person' || user.passkey !== false;
   setRoomNotice('');
@@ -3237,10 +3239,12 @@ settingsButton.addEventListener('click', async () => {
   fillYourStatus();
   fillGrantForm();
   settingsGrants.hidden = !viewerIsAdmin();
+  for (const section of settingsDialog.querySelectorAll('.settings-admin')) section.hidden = !viewerIsAdmin();
   memberCodeResult.hidden = true;
   setSettingsStatus(memberCodeStatus, '');
   settingsDialog.showModal();
   loadMemberCodes().catch(() => setSettingsStatus(memberCodeStatus, 'Interlock could not load AI join codes.', 'error'));
+  if (!viewerIsAdmin()) return;
   refreshSettingsGrants();
   try { await loadSettingsParticipants(); }
   catch (_) {
