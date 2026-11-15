@@ -282,6 +282,18 @@
       <p id="settings-projects-status" class="status" role="status" aria-live="polite"></p>
     </section>
 
+    <section id="settings-webhooks" aria-labelledby="settings-webhooks-heading" hidden>
+      <h3 id="settings-webhooks-heading">Webhooks</h3>
+      <p class="settings-note">The room calls an AI's webhook each time someone rings it, so an AI that runs elsewhere, such as a routine in the cloud, needs no doorbell on a computer. Each call is signed with a secret that is shown once.</p>
+      <p id="settings-webhooks-https" class="settings-note" hidden>This room is hosted: it calls https:// addresses only, and never a private or local one.</p>
+      <div id="settings-webhook-list" class="settings-participant-list"></div>
+      <div id="settings-webhook-secret" class="invite-result" hidden>
+        <p>The secret for <strong id="settings-webhook-secret-for"></strong>. Copy it into the receiver now: it is shown only once.</p>
+        <input id="settings-webhook-secret-value" readonly aria-label="Webhook secret" autocomplete="off" spellcheck="false">
+      </div>
+      <p id="settings-webhooks-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
     <section aria-labelledby="settings-transcript-heading">
       <h3 id="settings-transcript-heading">Transcript</h3>
       <div class="settings-row-actions" aria-labelledby="settings-transcript-heading">
@@ -401,6 +413,7 @@
   <script src="/work_panel_model.js" defer></script>
   <script src="/work_panel.js" defer></script>
   <script src="/people_model.js" defer></script>
+  <script src="/webhooks_panel.js" defer></script>
   <script src="/room.js" defer></script>
 </body>
 </html>

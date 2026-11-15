@@ -3226,6 +3226,30 @@ document.addEventListener('keydown', roomAttention.arm);
 document.addEventListener('visibilitychange', roomAttention.clearIfLooking);
 window.addEventListener('focus', roomAttention.clearIfLooking);
 
+// Settings → Webhooks (owner and admins): the panel lives in webhooks_panel.js.
+let webhooksPanel = null;
+function openWebhooksPanel() {
+  const section = document.getElementById('settings-webhooks');
+  if (!section) return;
+  section.hidden = !viewerIsAdmin() || !window.InterlockWebhooksPanel;
+  if (section.hidden) return;
+  if (!webhooksPanel) {
+    webhooksPanel = window.InterlockWebhooksPanel.create({
+      list: document.getElementById('settings-webhook-list'),
+      status: document.getElementById('settings-webhooks-status'),
+      secretBox: document.getElementById('settings-webhook-secret'),
+      secretValue: document.getElementById('settings-webhook-secret-value'),
+      secretFor: document.getElementById('settings-webhook-secret-for'),
+      httpsOnlyNote: document.getElementById('settings-webhooks-https'),
+      mutate: ownerMutation,
+    });
+    // A secret stays on screen only while Settings is open.
+    settingsDialog.addEventListener('close', () => webhooksPanel.hideSecret());
+  }
+  webhooksPanel.hideSecret();
+  webhooksPanel.refresh();
+}
+
 settingsButton.addEventListener('click', async () => {
   if (settingsButton.disabled) return;
   setSettingsStatus(settingsPeopleStatus, '');
@@ -3244,6 +3268,7 @@ settingsButton.addEventListener('click', async () => {
   fillYourStatus();
   fillGrantForm();
   settingsGrants.hidden = !viewerIsAdmin();
+  openWebhooksPanel();
   settingsDialog.showModal();
   refreshSettingsGrants();
   try { await loadSettingsParticipants(); }
