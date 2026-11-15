@@ -2304,6 +2304,16 @@ async function runLeave(args, io, dependencies = {}) {
     line(io.stderr, 'interlock: the selected local connection could not be forgotten safely.');
     return EXIT_RUNTIME;
   }
+  // The room has ended this connection, so its doorbell cursors are spent.
+  // Removing them lets a later join under this name start its doorbell
+  // without --replace-connection.
+  try {
+    const doorbell = dependencies.doorbell || require('../integrations/doorbell.js');
+    doorbell.forgetConnectionCursors(dependencies.doorbellStateDir || doorbell.defaultStateDir(),
+      profile.name, profile.request_id);
+  } catch (_) {
+    line(io.stderr, 'interlock: the doorbell state for this connection could not be cleared; a later doorbell under this name may need --replace-connection once.');
+  }
   if (parsed.json) {
     line(io.stdout, JSON.stringify({ ok: true, connection: profile.name, ended_how: 'left' }));
   } else {
