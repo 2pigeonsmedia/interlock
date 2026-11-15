@@ -530,7 +530,7 @@ function createService(opts) {
    * the room grants and the enrolment intent. `principalId` is whom the seat
    * acts for: the administrator who allowed it, or (#821) the member whose
    * code it came by. */
-  function admitAiSeat(candidate, principalId, now, label, checkInDraft) {
+  function admitAiSeat(candidate, principalId, now, label, checkInDraft, ownSeatsOnly) {
     const requestId = candidate.request_id;
     const { name, product, selector, digest } = candidate;
     const productProvenance = candidate.product_provenance;
@@ -551,6 +551,11 @@ function createService(opts) {
         subject.tenant === TENANT() && subject.name_fold === nameFold &&
         !(Number.isFinite(subject.expires_at) && subject.expires_at > 0 &&
           subject.expires_at <= now));
+      // A member's AI (#821) may end only that member's own live AI of the
+      // same name, never someone else's (security review, 11-14).
+      if (held && !existingCredential && ownSeatsOnly === true && held.principal !== principalId) {
+        throw new Error('administration.' + label + ': the name is held by another principal\'s AI');
+      }
       if (held && !existingCredential) {
         if (!subjects.revokeInDraft(draft, held.id, 'revoked', now)) {
           throw new Error('administration.' + label + ': held seat could not be ended');
@@ -664,12 +669,14 @@ function createService(opts) {
       }
       return authzAllow(actorId, 'membership', assurance);
     }
-    return withFreshAdmin(rest, 'ai-admission.allow-member', 'membership', ({ now }) =>
+    return withFreshAdmin(rest, 'ai-admission.allow-member', 'membership', ({ actorId, now }) =>
       admitAiSeat(candidate, principalId, now, 'allowAiAdmissionForMember', draft => {
         if (!principalStanding(draft, principalId)) {
           throw new Error('administration.allowAiAdmissionForMember: principal is not an active member');
         }
-      }), gate);
+        // The first-owner lock: nobody else names her, here as everywhere.
+        if (actorId !== principalId) refuseFirstOwner(draft, principalId);
+      }, true), gate);
   }
 
   async function redeemHumanInvite(optsIn) {

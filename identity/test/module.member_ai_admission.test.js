@@ -191,3 +191,45 @@ test('refused: a member whose membership is suspended is no principal, though th
     { ok: false, reason: 'refused-after-step-up' });
   assert.strictEqual(seatNamed(r.repo, 'Kestrel'), null);
 });
+
+test('refused: a member\'s AI may not take the name of a live AI that is someone else\'s', async () => {
+  const r = await room();
+  const owners = r.house.allowAiAdmission(await r.asOwner(), admission(r.identity.newAiCredential(), { name: 'Plover' }));
+  assert.strictEqual(owners.ok, true, 'ARRANGEMENT: the owner\'s AI Plover is in');
+  const body = admission(r.identity.newAiCredential(), { name: 'Plover', principal_subject_id: r.member.subject_id });
+  assert.deepStrictEqual(r.house.allowAiAdmissionForMember(await r.asMember(), body),
+    { ok: false, reason: 'refused-after-step-up' });
+  assert.deepStrictEqual(r.house.allowAiAdmissionForMember(await r.asOwner(), body),
+    { ok: false, reason: 'refused-after-step-up' }, 'nor by an admin on a member code');
+  const plover = seatNamed(r.repo, 'Plover');
+  assert.ok(plover, 'the owner\'s AI is still in');
+  assert.strictEqual(plover.id, owners.subject_id);
+  assert.strictEqual(plover.principal, r.owner.id);
+});
+
+test('control: a member\'s AI may replace that member\'s own live AI of the same name (a re-join)', async () => {
+  const r = await room();
+  const first = r.house.allowAiAdmissionForMember(await r.asMember(),
+    admission(r.identity.newAiCredential(), { principal_subject_id: r.member.subject_id }));
+  assert.strictEqual(first.ok, true);
+  const again = r.house.allowAiAdmissionForMember(await r.asMember(),
+    admission(r.identity.newAiCredential(), { principal_subject_id: r.member.subject_id }));
+  assert.strictEqual(again.ok, true, JSON.stringify(again));
+  assert.notStrictEqual(again.subject_id, first.subject_id, 'a new session of the member\'s own AI');
+});
+
+test('refused: no one but the first owner may make the first owner an AI\'s principal', async () => {
+  const r = await room();
+  const body = admission(r.identity.newAiCredential(), { principal_subject_id: r.owner.id });
+  assert.deepStrictEqual(r.house.allowAiAdmissionForMember(await r.asMember(), body),
+    { ok: false, reason: 'not-administrator' }, 'a member cannot');
+  // A second administrator: the first owner makes the member one.
+  const made = r.house.grantAdministrator(await r.asOwner(), { name: 'Second' });
+  assert.strictEqual(made.ok, true, 'ARRANGEMENT: Second is an administrator: ' + JSON.stringify(made));
+  assert.deepStrictEqual(r.house.allowAiAdmissionForMember(await r.asMember(), body),
+    { ok: false, reason: 'refused-after-step-up' }, 'another administrator cannot');
+  assert.strictEqual(seatNamed(r.repo, 'Kestrel'), null);
+  const own = r.house.allowAiAdmissionForMember(await r.asOwner(), body);
+  assert.strictEqual(own.ok, true, 'the first owner may name herself: ' + JSON.stringify(own));
+  assert.strictEqual(seatNamed(r.repo, 'Kestrel').principal, r.owner.id);
+});
