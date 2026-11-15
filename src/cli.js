@@ -2574,13 +2574,72 @@ function completedJoinDecision(code) {
   return Object.freeze({ action: 'done', code });
 }
 
+// A profile's standing, in words: never admitted, admitted until, expired.
+function profileStanding(profile, now) {
+  if (profile.state !== 'admitted') return 'It was never admitted.';
+  const at = new Date(profile.expires_at).toISOString();
+  return profile.expires_at <= now ? `It expired at ${at}.` : `It is admitted there until ${at}.`;
+}
+
+// Connection directories beside this one that hold a profile for this room
+// and name, read without opening or changing them. The default directory
+// and its siblings named connections-* are the known places.
+function otherProfilesFor(connectionDir, name, serverUrl, now, dependencies = {}) {
+  const found = [];
+  let candidates = [];
+  try {
+    const config = dependencies.config || require('./config.js');
+    const env = dependencies.env || process.env;
+    const dataDir = typeof config.resolveDataDir === 'function'
+      ? config.resolveDataDir({ env, platform: dependencies.platform || process.platform, homedir: dependencies.homedir })
+      : path.dirname(connectionDir);
+    const parents = [...new Set([dataDir, path.dirname(connectionDir)])];
+    for (const parent of parents) {
+      for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+        if (entry.isDirectory() && /^connections(-[A-Za-z0-9._-]+)?$/.test(entry.name)) {
+          candidates.push(path.join(parent, entry.name));
+        }
+      }
+    }
+  } catch (_) { return found; }
+  candidates = [...new Set(candidates)].filter(dir => path.resolve(dir) !== path.resolve(connectionDir));
+  for (const dir of candidates) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(dir, name.toLowerCase() + '.json'), 'utf8'));
+      if (raw && raw.server_url === serverUrl && typeof raw.name === 'string' &&
+          raw.name.toLowerCase() === name.toLowerCase()) {
+        found.push({ dir, standing: profileStanding(raw, now) });
+      }
+    } catch (_) { /* nothing there, or not a profile */ }
+  }
+  return found;
+}
+
+function otherProfileNotes(stderr, others) {
+  for (const other of others) {
+    line(stderr, `Another connection directory holds this name for this room: ${terminalSafe(other.dir)}. ${other.standing}`);
+    line(stderr, `  Use it: INTERLOCK_CONNECTION_DIR=${terminalSafe(other.dir)} interlock join …`);
+  }
+}
+
+function otherRoomRefusal(stderr, profile, serverUrl, now, dependencies, connectionDir, kind) {
+  line(stderr, `interlock: ${kind} ${terminalSafe(profile.name)} belongs to ${terminalSafe(profile.server_url)}, not this Interlock. ${profileStanding(profile, now)} No new admission was created.`);
+  line(stderr, 'Ways forward:');
+  line(stderr, '  - join this room under another name (--name);');
+  line(stderr, '  - keep a separate set of connections for this room: INTERLOCK_CONNECTION_DIR=/another/dir interlock join …;');
+  line(stderr, profile.state === 'admitted'
+    ? `  - if ${terminalSafe(profile.server_url)} still runs and you are done there: interlock leave --connection ${terminalSafe(profile.name)}`
+    : `  - drop the unfinished one: interlock join --discard --name ${terminalSafe(profile.name)}`);
+  if (connectionDir) otherProfileNotes(stderr, otherProfilesFor(connectionDir, profile.name, serverUrl, now, dependencies));
+}
+
 async function reconnectStaged(profiles, profile, product, serverUrl, fetcher, clock, io) {
   if (profile.product !== product || profile.product_provenance !== 'client-reported') {
     line(io.stderr, `interlock: the unfinished candidate ${terminalSafe(profile.name)} belongs to ${terminalSafe(profile.product)}, not ${terminalSafe(product)}. It was kept and no new admission was created.`);
     return completedJoinDecision(EXIT_RUNTIME);
   }
   if (profile.server_url !== serverUrl) {
-    line(io.stderr, `interlock: the unfinished candidate ${terminalSafe(profile.name)} belongs to ${terminalSafe(profile.server_url)}, not this Interlock. It was kept and no new admission was created.`);
+    otherRoomRefusal(io.stderr, profile, serverUrl, clock(), io.dependencies || {}, io.connectionDir, 'the unfinished candidate');
     return completedJoinDecision(EXIT_RUNTIME);
   }
   const confirmation = await candidateConfirmation(fetcher, serverUrl, profile);
@@ -2601,7 +2660,7 @@ async function reconnectExisting(profiles, profile, product, serverUrl, fetcher,
     return completedJoinDecision(EXIT_RUNTIME);
   }
   if (profile.server_url !== serverUrl) {
-    line(io.stderr, `interlock: local connection ${terminalSafe(profile.name)} belongs to ${terminalSafe(profile.server_url)}, not this Interlock. No new admission was created.`);
+    otherRoomRefusal(io.stderr, profile, serverUrl, clock(), io.dependencies || {}, io.connectionDir, 'local connection');
     return completedJoinDecision(EXIT_RUNTIME);
   }
   if (profile.state !== 'admitted') {
@@ -2746,6 +2805,8 @@ async function runJoin(args, io, dependencies = {}) {
     line(stderr, 'interlock: invalid connection directory; INTERLOCK_CONNECTION_DIR must be absolute.');
     return EXIT_USAGE;
   }
+  // The reconnect refusals look beside this directory for the same name.
+  const joinIo = Object.assign({}, io, { dependencies, connectionDir });
   let profiles;
   try { profiles = profileModule.openProfiles({ connectionDir }); }
   catch (error) {
@@ -2839,7 +2900,7 @@ async function runJoin(args, io, dependencies = {}) {
       let resumed = false;
       if (profiles.stagedExists(name)) {
         const decision = await reconnectStaged(
-          profiles, profiles.loadStaged(name), product, parsed.url, fetcher, clock, io);
+          profiles, profiles.loadStaged(name), product, parsed.url, fetcher, clock, joinIo);
         if (decision.action === 'done') return decision.code;
         profile = decision.profile;
         staged = decision.staged;
@@ -2848,7 +2909,7 @@ async function runJoin(args, io, dependencies = {}) {
 
       if (profile === null && profiles.exists(name)) {
         const decision = await reconnectExisting(
-          profiles, profiles.load(name), product, parsed.url, fetcher, clock, io);
+          profiles, profiles.load(name), product, parsed.url, fetcher, clock, joinIo);
         if (decision.action === 'done') return decision.code;
         if (decision.action === 'resume') {
           profile = decision.profile;
@@ -2951,6 +3012,7 @@ async function runJoin(args, io, dependencies = {}) {
             removeJoinCandidate(profiles, profile, staged);
             if (parsed.name !== null) {
               line(stderr, 'interlock: that name is already used or waiting in this Interlock.');
+              otherProfileNotes(stderr, otherProfilesFor(connectionDir, profile.name, parsed.url, clock(), dependencies));
               return EXIT_RUNTIME;
             }
             line(stderr, 'interlock: that name is already used or waiting in this Interlock. Choose another.');
