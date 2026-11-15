@@ -52,7 +52,7 @@ Usage:
   interlock recover --hosted
   interlock backup --to ABSOLUTE_PATH
   interlock restore --from ABSOLUTE_PATH
-  interlock join [--product LABEL] [--name NAME] [--url URL] [--project ID] [--model LABEL]
+  interlock join [--product LABEL] [--name NAME] [--url URL] [--project ID] [--model LABEL] [--code CODE | --code -]
   interlock history --connection NAME [--drain | --through N | --skip-to-current | --before N | --find TEXT] [--json]
   interlock history --connection NAME --project ID [--drain | --through N | --before N | --find TEXT]
   interlock say --connection NAME --file PATH [--json]
@@ -484,12 +484,12 @@ function runRestore(args, io, dependencies = {}) {
 }
 
 function joinOptions(args) {
-  const options = { name: null, product: null, url: DEFAULT_URL, project: null, model: null };
+  const options = { name: null, product: null, url: DEFAULT_URL, project: null, model: null, code: null };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
     const value = args[index + 1];
-    if (!['--name', '--product', '--url', '--project', '--model'].includes(flag) || seen.has(flag) ||
+    if (!['--name', '--product', '--url', '--project', '--model', '--code'].includes(flag) || seen.has(flag) ||
         typeof value !== 'string' || value.length === 0) return null;
     seen.add(flag);
     options[flag.slice(2)] = flag === '--url' ? rootSlashDropped(value) : value;
@@ -2356,7 +2356,24 @@ function admissionBody(profile, declared = {}) {
     product_provenance: profile.product_provenance,
     selector: profile.selector,
     digest: profile.digest,
-  }, declared.project ? { project: declared.project } : {}, declared.model ? { model: declared.model } : {});
+  }, declared.project ? { project: declared.project } : {}, declared.model ? { model: declared.model } : {},
+  declared.joinCode ? { join_code: declared.joinCode } : {});
+}
+
+/* A member's one-time AI join code (#821): `--code CODE`, `--code -` (read
+ * from stdin), or INTERLOCK_JOIN_CODE, so the code need not sit in shell
+ * history or the process list. Null when none is given. */
+async function joinCodeOf(parsed, io, dependencies) {
+  let code = parsed.code;
+  if (code === '-') {
+    const text = await (dependencies.readStdin || readStdin)(io.stdin || process.stdin);
+    code = String(text).split(/\r?\n/)[0];
+  } else if (code === null) {
+    const env = dependencies.env || process.env;
+    code = typeof env.INTERLOCK_JOIN_CODE === 'string' ? env.INTERLOCK_JOIN_CODE : null;
+  }
+  code = typeof code === 'string' ? code.trim() : null;
+  return code ? code : null;
 }
 
 function joinedOutput(stdout, profile, start = 'tip', facts = null) {
@@ -2530,6 +2547,8 @@ async function runJoin(args, io, dependencies = {}) {
     line(stderr, 'interlock: join accepts only http://localhost or a canonical https origin.');
     return EXIT_USAGE;
   }
+  const joinCode = await joinCodeOf(parsed, io, dependencies);
+  const declared = joinCode ? Object.assign({}, parsed, { joinCode }) : parsed;
   line(stdout, `Interlock target: ${terminalSafe(parsed.url)}`);
   const config = dependencies.config || require('./config.js');
   const identity = dependencies.identity || require('identity');
@@ -2662,7 +2681,7 @@ async function runJoin(args, io, dependencies = {}) {
       while (firstAttempt || clock() < deadline) {
         firstAttempt = false;
         try {
-          const result = await knock(fetcher, parsed.url, admissionBody(profile, parsed));
+          const result = await knock(fetcher, parsed.url, admissionBody(profile, declared));
           lastNetworkFailure = false;
           if (result.state === 'waiting') {
             if (Number.isSafeInteger(result.expires_at) && result.expires_at > deadline) {
@@ -2724,6 +2743,16 @@ async function runJoin(args, io, dependencies = {}) {
             line(stderr, 'interlock: that name is already used or waiting in this Interlock. Choose another.');
             name = null;
             break;
+          }
+          if (error.code === 'invalid-join-code') {
+            removeJoinCandidate(profiles, profile, staged);
+            line(stderr, 'interlock: the room refused that join code: it is wrong, already used, expired or cancelled. Ask your person for a new one. No connection was created.');
+            return EXIT_RUNTIME;
+          }
+          if (joinCode && error.code === 'invalid-request') {
+            removeJoinCandidate(profiles, profile, staged);
+            line(stderr, 'interlock: this room refused the join code field; it may run Interlock older than 0.4.0, which has no member join codes. Join without --code and ask the owner to Allow you. No connection was created.');
+            return EXIT_USAGE;
           }
           if (['cooldown', 'pending-cap', 'request-id-collision', 'invalid-request',
             'invalid-name'].includes(error.code)) {
