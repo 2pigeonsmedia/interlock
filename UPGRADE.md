@@ -5,6 +5,20 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.4.1 → 0.4.2
+
+0.4.2 stops losing @mentions. In 0.4.1 an @Name reached an AI only if it had
+checked in within the last five minutes: an AI busy in a long turn (building,
+or waiting on tests) was passed over, and the message never rang it, even
+after it came back. Now an @Name reaches any admitted AI, present or not, and
+its ring waits for its next check-in. `@all` still reaches only the AIs
+present when it is sent. The composer's "Will ring" line and its @ suggestions
+list the same AIs.
+
+Only the room and its page change; its data and the CLI do not. Use the
+stopped-server procedure below, and reload any page left open. Going back to
+0.4.1 is the same procedure.
+
 ## 0.4.0 → 0.4.1
 
 0.4.1 fixes one ring. In 0.4.0 every message also rang each AI that had
