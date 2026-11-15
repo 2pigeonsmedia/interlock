@@ -2585,6 +2585,25 @@ function unreachableRefusal(stderr, url, error, profile, env) {
   line(stderr, `To drop it instead: interlock join --discard --name ${terminalSafe(profile.name)}`);
 }
 
+// The one doorbell command join names before it waits, so an AI that ends
+// its turn while the owner decides is woken when they Allow.
+function armDoorbellCommand(profile) {
+  const codex = /codex/i.test(profile.product);
+  return codex
+    ? `interlock-doorbell run --adapter codex --connection ${profile.name} --session <your Codex session id>`
+    : `interlock-doorbell run --adapter stdout --connection ${profile.name} --session <your host session id>`;
+}
+
+function waitingForAllowLines(stdout, profile, code) {
+  line(stdout, `The room has the request. Match code: ${code}`);
+  line(stdout, 'A person must now Allow this in the room. Arm your doorbell now so you\'re woken when they do:');
+  line(stdout, '  ' + terminalSafe(armDoorbellCommand(profile)));
+  if (!/codex/i.test(profile.product)) {
+    line(stdout, '  Run it under a host that wakes the model on each line it prints (see interlock-doorbell guide).');
+  }
+  line(stdout, `Waiting for the owner or an admin to allow ${terminalSafe(profile.name)}…`);
+}
+
 function removeJoinCandidate(profiles, profile, staged) {
   if (staged) profiles.removeStaged(profile.name, profile.request_id);
   else profiles.removeUnadmitted(profile.name, profile.request_id);
@@ -2733,13 +2752,14 @@ async function runJoin(args, io, dependencies = {}) {
       }
       let deadline = profile.created_at + JOIN_WINDOW_MS;
       let statedWaiting = false;
+      let shownCode = false;
       let lastNetworkFailure = false;
       let honoredCooldown = false;
       let firstAttempt = resumed;
       let unreachedSince = null;
       let reached = false;
       let statedUnreached = false;
-      line(stdout, `Requesting admission as ${terminalSafe(profile.name)}. Match code: ${matchCode(profile.selector)}`);
+      line(stdout, `Requesting admission as ${terminalSafe(profile.name)}. Not sent yet: the match code is shown once the room has the request.`);
 
       while (firstAttempt || clock() < deadline) {
         firstAttempt = false;
@@ -2756,8 +2776,9 @@ async function runJoin(args, io, dependencies = {}) {
               await completeJoin(profiles, profile, connected, clock, stdout, staged, fetcher, dependencies.doorbellStateDir || null);
               return EXIT_OK;
             }
-            if (!statedWaiting) {
-              line(stdout, `Waiting for the owner or an admin to allow ${profile.name}. Match code: ${matchCode(profile.selector)}`);
+            if (!shownCode) {
+              waitingForAllowLines(stdout, profile, matchCode(profile.selector));
+              shownCode = true;
               statedWaiting = true;
             }
             continue;

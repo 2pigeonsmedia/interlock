@@ -146,12 +146,14 @@ test('the code the joining CLI prints is the code on its Allow card, and only on
     let rows = [];
     for (let attempt = 0; attempt < 50; attempt += 1) {
       rows = await pendingRows(runtime, owner);
-      if (rows.length === 2 && rows.every(row => row.connected)) break;
+      if (rows.length === 2 && rows.every(row => row.connected) &&
+          /The room has the request/.test(stdout)) break;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
-    // The first knock is held open for up to 20 s before the CLI reports it is
-    // waiting, so the code is printed as the request is made.
-    const printed = /Requesting admission as Scout\. Match code: ([A-Z0-9]+)/.exec(stdout);
+    // The knock that creates the request is answered at once, and the CLI
+    // shows the code only then: the code it prints is the one on the card.
+    assert.match(stdout, /Requesting admission as Scout\. Not sent yet/);
+    const printed = /The room has the request\. Match code: ([A-Z0-9]+)/.exec(stdout);
     assert.ok(printed, `the request line carries the code: ${JSON.stringify(stdout)}`);
     const scout = rows.find(row => row.name === 'Scout');
     const atlas = rows.find(row => row.name === 'Atlas');

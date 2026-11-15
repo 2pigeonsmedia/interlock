@@ -398,8 +398,14 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.match(result.stdout, /Requesting admission as Marlow/);
   const code = matchCode(seen[0].selector);
   assert.ok(code !== null, 'ARRANGEMENT: the knock carried a selector');
-  assert.ok(result.stdout.includes(`Requesting admission as Marlow. Match code: ${code}\n`), result.stdout);
-  assert.ok(result.stdout.includes(`Waiting for the owner or an admin to allow Marlow. Match code: ${code}\n`), result.stdout);
+  assert.ok(result.stdout.includes('Requesting admission as Marlow. Not sent yet: the match code is shown once the room has the request.\n'), result.stdout);
+  assert.ok(result.stdout.includes(`The room has the request. Match code: ${code}\n`), result.stdout);
+  assert.equal(result.stdout.split('Match code:').length - 1, 1, 'the code is shown once, after the room answered');
+  assert.ok(result.stdout.indexOf('Not sent yet') < result.stdout.indexOf('Match code:'));
+  assert.ok(result.stdout.includes('A person must now Allow this in the room. Arm your doorbell now so you\'re woken when they do:\n' +
+    '  interlock-doorbell run --adapter codex --connection Marlow --session <your Codex session id>\n'), result.stdout);
+  assert.ok(result.stdout.indexOf('A person must now Allow') < result.stdout.indexOf('Connected as'),
+    'the Allow and doorbell lines come before the wait ends');
   assert.match(result.stdout, /Interlock target: http:\/\/localhost:8788/);
   assert.ok(result.stdout.indexOf('Interlock target:') <
     result.stdout.indexOf('Requesting admission'),
