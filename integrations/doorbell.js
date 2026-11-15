@@ -33,6 +33,7 @@ const HELP = `Interlock doorbell adapter
 Usage:
   interlock-doorbell run --adapter codex|stdout --connection NAME --session HOST_SESSION [--state-dir ABSOLUTE_PATH] [--replace-connection] [--replace-stale] [--once]
   interlock-doorbell status --connection NAME [--adapter codex|stdout --session HOST_SESSION] [--state-dir ABSOLUTE_PATH] [--json]
+  interlock-doorbell claude-code-hook --connection NAME [--event stop|prompt] [--state-dir ABSOLUTE_PATH] [--max-seconds N]
   interlock-doorbell guide
 
 The legacy direct form remains supported:
@@ -1243,6 +1244,9 @@ function main(argv = process.argv.slice(2)) {
       .catch(() => null)
       .then(facts => { process.exitCode = printStatus(result, options.json, facts); });
   }
+  if (argv[0] === 'claude-code-hook') {
+    return require('./claude_code_hook.js').main(argv.slice(1), { commandLineOf, defaultStateDir });
+  }
   if (argv.length === 1 && argv[0] === 'guide') {
     printGuide();
     return;
@@ -1257,6 +1261,8 @@ function reportCrash(error) {
 module.exports = Object.freeze({
   FRESH_MS,
   HELP,
+  commandLineOf,
+  defaultStateDir,
   OUTAGE_RETRY_SCHEDULE_MS,
   inspectStatus,
   main,
