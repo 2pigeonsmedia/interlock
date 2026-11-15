@@ -24,7 +24,6 @@ const { endDepartedGrants, standingSubjects } = require('./departures.js');
 const { readRoomSettings } = require('./room_settings.js');
 const { openWebhookStore } = require('./webhooks/store.js');
 const { createWebhookDelivery } = require('./webhooks/deliver.js');
-const { webhookRing } = require('./webhooks/ring.js');
 const PACKAGE_VERSION = require('../package.json').version;
 
 // Tests shorten webhook retries and timeouts; only short lists of positive
@@ -481,7 +480,9 @@ async function startInterlockServer(options) {
     webhookDelivery = createWebhookDelivery(Object.assign(webhookTiming(process.env), {
       store: webhooks,
       hosted: Boolean(hosted),
-      ringFor: webhookRing,
+      // The handler builds the ring, as its rings route does; it exists by
+      // the time any message is saved.
+      ringFor: (message, recipient) => handler.ringFor(message, recipient),
       noteDelivery: (subjectId, outcome) => chat.noteWebhookDelivery(subjectId, outcome),
       version: PACKAGE_VERSION,
     }));

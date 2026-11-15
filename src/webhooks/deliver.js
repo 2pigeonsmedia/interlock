@@ -38,12 +38,18 @@ for (const [network, prefix] of [
   ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16],
   ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
 ]) BLOCKED_V4.addSubnet(network, prefix, 'ipv4');
+// IPv6 is allowed, not blocked: only global unicast (2000::/3) is public,
+// less its special ranges. Everything else (loopback, ULA, link-local,
+// multicast, the forms that carry an IPv4 address such as ::ffff:0:0/96,
+// ::ffff:0:0:0/96, 64:ff9b:1::/48) is refused, except the two the code below
+// reads the IPv4 address out of and judges by it.
+const GLOBAL_V6 = new net.BlockList();
+GLOBAL_V6.addSubnet('2000::', 3, 'ipv6');
 for (const [network, prefix] of [
-  ['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8], ['2001:db8::', 32],
-  ['100::', 64], ['2001::', 23], ['::', 96],
-  // Forms that carry an IPv4 address: refused here unless embeddedIpv4
-  // below reads the address inside and judges that instead.
-  ['::ffff:0:0', 96], ['64:ff9b::', 96],
+  ['2001::', 23],      // IETF protocol assignments, Teredo among them
+  ['2001:db8::', 32],  // documentation
+  ['2002::', 16],      // 6to4: carries an IPv4 address
+  ['3fff::', 20],      // documentation (RFC 9637)
 ]) BLOCKED_V6.addSubnet(network, prefix, 'ipv6');
 
 // An IPv6 form that carries an IPv4 address (mapped ::ffff:a.b.c.d, or the
@@ -67,7 +73,7 @@ function publicAddress(address) {
   if (family !== 6) return false;
   const inner = embeddedIpv4(bare);
   if (inner !== null) return net.isIPv4(inner) && !BLOCKED_V4.check(inner, 'ipv4');
-  return !BLOCKED_V6.check(bare, 'ipv6');
+  return GLOBAL_V6.check(bare, 'ipv6') && !BLOCKED_V6.check(bare, 'ipv6');
 }
 
 function refusedError() {
@@ -125,7 +131,7 @@ function sign(secret, body) {
 /* options:
  *   store       the webhook registrations (has, signingRecord)
  *   hosted      true in hosted mode: https only, public addresses only
- *   ringFor     (message, recipient) -> the ring object (C4) for that seat
+ *   ringFor     (message, recipient) -> the ring object (C4) for that seat, or a promise of it
  *   noteDelivery (subjectId, { ok, at, error_class }) once per ring, after the last attempt
  *   version     the server's version, for the user agent
  * Tests may also pass retryDelaysMs, timeoutMs, resolve (a dns.lookup) and
@@ -221,7 +227,7 @@ function createWebhookDelivery(options) {
     const record = store.signingRecord(subjectId);
     if (!record || closed) return;
     let ring;
-    try { ring = options.ringFor(message, recipient); } catch (_) { return; }
+    try { ring = await options.ringFor(message, recipient); } catch (_) { return; }
     if (!ring || typeof ring !== 'object') return;
     const payload = Object.assign({}, ring, record.excerpt ? { excerpt: excerptOf(message.text) } : {});
     const body = JSON.stringify(payload);

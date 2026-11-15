@@ -17,6 +17,7 @@ process.env.INTERLOCK_WEBHOOK_RETRY_SCHEDULE_MS = '10,10,10';
 process.env.INTERLOCK_WEBHOOK_TIMEOUT_MS = '2000';
 
 const room = require('./helpers/room_server.js');
+const Ring = require('../src/rings.js');
 
 const receivers = new Set();
 test.afterEach(async () => {
@@ -127,7 +128,9 @@ test('an owner registers a webhook; an @mention calls it, signed; a plain post d
     const body = JSON.parse(call.body);
     assert.equal(body.message_id, mention.json.message.id);
     assert.equal(body.from, 'Ana');
-    assert.equal(body.to, S);
+    assert.equal(Ring.validRing(body), true, 'the body is the one ring shape (C4), nothing more');
+    assert.equal(body.kind, 'mention');
+    assert.equal(body.room_time, Ring.NOT_SET, 'Ana set no time zone');
     assert.equal(body.read, `interlock history --connection ${S} --through ${mention.json.message.id}`);
     assert.equal(body.excerpt, undefined);
     assert.equal(await eventually(async () => (await kindOf(runtime, owner, S)) === 'rung' && 'rung', 'rung'), 'rung');

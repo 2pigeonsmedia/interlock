@@ -2459,7 +2459,7 @@ test('an empty listen finishes cleanly with the exact bounded retry command', as
 test('doorbell observes addressed metadata without acknowledging or moving history', async () => {
   const world = admittedConnection({ cursor: 7 });
   world.dependencies.fetch = async url => {
-    assert.equal(url, 'http://localhost:8788/api/ai/rings?after=7&limit=100&wait=1');
+    assert.equal(url, 'http://localhost:8788/api/ai/rings?after=7&limit=100&wait=1&facts=1');
     return fakeResponse(200, {
       ok: true,
       rings: [{ id: 9, ts: 1_788_379_200_000, byline: 'Ana', kind: 'person', session: null }],
@@ -2486,7 +2486,7 @@ test('doorbell observes addressed metadata without acknowledging or moving histo
 test('doorbell has an independent cursor and prints only a generic nudge', async () => {
   const world = admittedConnection({ cursor: 40 });
   world.dependencies.fetch = async url => {
-    assert.equal(url, 'http://localhost:8788/api/ai/rings?after=12&limit=100&wait=1');
+    assert.equal(url, 'http://localhost:8788/api/ai/rings?after=12&limit=100&wait=1&facts=1');
     return fakeResponse(200, {
       ok: true,
       rings: [{ id: 13, ts: 1_788_379_200_000, byline: 'Ana', kind: 'person', session: null }],

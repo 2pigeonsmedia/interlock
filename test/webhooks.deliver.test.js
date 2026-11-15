@@ -312,6 +312,22 @@ test('close() ends a delivery waiting to retry, and settles', async () => {
   assert.equal(notes.length, 0);
 });
 
+test('public means public: the address table', () => {
+  const table = {
+    '8.8.8.8': true, '1.1.1.1': true, '172.32.0.1': true, '2606:4700::1111': true, '2a00:1450:4001::200e': true,
+    '::ffff:8.8.8.8': true, '64:ff9b::808:808': true,
+    '127.0.0.1': false, '10.1.2.3': false, '172.16.0.1': false, '192.168.1.1': false, '169.254.169.254': false,
+    '0.0.0.0': false, '100.64.1.1': false, '224.0.0.1': false, '255.255.255.255': false, '192.0.2.1': false,
+    '::1': false, '::': false, 'fd00::1': false, 'fe80::1': false, 'ff02::1': false, '100::1': false,
+    '::ffff:127.0.0.1': false, '::ffff:7f00:1': false, '0:0:0:0:0:ffff:7f00:1': false, '::127.0.0.1': false,
+    '64:ff9b::a9fe:a9fe': false, '64:ff9b:1::a00:1': false, '::ffff:0:a00:1': false, '2002:a00:1::1': false,
+    '2001:0:4136:e378::1': false, '2001:db8::1': false, '3fff::1': false, '[::1]': false, 'garbage': false, '': false,
+  };
+  for (const [address, expected] of Object.entries(table)) {
+    assert.equal(Deliver.publicAddress(address), expected, address);
+  }
+});
+
 test('excerpts are one safe line, bounded', () => {
   assert.equal(Deliver.excerptOf('a\nb\tc\u0007d'), 'a b c d');
   assert.equal(Array.from(Deliver.excerptOf('x'.repeat(500))).length, 200);

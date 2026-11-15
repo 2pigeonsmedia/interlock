@@ -3588,6 +3588,16 @@ function createFirstOwnerHandler(options) {
     });
   }
 
+  async function webhookRingFor(message, recipient) {
+    const now = Date.now();
+    const clock = await roomClockFor(recipient.subject_id);
+    return Ring.buildRing({
+      kind: ringKindFor(message, recipient.subject_id),
+      message_id: message.id, from: message.byline, at: message.ts, connection: recipient.name,
+      now, person: clock.person, last_person_message_at: clock.last_person_message_at,
+    });
+  }
+
   /* Which kind of ring a message is for this seat (A12). Every ring the
    * room makes today is a message addressed to the seat: a mention. The
    * reply rule (A4) adds its own. */
@@ -4129,7 +4139,7 @@ function createFirstOwnerHandler(options) {
     mutations.set('/api/owner-recovery/complete', ownerRecoveryComplete);
   }
 
-  return async function firstOwnerHandler(request, response) {
+  const firstOwnerHandler = async function firstOwnerHandler(request, response) {
     if (request.headers.host !== expectedHost) {
       sendJson(request, response, 421, {
         ok: false,
@@ -4625,6 +4635,10 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, status, { ok: false, error: code });
     }
   };
+  // The ring a webhook carries is the one the rings route builds (C4): the
+  // same kind, room time and read command, for the same seat.
+  firstOwnerHandler.ringFor = webhookRingFor;
+  return firstOwnerHandler;
 }
 
 // The ONE mapping from an identity step-up refusal to the page. Only a missing

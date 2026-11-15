@@ -8,6 +8,7 @@ const path = require('node:path');
 const childProcess = require('node:child_process');
 const { acquireInstanceLock, inspectInstanceLock } = require('../src/instance_lock.js');
 const { EXIT_UNREACHABLE } = require('../src/cli.js');
+const Ring = require('../src/rings.js');
 
 const SCHEMA = 1;
 const RUNTIME_SCHEMA = 1;
@@ -129,8 +130,13 @@ function exactObject(value, keys) {
   return actual.length === keys.length && actual.every(key => keys.includes(key)) ? value : null;
 }
 
+// A ring row: the 0.3 row, or the 0.4.0 row that also carries `ring`, the
+// one ring shape (C4), for the same message.
 function validRing(value) {
-  const ring = exactObject(value, ['id', 'ts', 'byline', 'kind', 'session']);
+  const facts = value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'ring');
+  const ring = exactObject(value, facts
+    ? ['id', 'ts', 'byline', 'kind', 'session', 'ring'] : ['id', 'ts', 'byline', 'kind', 'session']);
+  if (facts && !(ring && Ring.validRing(ring.ring) && ring.ring.message_id === ring.id)) return false;
   return !!ring && Number.isSafeInteger(ring.id) && ring.id > 0 &&
     Number.isSafeInteger(ring.ts) && ring.ts >= 0 && validText(ring.byline, 256) &&
     (ring.kind === 'person' || ring.kind === 'seat') &&
@@ -142,8 +148,13 @@ function validRing(value) {
 function parsePage(raw, after) {
   let value;
   try { value = JSON.parse(raw); } catch (_) { return null; }
-  const page = exactObject(value,
-    ['ok', 'rings', 'cursor', 'timed_out', 'connection_session', 'connection_request_id']);
+  const facts = value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'room');
+  const page = exactObject(value, facts
+    ? ['ok', 'rings', 'cursor', 'timed_out', 'connection_session', 'connection_request_id', 'room']
+    : ['ok', 'rings', 'cursor', 'timed_out', 'connection_session', 'connection_request_id']);
+  // A facts page carries the ring shape on every row, or it is not one.
+  if (facts && (!page || !Array.isArray(page.rings) ||
+      !page.rings.every(row => row && typeof row === 'object' && Object.prototype.hasOwnProperty.call(row, 'ring')))) return null;
   if (!page || page.ok !== true || !Array.isArray(page.rings) || page.rings.length > 100 ||
       !Number.isSafeInteger(page.cursor) || page.cursor < after ||
       typeof page.timed_out !== 'boolean' || !page.rings.every(validRing) ||
@@ -628,7 +639,18 @@ function pollReason(polled) {
   return safe.length > MAX_REASON ? safe.slice(0, MAX_REASON) + '…' : safe;
 }
 
+/* The line a ring becomes (C4): `Interlock rang for <Name>: <kind> <id> from
+ * <from> · Room time: … · Run: <read>`. The prefix is the 0.3 one, unchanged,
+ * so hosts that match on it keep working. Several rings in one poll are one
+ * line, read through the last. A room older than 0.4.0 sends no ring shape;
+ * its rings get the 0.3 line. */
 function nudge(options, rings) {
+  if (rings.every(ring => ring.ring)) {
+    const last = rings.reduce((latest, ring) => (ring.id > latest.id ? ring : latest));
+    if (rings.length === 1) return Ring.ringLine(options.connection, last.ring);
+    const what = rings.map(ring => `${ring.ring.kind} ${ring.id} from ${ring.byline}`).join('; ');
+    return `Interlock rang for ${options.connection}: ${what} · Room time: ${last.ring.room_time} · Run: ${last.ring.read}`;
+  }
   const ids = rings.map(ring => ring.id).join(', ');
   const from = [...new Set(rings.map(ring => ring.byline))].join(', ');
   // The nudge names the one command that reads up to the message that rang;

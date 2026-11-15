@@ -7,6 +7,7 @@ const path = require('node:path');
 const readline = require('node:readline/promises');
 
 const packageJson = require('../package.json');
+const Ring = require('./rings.js');
 
 const EXIT_OK = 0;
 const EXIT_RUNTIME = 1;
@@ -616,17 +617,32 @@ function validPublicRing(value) {
       : ring.session === null);
 }
 
-function validRingPage(result, after) {
-  const page = exactObject(result, [
-    'ok', 'rings', 'cursor', 'timed_out', 'connection_session',
-  ]);
-  if (!page || page.ok !== true || !Array.isArray(page.rings) ||
-      page.rings.length > HISTORY_PEEK_LIMIT ||
+// The room's time on a facts page (0.4.0, `facts=1`).
+function validRoomFacts(value) {
+  const room = exactObject(value, ['room_time', 'last_person_message_ago']);
+  return !!room && typeof room.room_time === 'string' && room.room_time.length > 0 && room.room_time.length <= 120 &&
+    (room.last_person_message_ago === null || typeof room.last_person_message_ago === 'string');
+}
+
+/* A ring page. `facts` true: the 0.4.0 page asked for with facts=1, where each
+ * ring row also carries `ring` (the one ring shape, C4) and the page carries
+ * `room`. Without it, exactly the 0.3 page. */
+function validRingPage(result, after, facts = false) {
+  const page = exactObject(result, facts
+    ? ['ok', 'rings', 'cursor', 'timed_out', 'connection_session', 'room']
+    : ['ok', 'rings', 'cursor', 'timed_out', 'connection_session']);
+  if (facts && (!page || !validRoomFacts(page.room) || !Array.isArray(page.rings) ||
+      !page.rings.every(row => row && typeof row === 'object' && Ring.validRing(row.ring)))) return false;
+  const rows = facts && page && Array.isArray(page.rings)
+    ? page.rings.map(row => { const copy = Object.assign({}, row); delete copy.ring; return copy; })
+    : page && page.rings;
+  if (!page || page.ok !== true || !Array.isArray(rows) ||
+      rows.length > HISTORY_PEEK_LIMIT ||
       !Number.isSafeInteger(page.cursor) || page.cursor < after ||
       typeof page.timed_out !== 'boolean' ||
       !(page.connection_session === null ||
         (Number.isSafeInteger(page.connection_session) && page.connection_session > 0)) ||
-      !page.rings.every(validPublicRing)) return false;
+      !rows.every(validPublicRing)) return false;
   let prior = after;
   for (const ring of page.rings) {
     if (ring.id <= prior || ring.id > page.cursor) return false;
@@ -1748,12 +1764,26 @@ async function runDoorbell(args, io, dependencies = {}) {
   }
   const after = parsed.after === null ? profile.cursor : parsed.after;
   let page;
+  let facts = true;
   try {
     const fetcher = dependencies.fetch || globalThis.fetch;
-    page = await localRequest(fetcher, profile,
-      `/api/ai/rings?after=${after}&limit=${HISTORY_PEEK_LIMIT}&wait=1`,
+    const ask = withFacts => localRequest(fetcher, profile,
+      `/api/ai/rings?after=${after}&limit=${HISTORY_PEEK_LIMIT}&wait=1${withFacts ? '&facts=1' : ''}`,
       { timeoutMs: LISTEN_FETCH_TIMEOUT_MS });
-    if (!validRingPage(page, after)) throw incompatibleResponse();
+    try {
+      page = await ask(true);
+    } catch (error) {
+      // A room older than 0.4.0 refuses the unknown parameter at once; it is
+      // asked again without it, and its rings get the 0.3 line.
+      if (!(error && error.status === 400 && error.code === 'invalid-ring-query')) throw error;
+      facts = false;
+      page = await ask(false);
+    }
+    // A page is judged by what it is: one that carries `room` is a facts
+    // page, whatever was asked; a room that ignores the parameter answers the
+    // 0.3 page, which stays valid.
+    facts = facts && page !== null && typeof page === 'object' && Object.prototype.hasOwnProperty.call(page, 'room');
+    if (!validRingPage(page, after, facts)) throw incompatibleResponse();
   } catch (error) {
     reportRequestError(io.stderr, error, profile);
     return roomUnreachable(error) ? EXIT_UNREACHABLE : EXIT_RUNTIME;
@@ -1768,8 +1798,9 @@ async function runDoorbell(args, io, dependencies = {}) {
   } else {
     for (const ring of page.rings) {
       const session = ring.session === null ? '' : ` · Session ${ring.session}`;
-      line(io.stdout,
-        `Interlock ring ${ring.id} from ${terminalSafe(ring.byline)}${session}.`);
+      line(io.stdout, ring.ring
+        ? `Interlock ring ${ring.id}: ${ring.ring.kind} from ${terminalSafe(ring.byline)}${session} · Room time: ${terminalSafe(ring.ring.room_time)}.`
+        : `Interlock ring ${ring.id} from ${terminalSafe(ring.byline)}${session}.`);
     }
     // Name the one command that reads up to the message that rang.
     const last = Math.max(...page.rings.map(ring => ring.id));
