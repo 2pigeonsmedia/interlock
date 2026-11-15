@@ -254,6 +254,18 @@ function publicRing(message) {
   });
 }
 
+// A webhook as the page sees it: where it points (scheme, host, port; a
+// path can carry a token), whether it sends an excerpt, and when it was set.
+// Never the secret.
+function publicWebhook(view) {
+  return Object.freeze({
+    target: view.target,
+    excerpt: view.excerpt,
+    created_at: view.created_at,
+    updated_at: view.updated_at,
+  });
+}
+
 function publicParticipant(participant) {
   if (!participant || typeof participant.name !== 'string' ||
       (participant.kind !== 'person' && participant.kind !== 'seat') ||
@@ -384,7 +396,7 @@ function deliveryQuery(target) {
 }
 
 function createFirstOwnerHandler(options) {
-  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people } = options || {};
+  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people, webhooks, liveSeats, endedSeats } = options || {};
   const hostedMode = hosted ? hosted : null;
   if (!house || !house.firstOwner || !house.authenticators || !house.sessions || !house.login ||
       typeof house.authorizeRead !== 'function' || typeof house.authorizeWrite !== 'function' ||
@@ -412,6 +424,13 @@ function createFirstOwnerHandler(options) {
       typeof work.ownerStepUpRequired !== 'function' || !Array.isArray(work.MUTATION_OPS) ||
       typeof house.confirmWorkProjectAct !== 'function')) {
     throw new TypeError('first owner transport: a complete work service is required');
+  }
+  // Webhook registrations are optional: without them their routes answer
+  // not-found.
+  if (webhooks !== undefined && (!webhooks || typeof webhooks.register !== 'function' ||
+      typeof webhooks.regenerate !== 'function' || typeof webhooks.setExcerpt !== 'function' ||
+      typeof webhooks.remove !== 'function' || typeof webhooks.view !== 'function')) {
+    throw new TypeError('first owner transport: a complete webhook store is required');
   }
   // The people record is optional like the Work record: without it the grant
   // routes answer not-found.
@@ -3672,6 +3691,16 @@ function createFirstOwnerHandler(options) {
     sendJson(request, response, 200, { ok: true, presence_kind: kind });
   }
 
+  async function webhookRingFor(message, recipient) {
+    const now = Date.now();
+    const clock = await roomClockFor(recipient.subject_id);
+    return Ring.buildRing({
+      kind: await ringKindFor(message, { subject_id: recipient.subject_id, name: recipient.name }),
+      message_id: message.id, from: message.byline, at: message.ts, connection: recipient.name,
+      now, person: clock.person, last_person_message_at: clock.last_person_message_at,
+    });
+  }
+
   // The room time line that leads `work brief`, `history` and each ring.
   async function readAiRoomTime(request, response) {
     if (!completed()) {
@@ -3873,6 +3902,115 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 200, { ok: true, allow_ended_reuse: settings.allow_ended_reuse });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'settings-unavailable' });
+    }
+  }
+
+  // ---- Webhooks (C5): the room calls an AI seat's URL when it is rung ----
+  // Owner or admin only, as for the room's other settings. The secret is in
+  // exactly two answers, the set and the regenerate that made it; every other
+  // read shows only where the webhook points.
+  const WEBHOOK_REFUSALS = Object.freeze({
+    'invalid-request': [400, 'invalid-webhook'],
+    'invalid-url': [400, 'invalid-webhook-url'],
+    'not-found': [404, 'no-webhook'],
+    'too-many': [409, 'too-many-webhooks'],
+  });
+
+  // A live AI seat by its exact name, or a refusal already sent.
+  function webhookSeat(request, response, name) {
+    if (typeof name !== 'string' || name.length === 0 || Buffer.byteLength(name, 'utf8') > 256 ||
+        name.includes('\0')) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-participant' });
+      return null;
+    }
+    const seats = house.listParticipants({ now: Date.now() })
+      .filter(row => row && row.kind === 'seat' && row.name === name);
+    if (seats.length !== 1) {
+      sendJson(request, response, seats.length === 0 ? 404 : 409,
+        { ok: false, error: seats.length === 0 ? 'not-found' : 'ambiguous-participant' });
+      return null;
+    }
+    return seats[0];
+  }
+
+  function webhookAnswer(request, response, name, act) {
+    try {
+      const result = act();
+      if (result && typeof result.secret === 'string') {
+        return sendJson(request, response, 200, { ok: true, name, webhook: publicWebhook(result.webhook), secret: result.secret });
+      }
+      return sendJson(request, response, 200, { ok: true, name, webhook: result ? publicWebhook(result) : null });
+    } catch (error) {
+      const [status, code] = WEBHOOK_REFUSALS[error && error.code] || [503, 'webhooks-unavailable'];
+      return sendJson(request, response, status, { ok: false, error: code });
+    }
+  }
+
+  // keySets: the exact bodies this act accepts (an optional key is a second set).
+  function webhookMutation(keySets, act) {
+    return function (request, response, body) {
+      if (!webhooks) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+      if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      const actor = ownerSession(request, response, true);
+      if (!actor) return;
+      const input = keySets.map(keys => closedObject(body, keys)).find(Boolean) || null;
+      if (!input || (input.excerpt !== undefined && typeof input.excerpt !== 'boolean') ||
+          (input.url !== undefined && typeof input.url !== 'string')) return sendJson(request, response, 400, { ok: false, error: 'invalid-webhook' });
+      // A seat that ended takes its registration with it (MED-2), so it
+      // never holds a place under the cap.
+      // Only seats the identity record says have ended (never "missing").
+      if (typeof endedSeats === 'function') { try { webhooks.eraseEnded(endedSeats()); } catch (_) { /* below */ } }
+      const seat = webhookSeat(request, response, input.name);
+      if (!seat) return;
+      return webhookAnswer(request, response, seat.name, () => act(seat.subject_id, input, actor.subject_id));
+    };
+  }
+
+  const setWebhook = webhookMutation([['name', 'url'], ['name', 'url', 'excerpt']], (subjectId, input, by) =>
+    webhooks.register(subjectId, input.excerpt === undefined ? { url: input.url } : { url: input.url, excerpt: input.excerpt }, by));
+  const regenerateWebhookSecret = webhookMutation([['name']], (subjectId, input, by) => webhooks.regenerate(subjectId, by));
+  const setWebhookExcerpt = webhookMutation([['name', 'excerpt']], (subjectId, input, by) => webhooks.setExcerpt(subjectId, input.excerpt, by));
+  const deleteLiveWebhook = webhookMutation([['name']], (subjectId, input, by) => {
+    if (!webhooks.remove(subjectId, by)) { const error = new Error('not-found'); error.code = 'not-found'; throw error; }
+    return null;
+  });
+  // { name } for a seat in the room; { ended: id } for a registration left by
+  // a seat that has gone, as the list shows it.
+  function deleteWebhook(request, response, body) {
+    if (!(body && typeof body === 'object' && Object.keys(body).length === 1 && typeof body.ended === 'string')) {
+      return deleteLiveWebhook(request, response, body);
+    }
+    if (!webhooks) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const actor = ownerSession(request, response, true);
+    if (!actor) return;
+    const live = typeof liveSeats === 'function' ? liveSeats() : new Set();
+    if (live.has(body.ended) || !webhooks.remove(body.ended, actor.subject_id)) {
+      return sendJson(request, response, 404, { ok: false, error: 'no-webhook' });
+    }
+    return sendJson(request, response, 200, { ok: true, name: null, webhook: null });
+  }
+
+  function listWebhooks(request, response) {
+    if (!webhooks) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!ownerSession(request, response, false)) return;
+    try {
+      const seats = house.listParticipants({ now: Date.now() }).filter(row => row && row.kind === 'seat');
+      const live = new Set(seats.map(row => row.subject_id));
+      return sendJson(request, response, 200, {
+        ok: true,
+        https_only: Boolean(hostedMode),
+        seats: seats.map(row => Object.freeze({
+          name: row.name,
+          webhook: webhooks.view(row.subject_id) ? publicWebhook(webhooks.view(row.subject_id)) : null,
+        })),
+        // Left by seats that have gone and not yet cleared (the room clears
+        // them within a minute); each can be deleted by its id.
+        ended: webhooks.orphans(live).map(view => Object.freeze(Object.assign({ id: view.subject_id }, publicWebhook(view)))),
+      });
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'webhooks-unavailable' });
     }
   }
 
@@ -4102,6 +4240,10 @@ function createFirstOwnerHandler(options) {
     ['/api/account/passkey/begin', accountPasskeyBegin],
     ['/api/account/passkey/finish', accountPasskeyFinish],
     ['/api/settings/reuse', updateEndedReuse],
+    ['/api/settings/webhooks/set', setWebhook],
+    ['/api/settings/webhooks/regenerate', regenerateWebhookSecret],
+    ['/api/settings/webhooks/excerpt', setWebhookExcerpt],
+    ['/api/settings/webhooks/delete', deleteWebhook],
     ['/api/settings/time-zone', updateOwnTimeZone],
     ['/api/owner/password', changeOwnerPassword],
     ['/api/owner/sessions/revoke-others', signOutOtherSessions],
@@ -4122,7 +4264,7 @@ function createFirstOwnerHandler(options) {
     mutations.set('/api/owner-recovery/complete', ownerRecoveryComplete);
   }
 
-  return async function firstOwnerHandler(request, response) {
+  const firstOwnerHandler = async function firstOwnerHandler(request, response) {
     if (request.headers.host !== expectedHost) {
       sendJson(request, response, 421, {
         ok: false,
@@ -4302,6 +4444,16 @@ function createFirstOwnerHandler(options) {
           return;
         }
         await aiSession(request, response);
+        return;
+      }
+      if (pathname === '/api/settings/webhooks') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-settings-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        listWebhooks(request, response);
         return;
       }
       if (pathname === '/api/settings/participants') {
@@ -4628,6 +4780,10 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, status, { ok: false, error: code });
     }
   };
+  // The ring a webhook carries is the one the rings route builds (C4): the
+  // same kind, room time and read command, for the same seat.
+  firstOwnerHandler.ringFor = webhookRingFor;
+  return firstOwnerHandler;
 }
 
 // The ONE mapping from an identity step-up refusal to the page. Only a missing

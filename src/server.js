@@ -22,6 +22,49 @@ const { createWorkRoutes } = require('./work/routes.js');
 const { releaseIdleSeats } = require('./idle.js');
 const { endDepartedGrants, standingSubjects } = require('./departures.js');
 const { readRoomSettings } = require('./room_settings.js');
+const { openWebhookStore } = require('./webhooks/store.js');
+const { createWebhookDelivery } = require('./webhooks/deliver.js');
+const PACKAGE_VERSION = require('../package.json').version;
+
+/* A20 (an addition, Patti's yes at the GO): the seats idle release passes
+ * over. An admitted seat with a webhook whose last delivery did not fail
+ * needs no contact to stay: the room reaches it. Once its webhook is
+ * unreachable, idle release applies again. Its pass expiry ends it either
+ * way (an expired seat is not in the roster at all). A delivered ring is
+ * never contact. */
+/* One clearing pass: erase the webhooks of the seats `readEnded` names as
+ * ended (the identity record's own list), and nothing else. When that list
+ * cannot be read, nothing is erased and `warn` is told (once, by the
+ * caller). Returns how many were erased, or null when the list was not read. */
+function pruneEndedWebhooks(webhooks, readEnded, warn) {
+  let ended;
+  try { ended = readEnded(); } catch (_) {
+    warn();
+    return null;
+  }
+  try { return webhooks.eraseEnded(ended); } catch (_) { return 0; }
+}
+
+function webhookIdleExempt(participants, hasWebhook) {
+  return new Set(participants.filter(row => row && row.kind === 'seat' && hasWebhook(row.subject_id) &&
+    !(row.presence_kind && row.presence_kind.kind === 'unreachable')).map(row => row.subject_id));
+}
+
+// Tests shorten webhook retries and timeouts, and only in test mode
+// (INTERLOCK_TEST_MODE=1): a running room keeps the contract's 10 s and three
+// retries whatever else its environment says. Only short lists of positive
+// millisecond delays are accepted.
+function webhookTiming(env) {
+  const timing = {};
+  if (env.INTERLOCK_TEST_MODE !== '1') return timing;
+  const schedule = env.INTERLOCK_WEBHOOK_RETRY_SCHEDULE_MS;
+  if (typeof schedule === 'string' && /^[1-9][0-9]{0,5}(,[1-9][0-9]{0,5}){0,7}$/.test(schedule)) {
+    timing.retryDelaysMs = schedule.split(',').map(Number);
+  }
+  const timeout = env.INTERLOCK_WEBHOOK_TIMEOUT_MS;
+  if (typeof timeout === 'string' && /^[1-9][0-9]{0,5}$/.test(timeout)) timing.timeoutMs = Number(timeout);
+  return timing;
+}
 const { renderGuidePage } = require('./guide.js');
 const { acquireInstanceLock } = require('./instance_lock.js');
 const { parseHostedOrigin, makeSetupCode, setupCodeMatches } = require('./hosted.js');
@@ -216,6 +259,7 @@ function loadBrowserAssets(hosted) {
       '/work_panel_model.js': ['work_panel_model.js', 'text/javascript; charset=utf-8'],
       '/work_panel.js': ['work_panel.js', 'text/javascript; charset=utf-8'],
       '/people_model.js': ['people_model.js', 'text/javascript; charset=utf-8'],
+      '/webhooks_panel.js': ['webhooks_panel.js', 'text/javascript; charset=utf-8'],
       '/room.js': ['room.js', 'text/javascript; charset=utf-8'],
       '/docs/screenshots/connect-an-ai.png': ['../../docs/screenshots/connect-an-ai.png', 'image/png'],
       '/BACKUP.md': ['../../BACKUP.md', 'text/plain; charset=utf-8'],
@@ -395,6 +439,7 @@ async function startInterlockServer(options) {
   let admission = null;
   let chat = null;
   let archive = null;
+  let webhookDelivery = null;
   try {
     const recordOrigin = checkDataDirOrigin(dataDir, origin);
     const stateDir = path.join(dataDir, 'identity');
@@ -455,9 +500,45 @@ async function startInterlockServer(options) {
       dataDir,
       aiSessionDiscriminator: subjectId => house.aiSessionDiscriminator(subjectId),
     });
+    // Webhook registrations (C5) live in a file of their own, which an
+    // earlier release never opens. The chat service asks it, and only it,
+    // whether a seat is rung by webhook; delivery reports back to the chat
+    // service once per ring.
+    const webhooks = openWebhookStore({ dataDir, hosted: Boolean(hosted) });
+    // The seats in the room now: a webhook is called, and kept, only for these.
+    const liveSeats = () => new Set(house.listParticipants({ now: Date.now() })
+      .filter(row => row && row.kind === 'seat').map(row => row.subject_id));
+    // The seats the identity record says have ended (left, removed, released
+    // or expired), by their own ids: the only evidence a webhook is erased on.
+    const endedSeats = () => new Set(house.listRecentEndedSeats({ now: Date.now(), since: 0 })
+      .map(row => row.subject_id));
+    let pruneWarned = false;
+    // No evidence, no erasing: said once, tried again next pass.
+    const pruneWebhooks = () => pruneEndedWebhooks(webhooks, endedSeats, () => {
+      if (!pruneWarned) {
+        pruneWarned = true;
+        process.stderr.write('interlock: could not read which seats have ended; no webhook was cleared\n');
+      }
+    });
+    pruneWebhooks();
+    webhookDelivery = createWebhookDelivery(Object.assign(webhookTiming(process.env), {
+      store: webhooks,
+      isLive: subjectId => liveSeats().has(subjectId),
+      // There is deliberately no hook for a delivered ring: a 2xx is never
+      // the seat's contact, so a receiver cannot extend a credential nobody
+      // uses.
+      hosted: Boolean(hosted),
+      // The handler builds the ring, as its rings route does; it exists by
+      // the time any message is saved.
+      ringFor: (message, recipient) => handler.ringFor(message, recipient),
+      noteDelivery: (subjectId, outcome) => chat.noteWebhookDelivery(subjectId, outcome),
+      version: PACKAGE_VERSION,
+    }));
     chat = createChatService({
       store: chatStore,
       participants: meta => house.listParticipants(meta),
+      hasWebhook: subjectId => webhooks.has(subjectId),
+      onSaved: message => webhookDelivery.deliver(message),
     });
     archive = createArchiveService({ dataDir, store: chatStore });
     // The Work record shares the process, the identity house and the data
@@ -516,7 +597,9 @@ async function startInterlockServer(options) {
       if (idleBusy) return idleBusy;
       // Then any seat the room has ended (released now, or expired since the
       // last pass) has its grants ended by the server, recorded with how.
-      idleBusy = Promise.resolve(releaseIdleSeats({ house, store: chatStore, now }))
+      idleBusy = Promise.resolve(chat.listParticipants())
+        .then(rows => webhookIdleExempt(rows, subjectId => webhooks.has(subjectId)), () => new Set())
+        .then(kept => releaseIdleSeats({ house, store: chatStore, now, exempt: kept }))
         .then(released => {
           // Never fails a read that waits on the release: the grant still
           // reads as ended (its holder is not in the room), and the next
@@ -569,6 +652,7 @@ async function startInterlockServer(options) {
     }) : null;
     const handler = createFirstOwnerHandler({
       house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler, work, people,
+      webhooks, liveSeats, endedSeats,
     });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));
@@ -580,7 +664,9 @@ async function startInterlockServer(options) {
 
     const outboxTimer = house.startOutboxFlusher({ intervalMs: 1_000 });
     const idleTimer = setInterval(() => {
-      Promise.resolve(releaseIdle(Date.now())).catch(() => { /* next tick retries */ });
+      Promise.resolve(releaseIdle(Date.now())).catch(() => { /* next tick retries */ })
+        // A seat that ended takes its webhook and secret with it (MED-2).
+        .then(() => pruneWebhooks());
     }, 60_000);
     idleTimer.unref();
     try {
@@ -621,6 +707,7 @@ async function startInterlockServer(options) {
         clearInterval(outboxTimer);
         clearInterval(idleTimer);
         let shutdownFailure = null;
+        webhookDelivery.close();
         try { admission.close(); }
         catch (error) { shutdownFailure = error; }
         try { await chat.close(); }
@@ -640,6 +727,7 @@ async function startInterlockServer(options) {
     });
   } catch (error) {
     const cleanupErrors = [];
+    if (webhookDelivery !== null) webhookDelivery.close();
     if (admission !== null) {
       try { admission.close(); } catch (caught) { cleanupErrors.push(caught); }
     }
@@ -670,4 +758,7 @@ module.exports = Object.freeze({
   recordedDataDirOrigin,
   startHealthServer,
   startInterlockServer,
+  pruneEndedWebhooks,
+  webhookIdleExempt,
+  webhookTiming,
 });

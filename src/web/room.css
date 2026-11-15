@@ -464,6 +464,12 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
   border-radius: var(--radius);
 }
 .settings-participant small { display: block; color: var(--ink-4); }
+/* A webhook row stacks at every width: its head, then the form, then the
+   actions, so a long address and date never crowd the buttons. */
+.settings-participant.webhook-row { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+.webhook-row .settings-participant-head { overflow-wrap: anywhere; }
+.webhook-form .settings-check { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+.webhook-form .settings-check input { margin: 0; width: auto; flex: none; min-height: 0; padding: 0; }
 .settings-participant .remove { color: var(--ember); border-color: var(--ember-line); }
 .settings-grants { display: grid; gap: 10px; margin-top: 8px; }
 .settings-grants h4 { font-size: 0.85rem; font-weight: 600; color: var(--ink-2); }

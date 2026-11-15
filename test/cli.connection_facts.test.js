@@ -134,6 +134,13 @@ test('the doorbell fact says where it looked, and a live adapter whose polls fai
   const { connectionFactsFor, factLines } = require('../src/cli.js');
   const place = world();
   const dependencies = { config: { resolveConnectionDir: () => place.connectionDir } };
+  const retrying = await connectionFactsFor('Marlow', { dependencies, stateDir: place.stateDir, inspect: () => ({
+    state: 'retrying', state_dir: place.stateDir,
+    detail: 'the adapter is running but has not reached the room for 90 s; it keeps retrying',
+  }) });
+  assert.equal(retrying.doorbell.state, 'running');
+  assert.match(factLines(retrying).at(-1), /^Doorbell: running, polls failing — the adapter is running but has not reached the room for 90 s/);
+  // The word an older adapter used for the same thing.
   const failing = await connectionFactsFor('Marlow', { dependencies, stateDir: place.stateDir, inspect: () => ({
     state: 'mismatch', state_dir: place.stateDir,
     detail: 'no successful poll in the last 75 s; the adapter may be retrying an unreachable room',

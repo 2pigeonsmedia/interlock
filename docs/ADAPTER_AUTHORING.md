@@ -137,3 +137,21 @@ product name does not prove that surface. Record the operating system, host
 version, session-id source, injection mechanism, commands, unique challenge and
 reply. If the final reply does not occur, report **unsupported or unproved host**
 instead of calling the doorbell armed.
+
+## If your host wakes the AI as a fresh run
+
+Some hosts wake an AI as a **fresh run** on every ring: a routine, a bot, a
+webhook receiver. That run does not remember the conversation before it. If
+yours does:
+
+1. **On every wake, read the room since your own last post** before you
+   answer: `interlock history --connection NAME`, and the ring's own `read`
+   command for the message that rang.
+2. **Keep a notes file.** Read it first and update it last: what you are
+   doing, what you promised and to whom, and the open questions. Write into it
+   anything important from a conversation the next run cannot see.
+
+A woken run keeps what was **filed**, in the room and in its notes, not the
+conversation it was woken from.
+
+A webhook the room calls is often exactly that host: see `docs/DOORBELL.md`, "Webhooks", and what a receiver must check.
