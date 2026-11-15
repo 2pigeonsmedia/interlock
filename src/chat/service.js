@@ -183,6 +183,34 @@ function createChatService(options) {
     return await appendWith(body, actor, false, null);
   }
 
+  /* A reply rings whoever addressed its author, without a tag:
+   * every other participant whose post since the author's own latest one
+   * @mentioned the author's name or asked the author.
+   * Read from the room's stored facts, never from the reply's own text. Who
+   * among them is an AI, and so rung, is ringRecipients's rule. */
+  async function addressersOf(actor, everyone, beforeId = null) {
+    if (!actor || typeof actor.subject_id !== 'string' || typeof store.postsSinceOwn !== 'function') return [];
+    const self = everyone.find(row => row.subject_id === actor.subject_id);
+    const name = self ? self.name : actor.name;
+    if (typeof name !== 'string' || name.length === 0) return [];
+    const kindOf = new Map(everyone.map(row => [row.subject_id, row.kind]));
+    const found = new Map();
+    for (const post of await store.postsSinceOwn(actor.subject_id, beforeId)) {
+      if (found.has(post.subject_id)) continue;
+      // Only an @mention or an ask addresses. A ring the post made for any
+      // other reason (an answer, or a reply ringing back) does not, or two AIs
+      // would ring each other back and forth for ever.
+      const addressed = post.ask_of === actor.subject_id ||
+        InterlockMentions.resolve(post.text, [name]).length > 0;
+      if (addressed) {
+        found.set(post.subject_id, Object.freeze({
+          subject_id: post.subject_id, name: post.byline, kind: kindOf.get(post.subject_id) || null,
+        }));
+      }
+    }
+    return [...found.values()];
+  }
+
   /* A message and its annotation in one call: the ask has to be known before
    * recipients are frozen on the row, or it could neither ring nor hold. */
   async function appendAnnotated(body, actor, annotationIn, requireNew = false, approverOf = null, decisionOf = null) {
@@ -289,7 +317,8 @@ function createChatService(options) {
       }
     }
     const recipients = ringRecipients(
-      body && body.text, roster, actor && actor.subject_id, askTarget, deliver, askers,
+      body && body.text, roster, actor && actor.subject_id, askTarget, deliver,
+      askers.concat(await addressersOf(actor, everyone)),
     );
     // The log's head before this post: a retried post answered by its first
     // save comes back at or below it, and is not handed to webhooks again.
@@ -310,6 +339,20 @@ function createChatService(options) {
   async function read(query) {
     requireOpen();
     return await store.read(query);
+  }
+
+  /* The reply cause of a ring, for the ring builder's `kind`:
+   * whether `seatSubjectId` had addressed the author of `message` (by an
+   * @mention or an ask) since the author's previous post, as the room stood
+   * when `message` was posted. The same rule that rang it (addressersOf). */
+  async function addressedSince(message, seatSubjectId) {
+    requireOpen();
+    if (!message || !Number.isSafeInteger(message.id) || typeof message.subject_id !== 'string' ||
+        typeof message.byline !== 'string' || typeof seatSubjectId !== 'string') return false;
+    const everyone = await participantSnapshot(Date.now());
+    const author = { subject_id: message.subject_id, name: message.byline };
+    const found = await addressersOf(author, everyone, message.id);
+    return found.some(row => row.subject_id === seatSubjectId);
   }
 
   /* How far each seat's ordinary history read (`/api/ai/messages`, the read
@@ -812,7 +855,7 @@ function createChatService(options) {
 
   return Object.freeze({
     append, appendAnnotated, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
-    read, readForSeat, wait, waitForSeat, waitForSeatRings,
+    read, addressedSince, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, notePoll, notePause, noteWebhookDelivery, lastPersonMessageAt, ringCauses, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });

@@ -99,6 +99,19 @@ const timeZoneBrowser = document.querySelector('#time-zone-browser');
 const timeZoneUseBrowser = document.querySelector('#time-zone-use-browser');
 const timeZoneClear = document.querySelector('#time-zone-clear');
 const settingsGrants = document.querySelector('#settings-grants');
+// A member brings their own AI.
+const memberCodesSwitch = document.querySelector('#member-codes-switch');
+const memberCodesEnabled = document.querySelector('#member-codes-enabled');
+const memberCodesHint = document.querySelector('#member-codes-hint');
+const createMemberCodeButton = document.querySelector('#create-member-code-button');
+const memberCodeResult = document.querySelector('#member-code-result');
+const memberCodeCommand = document.querySelector('#member-code-command');
+const memberCodeExpiry = document.querySelector('#member-code-expiry');
+const copyMemberCodeButton = document.querySelector('#copy-member-code-button');
+const memberCodeValue = document.querySelector('#member-code-value');
+const copyMemberCodeValueButton = document.querySelector('#copy-member-code-value-button');
+const memberCodeList = document.querySelector('#member-code-list');
+const memberCodeStatus = document.querySelector('#member-code-status');
 const settingsGrantList = document.querySelector('#settings-grant-list');
 const grantCreateForm = document.querySelector('#grant-create-form');
 const grantHolder = document.querySelector('#grant-holder');
@@ -393,8 +406,10 @@ function showRoom(user) {
   }]);
   connectAiButton.disabled = !owner;
   connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
-  settingsButton.disabled = !owner;
-  settingsButton.title = owner ? '' : 'Only the owner or an admin can manage this Interlock';
+  // Every signed-in person has Settings (their status, their own AI);
+  // the sections that manage the room are shown to the owner and admins only.
+  settingsButton.disabled = user.kind !== 'person';
+  settingsButton.title = '';
   // A person without a passkey can add one with a code from the owner.
   addPasskeyButton.hidden = user.kind !== 'person' || user.passkey !== false;
   setRoomNotice('');
@@ -3408,7 +3423,14 @@ settingsButton.addEventListener('click', async () => {
   fillGrantForm();
   settingsGrants.hidden = !viewerIsAdmin();
   openWebhooksPanel();
+  for (const section of settingsDialog.querySelectorAll('.settings-admin')) section.hidden = !viewerIsAdmin();
+  memberCodeResult.hidden = true;
+  memberCodeCommand.textContent = '';
+  memberCodeValue.textContent = '';
+  setSettingsStatus(memberCodeStatus, '');
   settingsDialog.showModal();
+  loadMemberCodes().catch(() => setSettingsStatus(memberCodeStatus, 'Interlock could not load AI join codes.', 'error'));
+  if (!viewerIsAdmin()) return;
   refreshSettingsGrants();
   try { await loadSettingsParticipants(); }
   catch (_) {
@@ -3456,6 +3478,10 @@ allowEndedReuse.addEventListener('change', async () => {
 });
 
 settingsDialog.addEventListener('close', () => {
+  // A one-time code is shown once: gone from the page when Settings closes.
+  memberCodeCommand.textContent = '';
+  memberCodeValue.textContent = '';
+  memberCodeResult.hidden = true;
   inviteResultCode.textContent = '';
   inviteExpiry.textContent = '';
   inviteExpiry.removeAttribute('datetime');
@@ -3515,6 +3541,115 @@ clearTranscriptButton.addEventListener('click', async () => {
       'error');
   } finally {
     clearTranscriptButton.disabled = false;
+  }
+});
+
+// ── Bring your own AI ────────────────────────────────────────────
+const MEMBER_CODE_STATES = Object.freeze({ unused: 'unused', used: 'used', expired: 'expired', cancelled: 'cancelled' });
+
+async function loadMemberCodes() {
+  const response = await fetch('/api/member-codes', { credentials: 'same-origin' });
+  const result = await readJson(response);
+  if (!response.ok || result.ok !== true || typeof result.enabled !== 'boolean' || !Array.isArray(result.codes)) {
+    throw new Error('member-codes-unavailable');
+  }
+  const firstOwner = Boolean(currentUser && currentUser.first_owner === true);
+  memberCodesSwitch.hidden = !firstOwner;
+  memberCodesEnabled.checked = result.enabled;
+  createMemberCodeButton.hidden = !result.enabled;
+  memberCodesHint.textContent = result.enabled
+    ? 'Make a one-time code and give it to your AI. It works once, for 15 minutes. You Allow your AI yourself, with your passkey, and it is yours: if you are removed, it goes too.'
+    : (firstOwner ? 'Off. Turn it on to let members bring their own AIs; you and the admins can always Allow an AI.'
+      : 'The owner has not turned this on. Ask them, or ask them to Allow your AI.');
+  memberCodeList.replaceChildren();
+  for (const row of result.codes) {
+    if (!row || typeof row.id !== 'string' || typeof row.issuer !== 'string' || !MEMBER_CODE_STATES[row.state]) continue;
+    const line = document.createElement('div');
+    line.className = 'settings-participant';
+    const label = document.createElement('span');
+    const when = row.state === 'unused' ? ' · expires ' + (formatFullTime(row.expires_at) || '') : '';
+    label.textContent = `${row.issuer} · ${MEMBER_CODE_STATES[row.state]}${when}`;
+    line.append(label);
+    if (row.state === 'unused') {
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'quiet-action';
+      cancel.textContent = 'Cancel';
+      cancel.addEventListener('click', async () => {
+        cancel.disabled = true;
+        try {
+          await ownerMutation('/api/member-codes/cancel', { id: row.id });
+          setSettingsStatus(memberCodeStatus, 'Code cancelled. It admits nothing now.', 'success');
+          await loadMemberCodes();
+        } catch (_) {
+          cancel.disabled = false;
+          setSettingsStatus(memberCodeStatus, 'Interlock did not cancel that code. Try again.', 'error');
+        }
+      });
+      line.append(cancel);
+    }
+    memberCodeList.append(line);
+  }
+}
+
+memberCodesEnabled.addEventListener('change', async () => {
+  const wanted = memberCodesEnabled.checked;
+  try {
+    await ownerMutation('/api/settings/member-codes', { enabled: wanted });
+    setSettingsStatus(memberCodeStatus, wanted ? 'Members can now bring their own AIs.' : 'Members can no longer make AI join codes.', 'success');
+    await loadMemberCodes();
+  } catch (_) {
+    memberCodesEnabled.checked = !wanted;
+    setSettingsStatus(memberCodeStatus, 'Interlock did not change that setting. Refresh and try again.', 'error');
+  }
+});
+
+createMemberCodeButton.addEventListener('click', async () => {
+  createMemberCodeButton.disabled = true;
+  try {
+    // Making a code takes the member's own fresh passkey step-up.
+    const result = await freshAdminMutation('/api/member-codes/issue', {});
+    if (typeof result.code !== 'string' || !Number.isSafeInteger(result.expires_at)) throw new Error('invalid response');
+    // Never the code inline: `--code -` reads it from standard input.
+    memberCodeCommand.textContent =
+      `interlock join --url ${window.location.origin} --product "YOUR PRODUCT" --name YOUR-AI-NAME --code -`;
+    memberCodeValue.textContent = result.code;
+    memberCodeExpiry.textContent = formatFullTime(result.expires_at) || 'the stated expiry';
+    memberCodeExpiry.dateTime = new Date(result.expires_at).toISOString();
+    memberCodeResult.hidden = false;
+    setSettingsStatus(memberCodeStatus, 'Code made. It is shown only now.', 'success');
+    await loadMemberCodes();
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    setSettingsStatus(memberCodeStatus, (error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
+      ? 'Passkey confirmation was cancelled. No code was made.'
+      : error.code === 'code-cap'
+      ? 'You already have 3 unused codes. Use or cancel one first.'
+      : (error.code === 'member-codes-off' ? 'The owner has not turned this on.' : 'Interlock did not make a code. Try again.'), 'error');
+  } finally {
+    createMemberCodeButton.disabled = false;
+  }
+});
+
+copyMemberCodeValueButton.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(memberCodeValue.textContent);
+    setSettingsStatus(memberCodeStatus, 'Code copied.', 'success');
+  } catch (_) {
+    setSettingsStatus(memberCodeStatus, 'The browser could not copy it. Select the code and copy it manually.', 'error');
+  }
+});
+
+copyMemberCodeButton.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(memberCodeCommand.textContent);
+    setSettingsStatus(memberCodeStatus, 'Command copied.', 'success');
+  } catch (_) {
+    setSettingsStatus(memberCodeStatus, 'The browser could not copy it. Select the command and copy it manually.', 'error');
   }
 });
 

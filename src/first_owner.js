@@ -14,6 +14,7 @@ const { REASONS: DEPARTURE_REASONS, departureNotices, standingSubjects } = requi
 const { returnPreview, allowPreview, bringBack, previewLine } = require('./returns.js');
 const { foldName } = require('identity');
 const { readRoomSettings, writeRoomSettings } = require('./room_settings.js');
+const { createMemberCodes } = require('./member_codes.js');
 const { version: PACKAGE_VERSION } = require('../package.json');
 
 const MAX_JSON_BYTES = 384 * 1024;
@@ -484,6 +485,14 @@ function createFirstOwnerHandler(options) {
   const clientVersions = ClientVersions.createClientVersions({ dataDir });
   const expectedHost = parsedOrigin.host;
   let bootstrapSecret = null;
+  // Member-issued AI join codes: their own files, never 0.3.11's.
+  const memberCodes = createMemberCodes({ dataDir,
+    onEvent: typeof house.recordMemberCodeEvent === 'function' ? event => house.recordMemberCodeEvent(event) : undefined });
+  /* The member a pending knock is for, or null. The pending list uses it to
+   * show a member the knocks bound to their own code. */
+  function knockIssuer(requestId) {
+    try { return memberCodes.issuerOf(requestId); } catch (_) { return null; }
+  }
 
   function completed() {
     return house.firstOwner.status().completed === true;
@@ -519,6 +528,37 @@ function createFirstOwnerHandler(options) {
       return null;
     }
     return Object.freeze({ subject_id: authorized.subject_id });
+  }
+
+  /* Any signed-in person, administrator or not (a member issues codes,
+   * elevates, and allows their own AI). Says which they are; the acts that
+   * need more ask identity, which re-checks. */
+  function personSession(request, response, mutation) {
+    const at = Date.now();
+    const authorized = mutation
+      ? house.authorizeWrite(authorizationMeta(request, at), 'write', CHAT_RESOURCE)
+      : house.authorizeRead(authorizationMeta(request, at), 'read', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) {
+      const sessionState = mutation ? house.resolveSession({
+        cookie_header: request.headers.cookie,
+        activity: 'passive-delivery',
+        now: at,
+      }) : null;
+      refuseAuthorization(request, response, authorized, sessionState);
+      return null;
+    }
+    const who = house.whoami({ cookie_header: request.headers.cookie, activity: 'ordinary', now: at });
+    if (!who || who.subject_id !== authorized.subject_id || who.kind !== 'person' ||
+        typeof who.name !== 'string' || !Array.isArray(who.roles)) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return null;
+    }
+    return Object.freeze({
+      subject_id: authorized.subject_id,
+      name: who.name,
+      admin: who.roles.some(role => role && role.slug === 'administrator'),
+      first_owner: who.first_owner === true,
+    });
   }
 
   function setupSession(request, response, session, passkeyRegistered) {
@@ -693,7 +733,9 @@ function createFirstOwnerHandler(options) {
     if (!closedObject(body, [])) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
     }
-    if (!ownerSession(request, response, true)) return;
+    // Any signed-in person may elevate: every admin act
+    // re-checks the role after the step-up is spent (identity withFreshAdmin).
+    if (!personSession(request, response, true)) return;
     const begun = await house.authenticators.beginElevation(requestMeta(request, Date.now()));
     if (!begun || begun.ok !== true) {
       return sendJson(request, response, 409, { ok: false, error: 'passkey-unavailable' });
@@ -710,7 +752,7 @@ function createFirstOwnerHandler(options) {
     if (!input || typeof input.ceremony_id !== 'string' || !input.response) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
     }
-    if (!ownerSession(request, response, true)) return;
+    if (!personSession(request, response, true)) return;
     const elevated = await house.authenticators.finishElevation(Object.assign(
       requestMeta(request, Date.now()),
       { ceremony_id: input.ceremony_id, response: input.response },
@@ -936,18 +978,34 @@ function createFirstOwnerHandler(options) {
         input.name.includes('\0') || Buffer.byteLength(input.name, 'utf8') > 256) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-participant' });
     }
-    if (!ownerSession(request, response, true)) return;
+    // An administrator removes anyone but the owner; a member removes only
+    // their own AI (R8), on their own fresh step-up. Identity decides.
+    const person = personSession(request, response, true);
+    if (!person) return;
     const at = Date.now();
     // Who removes it, and which seats were in the room before: a removed
     // person takes the seats delegated from them out with them.
     const remover = authorizedActor(request, house.authorizeWrite(authorizationMeta(request, at), 'write', CHAT_RESOURCE), at);
     const seatsBefore = house.listParticipants({ now: at }).filter(row => row.kind === 'seat');
-    const result = house.revokeParticipant(requestMeta(request, at), input);
-    if (!result || result.ok !== true) return sendStepUpRefusal(request, response, result);
+    const result = person.admin
+      ? house.revokeParticipant(requestMeta(request, at), input)
+      : (typeof house.revokeOwnAiSeat === 'function'
+        ? house.revokeOwnAiSeat(requestMeta(request, at), input) : { ok: false, reason: 'not-authorized' });
+    if (!result || result.ok !== true) {
+      // A member's refusal for want of authority reads as the room's own word.
+      if (!person.admin && result && result.reason === 'not-administrator') {
+        return sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      }
+      return sendStepUpRefusal(request, response, result);
+    }
     const after = new Set(house.listParticipants({ now: Date.now() }).map(row => row.subject_id));
     if (remover) {
-      await settleDeparture(seatsBefore.filter(row => !after.has(row.subject_id)), 'revoked',
-        { subject_id: remover.subject_id, name: remover.name, kind: 'person', owner: true }, remover);
+      // A member's own AI: its grants were an administrator's to give, so the
+      // room ends them as the server; the member's act is in identity's record.
+      const peopleActor = person.admin
+        ? { subject_id: remover.subject_id, name: remover.name, kind: 'person', owner: true }
+        : { subject_id: 'server', name: 'server', kind: 'server', owner: false };
+      await settleDeparture(seatsBefore.filter(row => !after.has(row.subject_id)), 'revoked', peopleActor, remover);
     }
     return sendJson(request, response, 200, result);
   }
@@ -1523,12 +1581,16 @@ function createFirstOwnerHandler(options) {
     const knock = Object.assign({}, body);
     const project = Object.prototype.hasOwnProperty.call(knock, 'project') ? knock.project : null;
     const model = Object.prototype.hasOwnProperty.call(knock, 'model') ? knock.model : null;
+    // A member's one-time AI join code; checked by the knock route.
+    const joinCode = Object.prototype.hasOwnProperty.call(knock, 'join_code') ? knock.join_code : undefined;
     delete knock.project;
     delete knock.model;
+    delete knock.join_code;
+    if (joinCode !== undefined && typeof joinCode !== 'string') return { knock, facts: false, joinCode };
     if ((project !== null && !oneLineText(project, 40)) || (model !== null && !oneLineText(model, 40))) {
       return { knock, facts: false };
     }
-    return { knock, facts: project === null && model === null ? null : { project, model } };
+    return { knock, facts: project === null && model === null ? null : { project, model }, joinCode };
   }
 
   function peopleFacts(row) {
@@ -1781,6 +1843,20 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
       return;
     }
+    // A member's code is checked before the knock takes a pending slot, and
+    // bound to this knock's request id (one-time). One refusal word for every
+    // bad code, so a wrong guess teaches nothing.
+    let reservation = null;
+    if (split.joinCode !== undefined) {
+      const requestId = split.knock && split.knock.request_id;
+      try { reservation = memberCodes.reserve(split.joinCode, requestId); } catch (_) { reservation = null; }
+      if (!reservation || reservation.ok !== true) {
+        request.removeListener('aborted', clientGone);
+        response.removeListener('close', responseClosed);
+        sendJson(request, response, 400, { ok: false, error: 'invalid-join-code' });
+        return;
+      }
+    }
     if (split.facts && split.knock && typeof split.knock.request_id === 'string' &&
         knockFacts.size < KNOCK_FACTS_MAX) {
       knockFacts.set(split.knock.request_id, split.facts);
@@ -1792,12 +1868,33 @@ function createFirstOwnerHandler(options) {
         timeoutMs: AI_ADMISSION_WAIT_MS,
       });
     } catch (error) {
+      // A knock that failed before it was taken did not spend its code. One
+      // the room holds as pending keeps it: released, that pending knock
+      // would be no member's, and an administrator's Allow would make it the
+      // administrator's AI. A re-knock with the same request id finds it.
+      if (reservation && reservation.fresh === true) {
+        let pending = true;
+        try { pending = admission.list().some(row => row.request_id === split.knock.request_id); } catch (_) { pending = true; }
+        if (!pending) {
+          try { memberCodes.release(split.knock.request_id, reservation.id); } catch (_) { /* stays spent */ }
+        } else {
+          // Held as pending: the code is used now, and its use is recorded
+          // now. A re-knock reads the same reservation and records nothing.
+          try { memberCodes.used(split.knock.request_id, reservation.id); } catch (_) { /* best-effort */ }
+        }
+      }
       if (controller.signal.aborted || response.destroyed) return;
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
       return;
     } finally {
       request.removeListener('aborted', clientGone);
       response.removeListener('close', responseClosed);
+    }
+    // A knock refused outright did not spend the code it just reserved.
+    if (reservation && reservation.fresh === true && (!result || result.ok !== true)) {
+      try { memberCodes.release(split.knock.request_id, reservation.id); } catch (_) { /* the code stays spent */ }
+    } else if (reservation && reservation.fresh === true) {
+      try { memberCodes.used(split.knock.request_id, reservation.id); } catch (_) { /* the record is best-effort */ }
     }
     if (response.destroyed) return;
     if (!result || result.ok !== true) {
@@ -3435,7 +3532,8 @@ function createFirstOwnerHandler(options) {
     if (waiting.length === 0) return sendJson(request, response, 201, { ok: true, grant: made });
     const inheritance = inheritOnGrant(who, firstOwnerSubjectId, holder, made, body.project, waiting);
     // The new lead hears once, from whoever made the grant, what it took over.
-    if (inheritance.inherited.length > 0 || (inheritance.not_inherited || []).length > 0) {
+    if (inheritance.inherited.length > 0 || (inheritance.not_inherited || []).length > 0 ||
+        (inheritance.unassigned || []).length > 0) {
       const at = Date.now();
       let grantor = null;
       try {
@@ -3461,6 +3559,10 @@ function createFirstOwnerHandler(options) {
     const parts = [];
     if (inheritance.inherited.length > 0) {
       parts.push(`you took over ${words(inheritance.inherited.length)}: ${inheritance.inherited.join(', ')}`);
+    }
+    const loose = inheritance.unassigned || [];
+    if (loose.length > 0) {
+      parts.push(`${loose.length === 1 ? '1 unassigned item waits' : `${loose.length} unassigned items wait`} in your Needs you: ${loose.join(', ')}`);
     }
     const missed = inheritance.not_inherited || [];
     if (missed.length > 0) parts.push(`not moved, still "holder left" and yours to hand on: ${missed.join(', ')}`);
@@ -3491,8 +3593,10 @@ function createFirstOwnerHandler(options) {
     } catch (_) {
       return { inherited: [], not_inherited: ids };
     }
-    return result.failed.length === 0 ? { inherited: result.inherited }
+    const out = result.failed.length === 0 ? { inherited: result.inherited }
       : { inherited: result.inherited, not_inherited: result.failed };
+    if (Array.isArray(result.unassigned) && result.unassigned.length > 0) out.unassigned = result.unassigned;
+    return out;
   }
 
   async function revokeGrant(request, response, body) {
@@ -3888,6 +3992,96 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  // ── member-issued AI join codes ─────────────────────────────────
+  /* A signed-in person makes a one-time code for an AI that will be theirs.
+   * A code admits nothing by itself: the Allow is still theirs (or an
+   * administrator's) on a fresh step-up. Shown once; only a digest is kept. */
+  function issueMemberCode(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!closedObject(body, [])) return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    const person = personSession(request, response, true);
+    if (!person) return undefined;
+    // Refusals that need no passkey come first; then the member's own fresh
+    // step-up, which an ordinary session alone can never supply.
+    let allowed;
+    try { allowed = memberCodes.canIssue(person.subject_id); } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'member-codes-unavailable' });
+    }
+    if (!allowed.ok) {
+      return sendJson(request, response, allowed.reason === 'code-cap' ? 429 : 403, { ok: false, error: allowed.reason });
+    }
+    const confirmed = typeof house.confirmMemberCodeIssue === 'function'
+      ? house.confirmMemberCodeIssue(requestMeta(request, Date.now())) : null;
+    if (!confirmed || confirmed.ok !== true) return sendStepUpRefusal(request, response, confirmed);
+    if (confirmed.subject_id !== person.subject_id) {
+      return sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+    }
+    let made;
+    try { made = memberCodes.issue({ subject_id: person.subject_id, name: person.name }); } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'member-codes-unavailable' });
+    }
+    if (!made.ok) {
+      return sendJson(request, response, made.reason === 'code-cap' ? 429 : 403, { ok: false, error: made.reason });
+    }
+    return sendJson(request, response, 201, { ok: true, id: made.id, code: made.code, expires_at: made.expires_at });
+  }
+
+  /* A member sees their own codes; the owner and administrators see all. */
+  function listMemberCodes(request, response) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const person = personSession(request, response, false);
+    if (!person) return undefined;
+    try {
+      const enabled = memberCodes.enabled();
+      // Off: a member sees no codes; the owner and admins still see all, to cancel.
+      return sendJson(request, response, 200, {
+        ok: true, enabled,
+        codes: person.admin ? memberCodes.list() : (enabled ? memberCodes.list(person.subject_id) : []),
+      });
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'member-codes-unavailable' });
+    }
+  }
+
+  /* An unused code is cancelled by its issuer or an administrator. */
+  function cancelMemberCode(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!closedObject(body, ['id']) || typeof body.id !== 'string') {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    const person = personSession(request, response, true);
+    if (!person) return undefined;
+    let result;
+    try {
+      result = memberCodes.cancel(body.id, person.subject_id,
+        issuerId => person.admin || issuerId === person.subject_id);
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'member-codes-unavailable' });
+    }
+    if (!result.ok) {
+      const status = result.reason === 'not-found' ? 404 : result.reason === 'not-authorized' ? 403 : 409;
+      return sendJson(request, response, status, { ok: false, error: result.reason });
+    }
+    return sendJson(request, response, 200, { ok: true, id: result.id });
+  }
+
+  /* The first owner's switch: members may bring their own AIs. Off until she
+   * turns it on. */
+  function updateMemberCodes(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!closedObject(body, ['enabled']) || typeof body.enabled !== 'boolean') {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-settings' });
+    }
+    const person = personSession(request, response, true);
+    if (!person) return undefined;
+    if (!person.first_owner) return sendJson(request, response, 403, { ok: false, error: 'first-owner-only' });
+    try {
+      return sendJson(request, response, 200, { ok: true, enabled: memberCodes.setEnabled(body.enabled) });
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'settings-unavailable' });
+    }
+  }
+
   function updateEndedReuse(request, response, body) {
     if (!completed()) {
       return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -4158,13 +4352,37 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
       return;
     }
-    const allowerSession = ownerSession(request, response, true);
+    // A knock that came by a member's code is that member's to allow or
+    // decline, or any administrator's; the member stays its principal either
+    // way. Taken from the room's own code record, never from the request.
+    const issuer = knockIssuer(requestId);
+    let allowerSession;
+    if (issuer) {
+      const person = personSession(request, response, true);
+      if (!person) return;
+      if (!person.admin && person.subject_id !== issuer.subject_id) {
+        sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+        return;
+      }
+      // With the switch off, no code-bound knock is let in, by anyone: a
+      // member's AI is a member's, and the owner has turned that off.
+      if (action === 'allow' && !memberCodes.enabled()) {
+        sendJson(request, response, 403, { ok: false, error: 'member-codes-off' });
+        return;
+      }
+      allowerSession = Object.freeze({ subject_id: person.subject_id });
+    } else {
+      allowerSession = ownerSession(request, response, true);
+    }
     if (!allowerSession) return;
     // The Allow hands over exactly what the card showed (cold read, H1). It
     // is judged again now; if it differs, nothing happens and the owner
     // looks again. A caller that names nothing saw nothing.
     let confirmedLine = null;
-    if (action === 'allow') {
+    // A member's code-bound knock is a different principal's AI: its Allow,
+    // by the member or an administrator, carries no earlier session of that
+    // name. Nothing to confirm, nothing to carry.
+    if (action === 'allow' && !issuer) {
       let knock = null;
       try { knock = admission.list().find(row => row.request_id === requestId) || null; } catch (_) { knock = null; }
       if (knock) {
@@ -4180,14 +4398,14 @@ function createFirstOwnerHandler(options) {
     let result;
     try {
       result = action === 'allow'
-        ? admission.allow(requestId, requestMeta(request, Date.now()))
+        ? admission.allow(requestId, requestMeta(request, Date.now()), issuer ? issuer.subject_id : undefined)
         : admission.decline(requestId);
       if (result && result.ok === true && action === 'allow') recordJoin(result.name, knockFacts.get(requestId));
       if (result && result.ok === true) knockFacts.delete(requestId);
       // A re-join after an idle release or expiry: what the earlier session
       // held carries to this one, as the allower's act. The Allow already
       // stands; a carry that fails says so and leaves the rest as it was.
-      if (result && result.ok === true && action === 'allow') {
+      if (result && result.ok === true && action === 'allow' && !issuer) {
         try {
           const returned = confirmedLine === null ? null
             : carryToLiveSeat(result.name, allowerSession.subject_id, Date.now(), confirmedLine);
@@ -4245,6 +4463,9 @@ function createFirstOwnerHandler(options) {
     ['/api/settings/webhooks/excerpt', setWebhookExcerpt],
     ['/api/settings/webhooks/delete', deleteWebhook],
     ['/api/settings/time-zone', updateOwnTimeZone],
+    ['/api/member-codes/issue', issueMemberCode],
+    ['/api/member-codes/cancel', cancelMemberCode],
+    ['/api/settings/member-codes', updateMemberCodes],
     ['/api/owner/password', changeOwnerPassword],
     ['/api/owner/sessions/revoke-others', signOutOtherSessions],
     ['/api/transcript/export', exportTranscript],
@@ -4375,6 +4596,16 @@ function createFirstOwnerHandler(options) {
           return;
         }
         await readMessages(request, response, target);
+        return;
+      }
+      if (pathname === '/api/member-codes') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400,
+            request.method !== 'GET' ? { ok: false, error: 'method-not-allowed' } : { ok: false, error: 'invalid-query' },
+            request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        listMemberCodes(request, response);
         return;
       }
       if (pathname === '/api/ai/admissions') {

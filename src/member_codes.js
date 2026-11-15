@@ -1,0 +1,309 @@
+'use strict';
+
+// Member-issued AI join codes. A member makes a one-time code for an AI
+// that will be theirs; the AI's knock carries it; the room then knows, as its
+// own fact, whom that knock is for. A code admits nothing by itself: the Allow
+// is still the member's (or an administrator's) on a fresh step-up, and the
+// match code is still checked (identity `allowAiAdmissionForMember`).
+//
+// Persistence: two files of their own, `member-codes.json` and
+// `member-codes-settings.json` in the data directory. 0.3.11 never opens
+// either, so a rollback ignores them. Only a digest of each code
+// is stored; the code itself is shown once, to its issuer.
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const CODES_FILE = 'member-codes.json';
+const SETTINGS_FILE = 'member-codes-settings.json';
+const SCHEMA = 1;
+const CODE_TTL_MS = 15 * 60 * 1000;      // the seat-claim ceiling (identity TTL_MAX_MS)
+const MAX_UNUSED_PER_MEMBER = 3;
+const KEEP_ENDED_MS = 24 * 60 * 60 * 1000;
+// Ten characters, no I, L, O or U: about 50 bits, read aloud without confusion.
+const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const CODE_CHARS = 10;
+const ROW_KEYS = Object.freeze(['id', 'digest', 'issuer_subject_id', 'issuer_name', 'created_at',
+  'expires_at', 'request_id', 'used_at', 'cancelled_at', 'cancelled_by', 'expiry_logged']);
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function fail(code) {
+  const error = new Error('member_codes: ' + code);
+  error.code = code;
+  return error;
+}
+
+function digestOf(normalized) {
+  return crypto.createHash('sha256').update('interlock-member-code\0' + normalized, 'utf8').digest('hex');
+}
+
+/* What a person types: case and the separator do not matter. */
+function normalize(code) {
+  if (typeof code !== 'string') return null;
+  const flat = code.trim().toUpperCase().replace(/[\s-]/g, '');
+  if (flat.length !== CODE_CHARS || [...flat].some(ch => !ALPHABET.includes(ch))) return null;
+  return flat;
+}
+
+function newCode() {
+  const bytes = crypto.randomBytes(CODE_CHARS);
+  let out = '';
+  for (const byte of bytes) out += ALPHABET[byte % ALPHABET.length];
+  return out;
+}
+
+function display(flat) {
+  return flat.slice(0, 5) + '-' + flat.slice(5);
+}
+
+// A row from before `expiry_logged` existed has every other key; it reads
+// as not yet logged. Every other key is required.
+const OPTIONAL_KEYS = Object.freeze(['expiry_logged']);
+
+function validRow(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
+  const keys = Object.keys(row);
+  if (keys.some(key => !ROW_KEYS.includes(key)) ||
+      ROW_KEYS.some(key => !OPTIONAL_KEYS.includes(key) && !keys.includes(key))) return false;
+  const time = value => Number.isSafeInteger(value) && value >= 0;
+  const timeOrNull = value => value === null || time(value);
+  return UUID_V4.test(row.id) && /^[0-9a-f]{64}$/.test(row.digest) &&
+    typeof row.issuer_subject_id === 'string' && row.issuer_subject_id.length > 0 &&
+    typeof row.issuer_name === 'string' && row.issuer_name.length > 0 &&
+    time(row.created_at) && time(row.expires_at) &&
+    (row.request_id === null || UUID_V4.test(row.request_id)) &&
+    timeOrNull(row.used_at) && timeOrNull(row.cancelled_at) &&
+    (row.cancelled_by === null || typeof row.cancelled_by === 'string') &&
+    (row.expiry_logged === undefined || typeof row.expiry_logged === 'boolean');
+}
+
+function atomicWrite(file, value) {
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const fd = fs.openSync(tmp, 'w', 0o600);
+  try {
+    fs.writeSync(fd, `${JSON.stringify(value)}\n`);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, file);
+}
+
+function createMemberCodes(options) {
+  const dataDir = options && options.dataDir;
+  if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir) || dataDir.includes('\0')) {
+    throw fail('invalid-data-dir');
+  }
+  const clock = options.clock === undefined ? Date.now : options.clock;
+  if (typeof clock !== 'function') throw fail('invalid-options');
+  // One audit event per issue, use, cancel and expiry (the host writes it to
+  // identity's audit stream). Never the code itself.
+  const onEvent = typeof options.onEvent === 'function' ? options.onEvent : () => {};
+  function emit(event, row, actorSubjectId) {
+    try {
+      onEvent({ event, actor_subject_id: actorSubjectId, issuer_subject_id: row.issuer_subject_id,
+        code_id: row.id, request_id: row.request_id });
+    } catch (_) { /* the record is best-effort; the code's own state stands */ }
+  }
+  const codesPath = path.join(dataDir, CODES_FILE);
+  const settingsPath = path.join(dataDir, SETTINGS_FILE);
+
+  function readRows() {
+    let text;
+    try { text = fs.readFileSync(codesPath, 'utf8'); } catch (error) {
+      if (error && error.code === 'ENOENT') return [];
+      throw error;
+    }
+    let raw;
+    try { raw = JSON.parse(text); } catch (_) { throw fail('invalid-state'); }
+    if (!raw || raw.schema !== SCHEMA || !Array.isArray(raw.codes) || !raw.codes.every(validRow)) {
+      throw fail('invalid-state');
+    }
+    const rows = raw.codes.map(row => Object.assign({ expiry_logged: false }, row));
+    // A code that ran out unused is recorded once, when the room next reads.
+    const now = clock();
+    const lapsed = rows.filter(row => !row.expiry_logged && row.used_at === null &&
+      row.cancelled_at === null && row.expires_at <= now);
+    if (lapsed.length > 0) {
+      for (const row of lapsed) { row.expiry_logged = true; emit('expire', row, null); }
+      atomicWrite(codesPath, { schema: SCHEMA, codes: rows });
+    }
+    return rows;
+  }
+
+  function writeRows(rows) {
+    const now = clock();
+    // Ended codes are kept a day, then dropped: nothing reads them after.
+    const kept = rows.filter(row => {
+      const ended = row.cancelled_at !== null ? row.cancelled_at
+        : row.used_at !== null ? row.used_at : row.expires_at;
+      return now - ended < KEEP_ENDED_MS || (row.cancelled_at === null && row.used_at === null && row.expires_at > now);
+    });
+    atomicWrite(codesPath, { schema: SCHEMA, codes: kept });
+  }
+
+  /* The first owner's switch. Absent means OFF (a new authority path
+   * is not on in a room before its owner says so). */
+  function enabled() {
+    let text;
+    try { text = fs.readFileSync(settingsPath, 'utf8'); } catch (error) {
+      if (error && error.code === 'ENOENT') return false;
+      throw error;
+    }
+    let raw;
+    try { raw = JSON.parse(text); } catch (_) { throw fail('invalid-settings'); }
+    if (!raw || typeof raw !== 'object' || Object.keys(raw).length !== 1 || typeof raw.enabled !== 'boolean') {
+      throw fail('invalid-settings');
+    }
+    return raw.enabled;
+  }
+
+  function setEnabled(value) {
+    if (typeof value !== 'boolean') throw fail('invalid-settings');
+    atomicWrite(settingsPath, { enabled: value });
+    return value;
+  }
+
+  function stateOf(row, now) {
+    if (row.cancelled_at !== null) return 'cancelled';
+    if (row.used_at !== null) return 'used';
+    if (row.expires_at <= now) return 'expired';
+    return 'unused';
+  }
+
+  function publicRow(row, now) {
+    return Object.freeze({
+      id: row.id, issuer: row.issuer_name, created_at: row.created_at, expires_at: row.expires_at,
+      state: stateOf(row, now), used_at: row.used_at, cancelled_at: row.cancelled_at,
+    });
+  }
+
+  /* A signed-in person makes one. Refused while the switch is off, and past
+   * MAX_UNUSED_PER_MEMBER unused codes of theirs. */
+  /* Whether `subjectId` may make a code now: checked before a passkey is
+   * asked for, so a refusal costs no step-up. */
+  function canIssue(subjectId) {
+    if (!enabled()) return Object.freeze({ ok: false, reason: 'member-codes-off' });
+    const now = clock();
+    const unused = readRows().filter(row => row.issuer_subject_id === subjectId && stateOf(row, now) === 'unused');
+    return unused.length >= MAX_UNUSED_PER_MEMBER ? Object.freeze({ ok: false, reason: 'code-cap' }) : Object.freeze({ ok: true });
+  }
+
+  function issue(issuer) {
+    if (!issuer || typeof issuer.subject_id !== 'string' || typeof issuer.name !== 'string' ||
+        issuer.subject_id.length === 0 || issuer.name.length === 0) throw fail('invalid-issuer');
+    if (!enabled()) return Object.freeze({ ok: false, reason: 'member-codes-off' });
+    const now = clock();
+    const rows = readRows();
+    const unused = rows.filter(row => row.issuer_subject_id === issuer.subject_id && stateOf(row, now) === 'unused');
+    if (unused.length >= MAX_UNUSED_PER_MEMBER) return Object.freeze({ ok: false, reason: 'code-cap' });
+    const flat = newCode();
+    const row = {
+      id: crypto.randomUUID(), digest: digestOf(flat), issuer_subject_id: issuer.subject_id,
+      issuer_name: issuer.name, created_at: now, expires_at: now + CODE_TTL_MS,
+      request_id: null, used_at: null, cancelled_at: null, cancelled_by: null, expiry_logged: false,
+    };
+    rows.push(row);
+    writeRows(rows);
+    emit('issue', row, issuer.subject_id);
+    return Object.freeze({ ok: true, id: row.id, code: display(flat), expires_at: row.expires_at });
+  }
+
+  /* Every code (owner and admins), or one member's own. */
+  function list(subjectId) {
+    const now = clock();
+    return Object.freeze(readRows()
+      .filter(row => subjectId === undefined || row.issuer_subject_id === subjectId)
+      .map(row => publicRow(row, now)));
+  }
+
+  /* An unused code is cancelled by its issuer or an administrator (the
+   * caller decides which; `bySubjectId` is recorded). */
+  function cancel(id, bySubjectId, mayCancel) {
+    const now = clock();
+    const rows = readRows();
+    const row = rows.find(candidate => candidate.id === id);
+    if (!row) return Object.freeze({ ok: false, reason: 'not-found' });
+    if (typeof mayCancel === 'function' && mayCancel(row.issuer_subject_id) !== true) {
+      return Object.freeze({ ok: false, reason: 'not-authorized' });
+    }
+    if (stateOf(row, now) !== 'unused') return Object.freeze({ ok: false, reason: 'not-unused' });
+    row.cancelled_at = now;
+    row.cancelled_by = bySubjectId;
+    writeRows(rows);
+    emit('cancel', row, bySubjectId);
+    return Object.freeze({ ok: true, id: row.id });
+  }
+
+  /* A knock's code, checked before the knock takes a slot. It binds the code
+   * to that knock's request id, once: the same request id (a re-knock) reads
+   * back the same issuer; any other is refused. Every refusal is one word,
+   * so a wrong code teaches nothing. Comparison is by digest over every row. */
+  function reserve(code, requestId) {
+    const flat = normalize(code);
+    if (!flat || typeof requestId !== 'string' || !UUID_V4.test(requestId)) {
+      return Object.freeze({ ok: false, reason: 'invalid-join-code' });
+    }
+    if (!enabled()) return Object.freeze({ ok: false, reason: 'invalid-join-code' });
+    const now = clock();
+    const wanted = Buffer.from(digestOf(flat), 'hex');
+    const rows = readRows();
+    let match = null;
+    for (const row of rows) {
+      if (crypto.timingSafeEqual(Buffer.from(row.digest, 'hex'), wanted)) match = row;
+    }
+    if (!match) return Object.freeze({ ok: false, reason: 'invalid-join-code' });
+    const issuer = Object.freeze({ subject_id: match.issuer_subject_id, name: match.issuer_name });
+    if (match.request_id === requestId && match.cancelled_at === null) {
+      return Object.freeze({ ok: true, id: match.id, issuer, fresh: false });
+    }
+    if (stateOf(match, now) !== 'unused') return Object.freeze({ ok: false, reason: 'invalid-join-code' });
+    // One knock, one code: a request id another code already holds takes no
+    // second one, so a knock can never be two members'.
+    if (rows.some(row => row !== match && row.request_id === requestId)) {
+      return Object.freeze({ ok: false, reason: 'invalid-join-code' });
+    }
+    match.request_id = requestId;
+    match.used_at = now;
+    writeRows(rows);
+    return Object.freeze({ ok: true, id: match.id, issuer, fresh: true });
+  }
+
+  /* The knock that reserved this code was taken: record its use, once. A
+   * knock refused for its own reason releases instead and records nothing. */
+  function used(requestId, id) {
+    const row = readRows().find(candidate => candidate.id === id && candidate.request_id === requestId);
+    if (row) emit('use', row, null);
+    return Boolean(row);
+  }
+
+  /* Undo a reservation this knock just made, when the knock itself was
+   * refused (name taken, cooling down, pending cap): the code was not spent. */
+  function release(requestId, id) {
+    const rows = readRows();
+    const row = rows.find(candidate => candidate.id === id && candidate.request_id === requestId);
+    if (!row) return false;
+    row.request_id = null;
+    row.used_at = null;
+    writeRows(rows);
+    return true;
+  }
+
+  /* `knockIssuer(requestId)`: the member a knock is for, or null. A
+   * cancelled code's knock is no member's. */
+  function issuerOf(requestId) {
+    if (typeof requestId !== 'string') return null;
+    const bound = readRows().filter(candidate => candidate.request_id === requestId);
+    // Fail closed: a knock bound to more than one code, or to a cancelled
+    // one, is no member's.
+    if (bound.length !== 1 || bound[0].cancelled_at !== null) return null;
+    return Object.freeze({ subject_id: bound[0].issuer_subject_id, name: bound[0].issuer_name });
+  }
+
+  return Object.freeze({ enabled, setEnabled, canIssue, issue, list, cancel, reserve, used, release, issuerOf });
+}
+
+module.exports = Object.freeze({
+  createMemberCodes, normalize, CODE_TTL_MS, MAX_UNUSED_PER_MEMBER, CODES_FILE, SETTINGS_FILE,
+});

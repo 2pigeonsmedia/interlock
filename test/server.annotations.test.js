@@ -189,11 +189,13 @@ test('asks, answers and status ride the side-car routes; the message and the pla
     const plainBrowser = await post(runtime, '/api/messages', { text: 'x', annotation: {} }, owner);
     assert.equal(plainBrowser.status, 400, 'the plain browser post route keeps its closed body');
 
-    // Ana asks Scout without naming it: Scout is rung all the same.
+    // Ana asks Scout without naming it: Scout is rung all the same. Lead,
+    // whose ask of Ana is her latest address, is rung by her next post as
+    // well (a reply rings whoever addressed you).
     const toScout = await post(runtime, '/api/annotated-messages',
       { text: 'can you check the import?', annotation: { ask: { of: 'Scout' } } }, owner);
     assert.equal(toScout.status, 201, toScout.text);
-    assert.deepEqual(toScout.json.message.delivery.map(row => row.name), ['Scout']);
+    assert.deepEqual(toScout.json.message.delivery.map(row => row.name), ['Scout', 'Lead']);
     const scoutAsks = await aiGet(runtime, '/api/ai/asks', scout.token);
     assert.equal(scoutAsks.status, 200, scoutAsks.text);
     assert.deepEqual(scoutAsks.json.addressed.map(ask => [ask.ask_id, ask.by]), [[toScout.json.message.id, 'Ana']]);

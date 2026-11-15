@@ -223,7 +223,7 @@ function stripIds(value) {
 }
 
 function createWorkService(options) {
-  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf', 'live', 'leadHeldOf']);
+  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf', 'live', 'leadHeldOf', 'hadLeadOf']);
   const store = input && input.store;
   if (!store || typeof store.read !== 'function' || typeof store.commit !== 'function' ||
       typeof store.nextId !== 'function' || typeof store.nextEvent !== 'function') {
@@ -239,6 +239,9 @@ function createWorkService(options) {
   // lead keeps its grant). Null means the project has no lead at all; without
   // it, no project reads as having none.
   const leadHeldOf = typeof input.leadHeldOf === 'function' ? input.leadHeldOf : null;
+  // Whether a project has ever had a lead, true or false (server-internal);
+  // without it, no project reads as having had one.
+  const hadLeadOf = typeof input.hadLeadOf === 'function' ? input.hadLeadOf : null;
   // The subject ids still in the room at `now`, as a Set (server-internal);
   // without it nobody reads as having left.
   const liveOf = typeof input.live === 'function' ? input.live : null;
@@ -290,7 +293,14 @@ function createWorkService(options) {
    * sees one line for the project instead of one per item, and the next lead
    * granted on the project inherits it. Derived on each read, never stored. */
   function waitsForLead(item, now) {
-    return holderLeft(item).length > 0 && leaderless(item.project, now);
+    return (holderLeft(item).length > 0 || unassignedOnLedProject(item)) && leaderless(item.project, now);
+  }
+  /* Live work with nobody responsible and nobody next, on a project that has
+   * had a lead: whoever filed it, only a lead can act on it. On a
+   * project that never had one (Operations, say) it routes as before. */
+  function unassignedOnLedProject(item) {
+    if (!unowned(item) || !hadLeadOf) return false;
+    try { return hadLeadOf(item.project) === true; } catch (_) { return false; }
   }
 
   /* An approved request whose asker has left (ruling, 2026-11-10): its lead
@@ -796,8 +806,9 @@ function createWorkService(options) {
    * known), the grant `grant_id` and who made it. What stays as it is: an approved request (what was
    * approved was its asker doing it; its lead withdraws it), and an item no
    * longer on the project or whose holder is back. Returns {inherited,
-   * failed}: the ids moved, and the ids whose update was refused, each left
-   * as it was. */
+   * failed, unassigned}: the ids moved, the ids whose update was refused,
+   * each left as it was, and the unassigned ids now the new lead's by
+   * routing, none of them written. */
   function inheritWaiting(actor, input) {
     requireActor(actor);
     const body = closedObject(input, ['project', 'ids', 'to', 'grant_id', 'ended']);
@@ -806,10 +817,17 @@ function createWorkService(options) {
     const how = ref => (body.ended && body.ended[ref.subject_id] === 'removed' ? 'removed' : 'left');
     const inherited = [];
     const failed = [];
+    const unassigned = [];
     for (const id of body.ids) {
       const draft = store.read();
       if (!draft) fail('store-damaged');
       const item = draft.items.find(row => row.id === id);
+      // Unassigned work has no slot to re-point: it is the new lead's
+      // by routing alone, so it is named, not written.
+      if (item && item.project === body.project && unassignedOnLedProject(item)) {
+        unassigned.push(id);
+        continue;
+      }
       if (!item || item.project !== body.project || item.approval || holderLeft(item).length === 0) continue;
       const seen = new Set();
       const gone = [];
@@ -829,7 +847,8 @@ function createWorkService(options) {
         failed.push(id);
       }
     }
-    return Object.freeze({ inherited: Object.freeze(inherited), failed: Object.freeze(failed) });
+    return Object.freeze({ inherited: Object.freeze(inherited), failed: Object.freeze(failed),
+      unassigned: Object.freeze(unassigned) });
   }
 
   function heldBy(subjectId) {
@@ -858,7 +877,9 @@ function createWorkService(options) {
     if (item.kind === 'decision') {
       return decisionState(item) === 'awaiting' && item.asked_of.subject_id === subjectId;
     }
-    if (unowned(item)) return unassignedTo(item) === subjectId;
+    // Unassigned work on a project that has had a lead and has none now
+    // waits for one: the first owner sees the project's one line instead.
+    if (unowned(item)) return !waitsForLead(item, clock()) && unassignedTo(item) === subjectId;
     // Its holder or next has left: its lead (else the first owner) decides.
     // On a project with no lead it waits for one: the first owner sees the
     // project's one line (waitingForLead), not this item.

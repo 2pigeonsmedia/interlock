@@ -564,7 +564,11 @@ function openAdmissionService(optionsIn) {
       })));
   }
 
-  function allow(requestId, meta) {
+  /* `principalSubjectId`, when given, is the member whose one-time code the
+   * knock came by: identity then makes that member the AI's principal
+   * and allows it only for that member or an administrator. Absent, the
+   * administrator who allows is the principal, as before. */
+  function allow(requestId, meta, principalSubjectId) {
     requireOpen();
     const at = now();
     cleanup(at);
@@ -579,9 +583,17 @@ function openAdmissionService(optionsIn) {
         options.endedReuseAllowed() === false) {
       return Object.freeze({ ok: false, reason: 'reuse-disabled' });
     }
-    const result = options.house.allowAiAdmission(meta, Object.fromEntries(
-      CANDIDATE_KEYS.map(key => [key, record[key]]),
-    ));
+    const candidate = Object.fromEntries(CANDIDATE_KEYS.map(key => [key, record[key]]));
+    let result;
+    if (principalSubjectId === undefined || principalSubjectId === null) {
+      result = options.house.allowAiAdmission(meta, candidate);
+    } else if (typeof principalSubjectId === 'string' && principalSubjectId.length > 0 &&
+        typeof options.house.allowAiAdmissionForMember === 'function') {
+      result = options.house.allowAiAdmissionForMember(meta,
+        Object.assign({}, candidate, { principal_subject_id: principalSubjectId }));
+    } else {
+      return Object.freeze({ ok: false, reason: 'not-authorized' });
+    }
     if (!result || result.ok !== true) {
       // Identity names the step-up reason; the host maps it to the page.
       return Object.freeze({ ok: false,

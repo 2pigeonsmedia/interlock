@@ -733,6 +733,44 @@ function create(config) {
     };
   }
 
+  /* A member's own AI. The host passes the member whose one-time code
+   * the knock came by; identity allows it only for that member or an
+   * administrator, each on a fresh step-up, and makes the member its
+   * principal. */
+  function allowAiAdmissionForMember(meta, body) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('allowAiAdmissionForMember(meta, …) requires the trusted metadata object');
+    }
+    const b = closedBody(body, [
+      'request_id', 'name', 'product', 'product_provenance', 'selector', 'digest',
+      'principal_subject_id',
+    ]);
+    if (!b) return { ok: false, reason: 'not-authorized' };
+    const result = service.allowAiAdmissionForMember({
+      cookie_header: meta.cookie_header,
+      csrf_token: meta.csrf_token,
+      request_origin: meta.request_origin,
+      sec_fetch_site: meta.sec_fetch_site,
+      now: meta.now,
+      request_id: b.request_id,
+      name: b.name,
+      product: b.product,
+      product_provenance: b.product_provenance,
+      selector: b.selector,
+      digest: b.digest,
+      principal_subject_id: b.principal_subject_id,
+    });
+    if (!result || result.ok !== true) return stepUpRefusal(result);
+    return {
+      ok: true,
+      subject_id: result.subject_id,
+      name: result.name,
+      product: result.product,
+      product_provenance: result.product_provenance,
+      expires_at: result.expires_at,
+    };
+  }
+
   function inspectAiAdmission(body, trustedNow) {
     const b = closedBody(body, [
       'request_id', 'name', 'product', 'product_provenance', 'selector', 'digest',
@@ -910,6 +948,28 @@ function create(config) {
       return Object.freeze({ ok: false, reason: 'not-authorized' });
     }
     const result = service.revokeParticipant({
+      cookie_header: meta.cookie_header,
+      csrf_token: meta.csrf_token,
+      request_origin: meta.request_origin,
+      sec_fetch_site: meta.sec_fetch_site,
+      now: meta.now,
+      name: b.name,
+    });
+    if (!result || result.ok !== true) return stepUpRefusal(result);
+    return Object.freeze({ ok: true, name: result.name, kind: result.kind });
+  }
+
+  // R8: a member removes their own AI, on their own fresh step-up.
+  function revokeOwnAiSeat(meta, body) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('revokeOwnAiSeat(meta, …) requires the trusted metadata object');
+    }
+    const b = closedBody(body, ['name']);
+    if (!b || typeof b.name !== 'string' || b.name.length === 0 || b.name.includes('\0') ||
+        Buffer.byteLength(b.name, 'utf8') > 256) {
+      return Object.freeze({ ok: false, reason: 'not-authorized' });
+    }
+    const result = service.revokeOwnAiSeat({
       cookie_header: meta.cookie_header,
       csrf_token: meta.csrf_token,
       request_origin: meta.request_origin,
@@ -1114,6 +1174,51 @@ function create(config) {
     return result && result.ok === true ? Object.freeze({ ok: true }) : stepUpRefusal(result, null);
   }
 
+  // A member's one-time AI join code, made on their own fresh step-up.
+  function confirmMemberCodeIssue(meta) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('confirmMemberCodeIssue(meta) requires the trusted metadata object');
+    }
+    const result = service.confirmMemberCodeIssue({
+      cookie_header: meta.cookie_header,
+      csrf_token: meta.csrf_token,
+      request_origin: meta.request_origin,
+      sec_fetch_site: meta.sec_fetch_site,
+      now: meta.now,
+    });
+    return result && result.ok === true && typeof result.subject_id === 'string'
+      ? Object.freeze({ ok: true, subject_id: result.subject_id }) : stepUpRefusal(result, null);
+  }
+
+  /* The audit trail of member AI join codes: one authorization row per
+   * issue, use, cancel and expiry, in the shape the stream already carries
+   * (capability `member-code.<event>`), so an older release reads it as it
+   * reads any other row. Never the code itself. */
+  const MEMBER_CODE_EVENTS = Object.freeze(['issue', 'use', 'cancel', 'expire']);
+  function recordMemberCodeEvent(input) {
+    const b = closedBody(input, ['event', 'actor_subject_id', 'issuer_subject_id', 'code_id', 'request_id']);
+    if (!b || !MEMBER_CODE_EVENTS.includes(b.event) || typeof b.issuer_subject_id !== 'string' ||
+        typeof b.code_id !== 'string' || !(b.actor_subject_id === null || typeof b.actor_subject_id === 'string') ||
+        !(b.request_id === null || typeof b.request_id === 'string')) {
+      return Object.freeze({ ok: false, reason: 'invalid-request' });
+    }
+    const row = {
+      tenant,
+      subject_id: b.actor_subject_id,
+      kind: b.actor_subject_id === null ? null : 'person',
+      principal: b.issuer_subject_id,
+      capability: 'member-code.' + b.event,
+      resource: 'member-code:' + b.code_id,
+      origin: originClass,
+      result: 'allow',
+      reason: b.request_id === null ? b.event : b.event + ' request ' + b.request_id,
+      decision_source: 'member-code',
+    };
+    let accepted;
+    try { accepted = audit.authz(row); } catch (_) { accepted = null; }
+    return Object.freeze({ ok: Boolean(accepted && accepted.accepted !== false) });
+  }
+
   const firstOwner = Object.freeze({
     status() {
       if (firstOwnerBootstrap) return firstOwnerBootstrap.status();
@@ -1222,6 +1327,10 @@ function create(config) {
     confirmWorkProjectAct,
     confirmGrantAct,
     allowAiAdmission,
+    allowAiAdmissionForMember,
+    confirmMemberCodeIssue,
+    recordMemberCodeEvent,
+    revokeOwnAiSeat,
     firstOwner,
     // ── THE BOOT SURFACE ────────────────────────────────────────────────
     //
