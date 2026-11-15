@@ -223,7 +223,7 @@ function stripIds(value) {
 }
 
 function createWorkService(options) {
-  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf', 'live', 'leadHeldOf']);
+  const input = closedObject(options, ['store', 'clock', 'approverFor', 'leadOf', 'live', 'leadHeldOf', 'hadLeadOf']);
   const store = input && input.store;
   if (!store || typeof store.read !== 'function' || typeof store.commit !== 'function' ||
       typeof store.nextId !== 'function' || typeof store.nextEvent !== 'function') {
@@ -239,6 +239,9 @@ function createWorkService(options) {
   // lead keeps its grant). Null means the project has no lead at all; without
   // it, no project reads as having none.
   const leadHeldOf = typeof input.leadHeldOf === 'function' ? input.leadHeldOf : null;
+  // Whether a project has ever had a lead, true or false (server-internal);
+  // without it, no project reads as having had one.
+  const hadLeadOf = typeof input.hadLeadOf === 'function' ? input.hadLeadOf : null;
   // The subject ids still in the room at `now`, as a Set (server-internal);
   // without it nobody reads as having left.
   const liveOf = typeof input.live === 'function' ? input.live : null;
@@ -290,14 +293,14 @@ function createWorkService(options) {
    * sees one line for the project instead of one per item, and the next lead
    * granted on the project inherits it. Derived on each read, never stored. */
   function waitsForLead(item, now) {
-    return (holderLeft(item).length > 0 || filedUnassignedByLeft(item)) && leaderless(item.project, now);
+    return (holderLeft(item).length > 0 || unassignedOnLedProject(item)) && leaderless(item.project, now);
   }
-  /* Live work with nobody responsible and nobody next, filed by an AI seat
-   * that has since left (#932): the departed lead's own unassigned items.
-   * Work filed unassigned by the owner or by anyone still here is waiting
-   * for no one; it routes as before. */
-  function filedUnassignedByLeft(item) {
-    return unowned(item) && departed(item.created_by);
+  /* Live work with nobody responsible and nobody next, on a project that has
+   * had a lead (#932, A13): whoever filed it, only a lead can act on it. On a
+   * project that never had one (Operations, say) it routes as before. */
+  function unassignedOnLedProject(item) {
+    if (!unowned(item) || !hadLeadOf) return false;
+    try { return hadLeadOf(item.project) === true; } catch (_) { return false; }
   }
 
   /* An approved request whose asker has left (ruling, 2026-11-10): its lead
@@ -821,7 +824,7 @@ function createWorkService(options) {
       const item = draft.items.find(row => row.id === id);
       // Unassigned work has no slot to re-point (#932): it is the new lead's
       // by routing alone, so it is named, not written.
-      if (item && item.project === body.project && filedUnassignedByLeft(item)) {
+      if (item && item.project === body.project && unassignedOnLedProject(item)) {
         unassigned.push(id);
         continue;
       }
@@ -874,7 +877,7 @@ function createWorkService(options) {
     if (item.kind === 'decision') {
       return decisionState(item) === 'awaiting' && item.asked_of.subject_id === subjectId;
     }
-    // Unassigned work a departed seat filed, on a project with no lead,
+    // Unassigned work on a project that has had a lead and has none now
     // waits for one: the first owner sees the project's one line instead.
     if (unowned(item)) return !waitsForLead(item, clock()) && unassignedTo(item) === subjectId;
     // Its holder or next has left: its lead (else the first owner) decides.

@@ -497,7 +497,11 @@ async function startInterlockServer(options) {
         // Whether a project has a lead at all: one holding its lead grant,
         // in the room or away. With none, its departed holders' work waits
         // for one.
-        leadHeldOf: (project, now) => people.service.leadOf(project, now, liveSubjects(now)) }),
+        leadHeldOf: (project, now) => people.service.leadOf(project, now, liveSubjects(now)),
+        // Whether a project has ever had a lead (a past lead grant in the
+        // log): on one that has, and has none now, its unassigned work waits
+        // for the next lead (#932, A13).
+        hadLeadOf: project => people.service.hadLead(project) }),
       participants: meta => house.listParticipants(meta),
       // A cited room message, looked up by id; null when it is not in the
       // room (never posted, or archived by a transcript clear).

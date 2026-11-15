@@ -1,13 +1,13 @@
 'use strict';
 
-// #932: unassigned work on a leaderless project waits for the lead with the
-// rest. A live item with nobody responsible and nobody next, filed by an AI
-// seat that has since left, on a project nobody holds a lead grant on, joins
-// that project's one "waits for a lead" line instead of landing on the first
-// owner one card each (Booksteady W-106/107/109, 11-14). It has no slot to
-// re-point, so a new lead "inherits" it by its routing alone: unassigned work
-// goes to its project's live lead. Work the owner (or anyone still here)
-// filed unassigned is not waiting for anyone: it routes as before.
+// #932 (contract A13): unassigned work on a leaderless project waits for the
+// lead with the rest. The rule follows the PROJECT, not the filer: on a
+// project that has had a lead (a past lead grant in the log) and has none
+// now, all live unassigned work (nobody responsible, nobody next) joins its
+// one "waits for a lead" line instead of landing on the first owner one card
+// each (Booksteady W-106/107/109, 11-14). A project that never had a lead
+// (Operations) keeps today's routing. Unassigned work has no slot to
+// re-point, so a new lead "inherits" it by routing alone.
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -30,11 +30,12 @@ function ref(actor) {
 function rig() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-unassigned-lead-'));
   const live = new Set([owner.subject_id, lead.subject_id, nova.subject_id]);
-  const state = { grant: lead };
+  const state = { grant: lead, hadLead: true };
   const work = createWorkService({
     store: openWorkStore({ dataDir }),
     leadOf: project => (project === 'ops' && state.grant && live.has(state.grant.subject_id) ? ref(state.grant) : null),
     leadHeldOf: project => (project === 'ops' && state.grant ? ref(state.grant) : null),
+    hadLeadOf: project => project === 'ops' && state.hadLead,
     approverFor: () => ({ approver: ref(owner), owner: ref(owner) }),
     live: () => live,
   });
@@ -82,21 +83,52 @@ test('unassigned and held work of a departed lead are one line together', () => 
     [[2, [held.id, loose.id]]]);
 });
 
-test('control: unassigned work the owner filed on a leaderless project is still hers, one card each', () => {
+test('A13: unassigned work the owner filed on a project whose lead left waits too', () => {
+  const { work, live, state } = rig();
+  const mine = unassigned(work, owner);
+  live.delete(lead.subject_id);
+  state.grant = null;
+  assert.equal(needs(work, owner).includes(mine.id), false, 'not a card of its own: only a lead can act on it');
+  assert.deepEqual(work.brief(owner, {}).waiting_for_lead.map(line => line.items), [[mine.id]]);
+});
+
+test('A13: unassigned work filed by an AI still in the room, on a project whose lead left, waits too', () => {
+  const { work, live, state } = rig();
+  const item = unassigned(work, nova);
+  live.delete(lead.subject_id);
+  state.grant = null;
+  assert.equal(needs(work, owner).includes(item.id), false);
+  assert.deepEqual(work.brief(owner, {}).waiting_for_lead.map(line => line.items), [[item.id]]);
+});
+
+test('control: on a project that never had a lead, unassigned work is the owner\'s, one card each', () => {
   const { work, state } = rig();
   state.grant = null;
+  state.hadLead = false;
   const mine = unassigned(work, owner);
+  const theirs = unassigned(work, nova);
   assert.equal(needs(work, owner).includes(mine.id), true);
+  assert.equal(needs(work, owner).includes(theirs.id), true);
   assert.deepEqual(work.brief(owner, {}).waiting_for_lead, []);
   assert.deepEqual(work.waitingIds('ops'), []);
 });
 
-test('control: unassigned work filed by an AI still in the room, with no lead, goes to the owner as before', () => {
-  const { work, state } = rig();
-  state.grant = null;
-  const item = unassigned(work, nova);
-  assert.equal(needs(work, owner).includes(item.id), true);
+test('control: a project that has had a lead and still has one routes unassigned work to that lead', () => {
+  const { work } = rig();
+  const mine = unassigned(work, owner);
+  assert.equal(needs(work, lead).includes(mine.id), true);
   assert.deepEqual(work.brief(owner, {}).waiting_for_lead, []);
+});
+
+test('a decision asked of the owner on a project whose lead left stays hers, by name', () => {
+  const { work, live, state } = rig();
+  const asked = work.createItem(lead, { operation_id: crypto.randomUUID(), kind: 'decision', project: 'ops',
+    title: 'Close March?', body: 'b', asked_of: ref(owner), proposal: 'yes' }).item;
+  const loose = unassigned(work, lead);
+  live.delete(lead.subject_id);
+  state.grant = null;
+  assert.equal(needs(work, owner).includes(asked.id), true);
+  assert.deepEqual(work.brief(owner, {}).waiting_for_lead.map(line => line.items), [[loose.id]]);
 });
 
 test('a new lead granted on the project: the waiting unassigned work is in its Needs you, untouched', () => {
