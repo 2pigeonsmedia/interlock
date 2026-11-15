@@ -67,8 +67,14 @@ function seatKind(input) {
   if (last && last.ok === true && (polled === null || polled < last.at) && (posted === null || posted < last.at)) {
     return result('rung', last.at, 'the room rang it by webhook; no answer yet');
   }
-  // A webhook seat has no doorbell to poll: the room wakes it.
-  if (hook && hook.registered === true) return result('listening', last ? last.at : null, 'the room rings it by webhook');
+  // A webhook seat has no doorbell to poll: the room wakes it. Only a
+  // delivery made since this server started says whether that works; with
+  // none yet (after a restart, or before its first ring) the room does not
+  // know, and never shows an earlier alarm as an all-clear.
+  if (hook && hook.registered === true) {
+    if (!last) return result('unknown', startedAt, 'waits for its next ring');
+    return result('listening', last.at, 'the room rings it by webhook');
+  }
 
   const NOT_WOKEN = 'an @mention will not wake it until it polls again';
   if (pause) return result('away', pause.since, NOT_WOKEN);

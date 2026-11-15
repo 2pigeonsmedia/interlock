@@ -1650,17 +1650,24 @@ function joinedAdmission(profile) {
 // What the room itself shows for this seat (0.4.0): the reason it is or is
 // not answering, as the room computes it, and what would change it.
 const ROOM_KINDS = Object.freeze(['listening', 'working', 'rung', 'pending', 'away', 'left', 'ended', 'unreachable', 'unknown']);
+// People's words for them, so status and People say the same thing.
+const ROOM_WORDS = Object.freeze({
+  listening: 'listening', working: 'working', rung: 'rung by webhook', pending: 'waiting to be let in',
+  away: 'not listening', left: 'left', ended: 'ended', unreachable: 'unreachable',
+  unknown: 'not known since the room restarted',
+});
 async function roomShowsFact(fetcher, profile) {
-  const blank = { kind: null, since: null, next: null };
+  const blank = { kind: null, since: null, next: null, session: null };
   try {
     const result = await localRequest(fetcher, profile, '/api/ai/presence-kind', { timeoutMs: FACTS_TIMEOUT_MS });
-    const kind = exactObject(result, ['ok', 'presence_kind']) ? exactObject(result.presence_kind, ['kind', 'since', 'next']) : null;
+    const kind = exactObject(result, ['ok', 'presence_kind', 'session']) ? exactObject(result.presence_kind, ['kind', 'since', 'next']) : null;
     if (!kind || !ROOM_KINDS.includes(kind.kind) || !(kind.since === null || Number.isSafeInteger(kind.since)) ||
         !(kind.next === null || typeof kind.next === 'string')) throw incompatibleResponse();
     const since = kind.since === null ? '' : ` since ${new Date(kind.since).toISOString()}`;
+    if (!(result.session === null || (Number.isSafeInteger(result.session) && result.session > 0))) throw incompatibleResponse();
     return {
-      state: kind.kind, kind: kind.kind, since: kind.since, next: kind.next,
-      detail: `${kind.kind}${since}${kind.next === null ? '' : ` — ${kind.next}`}`,
+      state: kind.kind, kind: kind.kind, since: kind.since, next: kind.next, session: result.session,
+      detail: `${ROOM_WORDS[kind.kind] || kind.kind}${since}${kind.next === null ? '' : ` — ${kind.next}`}`,
     };
   } catch (error) {
     if (error && error.status === 404) {
@@ -1680,7 +1687,13 @@ async function connectionFacts(fetcher, profile, stateDir, admitted = null, insp
     last_answered: await lastAnsweredFact(fetcher, profile),
     doorbell: doorbellFact(profile.name, stateDir, inspect),
   };
-  if (withRoom) facts.room_shows = await roomShowsFact(fetcher, profile);
+  if (withRoom) {
+    facts.room_shows = await roomShowsFact(fetcher, profile);
+    // Which run answered: this connection's own session, as People labels it.
+    if (facts.last_answered.state === 'found' && Number.isSafeInteger(facts.room_shows.session)) {
+      facts.last_answered.detail += ` · Session ${facts.room_shows.session}`;
+    }
+  }
   return facts;
 }
 
@@ -1702,7 +1715,7 @@ async function connectionFactsFor(name, options = {}) {
       admitted: { state: 'unknown', detail: why },
       last_answered: { state: 'unknown', ring_id: null, reply_id: null, replied_at: null, detail: why },
       doorbell: doorbellFact(name, stateDir, options.inspect),
-      room_shows: { state: 'unknown', kind: null, since: null, next: null, detail: why },
+      room_shows: { state: 'unknown', kind: null, since: null, next: null, session: null, detail: why },
     };
   }
   return await connectionFacts(dependencies.fetch || globalThis.fetch, selected.profile, stateDir,

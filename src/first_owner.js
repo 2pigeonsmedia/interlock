@@ -1921,23 +1921,50 @@ function createFirstOwnerHandler(options) {
     sendJson(request, response, 200, result);
   }
 
+  /* Who is reading the waiting list, and which knocks they may see: the
+   * first owner and administrators see every knock; a member sees only the
+   * knocks made with their own join code (S4), which are theirs to Allow.
+   * Read passively: the list is polled and must not keep a session alive. */
+  function admissionViewer(request, response) {
+    const at = Date.now();
+    const authorized = house.authorizeRead(authorizationMeta(request, at), 'read', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) {
+      refuseAuthorization(request, response, authorized, null);
+      return null;
+    }
+    const who = house.whoami({ cookie_header: request.headers.cookie, activity: 'passive-delivery', now: at });
+    if (!who || who.subject_id !== authorized.subject_id || who.kind !== 'person' || !Array.isArray(who.roles)) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return null;
+    }
+    const all = who.first_owner === true || who.roles.some(role => role && role.slug === 'administrator');
+    return Object.freeze({
+      subject_id: authorized.subject_id,
+      all,
+      sees: row => all || (knockIssuer(row.request_id) || {}).subject_id === authorized.subject_id,
+    });
+  }
+
   function listAdmissions(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
     }
-    const viewer = ownerSession(request, response, false);
+    const viewer = admissionViewer(request, response);
     if (!viewer) return;
     try {
-      const pending = admission.list();
-      const live = new Set(pending.map(row => row.request_id));
+      const listed = admission.list();
+      const pending = listed.filter(viewer.sees);
+      const live = new Set(listed.map(row => row.request_id));
       for (const id of knockFacts.keys()) if (!live.has(id)) knockFacts.delete(id);
       const now = Date.now();
       const actors = viewer ? returnActors(viewer.subject_id, now) : null;
       sendJson(request, response, 200, { ok: true, pending: pending.map(row => Object.freeze(Object.assign({}, row, {
         declared_project: knockFacts.has(row.request_id) ? knockFacts.get(row.request_id).project : null,
         // What Allow hands over, said before the click (ruling, 2026-11-13).
-        returns: allowLine(row.name, actors, now),
+        // A knock made with a member's code carries nothing over (its Allow
+        // skips the check), so its card promises nothing.
+        returns: knockIssuer(row.request_id) ? null : allowLine(row.name, actors, now),
       }))) });
     } catch (_) {
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
@@ -3750,9 +3777,11 @@ function createFirstOwnerHandler(options) {
       const mayAllow = Boolean(who && who.subject_id === authorized.subject_id && (who.first_owner === true ||
         (Array.isArray(who.roles) && who.roles.some(role => role && role.slug === 'administrator'))));
       const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
-      const workOf = name => {
+      const workOf = (name, subjectId) => {
         const assignment = people ? people.service.assignmentOf(name) : null;
         const project = assignment ? assignment.project : null;
+        const held = work && typeof work.heldBy === 'function' && typeof subjectId === 'string' ? work.heldBy(subjectId) : [];
+        if (held.length === 0) return { project, holder: null };
         if (!project) return { project: null, holder: 'the owner' };
         const lead = people.service.leadOf(project, now, live);
         return { project, holder: lead && typeof lead.name === 'string' ? lead.name : `whoever next leads ${project}` };
@@ -3764,17 +3793,19 @@ function createFirstOwnerHandler(options) {
         .map(seat => {
           const how = seat.ended_how === 'left' ? 'left' : seat.ended_how === 'revoked' ? 'removed'
             : seat.ended_how === 'released' ? 'released' : 'expired';
-          const work = workOf(seat.name);
+          const work = workOf(seat.name, seat.subject_id);
           return Object.freeze({
             name: seat.name, session: Number.isSafeInteger(seat.session) ? seat.session : null,
-            ended_how: how, ended_at: seat.ended_at, project: work.project, work_with: work.holder,
+            ended_how: how, ended_at: seat.ended_at, project: work.project, work_with: work.holder || 'nobody',
             presence_kind: PresenceKind.endedKind(how, seat.ended_at, work.holder),
           });
         });
-      const pending = mayAllow ? admission.list().map(row => Object.freeze({
+      // A member also sees the knocks made with their own join code (S4).
+      const ownCode = row => (knockIssuer(row.request_id) || {}).subject_id === authorized.subject_id;
+      const pending = admission.list().filter(row => mayAllow || ownCode(row)).map(row => Object.freeze({
         name: row.name, created_at: row.created_at,
-        presence_kind: PresenceKind.pendingKind(row.created_at, null),
-      })) : [];
+        presence_kind: PresenceKind.pendingKind(row.created_at, row.match_code),
+      }));
       return sendJson(request, response, 200, { ok: true, recently_left: recentlyLeft, pending });
     } catch (_) {
       return sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
@@ -3801,7 +3832,15 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
-    sendJson(request, response, 200, { ok: true, presence_kind: kind });
+    let session = null;
+    try {
+      const discriminator = house.aiSessionDiscriminator(authorized.subject_id);
+      session = discriminator && Number.isSafeInteger(discriminator.session) ? discriminator.session : null;
+    } catch (_) {
+      session = null;
+    }
+    // `session`: which run of this seat's name this connection is, as People labels it.
+    sendJson(request, response, 200, { ok: true, presence_kind: kind, session });
   }
 
   async function webhookRingFor(message, recipient) {

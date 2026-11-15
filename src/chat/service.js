@@ -741,7 +741,8 @@ function createChatService(options) {
 
 
   /* The causes a message rings a seat for (A12): an @ of it, an ask of it,
-   * an answer to its ask, or a post discussing its ask. */
+   * an answer to its ask, a post discussing its ask, or (A4) a post by
+   * someone the seat addressed since that author's previous post. */
   async function ringCauses(message, seat) {
     requireOpen();
     const mentioned = resolveRecipients(message.text, [{ subject_id: seat.subject_id, name: seat.name, kind: 'seat' }],
@@ -749,7 +750,9 @@ function createChatService(options) {
     const asks = typeof store.askCauses === 'function'
       ? await store.askCauses(message.id, seat.subject_id)
       : { asked: false, answers_its_ask: false, discusses_its_ask: false };
-    return Object.freeze(Object.assign({ mentioned }, asks));
+    // A4: the seat addressed this author since the author's previous post.
+    const addressed = await addressedSince(message, seat.subject_id);
+    return Object.freeze(Object.assign({ mentioned }, asks, { addressed_since: addressed }));
   }
 
   async function lastPersonMessageAt() {

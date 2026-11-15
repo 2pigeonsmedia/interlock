@@ -176,9 +176,19 @@ test('a seat that leaves is under Recently left, not the roster; a knock waits o
     const [row] = (await absences(ana)).recently_left;
     assert.equal(row.name, 'Seriema');
     assert.equal(row.ended_how, 'left');
-    assert.deepEqual(row.presence_kind, { kind: 'left', since: row.ended_at, next: 'its work went to the owner' });
-    assert.equal(row.work_with, 'the owner', 'no project: its news went to the first owner');
-    assert.deepEqual((await absences(bea)).recently_left.map(entry => entry.name), ['Seriema'], 'any member sees who left');
+    assert.deepEqual(row.presence_kind, { kind: 'left', since: row.ended_at, next: 'it held no work' }, 'LOW-3: held nothing');
+    assert.equal(row.work_with, 'nobody');
+    // A seat that holds an item when it leaves: its work went to the owner (no project lead).
+    owner = await elevate(runtime, owner, device);
+    const holder = await admitSeat(runtime, owner, 'Holder');
+    const filed = await aiPost(runtime, '/api/ai/work/items/create',
+      { operation_id: crypto.randomUUID(), kind: 'work', project: 'ops', title: 'Reconcile March', body: 'b', responsible: 'Holder' }, holder.token);
+    assert.equal(filed.status, 201, 'ARRANGEMENT: Holder holds an item: ' + filed.text);
+    assert.equal((await aiPost(runtime, '/api/ai/leave', {}, holder.token)).status, 200);
+    const held = (await absences(ana)).recently_left.find(entry => entry.name === 'Holder');
+    assert.equal(held.presence_kind.next, 'its work went to the owner');
+    assert.equal(held.work_with, 'the owner');
+    assert.ok((await absences(bea)).recently_left.some(entry => entry.name === 'Seriema'), 'any member sees who left');
 
     // A knock waiting for an Allow: the owner sees it, a member does not.
     const candidate = identity.newAiCredential();
@@ -188,6 +198,8 @@ test('a seat that leaves is under Recently left, not the roster; a knock waits o
     await waitForPending(runtime, ana, body.request_id);
     const forOwner = await absences(ana);
     assert.deepEqual(forOwner.pending.map(entry => [entry.name, entry.presence_kind.kind]), [['Rowan', 'pending']]);
+    assert.match(forOwner.pending[0].presence_kind.next, /^Allow it in People, code [23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5}$/,
+      'LOW-2: the next step names the match code');
     assert.deepEqual((await absences(bea)).pending, [], 'a member cannot Allow, so is not shown the knock');
     owner = await elevate(runtime, owner, device);
     const declined = await post(runtime, `/api/ai/admissions/${body.request_id}/decline`, {}, owner);

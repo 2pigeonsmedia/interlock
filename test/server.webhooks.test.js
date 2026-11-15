@@ -113,7 +113,9 @@ test('an owner registers a webhook; an @mention calls it, signed; a plain post d
     assert.equal(listed.json.seats.find(row => row.name === O).webhook, null);
     assert.equal(listed.text.includes(secret), false);
     assert.equal(listed.text.includes('TOKEN-IN-PATH'), false);
-    assert.equal(await kindOf(runtime, owner, S), 'listening', 'a registered webhook seat reads listening');
+    // MED-2 (People cold read): before its first delivery the room does not
+    // know whether the webhook works, so it says so; never an all-clear.
+    assert.equal(await kindOf(runtime, owner, S), 'unknown', 'registered, no delivery yet: not known');
 
     // Not addressed: no call.
     assert.equal((await room.post(runtime, '/api/messages', { text: 'general news, no one named' }, owner)).status, 201);
@@ -415,4 +417,53 @@ test('a webhook seat rung by @Name reads mention, and by an answer to its ask re
   const third = JSON.parse(target.seen[0].body);
   assert.equal(third.message_id, both.json.message.id);
   assert.equal(third.kind, 'mention', 'an @ that also answers is a mention: the seat\'s own name was seen');
+});
+
+test('A4: an untagged reply to the seat that addressed you rings it as reply, on the webhook and on facts=1; once; a tagged one is a mention', async () => {
+  const { runtime, owner, scout, names } = await setUp();
+  const S = names.scout;
+  const target = await receiver();
+  const set = await room.post(runtime, '/api/settings/webhooks/set', { name: S, url: `http://127.0.0.1:${target.port}/hook` }, owner);
+  assert.equal(set.status, 200, set.text);
+  const ringKind = async messageId => {
+    const page = await room.aiGet(runtime, '/api/ai/rings?after=0&limit=100&wait=0&facts=1', scout.token);
+    assert.equal(page.status, 200, page.text);
+    const row = page.json.rings.find(ring => ring.id === messageId);
+    return row ? row.ring.kind : null;
+  };
+  // The seat addresses Ana; then Ana answers with no tag and no annotation.
+  const addressed = await room.aiPost(runtime, '/api/ai/messages',
+    { text: '@Ana is the import ready?', client_message_id: crypto.randomUUID() }, scout.token);
+  assert.equal(addressed.status, 201, addressed.text);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  target.seen.length = 0;
+  const untagged = await room.post(runtime, '/api/messages', { text: 'yes, it is ready' }, owner);
+  assert.equal(untagged.status, 201, untagged.text);
+  await eventually(() => target.seen.length >= 1, 'the untagged reply called the webhook (A4 selection)');
+  const body = JSON.parse(target.seen[0].body);
+  assert.equal(body.message_id, untagged.json.message.id);
+  assert.equal(body.kind, 'reply', 'webhook: an untagged reply is a reply, not a mention');
+  assert.equal(await ringKind(untagged.json.message.id), 'reply', 'stdout (facts=1): the same kind');
+
+  // Once: Ana's next post does not ring the seat again for the same address.
+  target.seen.length = 0;
+  const later = await room.post(runtime, '/api/messages', { text: 'and the docs too' }, owner);
+  assert.equal(later.status, 201, later.text);
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(target.seen.length, 0, 'A4: one ring per address');
+  assert.equal(await ringKind(later.json.message.id), null, 'and no ring row for it');
+
+  // Tagged: the seat addresses Ana again; her reply @s it: a mention, rung once.
+  const again = await room.aiPost(runtime, '/api/ai/messages',
+    { text: '@Ana and the tests?', client_message_id: crypto.randomUUID() }, scout.token);
+  assert.equal(again.status, 201, again.text);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  target.seen.length = 0;
+  const tagged = await room.post(runtime, '/api/messages', { text: `@${S} green` }, owner);
+  assert.equal(tagged.status, 201, tagged.text);
+  await eventually(() => target.seen.length >= 1, 'the tagged reply called the webhook');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(target.seen.length, 1, 'A4: an @ that is also a reply rings once');
+  assert.equal(JSON.parse(target.seen[0].body).kind, 'mention');
+  assert.equal(await ringKind(tagged.json.message.id), 'mention');
 });

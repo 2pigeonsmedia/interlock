@@ -233,10 +233,13 @@ test('the room wires attention into background owner admission polling and chat 
   assert.match(room, /InterlockMessagePage\.caughtUp\(page, MESSAGE_PAGE_LIMIT\)/,
     'every full historical page must remain quiet until an under-limit page proves catch-up');
   assert.match(room, /roomAttention\.pending\(result\.pending\)/);
-  assert.match(room, /if \(owner\) loadPendingAis\(\);/,
-    'owners must see knocks without first opening the Connect an AI sheet');
-  assert.match(room, /if \(pendingAiLoading \|\| !owner\) return;/,
-    'non-owners must not poll the administrative admissions route');
+  assert.match(room, /if \(user\.kind === 'person'\) loadPendingAis\(\);/,
+    'owners see knocks without first opening the Connect an AI sheet; a member polls too (0.4.0)');
+  // 0.4.0 (lead's ruling, 13374): a member reads the waiting list too. The
+  // room lists her only the knocks made with her own join code
+  // (test/server.member_own_knock.test.js); an AI seat never reads it.
+  assert.match(room, /if \(pendingAiLoading \|\| !currentUser \|\| currentUser\.kind !== 'person'\) return;/,
+    'only a person polls the admissions route');
   assert.match(room, /function showLogin\([^]*?roomRequestGeneration\.rotate\(\);/,
     'leaving the room must invalidate owner-only admission responses still in flight');
   assert.match(css, /#connect-ai-button\.has-waiting/);

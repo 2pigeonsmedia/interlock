@@ -34,7 +34,7 @@ test('three facts for a seat, each worded from its own evidence', () => {
     last_answered: { ring_id: 12, reply_id: 14, replied_at: NOW - 4 * MINUTE }, last_polled_at: NOW - 30_000,
   }), NOW), [
     'Admitted',
-    'Last answered mention: #12 → reply #14 · 4m ago',
+    'Last answered mention: #12 → reply #14 · Session 1 · 4m ago',
     'A read-and-reply, not proof the doorbell rang',
     'Doorbell: running · polled now',
   ]);
