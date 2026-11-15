@@ -56,7 +56,7 @@ function engine(store, overrides = {}) {
   const notes = [];
   const delivered = [];
   const e = Deliver.createWebhookDelivery(Object.assign({
-    store, ringFor, noteDelivery: (id, outcome) => notes.push(outcome), delivered: id => delivered.push(id),
+    store, ringFor, noteDelivery: (id, outcome) => notes.push(outcome),
     retryDelaysMs: [10, 10, 10], timeoutMs: 1_000,
   }, overrides));
   return { e, notes, delivered };
@@ -149,21 +149,30 @@ test('a ring the room cannot build is reported as a failed delivery, not dropped
   e.close();
 });
 
-test('the delivery tells its caller about a 2xx, and only a 2xx (the room does not count it as contact)', async () => {
+test('delivery has no hook for a 2xx, so a delivered ring can never become the seat\'s contact', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'webhooks', 'deliver.js'), 'utf8');
+  assert.doesNotMatch(source, /options\.delivered/);
+});
+
+test('a read that under-reports erases nothing: only seats named as ended lose their webhook', () => {
   const { store } = world();
-  const good = await receiver(() => ({ status: 204 }));
-  store.register('seat-scout', { url: `http://127.0.0.1:${good.port}/` });
-  const ok = engine(store);
-  ok.e.deliver(message(10));
-  await ok.e.settled();
-  assert.deepEqual(ok.delivered, ['seat-scout']);
-  const bad = await receiver(() => ({ status: 500 }));
-  store.register('seat-scout', { url: `http://127.0.0.1:${bad.port}/` });
-  const ko = engine(store);
-  ko.e.deliver(message(11));
-  await ko.e.settled();
-  assert.deepEqual(ko.delivered, []);
-  ok.e.close(); ko.e.close();
+  store.register('seat-a', { url: 'http://127.0.0.1:9/' });
+  store.register('seat-b', { url: 'http://127.0.0.1:9/' });
+  // Nothing named as ended (an empty or failed read): nothing erased.
+  assert.equal(store.eraseEnded(new Set()), 0);
+  // One seat short of a roster is no evidence either; only a named end is.
+  assert.equal(store.eraseEnded(new Set(['seat-unknown'])), 0);
+  assert.equal(store.has('seat-a') && store.has('seat-b'), true);
+  assert.equal(store.eraseEnded(new Set(['seat-b'])), 1);
+  assert.deepEqual([store.has('seat-a'), store.has('seat-b')], [true, false]);
+  assert.throws(() => store.eraseEnded(null), /invalid-request/);
+});
+
+test('the server erases only on the identity record\'s ended list, and erases nothing when it cannot read it', () => {
+  const server = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+  assert.match(server, /house\.listRecentEndedSeats\(\{ now: Date\.now\(\), since: 0 \}\)/);
+  assert.match(server, /try \{ ended = endedSeats\(\); \} catch \(_\) \{[\s\S]*?return;/);
+  assert.doesNotMatch(server, /eraseEnded\(liveSeats/);
 });
 
 test('the check on the connected socket refuses a private peer by itself', async () => {
@@ -207,7 +216,8 @@ test('registrations end with their seat; orphans are listed and deletable; every
   store.regenerate('seat-b', 'admin-2');
   store.setExcerpt('seat-b', true, 'admin-2');
   assert.deepEqual(store.orphans(new Set(['seat-b'])).map(view => view.subject_id), ['seat-a']);
-  assert.equal(store.retainOnly(new Set(['seat-b'])), 1);
+  // Erased on positive evidence only: seat-a is named as ended.
+  assert.equal(store.eraseEnded(new Set(['seat-a'])), 1);
   assert.equal(store.has('seat-a'), false);
   const onDisk = fs.readFileSync(path.join(dataDir, 'webhooks.json'), 'utf8');
   assert.equal(onDisk.includes(a), false, 'the ended seat\'s secret is erased');
@@ -217,6 +227,7 @@ test('registrations end with their seat; orphans are listed and deletable; every
     ['set', 'seat-a', 'owner-1'], ['set', 'seat-b', 'owner-1'], ['regenerate', 'seat-b', 'admin-2'],
     ['excerpt-on', 'seat-b', 'admin-2'], ['ended', 'seat-a', null], ['delete', 'seat-b', 'owner-1'],
   ]);
+  assert.equal(lines[4].target, 'http://127.0.0.1:9', 'the ended line keeps where the webhook pointed');
   const raw = fs.readFileSync(path.join(dataDir, 'webhooks-audit.jsonl'), 'utf8');
   for (const secret of [a, b]) assert.equal(raw.includes(secret), false);
   assert.equal(raw.includes('ilwh_'), false);

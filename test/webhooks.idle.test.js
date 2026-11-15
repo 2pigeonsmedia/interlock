@@ -58,14 +58,15 @@ test('a rung webhook seat is kept too (its last delivery succeeded)', async () =
   assert.deepEqual(await idlePass(roster, webhookIdleExempt(roster, () => true)), []);
 });
 
-test('pass expiry still ends it: an expired seat is not in the roster, so it is neither kept nor its webhook', () => {
+test('pass expiry still ends it: an expired seat is not in the roster, so it is not kept, and its webhook is erased as ended', () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-webhook-idle-'));
   const store = openWebhookStore({ dataDir });
   store.register('expired-seat', { url: 'http://127.0.0.1:9/' });
   // The roster the room reads lists live, unexpired seats only.
   const roster = [];
   assert.equal(webhookIdleExempt(roster, id => store.has(id)).has('expired-seat'), false);
-  assert.equal(store.retainOnly(new Set(roster.map(row => row.subject_id))), 1);
+  // The identity record lists an expired seat among the ended ones.
+  assert.equal(store.eraseEnded(new Set(['expired-seat'])), 1);
   assert.equal(store.has('expired-seat'), false);
 });
 

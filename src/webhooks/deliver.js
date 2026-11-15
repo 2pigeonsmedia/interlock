@@ -146,7 +146,6 @@ function sign(secret, body) {
  *   isLive      (subjectId) -> whether the seat is still admitted; checked
  *               before every attempt, so a seat that left, was removed or
  *               ended is never called again (A8)
- *   delivered   (subjectId) -> called after a 2xx: the seat is reachable
  * Tests may also pass retryDelaysMs, timeoutMs, resolve (a dns.lookup) and
  * tls (extra options for https, e.g. a test CA). `unfilteredLookupForTests`
  * replaces the public-address resolver, so a test can show that the check on
@@ -163,7 +162,6 @@ function createWebhookDelivery(options) {
   const lookup = typeof options.unfilteredLookupForTests === 'function' ? options.unfilteredLookupForTests
     : publicLookup(typeof options.resolve === 'function' ? options.resolve : dns.lookup);
   const isLive = typeof options.isLive === 'function' ? options.isLive : () => true;
-  const delivered = typeof options.delivered === 'function' ? options.delivered : () => {};
   const tlsOptions = options.tls && typeof options.tls === 'object' ? options.tls : {};
   const userAgent = `Interlock-Webhook/${typeof options.version === 'string' ? options.version : '0'}`;
   const clock = typeof options.clock === 'function' ? options.clock : Date.now;
@@ -276,9 +274,6 @@ function createWebhookDelivery(options) {
     }
     if (closed) return;
     note(subjectId, failure === null ? { ok: true, at: clock() } : { ok: false, at: clock(), error_class: failure });
-    if (failure === null) {
-      try { delivered(subjectId); } catch (_) { /* contact is a courtesy */ }
-    }
   }
 
   function start(subjectId, message, recipient) {

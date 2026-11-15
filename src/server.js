@@ -495,14 +495,30 @@ async function startInterlockServer(options) {
     // The seats in the room now: a webhook is called, and kept, only for these.
     const liveSeats = () => new Set(house.listParticipants({ now: Date.now() })
       .filter(row => row && row.kind === 'seat').map(row => row.subject_id));
-    const pruneWebhooks = () => { try { webhooks.retainOnly(liveSeats()); } catch (_) { /* next pass */ } };
+    // The seats the identity record says have ended (left, removed, released
+    // or expired), by their own ids: the only evidence a webhook is erased on.
+    const endedSeats = () => new Set(house.listRecentEndedSeats({ now: Date.now(), since: 0 })
+      .map(row => row.subject_id));
+    let pruneWarned = false;
+    const pruneWebhooks = () => {
+      let ended;
+      try { ended = endedSeats(); } catch (_) {
+        // No evidence, no erasing: said once, tried again next pass.
+        if (!pruneWarned) {
+          pruneWarned = true;
+          process.stderr.write('interlock: could not read which seats have ended; no webhook was cleared\n');
+        }
+        return;
+      }
+      try { webhooks.eraseEnded(ended); } catch (_) { /* next pass */ }
+    };
     pruneWebhooks();
     webhookDelivery = createWebhookDelivery(Object.assign(webhookTiming(process.env), {
       store: webhooks,
       isLive: subjectId => liveSeats().has(subjectId),
-      // A delivered ring is NOT contact: only the seat's own authenticated
-      // calls keep it from idle release, so a receiver answering 2xx cannot
-      // extend a credential nobody uses.
+      // There is deliberately no hook for a delivered ring: a 2xx is never
+      // the seat's contact, so a receiver cannot extend a credential nobody
+      // uses.
       hosted: Boolean(hosted),
       // The handler builds the ring, as its rings route does; it exists by
       // the time any message is saved.
@@ -628,7 +644,7 @@ async function startInterlockServer(options) {
     }) : null;
     const handler = createFirstOwnerHandler({
       house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler, work, people,
-      webhooks, liveSeats,
+      webhooks, liveSeats, endedSeats,
     });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));

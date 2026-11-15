@@ -210,17 +210,22 @@ function openWebhookStore(options) {
     return true;
   }
 
-  /* MED-2: a registration lives only as long as its seat. Every record whose
-   * seat is not in `live` (left, removed, revoked, ended) is deleted, and its
-   * secret with it. Returns how many went. */
-  function retainOnly(live) {
-    if (!(live instanceof Set)) throw fail('invalid-request');
-    const gone = [...records.keys()].filter(subjectId => !live.has(subjectId));
+  /* A registration lives only as long as its seat. It is erased, secret
+   * and all, ONLY on positive evidence: `ended` is the set of seats the
+   * identity record itself says have ended (left, removed, released or
+   * expired), each by its own id. A seat merely missing from some read is
+   * never erased, so a read that under-reports deletes nothing. Returns how
+   * many went. */
+  function eraseEnded(ended) {
+    if (!(ended instanceof Set)) throw fail('invalid-request');
+    const gone = [...records.values()].filter(record => ended.has(record.subject_id));
     if (gone.length === 0) return 0;
     const next = new Map(records);
-    for (const subjectId of gone) next.delete(subjectId);
+    for (const record of gone) next.delete(record.subject_id);
     persist(next);
-    for (const subjectId of gone) audit('ended', subjectId, null, records.get(subjectId) || null);
+    // The records read above, before the store moved on: each line keeps
+    // where the webhook pointed.
+    for (const record of gone) audit('ended', record.subject_id, null, record);
     return gone.length;
   }
 
@@ -230,7 +235,7 @@ function openWebhookStore(options) {
     return Object.freeze([...records.values()].filter(record => !live.has(record.subject_id)).map(maskedView));
   }
 
-  return Object.freeze({ has, view, list, register, regenerate, setExcerpt, remove, retainOnly, orphans,
+  return Object.freeze({ has, view, list, register, regenerate, setExcerpt, remove, eraseEnded, orphans,
     signingRecord, file, auditFile });
 }
 

@@ -395,7 +395,7 @@ function deliveryQuery(target) {
 }
 
 function createFirstOwnerHandler(options) {
-  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people, webhooks, liveSeats } = options || {};
+  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people, webhooks, liveSeats, endedSeats } = options || {};
   const hostedMode = hosted ? hosted : null;
   if (!house || !house.firstOwner || !house.authenticators || !house.sessions || !house.login ||
       typeof house.authorizeRead !== 'function' || typeof house.authorizeWrite !== 'function' ||
@@ -3858,7 +3858,8 @@ function createFirstOwnerHandler(options) {
           (input.url !== undefined && typeof input.url !== 'string')) return sendJson(request, response, 400, { ok: false, error: 'invalid-webhook' });
       // A seat that ended takes its registration with it (MED-2), so it
       // never holds a place under the cap.
-      if (typeof liveSeats === 'function') { try { webhooks.retainOnly(liveSeats()); } catch (_) { /* below */ } }
+      // Only seats the identity record says have ended (never "missing").
+      if (typeof endedSeats === 'function') { try { webhooks.eraseEnded(endedSeats()); } catch (_) { /* below */ } }
       const seat = webhookSeat(request, response, input.name);
       if (!seat) return;
       return webhookAnswer(request, response, seat.name, () => act(seat.subject_id, input, actor.subject_id));
