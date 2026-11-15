@@ -2506,6 +2506,14 @@ function admissionBody(profile, declared = {}) {
   }, declared.project ? { project: declared.project } : {}, declared.model ? { model: declared.model } : {});
 }
 
+// The one knock for a candidate: the exact body join sends, to the
+// candidate's own room. A doorbell holding a pending profile re-posts with
+// this, so its knock is identical to join's (same request, selector and
+// digest; never the token). Answers the room's result or throws as knock.
+function knockCandidate(fetcher, profile, declared = {}) {
+  return knock(fetcher, profile.server_url, admissionBody(profile, declared));
+}
+
 function joinedOutput(stdout, profile, start = 'tip', facts = null) {
   line(stdout, `Connected as ${profile.name} (${profile.product}).`);
   if (facts) {
@@ -4232,6 +4240,7 @@ module.exports = {
   runRestore,
   runCodexPolicy,
   settleCandidate,
+  knockCandidate,
   commandOptions,
   joinOptions,
   storageOptions,

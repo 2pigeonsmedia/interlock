@@ -577,3 +577,29 @@ test('the immediate answer moves no cooldown and no pending count', async () => 
     'the cap still has room for a second request');
   world.service.close();
 });
+
+test('an identical re-knock after decline or expiry creates nothing and takes no pending slot', async () => {
+  const world = fixture({ maxPending: 1, pendingTtlMs: 100 });
+  const declinedBody = candidate(1);
+  assert.equal((await world.service.knock(declinedBody, { timeoutMs: 0 })).state, 'waiting');
+  const declined = world.service.decline(requestId(1));
+  assert.equal(declined.state, 'declined');
+  assert.deepEqual(await world.service.knock(declinedBody, { timeoutMs: 100 }), declined,
+    'the identical knock answers the decline at once');
+  assert.deepEqual(world.service.list(), [], 'no request was made');
+
+  const expiringBody = candidate(2, 'Finch');
+  world.setTime(1_200);
+  assert.equal((await world.service.knock(expiringBody, { timeoutMs: 0 })).state, 'waiting');
+  world.setTime(1_301);
+  const expired = await world.service.knock(expiringBody, { timeoutMs: 100 });
+  assert.equal(expired.state, 'expired');
+  assert.deepEqual(await world.service.knock(expiringBody, { timeoutMs: 100 }), expired);
+  assert.deepEqual(world.service.list(), [], 'no request was made');
+
+  // The single pending slot is still free: neither terminal record holds it.
+  world.setTime(1_400);
+  assert.equal((await world.service.knock(candidate(3, 'Grok'), { timeoutMs: 0 })).state, 'waiting',
+    'ARRANGEMENT/OUTCOME: the cap of one still admits a new request');
+  world.service.close();
+});
