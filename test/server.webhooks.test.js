@@ -364,3 +364,28 @@ test('a seat that leaves takes its registration and secret with it; a leftover i
   const audit = fs.readFileSync(path.join(dataDir, 'webhooks-audit.jsonl'), 'utf8');
   assert.equal(audit.includes('ilwh_'), false);
 });
+
+test('a webhook ring for an answer to the seat\'s ask carries kind reply, a string, never a Promise', async () => {
+  const { runtime, owner, scout, names } = await setUp();
+  const S = names.scout;
+  const target = await receiver();
+  const set = await room.post(runtime, '/api/settings/webhooks/set', { name: S, url: `http://127.0.0.1:${target.port}/hook` }, owner);
+  assert.equal(set.status, 200, set.text);
+  const asked = await room.aiPost(runtime, '/api/ai/annotated-messages', {
+    text: 'may I merge?', client_message_id: crypto.randomUUID(),
+    annotation: { ask: { of: 'Ana', means: 'I merge the candidate and nothing else' } },
+  }, scout.token);
+  assert.equal(asked.status, 201, asked.text);
+  // Arrangement: the seat's own ask rings nobody's webhook.
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(target.seen.length, 0, 'arrangement: no call before the answer');
+  const answer = await room.post(runtime, '/api/annotated-messages',
+    { text: 'yes', annotation: { answers: [{ ask_id: asked.json.message.id, choice: 'yes' }] } }, owner);
+  assert.equal(answer.status, 201, answer.text);
+  await eventually(() => target.seen.length >= 1, 'the answer called the webhook');
+  const body = JSON.parse(target.seen[0].body);
+  assert.equal(body.message_id, answer.json.message.id);
+  assert.equal(typeof body.kind, 'string', 'kind is a string (an un-awaited Promise would serialize as {})');
+  assert.equal(body.kind, 'reply', 'the webhook says reply for an answer, as stdout does (C4)');
+  assert.equal(Ring.validRing(body), true);
+});
