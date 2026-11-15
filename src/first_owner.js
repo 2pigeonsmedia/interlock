@@ -2462,9 +2462,11 @@ function createFirstOwnerHandler(options) {
           room_time: Ring.roomTime(now, clock.person),
           last_person_message_ago: Ring.ago(clock.last_person_message_at, now),
         });
+        const kinds = await Promise.all(result.messages.map(message =>
+          ringKindFor(message, { subject_id: reauthorized.subject_id, name: clock.connection })));
         rings = rings.map((ring, index) => Object.freeze(Object.assign({}, ring, {
           ring: Ring.buildRing({
-            kind: ringKindFor(result.messages[index], reauthorized.subject_id),
+            kind: kinds[index],
             message_id: ring.id, from: ring.byline, at: ring.ts, connection: clock.connection,
             now, person: clock.person, last_person_message_at: clock.last_person_message_at,
           }),
@@ -3592,11 +3594,14 @@ function createFirstOwnerHandler(options) {
     });
   }
 
-  /* Which kind of ring a message is for this seat (A12). Every ring the
-   * room makes today is a message addressed to the seat: a mention. The
-   * reply rule (A4) adds its own. */
-  function ringKindFor(_message, _subjectId) {
-    return Ring.ringKind({ mentioned: true });
+  /* Which kind of ring a message is for this seat (A12): a mention (an @ of
+   * it, or an ask of it) or a reply (an answer to its ask, or a post that
+   * discusses it). The A4 reply cause, "addressed since", joins here. A ring
+   * the room delivered for no cause it can name now (the roster changed)
+   * reads as a mention: it was addressed to the seat. */
+  async function ringKindFor(message, seat) {
+    const causes = typeof chat.ringCauses === 'function' ? await chat.ringCauses(message, seat) : {};
+    return Ring.ringKind(causes) || 'mention';
   }
 
   // The room time line that leads `work brief`, `history` and each ring.

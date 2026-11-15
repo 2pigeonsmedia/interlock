@@ -685,6 +685,18 @@ function createChatService(options) {
   }
 
 
+  /* The causes a message rings a seat for (A12): an @ of it, an ask of it,
+   * an answer to its ask, or a post discussing its ask. */
+  async function ringCauses(message, seat) {
+    requireOpen();
+    const mentioned = resolveRecipients(message.text, [{ subject_id: seat.subject_id, name: seat.name, kind: 'seat' }],
+      message.subject_id).length > 0;
+    const asks = typeof store.askCauses === 'function'
+      ? await store.askCauses(message.id, seat.subject_id)
+      : { asked: false, answers_its_ask: false, discusses_its_ask: false };
+    return Object.freeze(Object.assign({ mentioned }, asks));
+  }
+
   async function lastPersonMessageAt() {
     requireOpen();
     return typeof store.lastPersonMessageAt === 'function' ? await store.lastPersonMessageAt() : null;
@@ -790,7 +802,7 @@ function createChatService(options) {
     append, appendAnnotated, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
-    touchParticipant, notePoll, notePause, noteWebhookDelivery, lastPersonMessageAt, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
+    touchParticipant, notePoll, notePause, noteWebhookDelivery, lastPersonMessageAt, ringCauses, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });
 }
 

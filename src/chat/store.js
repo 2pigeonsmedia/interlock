@@ -1116,6 +1116,25 @@ function openStore(opts) {
     });
   }
 
+  /* Why a message rings this seat, from the room's stored asks (A12): it
+   * asks the seat, answers one of the seat's asks, or discusses one. */
+  function askCauses(messageId, subjectId) {
+    return exclusive(() => {
+      requireOpen();
+      const askerIs = askId => {
+        const ask = asks.asks.get(askId);
+        return Boolean(ask && ask.asker_subject_id === subjectId);
+      };
+      const own = asks.asks.get(messageId);
+      const row = asks.posts.get(messageId);
+      return Object.freeze({
+        asked: Boolean(own && own.of_subject_id === subjectId),
+        answers_its_ask: Boolean(row && row.answers.some(answer => askerIs(answer.ask_id))),
+        discusses_its_ask: Boolean(row && row.discusses && askerIs(row.discusses.ask_id)),
+      });
+    });
+  }
+
   /* For the host only, never a route: who asked each of these asks, so an
    * answer or a reply to an ask can ring its asker. Unknown ids are left out. */
   function askersOf(askIds) {
@@ -1528,7 +1547,7 @@ function openStore(opts) {
   }
 
   return Object.freeze({
-    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch, notePoll, lastPersonMessageAt,
+    append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch, notePoll, lastPersonMessageAt, askCauses,
     participantState, coordinateIdleRelease, deliveryChanges, close,
     annotate, stamp, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf, repliedAskProject,
   });
