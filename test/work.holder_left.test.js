@@ -268,7 +268,7 @@ test('a departure notice: one per recipient, listing its items by project, never
 
 test('the server runs the sweep after each idle release, and a failed sweep fails no read', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
-  assert.match(server, /releaseIdleSeats\(\{ house, store: chatStore, now(, exempt: kept)? \}\)\)\s*\.then\(released => \{[\s\S]*?try \{ endDepartedGrants\(\{ people, house, now \}\); \} catch \(_\)/);
+  assert.match(server, /releaseIdleSeats\(\{ house, store: chatStore, now \}\)\)\s*\.then\(released => \{[\s\S]*?try \{ endDepartedGrants\(\{ people, house, now \}\); \} catch \(_\)/);
   assert.match(server, /live: liveSubjects,/, 'the work service knows who is in the room');
 });
 
