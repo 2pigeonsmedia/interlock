@@ -4,7 +4,8 @@
 // code AFTER it answered "waiting" (or on a resume): the request may still be
 // held. The current room never sends that refusal for a held request; this
 // guard is for a room that does. A fake room answers waiting, then the code
-// refusal.
+// refusal. Each test has its own timeout, so a changed room fails it by name
+// instead of hanging the run.
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -34,9 +35,14 @@ async function join(dir, args, fetchImpl, now = 5_000) {
   }, {
     config: { resolveConnectionDir: () => dir },
     doorbellStateDir: path.join(path.dirname(dir), 'doorbells'),
-    env: {}, clock: () => now, sleep: async () => {},
+    // A clock that moves: each read is 100 ms later and a sleep passes its
+    // time, so a join looping on a changed room meets its own deadline.
+    env: {}, clock: () => (now += 100), sleep: async ms => { now += ms; },
     ask: async () => { throw new Error('must not prompt'); },
     async fetch(url, options) {
+      // Yield to the event loop on every request: a join that loops on a
+      // changed room must still let the test's timeout fire.
+      await new Promise(resolve => setImmediate(resolve));
       if (url.endsWith('/api/ai/admissions')) knocks += 1;
       return fetchImpl(url, options, knocks);
     },
@@ -46,7 +52,7 @@ async function join(dir, args, fetchImpl, now = 5_000) {
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-code-guard-')), 'profiles');
 
-test('a code refused after "waiting" keeps the candidate; --resume records a later Allow', async () => {
+test('a code refused after "waiting" keeps the candidate; --resume records a later Allow', { timeout: 30_000 }, async () => {
   const dir = tmp();
   let sent = null;
   const first = await join(dir, ['--url', ROOM, '--product', 'Claude Code', '--name', 'Kestrel', '--code', 'AAAAA-BBBBB'],
@@ -73,7 +79,7 @@ test('a code refused after "waiting" keeps the candidate; --resume records a lat
   assert.equal(profiles.load('Kestrel').state, 'admitted');
 });
 
-test('a resumed candidate whose knock is refused its code is kept', async () => {
+test('a resumed candidate whose knock is refused its code is kept', { timeout: 30_000 }, async () => {
   const dir = tmp();
   const profiles = openProfiles({ connectionDir: dir });
   const credential = identity.newAiCredential();
@@ -87,7 +93,7 @@ test('a resumed candidate whose knock is refused its code is kept', async () => 
   assert.equal(profiles.load('Kestrel').state, 'unadmitted', 'kept');
 });
 
-test('control: a first knock refused for its code (the room holds nothing) still removes the candidate', async () => {
+test('control: a first knock refused for its code (the room holds nothing) still removes the candidate', { timeout: 30_000 }, async () => {
   const dir = tmp();
   const result = await join(dir, ['--url', ROOM, '--product', 'Claude Code', '--name', 'Kestrel', '--code', 'WRONG-CODE1'],
     async url => url.endsWith('/api/ai/admissions') ? refusedCode() : json(401, { ok: false, error: 'invalid-connection' }));
