@@ -33,6 +33,20 @@ async function morePolls(fake, count) {
   assert.ok(reached, `the adapter did not poll ${count} more times`);
 }
 
+// The adapter's exit, within a bound: one that never exits fails by name
+// instead of hanging the file.
+async function exitOf(running, bound = 20_000) {
+  let timer;
+  const limit = new Promise(resolve => { timer = setTimeout(() => resolve(null), bound); });
+  const done = await Promise.race([running.exited, limit]);
+  clearTimeout(timer);
+  if (done === null) {
+    running.child.kill('SIGKILL');
+    assert.fail(`the adapter did not exit within ${bound} ms: ${JSON.stringify(running.stderr)}`);
+  }
+  return done;
+}
+
 function ppidOf(pid) {
   if (process.platform !== 'linux') return null;
   try {
@@ -56,14 +70,14 @@ test('a ring the adapter could not write is not swallowed: the cursor stays and 
   await morePolls(fake, 1);
 
   fake.respond = after => room.ringsAfter(after, RING_SIX, 6, 50);
-  const done = await running.exited;
+  const done = await exitOf(running);
   assert.notEqual(done.code, 0, 'an adapter that cannot write a ring must not report success');
   assert.equal(room.savedCursor(world.stateDir), 5, 'the ring it could not write must not be marked seen');
   assert.equal(room.lockHeld(world), false, 'the lock is released for the next adapter');
 
   // The next adapter, with a reader, rings it.
   fake.respond = after => room.ringsAfter(after, RING_SIX, 6);
-  const next = await room.startAdapter(world, ['--once']).exited;
+  const next = await exitOf(room.startAdapter(world, ['--once']));
   assert.equal(next.code, 0, next.stderr);
   assert.match(next.stdout, /^Interlock rang for Marlow: /);
   assert.equal(room.savedCursor(world.stateDir), 6);
@@ -81,7 +95,7 @@ test('an adapter whose output closed says so, plainly, and records when', async 
   const pid = running.child.pid;
   running.child.stdout.destroy();
   fake.respond = after => room.ringsAfter(after, RING_SIX, 6, 50);
-  const done = await running.exited;
+  const done = await exitOf(running);
 
   assert.match(done.stderr, /output (is )?closed/i, done.stderr);
   assert.doesNotMatch(done.stderr, /\n\s+at /, 'a closed output is reported, not thrown as a stack trace');
@@ -153,7 +167,7 @@ test('the lock refusal names the owner and the way to replace it', async () => {
   await morePolls(fake, 1);
   assert.equal(room.runtimeOf(world).pid, first.child.pid);
 
-  const second = await room.startAdapter(world, ['--once']).exited;
+  const second = await exitOf(room.startAdapter(world, ['--once']));
   assert.equal(second.code, 1);
   assert.match(second.stderr, new RegExp(`pid ${first.child.pid}\\b`), second.stderr);
   assert.match(second.stderr, /started \d{4}-\d{2}-\d{2}T/, second.stderr);
@@ -173,12 +187,12 @@ test('--replace-stale stops the adapter that owns this connection and takes over
   first.child.stdout.destroy();
 
   fake.respond = after => room.ringsAfter(after, RING_SIX, 6, 50);
-  const second = await room.startAdapter(world, ['--replace-stale', '--once']).exited;
+  const second = await exitOf(room.startAdapter(world, ['--replace-stale', '--once']));
   assert.equal(second.code, 0, second.stderr);
   assert.match(second.stderr, new RegExp(`stopped .*pid ${first.child.pid}\\b`), second.stderr);
   assert.match(second.stdout, /^Interlock rang for Marlow: /, 'the new adapter rings what the old one could not');
   assert.equal(room.savedCursor(world.stateDir), 6);
-  await first.exited;
+  await exitOf(first);
 });
 
 test('--replace-stale never stops a process that is not this connection\'s doorbell', async () => {
@@ -205,7 +219,7 @@ test('--replace-stale never stops a process that is not this connection\'s doorb
   impostor.stdout.on('data', chunk => { held += chunk; });
   assert.ok(await room.waitUntil(() => held.includes('HELD')), 'arrangement: the impostor holds the lock');
 
-  const second = await room.startAdapter(world, ['--replace-stale', '--once']).exited;
+  const second = await exitOf(room.startAdapter(world, ['--replace-stale', '--once']));
   assert.equal(second.code, 1, second.stderr);
   assert.match(second.stderr, /not (a|this connection's) doorbell|could not be confirmed/i, second.stderr);
   assert.equal(room.pidAlive(impostor.pid), true, 'the impostor was not stopped');
