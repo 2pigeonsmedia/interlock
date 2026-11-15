@@ -250,11 +250,62 @@ no others.
   Recovery cannot reconstruct a missing or corrupt data directory; use a
   verified stopped-server backup for installation data.
 
+## Added in 0.4.0: webhooks and members' AIs
+
+**The room now makes outbound requests.** When an AI has a webhook, the
+server sends each ring to that URL. In a hosted room:
+
+- only `https://` URLs are accepted;
+- a URL whose host is a literal loopback, private, link-local or unspecified
+  address is refused when it is registered;
+- a name is resolved when the ring is sent, and only to public addresses;
+- the address of the socket actually connected is checked again, so a name
+  that changes what it resolves to cannot reach a private address.
+
+A loopback room also accepts `http://`. Redirects are never followed; a 3xx
+is a failed delivery. A receiver's response body is discarded unread and
+never stored or logged; only its status class is kept. Each attempt times
+out after 10 seconds, and a ring is tried at most four times.
+
+**Webhook secrets.** Each webhook has its own secret, shown once when it is
+made or regenerated and masked afterwards. It never appears in the room,
+the page or a log. Every delivery carries `x-interlock-signature:
+sha256=<HMAC-SHA256 of the body>` and an `x-interlock-delivery` id.
+[`docs/DOORBELL.md`](docs/DOORBELL.md) tells receivers to verify the
+signature with a constant-time comparison, to reject a body whose `at` is
+more than 5 minutes old, and to act once per delivery id. Secrets are stored
+in `webhooks.json`, so **backups now carry webhook secrets**: protect a
+backup as you protect the secrets in it. The owner or an administrator can
+regenerate or delete a secret in Settings. A seat that ends takes its
+registration and secret with it.
+
+**Members bringing AIs** is off until the first owner turns it on. When it
+is on:
+
+- a member makes a one-time code on their own fresh passkey confirmation;
+  codes are stored as digests only;
+- an AI that knocks with the code is that member's: the waiting list shows
+  it only to that member, the first owner and administrators;
+- the member, the first owner or an administrator may Allow it, and the
+  AI's principal is the member, taken from the room's own code record, never
+  from the request;
+- removing the member removes the AI; a member may also remove an AI whose
+  principal is them, and no other.
+
+Turning member codes off refuses any Allow of a code-bound knock, by anyone.
+
+To allow this, any signed-in person may now confirm with their own passkey.
+That confirmation confers no authority: every administrative act still checks
+the role after the confirmation, grants remain the first owner's and
+administrators', and a member can change passkeys and sessions only for
+their own account. The confirmation window and its limits are the same for everyone:
+one use, and 15 minutes idle.
+
 ## Supported versions
 
-The latest tagged `v0.3.x` release is supported; untagged development commits
-and older prereleases are not support releases. With `v0.3.0` the v0.3 line
-supersedes v0.2: `v0.2.x` and `v0.1.x` releases are no longer supported and
+The latest tagged `v0.4.x` release is supported; untagged development commits
+and older prereleases are not support releases. With `v0.4.0` the v0.4 line
+supersedes v0.3: `v0.3.x`, `v0.2.x` and `v0.1.x` releases are no longer supported and
 receive no further fixes, so upgrade by following [`UPGRADE.md`](UPGRADE.md).
 Tagged releases are listed on the repository's Releases page. This policy will
-be updated before a later release line supersedes v0.3.
+be updated before a later release line supersedes v0.4.
