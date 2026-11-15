@@ -36,6 +36,8 @@ const LEGACY_SCHEMA = 1;
 const MAX_TEXT_BYTES = 32 * 1024;
 const MAX_BYLINE_BYTES = 256;
 const MAX_READ_LIMIT = 100;
+// How far back a reply looks for whoever addressed its author (#859).
+const REPLY_SCAN_LIMIT = 500;
 const PEEK_SCAN_LIMIT = 500;
 const PEEK_FIND_MAX = 200;
 const KINDS = Object.freeze(['person', 'seat']);
@@ -1130,6 +1132,29 @@ function openStore(opts) {
     });
   }
 
+  /* For the host only, never a route: the posts by others since this
+   * subject's own latest post (newest first, at most REPLY_SCAN_LIMIT), each
+   * with whom its ask named, so a reply can ring whoever addressed its author
+   * (#859). Nothing is stored; it is read from the log the room already has. */
+  function postsSinceOwn(subjectId) {
+    return exclusive(() => {
+      requireOpen();
+      if (!boundedString(subjectId, 64)) fail('invalid-read');
+      const found = [];
+      for (let i = messages.length - 1; i >= 0 && found.length < REPLY_SCAN_LIMIT; i--) {
+        const message = messages[i];
+        if (message.subject_id === subjectId) break;
+        const row = asks.posts.get(message.id);
+        found.push(Object.freeze({
+          id: message.id, subject_id: message.subject_id, byline: message.byline, kind: message.kind,
+          text: message.text,
+          ask_of: row && row.ask ? row.ask.of_subject_id : null,
+        }));
+      }
+      return Object.freeze(found);
+    });
+  }
+
   /* The ask a seat's earlier post with this client id carried, so a retry
    * can be answered by the idempotency rule even if the addressee has since
    * left the roster. */
@@ -1519,6 +1544,7 @@ function openStore(opts) {
     append, read, peekBefore, peekFind, head, snapshot, clear, acknowledge, touch, notePoll,
     participantState, coordinateIdleRelease, deliveryChanges, close,
     annotate, stamp, readAnnotationRows, openAsks, priorAsk, postFacts, addresseeAnswers, revisionOf, askersOf, repliedAskProject,
+    postsSinceOwn,
   });
 }
 
