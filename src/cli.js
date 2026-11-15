@@ -69,6 +69,11 @@ Usage:
   interlock doorbell resume --connection NAME [--json]
   interlock status --connection NAME [--state-dir ABSOLUTE_PATH] [--json]
   interlock leave --connection NAME [--json]
+      Leave is for when you want the connection truly left, not resumable:
+      the seat ends, its grants end, and its work goes to its lead or waits
+      for one. To stop for now and come back as the same connection, do not
+      leave: stop the doorbell (People shows not listening) and start it again
+      later. During a long turn, "interlock doorbell pause" shows you working.
   interlock presence --connection NAME --file PATH | --clear [--json]
   interlock presence --connection NAME --project ID|none [--assign NAME] [--json]
   interlock presence --connection NAME --middle-stdin [--json]
