@@ -2360,7 +2360,7 @@ function admissionBody(profile, declared = {}) {
   declared.joinCode ? { join_code: declared.joinCode } : {});
 }
 
-/* A member's one-time AI join code (#821): `--code CODE`, `--code -` (read
+/* A member's one-time AI join code: `--code CODE`, `--code -` (read
  * from stdin), or INTERLOCK_JOIN_CODE, so the code need not sit in shell
  * history or the process list. Null when none is given. */
 async function joinCodeOf(parsed, io, dependencies) {

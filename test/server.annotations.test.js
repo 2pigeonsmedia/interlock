@@ -191,7 +191,7 @@ test('asks, answers and status ride the side-car routes; the message and the pla
 
     // Ana asks Scout without naming it: Scout is rung all the same. Lead,
     // whose ask of Ana is her latest address, is rung by her next post as
-    // well (#859: a reply rings whoever addressed you).
+    // well (a reply rings whoever addressed you).
     const toScout = await post(runtime, '/api/annotated-messages',
       { text: 'can you check the import?', annotation: { ask: { of: 'Scout' } } }, owner);
     assert.equal(toScout.status, 201, toScout.text);

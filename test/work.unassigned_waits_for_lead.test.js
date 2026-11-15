@@ -1,6 +1,6 @@
 'use strict';
 
-// #932 : unassigned work on a leaderless project waits for the
+// Unassigned work on a leaderless project waits for the
 // lead with the rest. The rule follows the PROJECT, not the filer: on a
 // project that has had a lead (a past lead grant in the log) and has none
 // now, all live unassigned work (nobody responsible, nobody next) joins its

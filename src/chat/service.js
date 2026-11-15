@@ -154,7 +154,7 @@ function createChatService(options) {
     return await appendWith(body, actor, false, null);
   }
 
-  /* A reply rings whoever addressed its author, without a tag (#859):
+  /* A reply rings whoever addressed its author, without a tag:
    * every other participant whose post since the author's own latest one
    * @mentioned the author's name or asked the author.
    * Read from the room's stored facts, never from the reply's own text. Who

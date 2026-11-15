@@ -36,7 +36,7 @@ const LEGACY_SCHEMA = 1;
 const MAX_TEXT_BYTES = 32 * 1024;
 const MAX_BYLINE_BYTES = 256;
 const MAX_READ_LIMIT = 100;
-// How far back a reply looks for whoever addressed its author (#859).
+// How far back a reply looks for whoever addressed its author.
 const REPLY_SCAN_LIMIT = 500;
 const PEEK_SCAN_LIMIT = 500;
 const PEEK_FIND_MAX = 200;
@@ -1135,8 +1135,8 @@ function openStore(opts) {
   /* For the host only, never a route: the posts by others since this
    * subject's own latest post (before `beforeId`, when given; newest first,
    * at most REPLY_SCAN_LIMIT), each
-   * with whom its ask named, so a reply can ring whoever addressed its author
-   * (#859). Nothing is stored; it is read from the log the room already has. */
+   * with whom its ask named, so a reply can ring whoever addressed its
+   * author. Nothing is stored; it is read from the log the room already has. */
   function postsSinceOwn(subjectId, beforeId = null) {
     return exclusive(() => {
       requireOpen();

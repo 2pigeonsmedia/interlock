@@ -503,7 +503,7 @@ async function startInterlockServer(options) {
         leadHeldOf: (project, now) => people.service.leadOf(project, now, liveSubjects(now)),
         // Whether a project has ever had a lead (a past lead grant in the
         // log): on one that has, and has none now, its unassigned work waits
-        // for the next lead (#932).
+        // for the next lead.
         hadLeadOf: project => people.service.hadLead(project) }),
       participants: meta => house.listParticipants(meta),
       // A cited room message, looked up by id; null when it is not in the

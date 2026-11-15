@@ -458,7 +458,7 @@ function createFirstOwnerHandler(options) {
   }
   const expectedHost = parsedOrigin.host;
   let bootstrapSecret = null;
-  // Member-issued AI join codes (#821): their own files, never 0.3.11's.
+  // Member-issued AI join codes: their own files, never 0.3.11's.
   const memberCodes = createMemberCodes({ dataDir,
     onEvent: typeof house.recordMemberCodeEvent === 'function' ? event => house.recordMemberCodeEvent(event) : undefined });
   /* The member a pending knock is for, or null. The pending list uses it to
@@ -503,7 +503,7 @@ function createFirstOwnerHandler(options) {
     return Object.freeze({ subject_id: authorized.subject_id });
   }
 
-  /* Any signed-in person, administrator or not (#821: a member issues codes,
+  /* Any signed-in person, administrator or not (a member issues codes,
    * elevates, and allows their own AI). Says which they are; the acts that
    * need more ask identity, which re-checks. */
   function personSession(request, response, mutation) {
@@ -706,7 +706,7 @@ function createFirstOwnerHandler(options) {
     if (!closedObject(body, [])) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
     }
-    // Any signed-in person may elevate (#821): every admin act
+    // Any signed-in person may elevate: every admin act
     // re-checks the role after the step-up is spent (identity withFreshAdmin).
     if (!personSession(request, response, true)) return;
     const begun = await house.authenticators.beginElevation(requestMeta(request, Date.now()));
@@ -952,7 +952,7 @@ function createFirstOwnerHandler(options) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-participant' });
     }
     // An administrator removes anyone but the owner; a member removes only
-    // their own AI (R8, #821), on their own fresh step-up. Identity decides.
+    // their own AI (R8), on their own fresh step-up. Identity decides.
     const person = personSession(request, response, true);
     if (!person) return;
     const at = Date.now();
@@ -1554,7 +1554,7 @@ function createFirstOwnerHandler(options) {
     const knock = Object.assign({}, body);
     const project = Object.prototype.hasOwnProperty.call(knock, 'project') ? knock.project : null;
     const model = Object.prototype.hasOwnProperty.call(knock, 'model') ? knock.model : null;
-    // A member's one-time AI join code (#821); checked by the knock route.
+    // A member's one-time AI join code; checked by the knock route.
     const joinCode = Object.prototype.hasOwnProperty.call(knock, 'join_code') ? knock.join_code : undefined;
     delete knock.project;
     delete knock.model;
@@ -3719,7 +3719,7 @@ function createFirstOwnerHandler(options) {
     }
   }
 
-  // ── member-issued AI join codes (#821) ─────────────────────────────────
+  // ── member-issued AI join codes ─────────────────────────────────
   /* A signed-in person makes a one-time code for an AI that will be theirs.
    * A code admits nothing by itself: the Allow is still theirs (or an
    * administrator's) on a fresh step-up. Shown once; only a digest is kept. */
@@ -3970,7 +3970,7 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
       return;
     }
-    // A knock that came by a member's code (#821) is that member's to allow or
+    // A knock that came by a member's code is that member's to allow or
     // decline, or any administrator's; the member stays its principal either
     // way. Taken from the room's own code record, never from the request.
     const issuer = knockIssuer(requestId);

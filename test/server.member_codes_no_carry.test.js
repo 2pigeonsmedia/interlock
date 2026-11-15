@@ -1,6 +1,6 @@
 'use strict';
 
-// #821: a member's AI never inherits another AI's earlier
+// A member's AI never inherits another AI's earlier
 // session. Allow of a same-name re-join carries the earlier session's grants
 // and items, as the allower's act. A knock that came by a member's code is
 // that member's AI, a different principal: its Allow, by the member or by an

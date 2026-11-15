@@ -733,7 +733,7 @@ function create(config) {
     };
   }
 
-  /* #821: a member's own AI. The host passes the member whose one-time code
+  /* A member's own AI. The host passes the member whose one-time code
    * the knock came by; identity allows it only for that member or an
    * administrator, each on a fresh step-up, and makes the member its
    * principal. */
@@ -947,7 +947,7 @@ function create(config) {
     return Object.freeze({ ok: true, name: result.name, kind: result.kind });
   }
 
-  // R8 (#821): a member removes their own AI, on their own fresh step-up.
+  // R8: a member removes their own AI, on their own fresh step-up.
   function revokeOwnAiSeat(meta, body) {
     if (meta === null || typeof meta !== 'object') {
       reject('revokeOwnAiSeat(meta, …) requires the trusted metadata object');
@@ -1162,7 +1162,7 @@ function create(config) {
     return result && result.ok === true ? Object.freeze({ ok: true }) : stepUpRefusal(result, null);
   }
 
-  // #821: a member's one-time AI join code, made on their own fresh step-up.
+  // A member's one-time AI join code, made on their own fresh step-up.
   function confirmMemberCodeIssue(meta) {
     if (meta === null || typeof meta !== 'object') {
       reject('confirmMemberCodeIssue(meta) requires the trusted metadata object');
@@ -1178,7 +1178,7 @@ function create(config) {
       ? Object.freeze({ ok: true, subject_id: result.subject_id }) : stepUpRefusal(result, null);
   }
 
-  /* #821, the audit trail of member AI join codes: one authorization row per
+  /* The audit trail of member AI join codes: one authorization row per
    * issue, use, cancel and expiry, in the shape the stream already carries
    * (capability `member-code.<event>`), so an older release reads it as it
    * reads any other row. Never the code itself. */

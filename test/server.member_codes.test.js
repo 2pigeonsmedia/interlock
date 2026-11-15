@@ -1,6 +1,6 @@
 'use strict';
 
-// #821 through the server: a member brings their own AI.
+// Through the server: a member brings their own AI.
 // - The first owner's switch is OFF until she turns it on; nobody else can.
 // - A member makes a one-time code; a knock carrying it is that member's.
 // - A wrong or spent code is refused before the knock takes a slot.

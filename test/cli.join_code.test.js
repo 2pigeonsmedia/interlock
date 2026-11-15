@@ -1,6 +1,6 @@
 'use strict';
 
-// #821: `join` carries a member's one-time AI join code, from `--code`, from
+// `join` carries a member's one-time AI join code, from `--code`, from
 // stdin with `--code -`, or from INTERLOCK_JOIN_CODE, so the code need not
 // sit in shell history. Without one it sends no `join_code` field at all (a
 // 0.3.11 room refuses unknown fields). A refused code says what to do.

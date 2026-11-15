@@ -276,7 +276,7 @@ test('join options are closed and preserve only non-secret adapter hints', () =>
     name: 'Marlow', product: 'Codex CLI', url: 'http://localhost:9123', project: 'finance', model: 'GPT-5 Codex',
     code: null,
   });
-  // A member's one-time join code (#821) is the one secret join takes; it is
+  // A member's one-time join code is the one secret join takes; it is
   // sent with the knock and never stored in the profile.
   assert.equal(joinOptions(['--code', 'ABCDE-FGHJK']).code, 'ABCDE-FGHJK');
   for (const args of [

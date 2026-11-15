@@ -94,7 +94,7 @@ const profileForm = document.querySelector('#profile-form');
 const profileLine = document.querySelector('#profile-line');
 const settingsYourStatus = document.querySelector('#settings-your-status');
 const settingsGrants = document.querySelector('#settings-grants');
-// #821: a member brings their own AI.
+// A member brings their own AI.
 const memberCodesSwitch = document.querySelector('#member-codes-switch');
 const memberCodesEnabled = document.querySelector('#member-codes-enabled');
 const memberCodesHint = document.querySelector('#member-codes-hint');
@@ -399,7 +399,7 @@ function showRoom(user) {
   }]);
   connectAiButton.disabled = !owner;
   connectAiButton.title = owner ? '' : 'Only the owner or an admin can connect an AI';
-  // Every signed-in person has Settings (their status, their own AI, #821);
+  // Every signed-in person has Settings (their status, their own AI);
   // the sections that manage the room are shown to the owner and admins only.
   settingsButton.disabled = user.kind !== 'person';
   settingsButton.title = '';
@@ -3243,6 +3243,8 @@ settingsButton.addEventListener('click', async () => {
   settingsGrants.hidden = !viewerIsAdmin();
   for (const section of settingsDialog.querySelectorAll('.settings-admin')) section.hidden = !viewerIsAdmin();
   memberCodeResult.hidden = true;
+  memberCodeCommand.textContent = '';
+  memberCodeValue.textContent = '';
   setSettingsStatus(memberCodeStatus, '');
   settingsDialog.showModal();
   loadMemberCodes().catch(() => setSettingsStatus(memberCodeStatus, 'Interlock could not load AI join codes.', 'error'));
@@ -3294,6 +3296,10 @@ allowEndedReuse.addEventListener('change', async () => {
 });
 
 settingsDialog.addEventListener('close', () => {
+  // A one-time code is shown once: gone from the page when Settings closes.
+  memberCodeCommand.textContent = '';
+  memberCodeValue.textContent = '';
+  memberCodeResult.hidden = true;
   inviteResultCode.textContent = '';
   inviteExpiry.textContent = '';
   inviteExpiry.removeAttribute('datetime');
@@ -3356,7 +3362,7 @@ clearTranscriptButton.addEventListener('click', async () => {
   }
 });
 
-// ── Bring your own AI (#821) ────────────────────────────────────────────
+// ── Bring your own AI ────────────────────────────────────────────
 const MEMBER_CODE_STATES = Object.freeze({ unused: 'unused', used: 'used', expired: 'expired', cancelled: 'cancelled' });
 
 async function loadMemberCodes() {
@@ -3419,7 +3425,8 @@ memberCodesEnabled.addEventListener('change', async () => {
 createMemberCodeButton.addEventListener('click', async () => {
   createMemberCodeButton.disabled = true;
   try {
-    const result = await ownerMutation('/api/member-codes/issue', {});
+    // Making a code takes the member's own fresh passkey step-up.
+    const result = await freshAdminMutation('/api/member-codes/issue', {});
     if (typeof result.code !== 'string' || !Number.isSafeInteger(result.expires_at)) throw new Error('invalid response');
     // Never the code inline: `--code -` reads it from standard input.
     memberCodeCommand.textContent =
@@ -3436,7 +3443,9 @@ createMemberCodeButton.addEventListener('click', async () => {
       showLogin('Your session ended. Sign in again to continue.');
       return;
     }
-    setSettingsStatus(memberCodeStatus, error.code === 'code-cap'
+    setSettingsStatus(memberCodeStatus, (error.name === 'NotAllowedError' || error.code === 'passkey-cancelled')
+      ? 'Passkey confirmation was cancelled. No code was made.'
+      : error.code === 'code-cap'
       ? 'You already have 3 unused codes. Use or cancel one first.'
       : (error.code === 'member-codes-off' ? 'The owner has not turned this on.' : 'Interlock did not make a code. Try again.'), 'error');
   } finally {

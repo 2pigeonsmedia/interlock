@@ -354,7 +354,7 @@ function createService(opts) {
 
   /* `gate(actorId, assurance)` answers who may do the act, as `can()` does;
    * by default it is `can()`'s admin check on `resource`. Only the member AI
-   * admission (#821) passes another: the principal itself, or an admin. */
+   * admission passes another: the principal itself, or an admin. */
   function withFreshAdmin(optsIn, workflow, resource, body, gate) {
     const allowed = typeof gate === 'function' ? gate
       : (actorId, assurance) => authzAllow(actorId, resource, assurance);
@@ -528,7 +528,7 @@ function createService(opts) {
 
   /* One AI admission, in one repository transaction: the seat, its pass,
    * the room grants and the enrolment intent. `principalId` is whom the seat
-   * acts for: the administrator who allowed it, or (#821) the member whose
+   * acts for: the administrator who allowed it, or the member whose
    * code it came by. */
   function admitAiSeat(candidate, principalId, now, label, checkInDraft, ownSeatsOnly) {
     const requestId = candidate.request_id;
@@ -551,7 +551,7 @@ function createService(opts) {
         subject.tenant === TENANT() && subject.name_fold === nameFold &&
         !(Number.isFinite(subject.expires_at) && subject.expires_at > 0 &&
           subject.expires_at <= now));
-      // A member's AI (#821) may end only that member's own live AI of the
+      // A member's AI may end only that member's own live AI of the
       // same name, never someone else's.
       if (held && !existingCredential && ownSeatsOnly === true && held.principal !== principalId) {
         throw new Error('administration.' + label + ': the name is held by another principal\'s AI');
@@ -636,7 +636,7 @@ function createService(opts) {
       ({ actorId, now }) => admitAiSeat(candidate, actorId, now, 'allowAiAdmission'));
   }
 
-  /* A member's own AI (#821). The host has matched the knock to a one-time
+  /* A member's own AI. The host has matched the knock to a one-time
    * code that member issued and passes that member as `principal_subject_id`.
    * Who may allow it: that member, on their own fresh step-up, or an
    * administrator on theirs. The seat's principal is the member either way:
@@ -1035,7 +1035,7 @@ function createService(opts) {
     });
   }
 
-  /* R8 (#821): a member removes their OWN AI, on their own fresh step-up.
+  /* R8: a member removes their OWN AI, on their own fresh step-up.
    * Only an active AI seat whose principal is the caller; never a person,
    * never another's AI. Administrators keep revokeParticipant for the rest. */
   function revokeOwnAiSeat(optsIn) {
@@ -1104,7 +1104,7 @@ function createService(opts) {
       Object.freeze({ ok: true }));
   }
 
-  /* A member makes a one-time AI join code (#821) on their own fresh
+  /* A member makes a one-time AI join code on their own fresh
    * step-up. A code admits nothing alone, but an administrator may Allow a
    * code-bound knock trusting "brought by <member>", so the code must come
    * from the member at full strength, never from an ordinary session alone.

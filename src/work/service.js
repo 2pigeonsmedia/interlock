@@ -296,7 +296,7 @@ function createWorkService(options) {
     return (holderLeft(item).length > 0 || unassignedOnLedProject(item)) && leaderless(item.project, now);
   }
   /* Live work with nobody responsible and nobody next, on a project that has
-   * had a lead (#932): whoever filed it, only a lead can act on it. On a
+   * had a lead: whoever filed it, only a lead can act on it. On a
    * project that never had one (Operations, say) it routes as before. */
   function unassignedOnLedProject(item) {
     if (!unowned(item) || !hadLeadOf) return false;
@@ -808,7 +808,7 @@ function createWorkService(options) {
    * longer on the project or whose holder is back. Returns {inherited,
    * failed, unassigned}: the ids moved, the ids whose update was refused,
    * each left as it was, and the unassigned ids now the new lead's by
-   * routing (#932), none of them written. */
+   * routing, none of them written. */
   function inheritWaiting(actor, input) {
     requireActor(actor);
     const body = closedObject(input, ['project', 'ids', 'to', 'grant_id', 'ended']);
@@ -822,7 +822,7 @@ function createWorkService(options) {
       const draft = store.read();
       if (!draft) fail('store-damaged');
       const item = draft.items.find(row => row.id === id);
-      // Unassigned work has no slot to re-point (#932): it is the new lead's
+      // Unassigned work has no slot to re-point: it is the new lead's
       // by routing alone, so it is named, not written.
       if (item && item.project === body.project && unassignedOnLedProject(item)) {
         unassigned.push(id);

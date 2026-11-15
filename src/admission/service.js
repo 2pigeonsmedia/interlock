@@ -538,7 +538,7 @@ function openAdmissionService(optionsIn) {
   }
 
   /* `principalSubjectId`, when given, is the member whose one-time code the
-   * knock came by (#821): identity then makes that member the AI's principal
+   * knock came by: identity then makes that member the AI's principal
    * and allows it only for that member or an administrator. Absent, the
    * administrator who allows is the principal, as before. */
   function allow(requestId, meta, principalSubjectId) {

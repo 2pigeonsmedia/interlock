@@ -1,6 +1,6 @@
 'use strict';
 
-// A reply rings whoever addressed you, without a tag (#859): a post by X
+// A reply rings whoever addressed you, without a tag: a post by X
 // rings Y when Y addressed X (by an @mention or an ask) at any point since
 // X's previous post, and Y is not X.
 

@@ -1,6 +1,6 @@
 'use strict';
 
-// Member-issued AI join codes (#821). A member makes a one-time code for an AI
+// Member-issued AI join codes. A member makes a one-time code for an AI
 // that will be theirs; the AI's knock carries it; the room then knows, as its
 // own fact, whom that knock is for. A code admits nothing by itself: the Allow
 // is still the member's (or an administrator's) on a fresh step-up, and the

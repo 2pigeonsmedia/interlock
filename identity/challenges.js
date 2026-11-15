@@ -16,7 +16,7 @@ const CHALLENGE_TTL_MS = 300_000; // 5 minutes
 const CEREMONY_ID_BYTES = 32;
 const MAX_CHALLENGES_TOTAL = 1024;
 // Live ceremonies per person and purpose. Past it, that person's oldest goes:
-// one person (an administrator or, since #821, any member who can elevate)
+// one person (an administrator or, since 0.4.0, any member who can elevate)
 // can never fill the shared store and lock everyone else out.
 const MAX_CHALLENGES_PER_PERSON = 4;
 const MAX_COLLISION_REROLLS = 8;

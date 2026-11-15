@@ -1,6 +1,6 @@
 'use strict';
 
-// The member-code store's own rules (#821): off by default, three unused per
+// The member-code store's own rules: off by default, three unused per
 // member, fifteen minutes, one knock each (a re-knock with the same request id
 // reads the same issuer), a cancelled code is no one's, and only digests on
 // disk, in files of their own.

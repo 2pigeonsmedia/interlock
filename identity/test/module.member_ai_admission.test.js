@@ -1,6 +1,6 @@
 'use strict';
 
-// #821: a member brings their own AI. The host has matched a knock to a
+// A member brings their own AI. The host has matched a knock to a
 // one-time code a member issued and passes that member as the principal.
 // Identity allows it only for that member, or an administrator, each on a
 // fresh passkey step-up, and the seat's principal is the MEMBER either way.
