@@ -32,6 +32,19 @@ const PACKAGE_VERSION = require('../package.json').version;
  * unreachable, idle release applies again. Its pass expiry ends it either
  * way (an expired seat is not in the roster at all). A delivered ring is
  * never contact. */
+/* One clearing pass: erase the webhooks of the seats `readEnded` names as
+ * ended (the identity record's own list), and nothing else. When that list
+ * cannot be read, nothing is erased and `warn` is told (once, by the
+ * caller). Returns how many were erased, or null when the list was not read. */
+function pruneEndedWebhooks(webhooks, readEnded, warn) {
+  let ended;
+  try { ended = readEnded(); } catch (_) {
+    warn();
+    return null;
+  }
+  try { return webhooks.eraseEnded(ended); } catch (_) { return 0; }
+}
+
 function webhookIdleExempt(participants, hasWebhook) {
   return new Set(participants.filter(row => row && row.kind === 'seat' && hasWebhook(row.subject_id) &&
     !(row.presence_kind && row.presence_kind.kind === 'unreachable')).map(row => row.subject_id));
@@ -500,18 +513,13 @@ async function startInterlockServer(options) {
     const endedSeats = () => new Set(house.listRecentEndedSeats({ now: Date.now(), since: 0 })
       .map(row => row.subject_id));
     let pruneWarned = false;
-    const pruneWebhooks = () => {
-      let ended;
-      try { ended = endedSeats(); } catch (_) {
-        // No evidence, no erasing: said once, tried again next pass.
-        if (!pruneWarned) {
-          pruneWarned = true;
-          process.stderr.write('interlock: could not read which seats have ended; no webhook was cleared\n');
-        }
-        return;
+    // No evidence, no erasing: said once, tried again next pass.
+    const pruneWebhooks = () => pruneEndedWebhooks(webhooks, endedSeats, () => {
+      if (!pruneWarned) {
+        pruneWarned = true;
+        process.stderr.write('interlock: could not read which seats have ended; no webhook was cleared\n');
       }
-      try { webhooks.eraseEnded(ended); } catch (_) { /* next pass */ }
-    };
+    });
     pruneWebhooks();
     webhookDelivery = createWebhookDelivery(Object.assign(webhookTiming(process.env), {
       store: webhooks,
@@ -750,6 +758,7 @@ module.exports = Object.freeze({
   recordedDataDirOrigin,
   startHealthServer,
   startInterlockServer,
+  pruneEndedWebhooks,
   webhookIdleExempt,
   webhookTiming,
 });

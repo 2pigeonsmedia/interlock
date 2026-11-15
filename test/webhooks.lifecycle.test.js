@@ -168,11 +168,25 @@ test('a read that under-reports erases nothing: only seats named as ended lose t
   assert.throws(() => store.eraseEnded(null), /invalid-request/);
 });
 
-test('the server erases only on the identity record\'s ended list, and erases nothing when it cannot read it', () => {
+test('a clearing pass erases only seats the ended list names, and nothing when that list cannot be read', () => {
+  const { pruneEndedWebhooks } = require('../src/server.js');
+  const { store } = world();
+  for (const id of ['in-room', 'gone', 'unknown']) store.register(id, { url: 'http://127.0.0.1:9/' });
+  let warned = 0;
+  // A read that fails: nothing erased, one warning.
+  assert.equal(pruneEndedWebhooks(store, () => { throw new Error('identity unavailable'); }, () => { warned += 1; }), null);
+  assert.equal(warned, 1);
+  assert.deepEqual(['in-room', 'gone', 'unknown'].map(id => store.has(id)), [true, true, true]);
+  // An empty ended list (nothing has ended): nothing erased.
+  assert.equal(pruneEndedWebhooks(store, () => new Set(), () => { warned += 1; }), 0);
+  // 'unknown' is in no list at all (an under-reporting roster would miss it): kept.
+  assert.equal(pruneEndedWebhooks(store, () => new Set(['gone']), () => { warned += 1; }), 1);
+  assert.deepEqual(['in-room', 'gone', 'unknown'].map(id => store.has(id)), [true, false, true]);
+  assert.equal(warned, 1);
+  // And the server feeds it the identity record's ended list.
   const server = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
-  assert.match(server, /house\.listRecentEndedSeats\(\{ now: Date\.now\(\), since: 0 \}\)/);
-  assert.match(server, /try \{ ended = endedSeats\(\); \} catch \(_\) \{[\s\S]*?return;/);
-  assert.doesNotMatch(server, /eraseEnded\(liveSeats/);
+  assert.match(server, /pruneEndedWebhooks\(webhooks, endedSeats,/);
+  assert.match(server, /const endedSeats = \(\) => new Set\(house\.listRecentEndedSeats\(\{ now: Date\.now\(\), since: 0 \}\)/);
 });
 
 test('the check on the connected socket refuses a private peer by itself', async () => {
