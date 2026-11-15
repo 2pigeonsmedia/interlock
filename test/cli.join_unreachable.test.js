@@ -64,12 +64,31 @@ test('a join whose room never answers stops within the bound and names the way f
   assert.ok(fs.existsSync(path.join(result.dir, 'probe.json')), 'the candidate is kept');
 });
 
-test('the refusal names the proxy it used, without its credentials', async () => {
-  const result = await joinWith(async () => { throw refused(); },
-    { HTTPS_PROXY: 'http://user:s3cret@127.0.0.1:3128' });
+test('the refusal names the proxy it used: scheme, host and port only', async () => {
+  const proxy = require('../src/client/proxy.js');
+  const env = { HTTPS_PROXY: 'http://user:s3cret@127.0.0.1:3128/path?key=k3y' };
+  // Records an install without touching this process's real dispatcher.
+  assert.equal(proxy.useEnvProxy(env, { setGlobalProxyFromEnv() {} }).installed, true);
+  const result = await joinWith(async () => { throw refused(); }, env);
   assert.equal(result.code, EXIT_RUNTIME);
   assert.match(result.stderr, /This computer sets HTTPS_PROXY=http:\/\/127\.0\.0\.1:3128, and Interlock sent the request through it/);
-  assert.doesNotMatch(result.stderr, /s3cret|user/);
+  assert.doesNotMatch(result.stderr, /s3cret|user|k3y|path/);
+});
+
+test('a proxy that could not be applied is not claimed as used', async () => {
+  const proxy = require('../src/client/proxy.js');
+  const env = { HTTPS_PROXY: 'http://127.0.0.1:3128' };
+  assert.equal(proxy.useEnvProxy(env, {}).installed, false, 'ARRANGEMENT: the runtime lacks the call');
+  const result = await joinWith(async () => { throw refused(); }, env);
+  assert.match(result.stderr, /could not apply it; set NODE_USE_ENV_PROXY=1/);
+  assert.doesNotMatch(result.stderr, /sent the request through it/);
+});
+
+test('a proxy value that is not an http(s) URL is never printed', () => {
+  const { redact } = require('../src/client/proxy.js');
+  assert.equal(redact('socks5://u:p@host:1080'), '(set, not shown)');
+  assert.equal(redact('not a url k3y'), '(set, not shown)');
+  assert.equal(redact('https://u:p@proxy.example:8443/x?y=z'), 'https://proxy.example:8443');
 });
 
 test('control: a room that answered once is not abandoned at the bound', async () => {

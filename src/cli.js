@@ -2573,8 +2573,10 @@ function unreachableRefusal(stderr, url, error, profile, env) {
   if (!loopbackUrl(url)) {
     const settings = proxy.proxySettings(env);
     const shown = settings && proxy.describeProxy(settings, new URL(url).protocol);
-    if (shown) {
+    if (shown && proxy.proxyInstalled()) {
       line(stderr, `This computer sets ${terminalSafe(shown)}, and Interlock sent the request through it. Check that the proxy lets this host through.`);
+    } else if (shown) {
+      line(stderr, `This computer sets ${terminalSafe(shown)}, but Interlock could not apply it; set NODE_USE_ENV_PROXY=1 and try again.`);
     } else {
       line(stderr, 'If this computer reaches the internet only through a proxy, set HTTPS_PROXY to it (and NO_PROXY for exceptions), then try again.');
     }

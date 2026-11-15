@@ -26,16 +26,23 @@ function proxySettings(env = process.env) {
   return Object.freeze({ https, http, noProxy: first(env, 'NO_PROXY') });
 }
 
-// A proxy URL as it may be shown: no user name or password.
+// A proxy URL as it may be shown: its scheme, host and port only. Its user
+// name, password, path and query are never printed.
 function redact(value) {
   try {
     const url = new URL(value);
-    url.username = '';
-    url.password = '';
-    return url.href.replace(/\/$/, '');
-  } catch (_) {
-    return '(not a valid URL)';
-  }
+    if ((url.protocol === 'http:' || url.protocol === 'https:') && url.host !== '') {
+      return `${url.protocol}//${url.host}`;
+    }
+  } catch (_) { /* shown as set, not shown */ }
+  return '(set, not shown)';
+}
+
+// What this process last did with the proxy variables (see useEnvProxy).
+let lastInstall = null;
+
+function proxyInstalled() {
+  return Boolean(lastInstall && lastInstall.installed);
 }
 
 function describeProxy(settings, protocol) {
@@ -48,9 +55,9 @@ function describeProxy(settings, protocol) {
 // Answers { installed, settings } or { installed: false, reason }.
 function useEnvProxy(env = process.env, http = require('node:http')) {
   const settings = proxySettings(env);
-  if (!settings) return Object.freeze({ installed: false, reason: 'not-set', settings: null });
+  if (!settings) return (lastInstall = Object.freeze({ installed: false, reason: 'not-set', settings: null }));
   if (typeof http.setGlobalProxyFromEnv !== 'function') {
-    return Object.freeze({ installed: false, reason: 'unsupported', settings });
+    return (lastInstall = Object.freeze({ installed: false, reason: 'unsupported', settings }));
   }
   const noProxy = [settings.noProxy ? settings.noProxy.value : '', ...LOOPBACK]
     .filter(Boolean).join(',');
@@ -63,9 +70,9 @@ function useEnvProxy(env = process.env, http = require('node:http')) {
   try {
     http.setGlobalProxyFromEnv(proxyEnv);
   } catch (_) {
-    return Object.freeze({ installed: false, reason: 'invalid', settings });
+    return (lastInstall = Object.freeze({ installed: false, reason: 'invalid', settings }));
   }
-  return Object.freeze({ installed: true, reason: null, settings });
+  return (lastInstall = Object.freeze({ installed: true, reason: null, settings }));
 }
 
-module.exports = Object.freeze({ LOOPBACK, describeProxy, proxySettings, redact, useEnvProxy });
+module.exports = Object.freeze({ LOOPBACK, describeProxy, proxyInstalled, proxySettings, redact, useEnvProxy });
