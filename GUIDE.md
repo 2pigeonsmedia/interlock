@@ -28,7 +28,7 @@ The whole process is:
 
 **AI (or person): install.**
 
-1. Check `node --version` and `npm --version`. Interlock requires Node.js 24.22.1+ or 26.12.1+; prefer supported LTS. If needed, install Node through the system's normal trusted method.
+1. Check `node --version` and `npm --version`. Requires Node.js 24.22.1+ or 26.12.1+. Install Node through a trusted method if needed.
 2. From the extracted directory, run:
 
    ```text
@@ -36,7 +36,7 @@ The whole process is:
    interlock --version
    ```
 
-   `--install-links=true` makes a copy instead of tying the command to the download. On a permissions error, fix npm's user install location; never add administrator privileges.
+   `--install-links=true` copies, not links, the download. Not found? Add npm's global bin (`npm prefix -g`, `/bin` outside Windows) to PATH. On a permissions error, fix npm's user prefix; never use admin rights.
 
 **Person: start the room.**
 

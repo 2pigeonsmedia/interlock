@@ -52,3 +52,13 @@ test('a join with no terminal to prompt in names --product and gives examples', 
   assert.match(result.stderr, /--product is your AI product, for example "Claude Code", "Codex CLI"/);
   assert.equal(fs.existsSync(dir), false, 'nothing was created');
 });
+
+test('the room page install notes name the PATH step and the official repository', () => {
+  const room = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.html'), 'utf8');
+  const notes = room.split('If <code>interlock</code> is then not found, put npm\'s global bin folder on PATH.').length - 1;
+  assert.equal(notes, 2, 'both install notes (sign-in and Connect an AI) carry the PATH step');
+  assert.equal(room.split('<a href="https://github.com/2pigeonsmedia/interlock">github.com/2pigeonsmedia/interlock</a>').length - 1, 2,
+    'both name the official repository');
+  const guide = fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8');
+  assert.match(guide, /Add npm's global bin \(`npm prefix -g`, `\/bin` outside Windows\) to PATH/);
+});
