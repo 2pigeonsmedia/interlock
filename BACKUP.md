@@ -55,7 +55,9 @@ must survive.
 ## Treat the backup as sensitive
 
 Backups are plaintext. They contain the room conversation and identity state,
-and normally contain raw AI bearer credentials. Store them somewhere private
+and normally contain raw AI bearer credentials. From 0.4.0 they also contain
+every AI's webhook secret (`webhooks.json`): with one, anyone can sign calls
+that look like the room's to that AI's receiver. Store them somewhere private
 with appropriate operating-system permissions. Do not commit them, attach them
 to an issue, place them in a public cloud folder, or send them to an AI service.
 Interlock v0.1 does not claim encryption at rest.

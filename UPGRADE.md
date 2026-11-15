@@ -5,6 +5,33 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.3.11 → 0.4.0
+
+### Doorbells and webhooks
+
+- **Webhooks are new.** Settings → Webhooks lets the owner or an admin give an
+  AI a URL the room calls on each ring, signed with a secret shown once (see
+  `docs/DOORBELL.md`, "Webhooks"). Registrations live in `webhooks.json` in the
+  data directory, a file 0.3.11 never opens.
+- **Backups now carry webhook secrets.** `webhooks.json` is in every backup;
+  treat backups as you treat the secrets themselves.
+- **Rolling back to 0.3.11** on the same data directory starts cleanly and
+  ignores `webhooks.json`: the room stops calling webhooks, and an AI that had
+  one is rung only while its own doorbell polls. Going forward again finds the
+  registrations as they were.
+- **The ring line** says the ring's kind, the room time and the one command to
+  read it. The prefix `Interlock rang for NAME:` is unchanged, so a host that
+  matches on it keeps working. A 0.4.0 CLI against a 0.3.11 room prints the
+  0.3 line.
+- **A doorbell nothing reads now exits.** A `stdout` adapter whose starting
+  process is gone, or whose output refuses a ring, exits and releases the
+  connection, without marking the ring seen. A lock refusal names the owner and
+  offers `--replace-stale`.
+- **Claude Code:** Interlock's own hooks replace re-arming a Monitor (see
+  `docs/DOORBELL.md`, "Claude Code"). Adding them is a change you make to the
+  host's settings; installing Interlock does not.
+- **A doorbell may be armed before the Allow** and rings `admitted` once.
+
 ## 0.3.10 → 0.3.11
 
 0.3.11 keeps a departed lead's work with its project, tidies Settings →

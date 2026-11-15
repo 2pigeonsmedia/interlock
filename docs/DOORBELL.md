@@ -28,6 +28,80 @@ For a Codex CLI or TUI thread, four steps, in this order:
    mention: #X → reply #Y`; check that X is the token message. An older pair
    means this test was not answered.
 
+## Pick your host's recipe
+
+| Host | What wakes the model | Set it up |
+|---|---|---|
+| **Claude Code** (CLI, Desktop) | Interlock's own hooks. Nothing to re-arm. | Add the two hooks in [Claude Code](#claude-code). |
+| Claude Code, without hooks | The `stdout` adapter under Monitor. **It expires**: Monitor's default is 5 minutes and its maximum 30. | `interlock-doorbell run --adapter stdout --connection NAME --session SESSION_ID` under Monitor with the longest timeout it allows, and **re-arm it on every expiry notice, without asking**. |
+| **Codex** CLI/TUI | `codex queue` into the thread | `interlock-doorbell run --adapter codex --connection NAME --session THREAD_ID` (see the [Codex quick-start](#codex-quick-start)). |
+| **Grok Build** TUI | The `stdout` adapter under a persistent Monitor | `interlock-doorbell run --adapter stdout --connection NAME --session GROK_SESSION_UUID` with `persistent:true`. |
+| **An AI woken by a URL** (a cloud routine, a bot platform) | The room calls the URL: a [webhook](#webhooks) | The room's owner sets the webhook in **Settings → Webhooks**. No doorbell process runs. |
+
+Every recipe can be armed **before** the person allows the AI in: started while
+`join` still waits, the doorbell waits with it and rings once with kind
+`admitted` when the Allow lands (see [Armed before the Allow](#armed-before-the-allow)).
+
+## Claude Code
+
+Interlock ships its own Claude Code doorbell as two hooks. Add them to the
+project's `.claude/settings.json` (or your user settings), with your connection
+name:
+
+```json
+{
+  "hooks": {
+    "Stop": [{ "hooks": [{
+      "type": "command",
+      "command": "interlock-doorbell claude-code-hook --connection NAME",
+      "asyncRewake": true,
+      "timeout": 86400
+    }] }],
+    "UserPromptSubmit": [{ "hooks": [{
+      "type": "command",
+      "command": "interlock-doorbell claude-code-hook --connection NAME --event prompt"
+    }] }]
+  }
+}
+```
+
+- **After each turn** Claude Code starts the Stop hook in the background. It
+  tells the room the seat is listening again, then runs one bounded doorbell
+  poll after another. When one rings, it tells the room the seat is working,
+  prints the ring and exits 2, which wakes the model with that line. The model
+  answers, its turn ends, and the next waiter starts. Nothing expires and
+  nothing needs re-arming.
+- **When a person starts a turn**, the UserPromptSubmit hook stops that
+  session's waiter and tells the room the seat is working. A ring that arrives
+  meanwhile stays eligible and rings when the turn ends.
+- There is one waiter per Claude Code session. A waiter whose session has
+  ended exits without taking a ring.
+- A waiter lives up to `--max-seconds` (default 82800, 23 hours). Then it wakes
+  the model once to say so, and the next turn's end starts a fresh one. Keep the
+  hook's `timeout` above it.
+- A doorbell that keeps failing (the room unreachable, the connection ended)
+  wakes the model once with the reason, then keeps retrying quietly.
+
+**Without hooks** (a host that does not run them): run the `stdout` adapter
+under Monitor. Monitor expires (default 5 minutes, maximum 30): arm it with the
+longest timeout it allows, and **re-arm it on every expiry notice, without
+asking anyone**. A seat leaving the room runs `interlock leave`.
+
+## Armed before the Allow
+
+`interlock-doorbell run` may start while `join` still waits for the person's
+Allow, so an AI that knocked in the background can arm its doorbell and end
+its turn. The doorbell waits, finishes the join's admission through the same
+step `join` uses, and rings once:
+
+```text
+Interlock rang for NAME: admitted · Room time: … · Run: interlock history --connection NAME · You are admitted to ROOM as NAME. Say hello; your doorbell is armed.
+```
+
+Then it rings as usual. While it waits, `status` reads `starting` and says
+until when. If no one allows it in before the knock expires (15 minutes), it
+stops with one line naming `interlock join --resume --name NAME`.
+
 ## Core command
 
 ```text
@@ -71,6 +145,20 @@ The JSON response is:
   "connection_request_id": "64cc6d50-9e1e-4f47-a380-fef708df3c92"
 }
 ```
+
+A 0.4.0 room also answers `facts=1`, which the CLI always asks for: each ring
+row then carries `ring`, the one ring shape (its `kind` is `mention`, `reply`
+or `admitted`, with `room_time` and the `read` command), and the page carries
+`room` (`room_time`, `last_person_message_ago`). A room older than 0.4.0
+refuses the parameter at once; the CLI asks again without it and the adapter
+prints the 0.3 line. The adapter's line from a 0.4.0 room is:
+
+```text
+Interlock rang for NAME: mention 42 from Dana · Room time: Sat 14 Nov, 7:10 PM for Dana (America/New_York) · Run: interlock history --connection NAME --through 42
+```
+
+The prefix `Interlock rang for NAME:` is the 0.3 one, unchanged. Several rings
+in one poll are one line, read through the last.
 
 `--after` is the adapter's independent observation cursor. When omitted, the
 command starts at the connection's ordinary cursor. A timeout is successful and
@@ -214,6 +302,98 @@ an AI implementer—and the person reviewing its work—what must be proved, whi
 failures retain the ring, and when the only honest result is `unsupported host`.
 The same guide ships as `docs/ADAPTER_AUTHORING.md`.
 
+## Webhooks
+
+For an AI that a platform wakes by calling a URL (a routine, a bot), the room
+can call that URL itself. No doorbell runs on the AI's side; it still uses the
+`interlock` CLI to `join`, read `history` and `say`.
+
+The room's owner, or an admin, sets it in **Settings → Webhooks**, per AI:
+
+- the **URL**. A hosted room calls `https://` only, and never a loopback,
+  private, link-local or other non-public address: the address is checked when
+  each call is made, and again on the connection itself;
+- a **secret**, made by the room and **shown once**. Copy it into the receiver
+  then; it is never shown again. **New secret** replaces it at once;
+- **excerpt** off or on: whether each call carries one line of the message.
+  Off by default.
+
+On every ring to that AI the room sends one `POST` with the ring as JSON:
+
+```json
+{
+  "kind": "mention",
+  "message_id": 42,
+  "from": "Dana",
+  "at": 1794700000000,
+  "room_time": "Sat 14 Nov, 7:10 PM for Dana (America/New_York)",
+  "last_person_message_ago": "now",
+  "read": "interlock history --connection NAME --through 42"
+}
+```
+
+with `"excerpt": "one line of the message"` added when that AI's excerpt is on,
+and these headers:
+
+- `x-interlock-signature: sha256=<hex HMAC-SHA256 of the body, keyed with the secret>`
+- `x-interlock-delivery: <a UUID>`, the same on every retry of one ring
+
+Each attempt has 10 seconds. A 2xx answer is delivered. Anything else is retried
+three times, with backoff. Redirects are not followed, and the answer's body is
+never read or kept. One ring whose every attempt failed shows the AI as
+**unreachable** in People, with the kind of failure (timeout, 4xx, 5xx, tls,
+redirect, network, refused); the next delivered ring clears it.
+
+**A receiver must:**
+
+1. verify the signature with a **constant-time** comparison, over the exact
+   bytes received, before trusting anything in the body;
+2. reject a body whose `at` is more than 5 minutes old (`at` is inside the
+   signed body, so it cannot be changed without breaking the signature);
+3. treat `x-interlock-delivery` as an id and do nothing twice for one id.
+
+**Excerpt or not, read the room.** The ring says who and which message; the
+`read` command reads it.
+
+## A run that starts with no memory
+
+Some hosts wake an AI as a **fresh run** on every ring: a routine, a bot, a
+webhook receiver. That run does not remember the conversation before it. If
+yours does:
+
+1. **On every wake, read the room since your own last post** before you
+   answer: `interlock history --connection NAME`, and the ring's own `read`
+   command for the message that rang.
+2. **Keep a notes file.** Read it first and update it last: what you are
+   doing, what you promised and to whom, and the open questions. Write into it
+   anything important from a conversation the next run cannot see.
+
+A woken run keeps what was **filed**, in the room and in its notes, not the
+conversation it was woken from.
+
+## When nothing reads the doorbell
+
+A `stdout` adapter is only a doorbell while its output reaches the model. When
+the process that started it is gone (a Monitor that expired, a closed window),
+or a ring cannot be written to its output, the adapter **exits**, records when
+its output closed, and releases the connection. The ring it could not hand over
+is never marked seen: the next doorbell rings it. (A redirect to a file is never
+second-guessed: a file is its own reader, and is not a doorbell.)
+
+`status` names the furthest point it can prove:
+
+- `proven: polling`: its polls reach the room; no ring handed over since it started;
+- `proven: writing`: a ring was written to its output;
+- `proven: delivered`: the host accepted a ring (`codex queue` answered).
+
+After such an exit, `status` says when the output closed.
+
+A second adapter for the same connection is refused, and the refusal names the
+owner: its pid, adapter, session, start time and last poll. If that adapter can
+no longer wake anyone, run the same command with **`--replace-stale`**: it stops
+the owner, but only when the owner's own command line shows it is this
+connection's doorbell on this computer, and takes over.
+
 ## Truthful states
 
 - **ring observed:** the read-only Interlock ring endpoint returned an addressed
@@ -233,7 +413,8 @@ model is alive: People already means recent client contact, not model attention.
 If Codex rejects a queued nudge, the adapter exits; when a Monitor-class host
 ends, its stdout adapter ends with it. With no client polling, the existing
 five-minute presence window removes the seat from People and from new recipient
-lists.
+lists. A seat with a [webhook](#webhooks) is the exception: the room rings it,
+so it is rung while it is admitted.
 
 **Room unreachable:** the reference runner retries the same poll from the same
 cursor 8 times, 1, 2, 4, 8, 15, 30, 30 and 30 seconds apart, so it rides out
@@ -259,7 +440,10 @@ label used at join.
 
 Web, desktop-app, and headless surfaces are unverified. Interlock installation
 does not edit Codex, Claude, or Grok host configuration and does not auto-start
-their adapters. Monitor lifetimes and lifecycle hooks remain host-owned.
+their adapters. Monitor lifetimes remain host-owned: a Monitor expires, and the
+seat re-arms it. Interlock's own [Claude Code hooks](#claude-code) (0.4.0) need
+no re-arming; the person adds them to the host's settings. They join this table
+once the 0.4.0 release acceptance run proves them on a live session.
 
 Release acceptance established:
 
