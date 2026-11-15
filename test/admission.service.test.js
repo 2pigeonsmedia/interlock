@@ -86,6 +86,9 @@ function fixture(options = {}) {
 test('a live digest-only knock is atomically allowed and wakes its exact waiter', async () => {
   const world = fixture();
   const body = candidate(1);
+  const created = await world.service.knock(body, { timeoutMs: 100 });
+  assert.equal(created.state, 'waiting', 'the knock that creates the request is answered at once');
+  // The client knocks again to wait; Allow wakes that held knock.
   const waiting = world.service.knock(body, { timeoutMs: 100 });
   assert.deepEqual(world.service.list(), [{
     request_id: requestId(1),
@@ -131,6 +134,7 @@ test('Allow re-checks ended-name reuse against the current room setting', async 
     cooldownMs: 50,
     endedReuseAllowed: () => allowEnded,
   });
+  assert.equal((await service.knock(candidate(1, 'Reused'), { timeoutMs: 100 })).state, 'waiting');
   const waiting = service.knock(candidate(1, 'Reused'), { timeoutMs: 100 });
   assert.equal(service.list()[0].reuse, 'ended');
   allowEnded = false;
@@ -171,6 +175,8 @@ test('allow refuses after a wait ceiling, while exact reconnect survives a proce
   const body = candidate(1, 'Reused');
   const first = await world.service.knock(body, { timeoutMs: 0 });
   assert.equal(first.state, 'waiting');
+  // A re-knock that reaches its wait ceiling leaves nobody waiting.
+  assert.equal((await world.service.knock(body, { timeoutMs: 0 })).state, 'waiting');
   assert.equal(world.service.list()[0].previously_used, true);
   assert.equal(world.service.list()[0].last_ended_at, 900);
   assert.deepEqual(world.service.allow(requestId(1), { fresh: true }), {
@@ -442,6 +448,7 @@ test('a 2e9de6d ended/null-session pending row cannot be rewritten as fresh', ()
 
 test('decline and expiry consume pending rows and enforce the same name-product cooldown', async () => {
   const world = fixture();
+  assert.equal((await world.service.knock(candidate(1), { timeoutMs: 100 })).state, 'waiting');
   const waiting = world.service.knock(candidate(1), { timeoutMs: 100 });
   const declined = world.service.decline(requestId(1));
   assert.equal(declined.state, 'declined');
@@ -451,6 +458,7 @@ test('decline and expiry consume pending rows and enforce the same name-product 
   });
 
   world.setTime(1_051);
+  assert.equal((await world.service.knock(candidate(2), { timeoutMs: 100 })).state, 'waiting');
   const expiring = world.service.knock(candidate(2), { timeoutMs: 100 });
   world.setTime(1_152);
   assert.deepEqual(world.service.list(), []);
@@ -466,6 +474,7 @@ test('decline and expiry consume pending rows and enforce the same name-product 
 
 test('request ids are exact-retry keys and cannot change their admission facts', async () => {
   const world = fixture();
+  assert.equal((await world.service.knock(candidate(1), { timeoutMs: 100 })).state, 'waiting');
   const original = world.service.knock(candidate(1), { timeoutMs: 100 });
   assert.deepEqual(await world.service.knock(candidate(1, 'Finch')), {
     ok: false, reason: 'request-id-collision',
@@ -490,6 +499,7 @@ test('waitingCandidate recognises only the bearer of a knock that is still pendi
   });
   assert.equal(service.waitingCandidate(real.token), false, 'nothing is pending yet');
   const body = Object.assign(candidate(1), { selector: real.selector, digest: real.digest });
+  assert.equal((await service.knock(body, { timeoutMs: 100 })).state, 'waiting');
   const waiting = service.knock(body, { timeoutMs: 100 });
   assert.equal(service.list().length, 1, 'ARRANGEMENT: the knock is pending');
 
@@ -520,4 +530,50 @@ test('waitingCandidate recognises only the bearer of a knock that is still pendi
   await pendingWithout;
   service.close();
   without.close();
+});
+
+test('the creating knock answers at once; the request reads connected until its re-knock or the window ends', async () => {
+  const world = fixture({ pendingTtlMs: 60_000 });
+  const body = candidate(1);
+  const started = Date.now();
+  const created = await world.service.knock(body, { timeoutMs: 20_000 });
+  assert.ok(Date.now() - started < 5_000, 'it was not held for the wait');
+  assert.equal(created.state, 'waiting');
+  assert.equal(created.request_id, requestId(1));
+  assert.equal(world.service.list()[0].connected, true, 'a request made a moment ago is not gone');
+
+  world.setTime(1_000 + 9_999);
+  assert.equal(world.service.list()[0].connected, true, 'still inside the window');
+  world.setTime(1_000 + 10_000);
+  assert.equal(world.service.list()[0].connected, false, 'no re-knock came: the connection is gone');
+  assert.deepEqual(world.service.allow(requestId(1), { fresh: true }), { ok: false, reason: 'not-connected' });
+
+  const held = world.service.knock(body, { timeoutMs: 100 });
+  assert.equal(world.service.list()[0].connected, true, 'ARRANGEMENT: a held re-knock connects it again');
+  const allowed = world.service.allow(requestId(1), { fresh: true });
+  assert.equal(allowed.state, 'allowed');
+  assert.deepEqual(await held, allowed, 'Allow wakes the held re-knock');
+  world.service.close();
+});
+
+test('Allow inside the window, before the re-knock, is picked up by the re-knock', async () => {
+  const world = fixture({ pendingTtlMs: 60_000 });
+  const body = candidate(1);
+  assert.equal((await world.service.knock(body, { timeoutMs: 100 })).state, 'waiting');
+  const allowed = world.service.allow(requestId(1), { fresh: true });
+  assert.equal(allowed.state, 'allowed', 'the owner could Allow before the AI knocked again');
+  assert.deepEqual(await world.service.knock(body, { timeoutMs: 100 }), allowed,
+    'the re-knock answers with the enrollment');
+  world.service.close();
+});
+
+test('the immediate answer moves no cooldown and no pending count', async () => {
+  const world = fixture({ maxPending: 2 });
+  const body = candidate(1);
+  assert.equal((await world.service.knock(body, { timeoutMs: 100 })).state, 'waiting');
+  assert.equal((await world.service.knock(body, { timeoutMs: 0 })).state, 'waiting', 'a re-knock reuses the request');
+  assert.equal(world.service.list().length, 1, 'one request, however many knocks');
+  assert.equal((await world.service.knock(candidate(2, 'Finch'), { timeoutMs: 0 })).state, 'waiting',
+    'the cap still has room for a second request');
+  world.service.close();
 });

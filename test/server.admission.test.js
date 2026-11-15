@@ -183,6 +183,10 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
       created_at: Date.now(),
     });
 
+    const created = await post(runtime, '/api/ai/admissions', body);
+    assert.equal(created.status, 200, created.text);
+    assert.equal(created.json.state, 'waiting', 'the knock that creates the request is answered at once');
+    // The re-knock is the one Allow wakes.
     const waiting = post(runtime, '/api/ai/admissions', body);
     const anonymousList = await call(runtime, { path: '/api/ai/admissions' });
     assert.equal(anonymousList.status, 401);
@@ -325,6 +329,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
 
     const secondCandidate = identity.newAiCredential();
     const secondBody = admissionBody(secondCandidate, 'Finch');
+    assert.equal((await post(runtime, '/api/ai/admissions', secondBody)).json.state, 'waiting');
     const secondWait = post(runtime, '/api/ai/admissions', secondBody);
     await waitForPending(runtime, owner, secondBody.request_id);
     const declined = await post(
@@ -785,6 +790,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
 
     const replacementCandidate = identity.newAiCredential();
     const replacementBody = admissionBody(replacementCandidate, 'mArLoW');
+    assert.equal((await post(runtime, '/api/ai/admissions', replacementBody)).json.state, 'waiting');
     const replacementWaiting = post(runtime, '/api/ai/admissions', replacementBody);
     const replacementPending = await waitForPending(
       runtime, owner, replacementBody.request_id,
@@ -887,6 +893,7 @@ test('loopback knock, owner passkey Allow, and owner Decline compose on the live
 
     const thirdCandidate = identity.newAiCredential();
     const thirdBody = admissionBody(thirdCandidate, 'mArLoW');
+    assert.equal((await post(runtime, '/api/ai/admissions', thirdBody)).json.state, 'waiting');
     const thirdWaiting = post(runtime, '/api/ai/admissions', thirdBody);
     await waitForPending(runtime, owner, thirdBody.request_id);
     owner = await elevate(runtime, owner, device);
