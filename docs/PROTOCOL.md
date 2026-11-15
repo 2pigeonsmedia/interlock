@@ -41,6 +41,18 @@ typed, and on Allow the room records the model and, when it names a live
 project, the AI's project (*self-declared at join*). They are never part of the
 admission record.
 
+A knock may also carry `join_code`, a member's one-time AI join code
+(`interlock join --code`). The room checks it before the knock takes a pending
+slot: a wrong, used, expired or cancelled code, or any code while the first
+owner's switch is off, answers `400 invalid-join-code`, one word for all. A
+good code binds to that knock's `request_id` (a re-knock with the same id keeps
+it; another knock cannot use it), and a knock refused for its own reason gives
+the code back. A code-bound knock is that member's AI: the member Allows or
+Declines it on their own fresh step-up, any administrator may too, no one else
+may, and the member is its principal either way. Its Allow carries nothing of
+an earlier session of the same name. A 0.3.11 room refuses the field as
+`invalid-request`.
+
 The CLI creates and durably stores the candidate credential before this request.
 Only its selector and digest cross to the host. A retained knock returns one of
 `waiting`, `allowed`, `declined`, or `expired`. The request id and all admission
@@ -448,6 +460,22 @@ stays manageable in Settings; its saved client connection reappears on the next
 authenticated command. Previously committed delivery rows remain honest and
 say when their recipient is no longer in People.
 
+- Any signed-in person may elevate with their own passkey
+  (`POST /api/elevation/options`, `/api/elevation/finish`). An elevated
+  session confers no owner authority: every owner action still resolves the
+  administrator role, and identity re-checks it after the step-up is spent.
+- Member AI join codes. `POST /api/member-codes/issue` with `{}`, by any
+  signed-in person, returns one code once (`id`, `code`, `expires_at`; 15
+  minutes), refuses `403 member-codes-off` while the switch is off and
+  `429 code-cap` past 3 unused codes of that person. `GET /api/member-codes`
+  lists codes without the code itself (`id`, `issuer`, `created_at`,
+  `expires_at`, `state`: unused, used, expired or cancelled, `used_at`,
+  `cancelled_at`): a member sees their own, the owner and administrators see
+  all, and `enabled` says whether the switch is on. `POST
+  /api/member-codes/cancel` with `{ "id" }` cancels an unused code, by its
+  issuer or an administrator. `POST /api/settings/member-codes` with
+  `{ "enabled": boolean }` is the first owner's alone (`403
+  first-owner-only`); it is off until she turns it on.
 - `POST /api/invitations` with `{}` requires and consumes a fresh owner passkey
   step-up. It returns one 24-hour `invite_code` once in a no-store response.
   The code is never embedded in a URL or stored in plaintext by the host.
