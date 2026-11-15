@@ -15,6 +15,10 @@ const PURPOSES = Object.freeze(['webauthn.register', 'webauthn.elevate']);
 const CHALLENGE_TTL_MS = 300_000; // 5 minutes
 const CEREMONY_ID_BYTES = 32;
 const MAX_CHALLENGES_TOTAL = 1024;
+// Live ceremonies per person and purpose. Past it, that person's oldest goes:
+// one person (an administrator or, since #821, any member who can elevate)
+// can never fill the shared store and lock everyone else out.
+const MAX_CHALLENGES_PER_PERSON = 4;
 const MAX_COLLISION_REROLLS = 8;
 
 const B64URL_43 = /^[A-Za-z0-9_-]{43}$/;
@@ -170,6 +174,11 @@ function createStore(opts) {
       }
     }
 
+    const mine = [...RECORDS.entries()]
+      .filter(([, r]) => r.person_subject_id === person_subject_id && r.purpose === purpose)
+      .sort((a, b) => a[1].created_at - b[1].created_at);
+    while (mine.length >= MAX_CHALLENGES_PER_PERSON) RECORDS.delete(mine.shift()[0]);
+
     if (RECORDS.size >= MAX_CHALLENGES_TOTAL) return FAIL;
 
     let ceremony_id = null;
@@ -286,4 +295,5 @@ module.exports = {
   CHALLENGE_TTL_MS,
   CEREMONY_ID_BYTES,
   MAX_CHALLENGES_TOTAL,
+  MAX_CHALLENGES_PER_PERSON,
 };
