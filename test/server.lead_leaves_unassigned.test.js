@@ -1,6 +1,6 @@
 'use strict';
 
-// #932 (A13), through the server: on a project that has had a lead and has
+// #932, through the server: on a project that has had a lead and has
 // none now, unassigned work waits for a lead with the rest of its work, while
 // a project that never had a lead keeps sending the owner hers; a lead grant
 // on the project names the waiting work to the new lead, whose Needs you it

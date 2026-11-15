@@ -460,8 +460,8 @@ function createFirstOwnerHandler(options) {
   let bootstrapSecret = null;
   // Member-issued AI join codes (#821): their own files, never 0.3.11's.
   const memberCodes = createMemberCodes({ dataDir });
-  /* The member a pending knock is for, or null (contract A15). S3's pending
-   * filter shows a member the knocks bound to their own code. */
+  /* The member a pending knock is for, or null. The pending list uses it to
+   * show a member the knocks bound to their own code. */
   function knockIssuer(requestId) {
     try { return memberCodes.issuerOf(requestId); } catch (_) { return null; }
   }
@@ -705,7 +705,7 @@ function createFirstOwnerHandler(options) {
     if (!closedObject(body, [])) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
     }
-    // Any signed-in person may elevate (#821, contract A17): every admin act
+    // Any signed-in person may elevate (#821): every admin act
     // re-checks the role after the step-up is spent (identity withFreshAdmin).
     if (!personSession(request, response, true)) return;
     const begun = await house.authenticators.beginElevation(requestMeta(request, Date.now()));
@@ -3746,7 +3746,7 @@ function createFirstOwnerHandler(options) {
   }
 
   /* The first owner's switch: members may bring their own AIs. Off until she
-   * turns it on (contract A15). */
+   * turns it on. */
   function updateMemberCodes(request, response, body) {
     if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
     if (!closedObject(body, ['enabled']) || typeof body.enabled !== 'boolean') {
@@ -3950,7 +3950,7 @@ function createFirstOwnerHandler(options) {
     let confirmedLine = null;
     // A member's code-bound knock is a different principal's AI: its Allow,
     // by the member or an administrator, carries no earlier session of that
-    // name (security review, 11-14). Nothing to confirm, nothing to carry.
+    // name. Nothing to confirm, nothing to carry.
     if (action === 'allow' && !issuer) {
       let knock = null;
       try { knock = admission.list().find(row => row.request_id === requestId) || null; } catch (_) { knock = null; }

@@ -296,7 +296,7 @@ function createWorkService(options) {
     return (holderLeft(item).length > 0 || unassignedOnLedProject(item)) && leaderless(item.project, now);
   }
   /* Live work with nobody responsible and nobody next, on a project that has
-   * had a lead (#932, A13): whoever filed it, only a lead can act on it. On a
+   * had a lead (#932): whoever filed it, only a lead can act on it. On a
    * project that never had one (Operations, say) it routes as before. */
   function unassignedOnLedProject(item) {
     if (!unowned(item) || !hadLeadOf) return false;

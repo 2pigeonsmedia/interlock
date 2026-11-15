@@ -8,7 +8,7 @@
 //
 // Persistence: two files of their own, `member-codes.json` and
 // `member-codes-settings.json` in the data directory. 0.3.11 never opens
-// either, so a rollback ignores them (contract A7). Only a digest of each code
+// either, so a rollback ignores them. Only a digest of each code
 // is stored; the code itself is shown once, to its issuer.
 
 const crypto = require('node:crypto');
@@ -119,8 +119,8 @@ function createMemberCodes(options) {
     atomicWrite(codesPath, { schema: SCHEMA, codes: kept });
   }
 
-  /* The first owner's switch. Absent means OFF (contract A15: a new
-   * authority path is not on in a room before its owner says so). */
+  /* The first owner's switch. Absent means OFF (a new authority path
+   * is not on in a room before its owner says so). */
   function enabled() {
     let text;
     try { text = fs.readFileSync(settingsPath, 'utf8'); } catch (error) {
@@ -225,7 +225,7 @@ function createMemberCodes(options) {
     }
     if (stateOf(match, now) !== 'unused') return Object.freeze({ ok: false, reason: 'invalid-join-code' });
     // One knock, one code: a request id another code already holds takes no
-    // second one, so a knock can never be two members' (security review).
+    // second one, so a knock can never be two members'.
     if (rows.some(row => row !== match && row.request_id === requestId)) {
       return Object.freeze({ ok: false, reason: 'invalid-join-code' });
     }
@@ -247,8 +247,8 @@ function createMemberCodes(options) {
     return true;
   }
 
-  /* `knockIssuer(requestId)`: the member a knock is for, or null (contract
-   * A15). A cancelled code's knock is no member's. */
+  /* `knockIssuer(requestId)`: the member a knock is for, or null. A
+   * cancelled code's knock is no member's. */
   function issuerOf(requestId) {
     if (typeof requestId !== 'string') return null;
     const bound = readRows().filter(candidate => candidate.request_id === requestId);

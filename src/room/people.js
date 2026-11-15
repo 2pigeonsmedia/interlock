@@ -460,7 +460,7 @@ function createPeopleService(options) {
   }
 
   /* Whether a project has ever had a lead: any lead grant on it in the log,
-   * active, ended or revoked (#932, A13). A whole-room grant leads nothing. */
+   * active, ended or revoked (#932). A whole-room grant leads nothing. */
   function hadLead(project) {
     if (damaged() || typeof project !== 'string') return false;
     for (const entry of grantsById.values()) if (entry.row.project === project) return true;

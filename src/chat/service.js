@@ -154,7 +154,7 @@ function createChatService(options) {
     return await appendWith(body, actor, false, null);
   }
 
-  /* A reply rings whoever addressed its author, without a tag (#859, A4):
+  /* A reply rings whoever addressed its author, without a tag (#859):
    * every other participant whose post since the author's own latest one
    * @mentioned the author's name or asked the author.
    * Read from the room's stored facts, never from the reply's own text. Who
@@ -301,7 +301,7 @@ function createChatService(options) {
     return await store.read(query);
   }
 
-  /* The A4 cause of a ring, for the ring builder's `kind` (contract A12):
+  /* The reply cause of a ring, for the ring builder's `kind`:
    * whether `seatSubjectId` had addressed the author of `message` (by an
    * @mention or an ask) since the author's previous post, as the room stood
    * when `message` was posted. The same rule that rang it (addressersOf). */

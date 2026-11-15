@@ -1,6 +1,6 @@
 'use strict';
 
-// #932 (contract A13): unassigned work on a leaderless project waits for the
+// #932 : unassigned work on a leaderless project waits for the
 // lead with the rest. The rule follows the PROJECT, not the filer: on a
 // project that has had a lead (a past lead grant in the log) and has none
 // now, all live unassigned work (nobody responsible, nobody next) joins its
@@ -83,7 +83,7 @@ test('unassigned and held work of a departed lead are one line together', () => 
     [[2, [held.id, loose.id]]]);
 });
 
-test('A13: unassigned work the owner filed on a project whose lead left waits too', () => {
+test('unassigned work the owner filed on a project whose lead left waits too', () => {
   const { work, live, state } = rig();
   const mine = unassigned(work, owner);
   live.delete(lead.subject_id);
@@ -92,7 +92,7 @@ test('A13: unassigned work the owner filed on a project whose lead left waits to
   assert.deepEqual(work.brief(owner, {}).waiting_for_lead.map(line => line.items), [[mine.id]]);
 });
 
-test('A13: unassigned work filed by an AI still in the room, on a project whose lead left, waits too', () => {
+test('unassigned work filed by an AI still in the room, on a project whose lead left, waits too', () => {
   const { work, live, state } = rig();
   const item = unassigned(work, nova);
   live.delete(lead.subject_id);

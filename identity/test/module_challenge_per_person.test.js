@@ -1,6 +1,6 @@
 'use strict';
 
-// One person cannot fill the shared ceremony store (#821, review U2). Since a
+// One person cannot fill the shared ceremony store (#821). Since a
 // member may now elevate, any signed-in person can open elevation ceremonies.
 // Each person keeps at most MAX_CHALLENGES_PER_PERSON live ceremonies of a
 // purpose; past it their own oldest goes, never anyone else's, and the shared

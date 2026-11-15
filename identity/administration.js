@@ -552,7 +552,7 @@ function createService(opts) {
         !(Number.isFinite(subject.expires_at) && subject.expires_at > 0 &&
           subject.expires_at <= now));
       // A member's AI (#821) may end only that member's own live AI of the
-      // same name, never someone else's (security review, 11-14).
+      // same name, never someone else's.
       if (held && !existingCredential && ownSeatsOnly === true && held.principal !== principalId) {
         throw new Error('administration.' + label + ': the name is held by another principal\'s AI');
       }

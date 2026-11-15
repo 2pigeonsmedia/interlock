@@ -1,8 +1,8 @@
 'use strict';
 
-// A reply rings whoever addressed you, without a tag (#859, contract C4
-// `reply`, amendment A4): a post by X rings Y when Y addressed X (by an
-// @mention or an ask) at any point since X's previous post, and Y is not X.
+// A reply rings whoever addressed you, without a tag (#859): a post by X
+// rings Y when Y addressed X (by an @mention or an ask) at any point since
+// X's previous post, and Y is not X.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -84,7 +84,7 @@ test('the second post by the same author does not ring the addresser again', asy
   await chat.close();
 });
 
-test('A4: an ask, then another post by the asker, then the reply still rings the asker', async () => {
+test('an ask, then another post by the asker, then the reply still rings the asker', async () => {
   const chat = service();
   await chat.appendAnnotated({ text: 'May I merge PR 12?' }, lead(),
     { ask: { of: 'Ana', means: 'merge PR 12' } });
@@ -175,10 +175,10 @@ test('an answer to an ask is not an address of the asker: the asker\'s next post
   await chat.close();
 });
 
-// The ring builder's A4 cause (A12): addressedSince(message, seat) answers,
+// The ring builder's reply cause: addressedSince(message, seat) answers,
 // for a message already posted, whether that seat had addressed its author
 // since the author's previous post, as the room stood then.
-test('addressedSince: true for the A4 ring, false for a bystander, false once the turn has passed', async () => {
+test('addressedSince: true for the reply ring, false for a bystander, false once the turn has passed', async () => {
   const chat = service();
   await chat.append({ text: "@Rowan reply 'rung'" }, lead());
   const reply = await chat.append({ text: 'rung' }, rowan());

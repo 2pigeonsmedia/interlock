@@ -5,7 +5,7 @@
 // - A member makes a one-time code; a knock carrying it is that member's.
 // - A wrong or spent code is refused before the knock takes a slot.
 // - The member Allows it on their own fresh step-up (members may elevate,
-//   contract A17); at L1 they are asked for one. The principal comes from the
+//   since 0.4.0); at L1 they are asked for one. The principal comes from the
 //   room's code record, never from the request body.
 // - A member cannot Allow a knock without their code, nor use any admin act,
 //   even elevated.
@@ -164,7 +164,7 @@ test('a member brings their own AI: switch, code, knock, the member\'s Allow, an
     assert.equal(ownerDeclines.status, 200, ownerDeclines.text);
     await plainWaiting;
 
-    // Elevated, Bea still has no administrator act (contract A17).
+    // Elevated, Bea still has no administrator act .
     bea = await elevate(runtime, bea, beaDevice);
     for (const [route, body] of [
       ['/api/invitations', {}],
