@@ -13,8 +13,6 @@
   const PERSON_HEARD_MS = 5 * MINUTE;
   // The doorbell long-polls for up to 45 seconds; two intervals with margin.
   const LISTENING_MS = 2 * MINUTE;
-  // How long a seat whose doorbell stopped still reads working (mid-task).
-  const WORKING_MS = 3 * 60 * MINUTE;
 
   function grantNumber(grantId) {
     const match = /^G-([1-9][0-9]*)$/.exec(String(grantId));
@@ -111,51 +109,53 @@
     return recent(row.last_posted_at) || Boolean(row.presence && recent(row.presence.since));
   }
 
-  // One word, one light. Waiting outranks working: a seat waiting on someone
-  // is amber whether or not it was heard lately.
-  // The state word from the doorbell's rhythm alone (see stateOf).
-  function pollWord(row, now, lastHeard, notPickedUp) {
+  // The state word from the room's own reason (presence_kind, 0.4.0). The
+  // room computes it; People never infers it from poll times. Owner's ruling
+  // on #938 (2026-11-15), replacing her 2026-10-31 definition: an AI reads
+  // "working" only while it has declared a pause for its turn; any other
+  // silence reads "not listening" with the time it began. Only unreachable
+  // is an alarm (red); everything else is a plain word with a time.
+  const KIND_WORDS = Object.freeze({
+    listening: ['listening', 'teal'],
+    working: ['working', 'grey'],
+    rung: ['rung by webhook', 'grey'],
+    away: ['not listening', 'grey'],
+    unknown: ['not known since the room restarted', 'grey'],
+    unreachable: ['unreachable', 'red'],
+    pending: ['waiting to be let in', 'amber'],
+    left: ['left', 'grey'],
+    ended: ['ended', 'grey'],
+    here: ['here', 'teal'],
+  });
+
+  function kindWord(row, notPickedUp) {
+    const kind = row.presence_kind;
     if (row.kind === 'person') {
-      return heard(row, now) ? { word: 'here', light: 'teal', age_since: lastHeard, notPickedUp }
-        : { word: 'away', light: 'grey', age_since: lastHeard, notPickedUp };
+      return kind.kind === 'here' ? { word: 'here', light: 'teal', age_since: kind.since, notPickedUp }
+        : { word: 'away', light: 'grey', age_since: kind.since, notPickedUp };
     }
-    const polled = Number.isSafeInteger(row.last_polled_at) ? row.last_polled_at : null;
-    const since = polled === null ? null : now - polled;
-    // A Work write after its last poll means it is mid-turn: it picks up after
-    // its current task. Posts do not count (her definition, 2026-10-31).
-    const wrote = Number.isSafeInteger(row.last_work_at) ? row.last_work_at : null;
-    if (polled !== null && wrote !== null && wrote > polled && now - wrote >= 0 && now - wrote < WORKING_MS) {
-      return { word: 'working', light: 'grey', age_since: polled, notPickedUp };
-    }
-    if (since !== null && since >= 0 && since < LISTENING_MS) {
-      return { word: 'listening', light: 'teal', age_since: polled, notPickedUp };
-    }
-    if (since !== null && since >= 0 && since < WORKING_MS) {
-      return { word: 'working', light: 'grey', age_since: polled, notPickedUp };
-    }
-    return { word: 'not listening', light: 'grey', age_since: polled, notPickedUp };
+    const [word, light] = KIND_WORDS[kind.kind] || ['not known', 'grey'];
+    return { word, light, age_since: kind.since, notPickedUp };
   }
+
+  // A seat that will not pick up an @mention now: its state word goes first.
+  const QUIET_WORDS = Object.freeze(['not listening', 'not known since the room restarted', 'unreachable']);
 
   function stateOf(row, now) {
     const notPickedUp = Number.isSafeInteger(row.outstanding) && row.outstanding > 0
       ? row.outstanding + ' not picked up' : null;
     const lastHeard = Number.isSafeInteger(row.last_heard) ? row.last_heard : null;
-    // Her definition (2026-10-31), read from the doorbell's rhythm when the
-    // server says when a seat last polled; posting does not enter into it.
-    // A person is here or away, never working. An AI is listening (its
-    // doorbell polled within about two poll intervals: it picks up now),
-    // working (it was polling and stopped lately, as a waiter does while its
-    // model works: it picks up after its current task), or not listening (no
-    // poll for hours, or none: an @mention will not wake it).
-    if (row.last_polled_at !== undefined) {
-      const base = pollWord(row, now, lastHeard, notPickedUp);
+    // The room's reason (presence_kind), when the server sends it. A person
+    // is here or away, never working.
+    if (row.presence_kind && typeof row.presence_kind.kind === 'string') {
+      const base = kindWord(row, notPickedUp);
       // Waiting on someone shows in amber, after the state word: declared on
       // the presence line, or derived from a blocked item (until the seat
       // posts after the wait began). A narrow sidebar cuts the row at the
       // right, and the state word says whether an @mention reaches the seat:
       // it goes first on a waiting row, and on any row of a seat that is not
       // listening. A listening or working seat's item or line still leads.
-      const quiet = base.word === 'not listening';
+      const quiet = QUIET_WORDS.includes(base.word);
       const derived = row.waiting && typeof row.waiting.name === 'string' &&
         !(Number.isSafeInteger(row.last_posted_at) && Number.isSafeInteger(row.waiting.since) &&
           row.last_posted_at > row.waiting.since) ? row.waiting : null;
@@ -286,7 +286,15 @@
         ? 'Doorbell: running · polled ' + when
         : 'Doorbell: none · last poll ' + when;
     }
-    const facts = ['Admitted', answered];
+    const facts = ['Admitted'];
+    const kind = row.presence_kind;
+    if (kind && typeof kind.kind === 'string') {
+      const span = age(kind.since, now);
+      const word = (KIND_WORDS[kind.kind] || [kind.kind])[0];
+      facts.push('The room shows: ' + word + (span === null ? '' : span === 'now' ? ' · now' : ' · since ' + span + ' ago') +
+        (kind.next ? ' — ' + kind.next : ''));
+    }
+    facts.push(answered);
     if (found) facts.push('A read-and-reply, not proof the doorbell rang');
     facts.push(doorbell);
     return facts;

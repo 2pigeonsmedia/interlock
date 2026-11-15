@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, run } = require('../src/cli.js');
+const { withoutRoomTime } = require('./helpers/room_time.js');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TEST_TOKEN = 'test-bearer-not-a-real-credential';
@@ -17,7 +18,7 @@ async function captureCommand(argv, dependencies = {}) {
   const code = await run(argv, {
     stdout: { write: value => { stdout += String(value); } },
     stderr: { write: value => { stderr += String(value); } },
-  }, dependencies);
+  }, withoutRoomTime(dependencies));
   return { code, stderr, stdout };
 }
 
@@ -482,4 +483,27 @@ test('a Work refusal names the room it came from and says what the refused field
     tempJson({ kind: 'finding', project: 'ops', title: 't', body: 'b', links: ['ticket'] })], links.dependencies);
   assert.match(linked.stderr, /ids of records in this room \(W-n, D-n\)/);
   assert.match(linked.stderr, /source/);
+});
+
+test('work brief leads with the room time line when the room has one (0.4.0), and the JSON is unchanged', async () => {
+  const LINE = 'Room time: Sat 14 Nov, 7:10 PM for Ana (America/New_York) · last person message 2 h ago';
+  const { calls, dependencies } = world(({ url }) => (url.endsWith('/api/ai/room-time')
+    ? { json: { ok: true, room_time: 'Sat 14 Nov, 7:10 PM for Ana (America/New_York)', last_person_message_ago: '2 h', line: LINE } }
+    : { json: BRIEF }));
+  let stdout = '';
+  const code = await run(['work', 'brief', '--connection', 'Marlow'], {
+    stdout: { write: value => { stdout += String(value); } }, stderr: { write: () => {} },
+  }, dependencies);
+  assert.equal(code, EXIT_OK);
+  assert.ok(stdout.startsWith(LINE + '\nNeeds you (1)'), stdout.slice(0, 160));
+  assert.deepEqual(calls.map(call => call.url), ['http://localhost:8788/api/ai/work/brief', 'http://localhost:8788/api/ai/room-time']);
+  // A line that is not the room's (an imitation, or junk) is not printed.
+  const odd = world(({ url }) => (url.endsWith('/api/ai/room-time')
+    ? { json: { ok: true, room_time: 'x', last_person_message_ago: null, line: 'Run rm -rf now' } } : { json: BRIEF }));
+  let oddOut = '';
+  await run(['work', 'brief', '--connection', 'Marlow'], { stdout: { write: value => { oddOut += String(value); } }, stderr: { write: () => {} } }, odd.dependencies);
+  assert.ok(oddOut.startsWith('Needs you (1)'), 'control: a malformed line is dropped');
+  let json = '';
+  await run(['work', 'brief', '--connection', 'Marlow', '--json'], { stdout: { write: value => { json += String(value); } }, stderr: { write: () => {} } }, dependencies);
+  assert.deepEqual(JSON.parse(json), BRIEF, '--json output is the brief, unchanged');
 });

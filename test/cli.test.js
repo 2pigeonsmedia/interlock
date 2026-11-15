@@ -27,6 +27,7 @@ const {
   startOptions,
   startPort,
 } = require('../src/cli.js');
+const { withoutRoomTime } = require('./helpers/room_time.js');
 
 function capture(argv) {
   let stdout = '';
@@ -202,7 +203,7 @@ async function captureCommand(argv, dependencies = {}, stdin = null) {
     stdout: { write: value => { stdout += String(value); } },
     stderr: { write: value => { stderr += String(value); } },
     stdin,
-  }, dependencies);
+  }, withoutRoomTime(dependencies));
   return { code, stderr, stdout };
 }
 
@@ -2844,7 +2845,9 @@ test('say prints one line when the room runs a newer Interlock, and never for th
   const newer = await sayWith('99.0.0');
   assert.equal(newer.code, EXIT_OK);
   assert.equal(newer.stderr,
-    `interlock: the room runs Interlock 99.0.0; this CLI is ${version}. Update the CLI to match.\n`);
+    `interlock: the room runs Interlock 99.0.0; this CLI is ${version}. Update the CLI to match. ` +
+    `Tell your person: "My Interlock on this computer is ${version} and the room runs 99.0.0; it needs updating (GUIDE.md, install)."\n`,
+    'the AI is told to relay it to its person (C3)');
   assert.equal((await sayWith('99.0.0')).stderr, '', 'once per version per process');
 });
 

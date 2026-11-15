@@ -2,6 +2,10 @@
 const { createApproverRule } = require('./work/approver.js');
 const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
 const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
+const PresenceKind = require('./chat/presence_kind.js');
+const Ring = require('./rings.js');
+const TimeZones = require('./time_zones.js');
+const ClientVersions = require('./client_versions.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -278,6 +282,7 @@ function publicParticipant(participant) {
       !(participant.last_answered === undefined || participant.last_answered === null ||
         validLastAnswered(participant.last_answered)) ||
       typeof participant.present !== 'boolean' ||
+      !(participant.presence_kind === undefined || PresenceKind.validPresenceKind(participant.presence_kind)) ||
       !Number.isSafeInteger(participant.outstanding) || participant.outstanding < 0) return null;
   return Object.freeze({
     name: participant.name,
@@ -293,6 +298,7 @@ function publicParticipant(participant) {
     last_posted_at: participant.last_posted_at === undefined ? null : participant.last_posted_at,
     last_polled_at: participant.last_polled_at === undefined ? null : participant.last_polled_at,
     last_answered: participant.last_answered === undefined ? null : participant.last_answered,
+    presence_kind: participant.presence_kind === undefined ? null : participant.presence_kind,
   });
 }
 
@@ -455,6 +461,8 @@ function createFirstOwnerHandler(options) {
       dataDir.length === 0 || dataDir.includes('\0') || !path.isAbsolute(dataDir)) {
     throw new TypeError('first owner transport: idle release and an absolute data directory are required');
   }
+  // Which Interlock each AI's own computer runs (C3): warn, never refuse.
+  const clientVersions = ClientVersions.createClientVersions({ dataDir });
   const expectedHost = parsedOrigin.host;
   let bootstrapSecret = null;
 
@@ -1679,6 +1687,10 @@ function createFirstOwnerHandler(options) {
 
   // An AI's own presence line and its own project.
   function setAiPresence(request, response, body) {
+    if (body !== null && typeof body === 'object' && !Array.isArray(body) && Object.hasOwn(body, 'pause')) {
+      setAiPause(request, response, body);
+      return;
+    }
     if (!peopleBody(request, response, body, ['middle', 'waiting_on', 'need'])) return;
     const authorized = seatAuthorization(request, 'write');
     if (!authorized || authorized.allow !== true) {
@@ -1687,6 +1699,35 @@ function createFirstOwnerHandler(options) {
     }
     const actor = Object.assign({ owner: false, now: Date.now() }, seatActor(authorized, null));
     sendPeopleResult(request, response, () => people.service.presence(actor, body));
+  }
+
+  // `{ pause: { reason } }` while the seat works a turn; `{ pause: null }` when
+  // it is back. Sent on its own, never with the presence line: it is held in
+  // memory and never written to the people store (0.3.11 must still open it).
+  function setAiPause(request, response, body) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    if (!closedObject(body, ['pause']) ||
+        !(body.pause === null || closedObject(body.pause, ['reason']))) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'write');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let pause;
+    try {
+      pause = chat.notePause(authorized.subject_id, body.pause, Date.now());
+    } catch (error) {
+      sendJson(request, response, error && error.code === 'invalid-pause' ? 400 : 503,
+        { ok: false, error: error && error.code === 'invalid-pause' ? 'invalid-request' : 'chat-unavailable' });
+      return;
+    }
+    sendJson(request, response, 200, { ok: true, pause });
   }
 
   // `{ project }` sets the AI's own project; `{ seat_name, project }` is a lead
@@ -1830,10 +1871,30 @@ function createFirstOwnerHandler(options) {
   }
 
   function seatAuthorization(request, capability) {
-    return house.authorizeSeatBearer({
+    const authorized = house.authorizeSeatBearer({
       authorization_header: request.headers.authorization,
       source: clientSource(request, hostedMode),
     }, capability, CHAT_RESOURCE);
+    if (authorized && authorized.allow === true && typeof authorized.subject_id === 'string') {
+      clientVersions.note(authorized.subject_id, request.headers[ClientVersions.HEADER], Date.now());
+    }
+    return authorized;
+  }
+
+  /* A seat's client version for one viewer: the version for everyone; the
+   * update line only for the first owner and the seat's own person. */
+  function clientFacts(row, viewerSubjectId, viewerIsFirstOwner) {
+    if (row.kind !== 'seat') return { client_version: null, client_notice: null };
+    const client = clientVersions.get(row.subject_id);
+    let principal = null;
+    try { principal = typeof house.principalOf === 'function' ? house.principalOf(row.subject_id) : null; }
+    catch (_) { principal = null; }
+    const mayAct = viewerSubjectId !== null &&
+      (viewerIsFirstOwner === true || Boolean(principal && principal.subject_id === viewerSubjectId));
+    return {
+      client_version: client ? Object.freeze({ version: client.version, seen_at: client.seen_at }) : null,
+      client_notice: mayAct ? ClientVersions.updateNotice(row.name, client, PACKAGE_VERSION) : null,
+    };
   }
 
   function seatActor(authorized, clientMessageId) {
@@ -2314,7 +2375,15 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
       return;
     }
-    const query = messageQuery(target);
+    // `facts=1` (0.4.0) adds the one ring shape (C4) to each ring. An older
+    // room refuses the unknown parameter, and the client falls back.
+    const withFacts = target.searchParams.getAll('facts').length === 1 && target.searchParams.get('facts') === '1';
+    let queryTarget = target;
+    if (withFacts) {
+      queryTarget = new URL(target.href);
+      queryTarget.searchParams.delete('facts');
+    }
+    const query = messageQuery(queryTarget);
     if (!query) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-ring-query' });
       return;
@@ -2379,18 +2448,41 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
-    const rings = result.messages.map(publicRing);
+    let rings = result.messages.map(publicRing);
+    let room = null;
     if (rings.some(ring => ring === null) || !Number.isSafeInteger(result.cursor)) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
-    sendJson(request, response, 200, {
+    if (withFacts) {
+      try {
+        const now = Date.now();
+        const clock = await roomClockFor(reauthorized.subject_id);
+        room = Object.freeze({
+          room_time: Ring.roomTime(now, clock.person),
+          last_person_message_ago: Ring.ago(clock.last_person_message_at, now),
+        });
+        const kinds = await Promise.all(result.messages.map(message =>
+          ringKindFor(message, { subject_id: reauthorized.subject_id, name: clock.connection })));
+        rings = rings.map((ring, index) => Object.freeze(Object.assign({}, ring, {
+          ring: Ring.buildRing({
+            kind: kinds[index],
+            message_id: ring.id, from: ring.byline, at: ring.ts, connection: clock.connection,
+            now, person: clock.person, last_person_message_at: clock.last_person_message_at,
+          }),
+        })));
+      } catch (_) {
+        sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+        return;
+      }
+    }
+    sendJson(request, response, 200, Object.assign({
       ok: true,
       rings: Object.freeze(rings),
       cursor: result.cursor,
       timed_out: result.timed_out === true,
       connection_session: connectionSession,
-    });
+    }, withFacts ? { room } : {}));
   }
 
   async function appendAiMessage(request, response, body) {
@@ -3489,6 +3581,150 @@ function createFirstOwnerHandler(options) {
 
   /* The seat's own last answered mention, read without touching its
    * doorbell poll. */
+  /* Whose clock a seat's rings and reads carry (C4, A2): its principal, the
+   * person it was admitted for, in the zone that person set; and when any
+   * person last posted. */
+  async function roomClockFor(seatSubjectId) {
+    const principal = typeof house.principalOf === 'function' ? house.principalOf(seatSubjectId) : null;
+    const seat = house.listParticipants({ now: Date.now() }).find(row => row.subject_id === seatSubjectId);
+    return Object.freeze({
+      connection: seat ? seat.name : 'NAME',
+      person: principal ? Object.freeze({ name: principal.name, time_zone: TimeZones.timeZoneOf(dataDir, principal.subject_id) }) : null,
+      last_person_message_at: typeof chat.lastPersonMessageAt === 'function' ? await chat.lastPersonMessageAt() : null,
+    });
+  }
+
+  /* Which kind of ring a message is for this seat (A12): a mention (an @ of
+   * it, or an ask of it) or a reply (an answer to its ask, or a post that
+   * discusses it). The A4 reply cause, "addressed since", joins here. A ring
+   * the room delivered for no cause it can name now (the roster changed)
+   * reads as a mention: it was addressed to the seat. */
+  async function ringKindFor(message, seat) {
+    const causes = typeof chat.ringCauses === 'function' ? await chat.ringCauses(message, seat) : {};
+    return Ring.ringKind(causes) || 'mention';
+  }
+
+  /* Who is not in the live roster, and why (C2): seats that left or ended in
+   * the last week, each with who has its work; and, for the people who can
+   * Allow them, knocks waiting to be let in. Its own route: the 0.3.11 page
+   * checks the participants body exactly. */
+  async function readPeopleAbsences(request, response) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const now = Date.now();
+    const authorized = house.authorizeRead(authorizationMeta(request, now), 'read', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) return refuseAuthorization(request, response, authorized);
+    try {
+      const who = house.whoami({ cookie_header: request.headers.cookie, activity: 'passive-delivery', now });
+      const mayAllow = Boolean(who && who.subject_id === authorized.subject_id && (who.first_owner === true ||
+        (Array.isArray(who.roles) && who.roles.some(role => role && role.slug === 'administrator'))));
+      const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
+      const workOf = name => {
+        const assignment = people ? people.service.assignmentOf(name) : null;
+        const project = assignment ? assignment.project : null;
+        if (!project) return { project: null, holder: 'the owner' };
+        const lead = people.service.leadOf(project, now, live);
+        return { project, holder: lead && typeof lead.name === 'string' ? lead.name : `whoever next leads ${project}` };
+      };
+      const recentlyLeft = house.listRecentEndedSeats({ now, since: now - SETTINGS_ENDED_MS })
+        .filter(seat => seat && typeof seat.name === 'string' && Number.isSafeInteger(seat.ended_at))
+        .slice().sort((left, right) => right.ended_at - left.ended_at)
+        .slice(0, SETTINGS_ENDED_PAGE)
+        .map(seat => {
+          const how = seat.ended_how === 'left' ? 'left' : seat.ended_how === 'revoked' ? 'removed'
+            : seat.ended_how === 'released' ? 'released' : 'expired';
+          const work = workOf(seat.name);
+          return Object.freeze({
+            name: seat.name, session: Number.isSafeInteger(seat.session) ? seat.session : null,
+            ended_how: how, ended_at: seat.ended_at, project: work.project, work_with: work.holder,
+            presence_kind: PresenceKind.endedKind(how, seat.ended_at, work.holder),
+          });
+        });
+      const pending = mayAllow ? admission.list().map(row => Object.freeze({
+        name: row.name, created_at: row.created_at,
+        presence_kind: PresenceKind.pendingKind(row.created_at, null),
+      })) : [];
+      return sendJson(request, response, 200, { ok: true, recently_left: recentlyLeft, pending });
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+    }
+  }
+
+  // What the room shows for this seat (C2): `interlock status` prints it.
+  async function readAiPresenceKind(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let kind;
+    try {
+      const row = (await chat.listParticipants()).find(entry => entry.subject_id === authorized.subject_id);
+      kind = row && PresenceKind.validPresenceKind(row.presence_kind) ? row.presence_kind : null;
+      if (!kind) throw new Error('no presence kind');
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    sendJson(request, response, 200, { ok: true, presence_kind: kind });
+  }
+
+  // The room time line that leads `work brief`, `history` and each ring.
+  async function readAiRoomTime(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let clock;
+    try {
+      clock = await roomClockFor(authorized.subject_id);
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    const now = Date.now();
+    sendJson(request, response, 200, {
+      ok: true,
+      room_time: Ring.roomTime(now, clock.person),
+      last_person_message_ago: Ring.ago(clock.last_person_message_at, now),
+      line: Ring.roomTimeLine(now, clock.person, clock.last_person_message_at),
+    });
+  }
+
+  // A person's own time zone, as they set it in Settings (null: not set).
+  function readOwnTimeZone(request, response) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const actor = browserWorkActor(request, response, false);
+    if (!actor) return undefined;
+    if (actor.kind !== 'person') return sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+    let zone;
+    try { zone = TimeZones.timeZoneOf(dataDir, actor.subject_id); }
+    catch (_) { return sendJson(request, response, 503, { ok: false, error: 'unavailable' }); }
+    return sendJson(request, response, 200, { ok: true, time_zone: zone });
+  }
+
+  function updateOwnTimeZone(request, response, body) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    if (!closedObject(body, ['time_zone']) ||
+        !(body.time_zone === null || Ring.validTimeZone(body.time_zone))) {
+      return sendJson(request, response, 400, { ok: false, error: 'invalid-request' });
+    }
+    const actor = browserWorkActor(request, response, true);
+    if (!actor) return undefined;
+    if (actor.kind !== 'person') return sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+    try { TimeZones.writeTimeZone(dataDir, actor.subject_id, body.time_zone); }
+    catch (_) { return sendJson(request, response, 503, { ok: false, error: 'unavailable' }); }
+    return sendJson(request, response, 200, { ok: true, time_zone: body.time_zone });
+  }
+
   async function readAiLastAnswered(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -3524,9 +3760,13 @@ function createFirstOwnerHandler(options) {
     }
     try {
       await releaseIdle(now);
+      const viewer = typeof authorized.subject_id === 'string' ? authorized.subject_id : null;
+      // A read asks passively: a People poll never keeps a session alive.
+      const viewerIsFirstOwner = viewer !== null && isFirstOwner(request, viewer, now, 'passive-delivery');
       const participants = (await chat.listParticipants()).map(row => {
         const base = publicParticipant(row);
-        return base === null ? null : Object.freeze(Object.assign({}, base, peopleFacts(row)));
+        return base === null ? null : Object.freeze(Object.assign({}, base, peopleFacts(row),
+          clientFacts(row, viewer, viewerIsFirstOwner)));
       });
       if (participants.some(row => row === null)) throw new Error('invalid participant');
       sendJson(request, response, 200, { ok: true, participants });
@@ -3862,6 +4102,7 @@ function createFirstOwnerHandler(options) {
     ['/api/account/passkey/begin', accountPasskeyBegin],
     ['/api/account/passkey/finish', accountPasskeyFinish],
     ['/api/settings/reuse', updateEndedReuse],
+    ['/api/settings/time-zone', updateOwnTimeZone],
     ['/api/owner/password', changeOwnerPassword],
     ['/api/owner/sessions/revoke-others', signOutOtherSessions],
     ['/api/transcript/export', exportTranscript],
@@ -4005,6 +4246,44 @@ function createFirstOwnerHandler(options) {
           return;
         }
         listAdmissions(request, response);
+        return;
+      }
+      if (pathname === '/api/people/absences') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-people-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        await readPeopleAbsences(request, response);
+        return;
+      }
+      if (pathname === '/api/ai/presence-kind') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-connection-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        await readAiPresenceKind(request, response);
+        return;
+      }
+      if (pathname === '/api/ai/room-time') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-connection-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        await readAiRoomTime(request, response);
+        return;
+      }
+      if (pathname === '/api/settings/time-zone' && request.method === 'GET') {
+        if (target.search !== '') {
+          sendJson(request, response, 400, { ok: false, error: 'invalid-settings-query' });
+          return;
+        }
+        readOwnTimeZone(request, response);
         return;
       }
       if (pathname === '/api/ai/last-answered') {

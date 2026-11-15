@@ -70,7 +70,8 @@ test('the Guide and its rendered Help page say how an AI in a hosted chat joins 
 
 test('the Guide has one maintainable word ceiling', () => {
   const words = GUIDE.trim().split(/\s+/).length;
-  assert.ok(words <= 2_700, `GUIDE.md grew to ${words} words`);
+  // 2,700 → 2,750 in 0.4.0 for leave-or-pause and the room's People words; detail lives in docs/WORK.md.
+  assert.ok(words <= 2_750, `GUIDE.md grew to ${words} words`);
 });
 
 test('the documented reachability probe exits after fetch handles close', () => {

@@ -6,12 +6,13 @@
 const InterlockMentions = require('../web/mentions.js');
 const InterlockReplyReference = require('../web/reply_reference.js');
 const Annotations = require('./annotations.js');
+const PresenceKind = require('./presence_kind.js');
 
 const MAX_WAIT_MS = 45_000;
 const DEFAULT_ASK_PROJECT = 'ops';
 const PARTICIPANT_STATE_BATCH = 64;   // the store's per-call limit
 const AI_PRESENCE_WINDOW_MS = 5 * 60 * 1000;
-const OPTION_KEYS = Object.freeze(['store', 'participants']);
+const OPTION_KEYS = Object.freeze(['store', 'participants', 'hasWebhook']);
 const WAIT_OPTION_KEYS = Object.freeze(['signal', 'timeoutMs']);
 
 function fail(code) {
@@ -107,12 +108,23 @@ function createChatService(options) {
       typeof store.acknowledge !== 'function' || typeof store.close !== 'function' ||
       typeof store.touch !== 'function' || typeof store.participantState !== 'function' ||
       typeof store.deliveryChanges !== 'function' ||
-      typeof input.participants !== 'function') {
+      typeof input.participants !== 'function' ||
+      !(input.hasWebhook === undefined || typeof input.hasWebhook === 'function')) {
     throw fail('invalid-options');
   }
+  // Whether a seat has a webhook registered: one lookup in the webhook
+  // registrations' own store, owned by the delivery side. Absent: none do.
+  const hasWebhook = subjectId => input.hasWebhook !== undefined && input.hasWebhook(subjectId) === true;
 
   let closed = false;
   const waiters = new Set();
+  // In memory, like the doorbell's polls: what a seat has declared about
+  // itself and what the room's webhook deliveries found. After a restart a
+  // seat reads `unknown` until it polls or pauses again.
+  const startedAt = Date.now();
+  const pauses = new Map();       // subject -> { reason, since, renewed_at }
+  const resumes = new Map();      // subject -> when it last cleared its own pause
+  const deliveries = new Map();   // subject -> { ok, at, error_class }
 
   function requireOpen() {
     if (closed) throw fail('service-closed');
@@ -129,6 +141,13 @@ function createChatService(options) {
     return states;
   }
 
+  // A registration and its last delivery. A delivery recorded for a seat
+  // whose registration is gone no longer speaks for it.
+  function webhookFacts(subjectId) {
+    if (!hasWebhook(subjectId)) return null;
+    return Object.freeze({ registered: true, last: deliveries.get(subjectId) || null });
+  }
+
   async function participantSnapshot(now) {
     const roster = input.participants({ now });
     if (!Array.isArray(roster) || roster.some(row => !validParticipantRow(row))) {
@@ -138,6 +157,14 @@ function createChatService(options) {
     const stateById = new Map(states.map(row => [row.subject_id, row]));
     return Object.freeze(roster.map(row => {
       const state = stateById.get(row.subject_id);
+      const polledAt = state && Number.isSafeInteger(state.last_polled_at) ? state.last_polled_at : null;
+      const postedAt = state && Number.isSafeInteger(state.last_posted_at) ? state.last_posted_at : null;
+      const presenceKind = row.kind === 'person' ? PresenceKind.personKind(state ? state.last_heard : null, now) : PresenceKind.seatKind({
+        now, started_at: startedAt, created_at: row.created_at,
+        last_polled_at: polledAt, last_posted_at: postedAt,
+        pause: pauses.get(row.subject_id) || null, resumed_at: resumes.get(row.subject_id) ?? null,
+        webhook: webhookFacts(row.subject_id),
+      });
       return Object.freeze(Object.assign({}, row, {
         last_heard: state ? state.last_heard : null,
         outstanding: state ? state.outstanding : 0,
@@ -146,6 +173,7 @@ function createChatService(options) {
         last_polled_at: state && Number.isSafeInteger(state.last_polled_at) ? state.last_polled_at : null,
         last_answered: row.kind === 'seat' && state && state.last_answered ? state.last_answered : null,
         present: isPresent(row, state, now),
+        presence_kind: presenceKind,
       }));
     }));
   }
@@ -614,10 +642,64 @@ function createChatService(options) {
     return await store.touch(subjectId, now);
   }
 
-  /* A doorbell poll: the seat is listening (only the rings route calls this). */
+  /* A doorbell poll: the seat is listening (only the rings route calls this).
+   * A poll ends any declared pause. */
   function notePoll(subjectId, now) {
     requireOpen();
     if (typeof store.notePoll === 'function') store.notePoll(subjectId, now);
+    pauses.delete(subjectId);
+  }
+
+  /* The seat's own declaration (C1): `{ reason }` while it works a turn,
+   * `null` when it is back. Posting a pause again renews it and keeps the
+   * time the turn began; one not renewed within three hours reads away. */
+  function notePause(subjectId, pause, now = Date.now()) {
+    requireOpen();
+    if (typeof subjectId !== 'string' || subjectId.length === 0 || subjectId.length > 64 ||
+        !Number.isSafeInteger(now) || now < 0) throw fail('invalid-pause');
+    if (pause === null) {
+      if (pauses.delete(subjectId)) resumes.set(subjectId, now);
+      return null;
+    }
+    const input = closedObject(pause, ['reason']);
+    const reason = input && input.reason === undefined ? 'turn' : input && input.reason;
+    if (!PresenceKind.PAUSE_REASONS.includes(reason)) throw fail('invalid-pause');
+    const prior = pauses.get(subjectId);
+    const renewedLive = prior && now - prior.renewed_at < PresenceKind.PAUSE_MS;
+    const entry = Object.freeze({ reason, since: renewedLive ? prior.since : now, renewed_at: now });
+    pauses.set(subjectId, entry);
+    return Object.freeze({ reason, since: entry.since, expires_at: now + PresenceKind.PAUSE_MS });
+  }
+
+  /* The room's webhook delivery of one ring (S2 calls this once per ring,
+   * after its last attempt). One failed delivery reads unreachable; the next
+   * good one clears it. */
+  function noteWebhookDelivery(subjectId, outcome) {
+    requireOpen();
+    const input = closedObject(outcome, ['ok', 'at', 'error_class']);
+    if (typeof subjectId !== 'string' || subjectId.length === 0 || subjectId.length > 64 || !input ||
+        typeof input.ok !== 'boolean' || !Number.isSafeInteger(input.at) || input.at < 0 ||
+        (input.ok ? !(input.error_class === undefined || input.error_class === null)
+          : !PresenceKind.ERROR_CLASSES.includes(input.error_class))) throw fail('invalid-delivery');
+    deliveries.set(subjectId, Object.freeze({ ok: input.ok, at: input.at, error_class: input.ok ? null : input.error_class }));
+  }
+
+
+  /* The causes a message rings a seat for (A12): an @ of it, an ask of it,
+   * an answer to its ask, or a post discussing its ask. */
+  async function ringCauses(message, seat) {
+    requireOpen();
+    const mentioned = resolveRecipients(message.text, [{ subject_id: seat.subject_id, name: seat.name, kind: 'seat' }],
+      message.subject_id).length > 0;
+    const asks = typeof store.askCauses === 'function'
+      ? await store.askCauses(message.id, seat.subject_id)
+      : { asked: false, answers_its_ask: false, discusses_its_ask: false };
+    return Object.freeze(Object.assign({ mentioned }, asks));
+  }
+
+  async function lastPersonMessageAt() {
+    requireOpen();
+    return typeof store.lastPersonMessageAt === 'function' ? await store.lastPersonMessageAt() : null;
   }
 
   async function listParticipants() {
@@ -720,7 +802,7 @@ function createChatService(options) {
     append, appendAnnotated, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
     read, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
-    touchParticipant, notePoll, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
+    touchParticipant, notePoll, notePause, noteWebhookDelivery, lastPersonMessageAt, ringCauses, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });
 }
 

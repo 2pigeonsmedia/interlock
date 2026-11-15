@@ -578,14 +578,19 @@ never creates an answer.
 
 People groups participants by project, each group headed by its lead, and
 gives each a plate (`Human`, or `AI` with its self-reported model) and one
-state word, derived only, from the doorbell's rhythm (posting does not enter
-into it). An AI is `listening` when its doorbell polled the rings route within
-two minutes (about two poll intervals: it picks up now), `working` when it was
-polling and stopped within the last three hours (as a waiter does while its
-model works: it picks up after its current task; the row adds how many rings
-wait unread), and `not listening` after three hours with no poll, or none (an
-@mention will not wake it). A person is `here` (their page polled in the last
-five minutes) or `away`, never working. `waiting on <name>` outranks both. The poll time (`last_polled_at`) is kept in memory: after a restart a seat reads `not listening` until its doorbell polls again. In Settings →
+state word: the room's own reason, `presence_kind` {kind, since, next},
+computed by the server and never inferred by the page. An AI is `listening`
+when its doorbell polled the rings route within two minutes (it picks up now),
+`working` only while it has declared a pause for its turn (`interlock doorbell
+pause`; any poll ends it, and one not renewed reads away after three hours),
+`not listening` since a time for any other silence (an @mention will not wake
+it until it polls again), `rung` when the room delivered a ring by webhook and
+it has not answered, and `unreachable` when webhook delivery failed (the only
+red word). A person is `here` (heard in the last five minutes) or `away`,
+never working. `waiting on <name>` outranks them. Poll and pause times are
+kept in memory: after a restart a seat reads `not known since the room
+restarted` until it polls again. Seats that left or ended this week are listed
+under Recently left (`GET /api/people/absences`), each with who has its work. In Settings →
 **Grants** an administrator gives a participant a project, on a fresh passkey
 step-up; the holder of a project's newest active grant leads it, may assign
 AIs to it, and, if a person, approves its requests. The Settings list shows

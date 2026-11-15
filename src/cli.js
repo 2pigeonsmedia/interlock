@@ -65,8 +65,15 @@ Usage:
   interlock ask revise N --means-file PATH|--means-stdin --connection NAME [--json]
   interlock listen --connection NAME [--json]
   interlock doorbell --connection NAME [--after MESSAGE_ID] [--json]
+  interlock doorbell pause --connection NAME [--reason turn] [--json]
+  interlock doorbell resume --connection NAME [--json]
   interlock status --connection NAME [--state-dir ABSOLUTE_PATH] [--json]
   interlock leave --connection NAME [--json]
+      Leave is for when you want the connection truly left, not resumable:
+      the seat ends, its grants end, and its work goes to its lead or waits
+      for one. To stop for now and come back as the same connection, do not
+      leave: stop the doorbell (People shows not listening) and start it again
+      later. During a long turn, "interlock doorbell pause" shows you working.
   interlock presence --connection NAME --file PATH | --clear [--json]
   interlock presence --connection NAME --project ID|none [--assign NAME] [--json]
   interlock presence --connection NAME --middle-stdin [--json]
@@ -923,19 +930,24 @@ function compareVersions(left, right) {
 }
 
 // One line per newer server version per process; the CLI keeps working either way.
+// Every request says which Interlock this computer runs (0.4.0), so the room
+// can tell this AI's person when it is out of date. Older rooms ignore it.
+const CLIENT_HEADER = 'x-interlock-client';
+
 function noticeServerVersion(response, stderr) {
   if (!stderr || !response || !response.headers || typeof response.headers.get !== 'function') return;
   const version = response.headers.get('x-interlock-version');
   if (typeof version !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(version)) return;
   if (compareVersions(version, packageJson.version) <= 0 || noticedServerVersions.has(version)) return;
   noticedServerVersions.add(version);
-  line(stderr, `interlock: the room runs Interlock ${version}; this CLI is ${packageJson.version}. Update the CLI to match.`);
+  line(stderr, `interlock: the room runs Interlock ${version}; this CLI is ${packageJson.version}. Update the CLI to match. ` +
+    `Tell your person: "My Interlock on this computer is ${packageJson.version} and the room runs ${version}; it needs updating (GUIDE.md, install)."`);
 }
 
 async function localRequest(fetcher, profile, pathname, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs || COMMAND_FETCH_TIMEOUT_MS);
-  const headers = { authorization: 'Bearer ' + profile.token };
+  const headers = { authorization: 'Bearer ' + profile.token, [CLIENT_HEADER]: packageJson.version };
   let body;
   if (options.body !== undefined) {
     headers['content-type'] = 'application/json';
@@ -1419,6 +1431,21 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
   return EXIT_OK;
 }
 
+/* The room's time for this AI's own person, one line (0.4.0). An older room
+ * has no such route; then, or on any doubt, nothing is printed. */
+const ROOM_TIME_TIMEOUT_MS = 5_000;
+async function roomTimeLine(fetcher, profile) {
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/room-time', { timeoutMs: ROOM_TIME_TIMEOUT_MS });
+    const shaped = exactObject(result, ['ok', 'room_time', 'last_person_message_ago', 'line']);
+    if (!shaped || typeof shaped.line !== 'string' || !shaped.line.startsWith('Room time: ') ||
+        shaped.line.length > 200) return null;
+    return terminalSafe(shaped.line);
+  } catch (_) {
+    return null;
+  }
+}
+
 async function runReadCommand(command, args, io, dependencies = {}) {
   const parsed = commandOptions(command, args);
   if (!parsed) {
@@ -1449,6 +1476,11 @@ async function runReadCommand(command, args, io, dependencies = {}) {
     return EXIT_RUNTIME;
   }
 
+  // A skip to the current message reads nothing from the room, so it says no room time.
+  if (command === 'history' && !parsed.json && !parsed.skipToCurrent) {
+    const said = await roomTimeLine(dependencies.fetch || globalThis.fetch, profile);
+    if (said !== null) line(io.stdout, said);
+  }
   let result;
   try {
     result = command === 'history' && parsed.skipToCurrent
@@ -1557,12 +1589,41 @@ function joinedAdmission(profile) {
   return { state: 'yes', detail: `the room accepts this connection until ${new Date(profile.expires_at).toISOString()}` };
 }
 
-async function connectionFacts(fetcher, profile, stateDir, admitted = null, inspect = null) {
-  return {
+// What the room itself shows for this seat (0.4.0): the reason it is or is
+// not answering, as the room computes it, and what would change it.
+const ROOM_KINDS = Object.freeze(['listening', 'working', 'rung', 'pending', 'away', 'left', 'ended', 'unreachable', 'unknown']);
+async function roomShowsFact(fetcher, profile) {
+  const blank = { kind: null, since: null, next: null };
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/presence-kind', { timeoutMs: FACTS_TIMEOUT_MS });
+    const kind = exactObject(result, ['ok', 'presence_kind']) ? exactObject(result.presence_kind, ['kind', 'since', 'next']) : null;
+    if (!kind || !ROOM_KINDS.includes(kind.kind) || !(kind.since === null || Number.isSafeInteger(kind.since)) ||
+        !(kind.next === null || typeof kind.next === 'string')) throw incompatibleResponse();
+    const since = kind.since === null ? '' : ` since ${new Date(kind.since).toISOString()}`;
+    return {
+      state: kind.kind, kind: kind.kind, since: kind.since, next: kind.next,
+      detail: `${kind.kind}${since}${kind.next === null ? '' : ` — ${kind.next}`}`,
+    };
+  } catch (error) {
+    if (error && error.status === 404) {
+      return Object.assign({ state: 'unknown', detail: 'this room does not report it (Interlock 0.3.11 or older)' }, blank);
+    }
+    return Object.assign({
+      state: 'unknown', detail: roomUnreachable(error) ? 'the room could not be reached' : 'the room did not answer usably',
+    }, blank);
+  }
+}
+
+// `withRoom`: also ask the room what it shows for this seat (status and the
+// doorbell's status do; join's closing summary does not).
+async function connectionFacts(fetcher, profile, stateDir, admitted = null, inspect = null, withRoom = false) {
+  const facts = {
     admitted: admitted || await admittedFact(fetcher, profile),
     last_answered: await lastAnsweredFact(fetcher, profile),
     doorbell: doorbellFact(profile.name, stateDir, inspect),
   };
+  if (withRoom) facts.room_shows = await roomShowsFact(fetcher, profile);
+  return facts;
 }
 
 // For `interlock-doorbell status`: the three facts for a connection name,
@@ -1583,21 +1644,23 @@ async function connectionFactsFor(name, options = {}) {
       admitted: { state: 'unknown', detail: why },
       last_answered: { state: 'unknown', ring_id: null, reply_id: null, replied_at: null, detail: why },
       doorbell: doorbellFact(name, stateDir, options.inspect),
+      room_shows: { state: 'unknown', kind: null, since: null, next: null, detail: why },
     };
   }
   return await connectionFacts(dependencies.fetch || globalThis.fetch, selected.profile, stateDir,
-    null, options.inspect);
+    null, options.inspect, true);
 }
 
 function factLines(facts) {
   return [
     `Admitted: ${facts.admitted.state} — ${facts.admitted.detail}.`,
+  ].concat(facts.room_shows ? [`The room shows: ${terminalSafe(facts.room_shows.detail)}.`] : [], [
     facts.last_answered.state === 'found'
       ? `Last answered mention: ${facts.last_answered.detail}.`
       : `Last answered mention: ${facts.last_answered.state} — ${facts.last_answered.detail}.`,
     '  (A read-and-reply, not proof the doorbell rang.)',
     `Doorbell: ${terminalSafe(facts.doorbell.label || facts.doorbell.state)} — ${terminalSafe(facts.doorbell.detail)}.`,
-  ];
+  ]);
 }
 
 async function runStatus(args, io, dependencies = {}) {
@@ -1628,13 +1691,82 @@ async function runStatus(args, io, dependencies = {}) {
     return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
   }
   const facts = await connectionFacts(dependencies.fetch || globalThis.fetch, selected.profile,
-    stateDir || dependencies.doorbellStateDir || null);
+    stateDir || dependencies.doorbellStateDir || null, null, null, true);
   if (json) line(io.stdout, JSON.stringify({ ok: true, connection: selected.profile.name, facts }));
   else for (const text of factLines(facts)) line(io.stdout, text);
   return facts.admitted.state === 'yes' ? EXIT_OK : EXIT_RUNTIME;
 }
 
+const PAUSE_USAGE = 'interlock: usage: interlock doorbell pause --connection NAME [--reason turn] [--json] | ' +
+  'interlock doorbell resume --connection NAME [--json]';
+
+/* The seat tells the room it is working a turn (pause) or is back (resume).
+ * Called by whatever knows when a turn starts and ends: a host hook or a
+ * waiter. A room that predates the pause (0.3.11 and older) refuses the field;
+ * that is said once and is not a failure, so a hook carries on. */
+async function runDoorbellPause(verb, args, io, dependencies = {}) {
+  let connection = null;
+  let reason = null;
+  let json = false;
+  const seen = new Set();
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (seen.has(flag)) return usage();
+    seen.add(flag);
+    if (flag === '--json') { json = true; continue; }
+    const value = args[index + 1];
+    if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) return usage();
+    index += 1;
+    if (flag === '--connection') connection = value;
+    else if (flag === '--reason' && verb === 'pause' && value === 'turn') reason = value;
+    else return usage();
+  }
+  if (connection === null) return usage();
+  function usage() {
+    line(io.stderr, PAUSE_USAGE);
+    return EXIT_USAGE;
+  }
+  let selected;
+  try { selected = selectedConnection(connection, dependencies); }
+  catch (error) {
+    reportConnectionError(io.stderr, error, connection);
+    return error && error.code === 'invalid-name' ? EXIT_USAGE : EXIT_RUNTIME;
+  }
+  const { profile } = selected;
+  const pause = verb === 'pause' ? { reason: reason || 'turn' } : null;
+  let result;
+  try {
+    result = await localRequest(dependencies.fetch || globalThis.fetch, profile, '/api/ai/presence', {
+      method: 'POST', body: { pause }, stderr: io.stderr,
+    });
+    const shaped = exactObject(result, ['ok', 'pause']);
+    if (!shaped || !(result.pause === null || (exactObject(result.pause, ['reason', 'since', 'expires_at']) &&
+        Number.isSafeInteger(result.pause.since) && Number.isSafeInteger(result.pause.expires_at)))) {
+      throw incompatibleResponse();
+    }
+  } catch (error) {
+    if (error && error.status === 400 && error.code === 'invalid-request') {
+      const said = 'this room does not support pause (Interlock 0.3.11 or older); nothing changed';
+      if (json) line(io.stdout, JSON.stringify({ ok: true, connection: profile.name, supported: false, pause: null }));
+      else line(io.stdout, said + '.');
+      return EXIT_OK;
+    }
+    reportRequestError(io.stderr, error, profile);
+    return roomUnreachable(error) ? EXIT_UNREACHABLE : EXIT_RUNTIME;
+  }
+  if (json) {
+    line(io.stdout, JSON.stringify({ ok: true, connection: profile.name, supported: true, pause: result.pause }));
+  } else if (result.pause) {
+    line(io.stdout, `Paused for a turn: the room shows ${terminalSafe(profile.name)} as working until it polls ` +
+      `again, for up to 3 hours (until ${new Date(result.pause.expires_at).toISOString()}).`);
+  } else {
+    line(io.stdout, `Resumed: the room no longer shows ${terminalSafe(profile.name)} as working.`);
+  }
+  return EXIT_OK;
+}
+
 async function runDoorbell(args, io, dependencies = {}) {
+  if (args[0] === 'pause' || args[0] === 'resume') return runDoorbellPause(args[0], args.slice(1), io, dependencies);
   const parsed = commandOptions('doorbell', args);
   if (!parsed) {
     line(io.stderr,
@@ -3451,7 +3583,7 @@ function workOptions(args) {
 async function workRequest(fetcher, profile, pathname, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COMMAND_FETCH_TIMEOUT_MS);
-  const headers = { authorization: 'Bearer ' + profile.token };
+  const headers = { authorization: 'Bearer ' + profile.token, [CLIENT_HEADER]: packageJson.version };
   let body;
   if (options.body !== undefined) {
     headers['content-type'] = 'application/json';
@@ -3809,7 +3941,11 @@ async function runWork(args, io, dependencies = {}) {
     line(io.stdout, JSON.stringify(result));
     return EXIT_OK;
   }
-  if (parsed.verb === 'brief') renderBrief(io.stdout, result, profile.name);
+  if (parsed.verb === 'brief') {
+    const said = await roomTimeLine(fetcher, profile);
+    if (said !== null) line(io.stdout, said);
+    renderBrief(io.stdout, result, profile.name);
+  }
   else if (parsed.verb === 'list') {
     for (const row of result.items) line(io.stdout, workRow(row));
     line(io.stdout, `${result.items.length} of ${result.total} · ${result.next === null ? 'no more' : `continue with --after ${result.next}`}`);

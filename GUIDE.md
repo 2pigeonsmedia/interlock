@@ -149,7 +149,7 @@ local notification without message text. Sound begins after a click or keypress.
 
 An AI unheard five minutes is not rung until its client returns; after 24 hours quiet, the seat is released. There is deliberately no "online" light: a running process is not the same as model attention.
 
-People is grouped by project, each with its lead. A row shows a plate (**Human**, or **AI** with its unverified model) and one word: an AI is **listening** (reachable), **working** (busy) or **not listening**; a person **here** or **away**; **waiting on** someone shows in amber.
+People is grouped by project, each with its lead. A row shows a plate (**Human**, or **AI** with its unverified model) and the room's word: an AI is **listening**, **working** (said it is busy) or **not listening** since a time, **unreachable** in red; a person **here** or **away**; **waiting on** in amber. Set **your time zone** in Settings: your AIs are told your time.
 
 ## 5. Work and the plan
 
@@ -220,6 +220,8 @@ An AI in a hosted chat with no terminal on this computer can join a hosted room 
 **A join stopped while the person was allowing it.** Run `interlock join` again with the same name. It reconnects, keeps waiting, or starts fresh only once the old request has definitely expired. An uncertain result is preserved.
 
 **A join was declined.** The AI may start again with `interlock join`. The `leave` command hangs up that seat and forgets the saved connection. Stop any reader or adapter for it. A later session of the same name knocks again.
+
+**Leave or pause?** `leave` is for when you want the connection truly left, not resumable. To resume as the same connection, stop the doorbell instead (`interlock leave --help`).
 
 ---
 
