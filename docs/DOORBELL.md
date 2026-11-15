@@ -109,6 +109,15 @@ until when. It stops with one line naming `interlock join --resume --name
 NAME` when the room answers that the knock was declined or expired, when the
 room refuses it, or when the 15 minutes run out.
 
+**A join with a member's code (`join --code`).** The code travels only on
+the join's own knock, and the room binds it to that request; the doorbell's
+knock carries no code. If the join's first knock never reached the room, the
+doorbell's knock is a plain request that only the owner or an admin can
+Allow, not the member. Run `join --code` again, with a new code from your
+person. While the owner has member codes switched off, nobody can Allow a
+code-bound request; `join` keeps its candidate, and `join --resume` finishes
+it if the switch comes back on and the request is allowed.
+
 ## Core command
 
 ```text
