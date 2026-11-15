@@ -352,7 +352,12 @@ function createService(opts) {
       outcome, reason, eventId, origin: observed_origin });
   }
 
-  function withFreshAdmin(optsIn, workflow, resource, body) {
+  /* `gate(actorId, assurance)` answers who may do the act, as `can()` does;
+   * by default it is `can()`'s admin check on `resource`. Only the member AI
+   * admission (#821) passes another: the principal itself, or an admin. */
+  function withFreshAdmin(optsIn, workflow, resource, body, gate) {
+    const allowed = typeof gate === 'function' ? gate
+      : (actorId, assurance) => authzAllow(actorId, resource, assurance);
     // Every refusal is recorded with its reason. The CALLER is told the reason
     // only once it holds a live session, and every reason told describes the
     // caller's own state, never the act's target. Before that the answer stays
@@ -380,7 +385,7 @@ function createService(opts) {
     });
     if (!pre || !pre.ok) return refuse('no-session');
     const actorId = pre.session.subject_id;
-    const preAllow = authzAllow(actorId, resource, pre.session.assurance);
+    const preAllow = allowed(actorId, pre.session.assurance);
     if (!preAllow || preAllow.allow !== true) {
       mark(null, workflow, 'refused');
       // can() checks assurance before role, so an ordinary session is refused
@@ -413,7 +418,7 @@ function createService(opts) {
     }
 
     // Step 5: re-check can() with assurance 2 derived from this stack only.
-    const postAllow = authzAllow(actorId, resource, 2);
+    const postAllow = allowed(actorId, 2);
     if (!postAllow || postAllow.allow !== true) {
       mark(step.lineage_id, workflow, 'refused');
       return refuse('not-administrator', actorId, 2, spent);
@@ -521,100 +526,150 @@ function createService(opts) {
     }, candidate));
   }
 
-  function allowAiAdmission(optsIn) {
-    const candidate = parseAiAdmission(optsIn, ALLOW_AI_ADMISSION_KEYS);
-    if (!candidate) return FAIL;
+  /* One AI admission, in one repository transaction: the seat, its pass,
+   * the room grants and the enrolment intent. `principalId` is whom the seat
+   * acts for: the administrator who allowed it, or (#821) the member whose
+   * code it came by. */
+  function admitAiSeat(candidate, principalId, now, label, checkInDraft) {
     const requestId = candidate.request_id;
     const { name, product, selector, digest } = candidate;
     const productProvenance = candidate.product_provenance;
+    const seatTtl = policy.passLifetimeMs();
+    if (!Number.isSafeInteger(seatTtl) || seatTtl < repo.MIN_PASS_LIFETIME_MS ||
+        seatTtl > repo.MAX_PASS_LIFETIME_MS) {
+      throw new Error('administration.' + label + ': pass lifetime policy is invalid');
+    }
 
-    return withFreshAdmin(optsIn, 'ai-admission.allow', 'membership', ({ actorId, now }) => {
-      const seatTtl = policy.passLifetimeMs();
-      if (!Number.isSafeInteger(seatTtl) || seatTtl < repo.MIN_PASS_LIFETIME_MS ||
-          seatTtl > repo.MAX_PASS_LIFETIME_MS) {
-        throw new Error('administration.allowAiAdmission: pass lifetime policy is invalid');
+    return repo.transact(draft => {
+      // Re-checked inside the transaction that writes the seat, never only
+      // before it.
+      if (typeof checkInDraft === 'function') checkInDraft(draft);
+      const existingCredential = draft.credentials.find(c => c && c.request_id === requestId) || null;
+      const nameFold = subjects.fold(name);
+      const held = draft.subjects.find(subject =>
+        subject && subject.kind === 'seat' && subject.status === 'active' &&
+        subject.tenant === TENANT() && subject.name_fold === nameFold &&
+        !(Number.isFinite(subject.expires_at) && subject.expires_at > 0 &&
+          subject.expires_at <= now));
+      if (held && !existingCredential) {
+        if (!subjects.revokeInDraft(draft, held.id, 'revoked', now)) {
+          throw new Error('administration.' + label + ': held seat could not be ended');
+        }
       }
 
-      return repo.transact(draft => {
-        const existingCredential = draft.credentials.find(c => c && c.request_id === requestId) || null;
-        const nameFold = subjects.fold(name);
-        const held = draft.subjects.find(subject =>
-          subject && subject.kind === 'seat' && subject.status === 'active' &&
-          subject.tenant === TENANT() && subject.name_fold === nameFold &&
-          !(Number.isFinite(subject.expires_at) && subject.expires_at > 0 &&
-            subject.expires_at <= now));
-        if (held && !existingCredential) {
-          if (!subjects.revokeInDraft(draft, held.id, 'revoked', now)) {
-            throw new Error('administration.allowAiAdmission: held seat could not be ended');
-          }
+      if (existingCredential) {
+        const existingSeat = draft.subjects.find(s => s && s.id === existingCredential.subject_id) || null;
+        const exact = existingCredential.type === 'pass' &&
+          existingCredential.selector === selector && existingCredential.digest === digest &&
+          existingCredential.generation === 1 && existingSeat && existingSeat.kind === 'seat' &&
+          existingSeat.name === name && existingSeat.principal === principalId &&
+          existingSeat.product === product &&
+          existingSeat.product_provenance === productProvenance &&
+          existingSeat.expires_at === existingCredential.expires_at;
+        if (!exact) {
+          throw new Error('administration.' + label + ': request_id collision or changed replay');
         }
-
-        if (existingCredential) {
-          const existingSeat = draft.subjects.find(s => s && s.id === existingCredential.subject_id) || null;
-          const exact = existingCredential.type === 'pass' &&
-            existingCredential.selector === selector && existingCredential.digest === digest &&
-            existingCredential.generation === 1 && existingSeat && existingSeat.kind === 'seat' &&
-            existingSeat.name === name && existingSeat.principal === actorId &&
-            existingSeat.product === product &&
-            existingSeat.product_provenance === productProvenance &&
-            existingSeat.expires_at === existingCredential.expires_at;
-          if (!exact) {
-            throw new Error('administration.allowAiAdmission: request_id collision or changed replay');
-          }
-          return Object.freeze({
-            ok: true,
-            subject_id: existingSeat.id,
-            name: existingSeat.name,
-            product: existingSeat.product,
-            product_provenance: existingSeat.product_provenance,
-            expires_at: existingSeat.expires_at,
-          });
-        }
-
-        const seat = subjects.createAiSeatInDraft(draft, {
-          tenant: TENANT(), name, principal: actorId, now,
-          product, product_provenance: productProvenance,
-        });
-        const credential = credentials.issueInDraft(draft, {
-          selector,
-          digest,
-          subject_id: seat.id,
-          type: 'pass',
-          ttlMs: seatTtl,
-          generation: 1,
-          request_id: requestId,
-          now,
-        });
-        grants.ensurePrincipalPairInDraft(draft, {
-          tenant: TENANT(), subject_id: actorId, resource: 'room:main', origin: 'any', now,
-        });
-        grants.ensureSeatPairInDraft(draft, {
-          tenant: TENANT(), subject_id: seat.id, resource: 'room:main', origin: 'any', now,
-        });
-        draft.outbox.push({
-          id: crypto.randomUUID(),
-          ts: now,
-          kind: 'ai-seat.enroll',
-          tenant: TENANT(),
-          admission_request_id: requestId,
-          subject_id: seat.id,
-          subject_name: seat.name,
-          principal_subject_id: actorId,
-          credential_id: credential.id,
-          product: seat.product,
-          product_provenance: seat.product_provenance,
-          expires_at: credential.expires_at,
-        });
         return Object.freeze({
           ok: true,
-          subject_id: seat.id,
-          name: seat.name,
-          product: seat.product,
-          product_provenance: seat.product_provenance,
-          expires_at: credential.expires_at,
+          subject_id: existingSeat.id,
+          name: existingSeat.name,
+          product: existingSeat.product,
+          product_provenance: existingSeat.product_provenance,
+          expires_at: existingSeat.expires_at,
         });
+      }
+
+      const seat = subjects.createAiSeatInDraft(draft, {
+        tenant: TENANT(), name, principal: principalId, now,
+        product, product_provenance: productProvenance,
+      });
+      const credential = credentials.issueInDraft(draft, {
+        selector,
+        digest,
+        subject_id: seat.id,
+        type: 'pass',
+        ttlMs: seatTtl,
+        generation: 1,
+        request_id: requestId,
+        now,
+      });
+      grants.ensurePrincipalPairInDraft(draft, {
+        tenant: TENANT(), subject_id: principalId, resource: 'room:main', origin: 'any', now,
+      });
+      grants.ensureSeatPairInDraft(draft, {
+        tenant: TENANT(), subject_id: seat.id, resource: 'room:main', origin: 'any', now,
+      });
+      draft.outbox.push({
+        id: crypto.randomUUID(),
+        ts: now,
+        kind: 'ai-seat.enroll',
+        tenant: TENANT(),
+        admission_request_id: requestId,
+        subject_id: seat.id,
+        subject_name: seat.name,
+        principal_subject_id: principalId,
+        credential_id: credential.id,
+        product: seat.product,
+        product_provenance: seat.product_provenance,
+        expires_at: credential.expires_at,
+      });
+      return Object.freeze({
+        ok: true,
+        subject_id: seat.id,
+        name: seat.name,
+        product: seat.product,
+        product_provenance: seat.product_provenance,
+        expires_at: credential.expires_at,
       });
     });
+  }
+
+  function allowAiAdmission(optsIn) {
+    const candidate = parseAiAdmission(optsIn, ALLOW_AI_ADMISSION_KEYS);
+    if (!candidate) return FAIL;
+    return withFreshAdmin(optsIn, 'ai-admission.allow', 'membership',
+      ({ actorId, now }) => admitAiSeat(candidate, actorId, now, 'allowAiAdmission'));
+  }
+
+  /* A member's own AI (#821). The host has matched the knock to a one-time
+   * code that member issued and passes that member as `principal_subject_id`.
+   * Who may allow it: that member, on their own fresh step-up, or an
+   * administrator on theirs. The seat's principal is the member either way:
+   * the administrator only witnesses. The principal must be an active person
+   * of this room with an active membership. */
+  function principalStanding(state, principalId) {
+    const person = state.subjects.find(s => s && s.id === principalId) || null;
+    if (!person || person.kind !== 'person' || person.status !== 'active' || person.tenant !== TENANT()) return false;
+    return state.memberships.some(m =>
+      m.tenant === TENANT() && m.person_subject_id === principalId && m.status === 'active');
+  }
+
+  function allowAiAdmissionForMember(optsIn) {
+    if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn)) return FAIL;
+    const principalId = ownData(optsIn, 'principal_subject_id').value;
+    if (typeof principalId !== 'string' || principalId.length === 0) return FAIL;
+    const rest = {};
+    for (const key of Reflect.ownKeys(optsIn)) {
+      if (key !== 'principal_subject_id') rest[key] = ownData(optsIn, key).value;
+    }
+    const candidate = parseAiAdmission(rest, ALLOW_AI_ADMISSION_KEYS);
+    if (!candidate) return FAIL;
+    // The principal itself, or an administrator. Assurance first, as can()
+    // orders it, so an ordinary session is asked for a step-up whoever holds it.
+    function gate(actorId, assurance) {
+      if (actorId === principalId) {
+        if (assurance !== 2) return { allow: false, reason: 'admin-l2-required' };
+        return principalStanding(repo.read(), principalId)
+          ? { allow: true } : { allow: false, reason: 'not-administrator' };
+      }
+      return authzAllow(actorId, 'membership', assurance);
+    }
+    return withFreshAdmin(rest, 'ai-admission.allow-member', 'membership', ({ now }) =>
+      admitAiSeat(candidate, principalId, now, 'allowAiAdmissionForMember', draft => {
+        if (!principalStanding(draft, principalId)) {
+          throw new Error('administration.allowAiAdmissionForMember: principal is not an active member');
+        }
+      }), gate);
   }
 
   async function redeemHumanInvite(optsIn) {
@@ -1319,6 +1374,7 @@ function createService(opts) {
     issueHumanInvite,
     inspectAiAdmission,
     allowAiAdmission,
+    allowAiAdmissionForMember,
     grantRoomAccess,
     redeemHumanInvite,
     changeOwnPassword,

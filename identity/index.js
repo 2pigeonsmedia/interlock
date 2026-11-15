@@ -733,6 +733,44 @@ function create(config) {
     };
   }
 
+  /* #821: a member's own AI. The host passes the member whose one-time code
+   * the knock came by; identity allows it only for that member or an
+   * administrator, each on a fresh step-up, and makes the member its
+   * principal. */
+  function allowAiAdmissionForMember(meta, body) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('allowAiAdmissionForMember(meta, …) requires the trusted metadata object');
+    }
+    const b = closedBody(body, [
+      'request_id', 'name', 'product', 'product_provenance', 'selector', 'digest',
+      'principal_subject_id',
+    ]);
+    if (!b) return { ok: false, reason: 'not-authorized' };
+    const result = service.allowAiAdmissionForMember({
+      cookie_header: meta.cookie_header,
+      csrf_token: meta.csrf_token,
+      request_origin: meta.request_origin,
+      sec_fetch_site: meta.sec_fetch_site,
+      now: meta.now,
+      request_id: b.request_id,
+      name: b.name,
+      product: b.product,
+      product_provenance: b.product_provenance,
+      selector: b.selector,
+      digest: b.digest,
+      principal_subject_id: b.principal_subject_id,
+    });
+    if (!result || result.ok !== true) return stepUpRefusal(result);
+    return {
+      ok: true,
+      subject_id: result.subject_id,
+      name: result.name,
+      product: result.product,
+      product_provenance: result.product_provenance,
+      expires_at: result.expires_at,
+    };
+  }
+
   function inspectAiAdmission(body, trustedNow) {
     const b = closedBody(body, [
       'request_id', 'name', 'product', 'product_provenance', 'selector', 'digest',
@@ -1209,6 +1247,7 @@ function create(config) {
     confirmWorkProjectAct,
     confirmGrantAct,
     allowAiAdmission,
+    allowAiAdmissionForMember,
     firstOwner,
     // ── THE BOOT SURFACE ────────────────────────────────────────────────
     //
