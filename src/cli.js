@@ -2874,7 +2874,7 @@ async function runJoin(args, io, dependencies = {}) {
         line(stderr, 'interlock: product must be 1–40 printable characters.');
         return EXIT_USAGE;
       }
-      product = String(await ask('AI product (for example Claude Code, Codex CLI, or Grok CLI): ')).trim();
+      product = String(await ask(`AI product (for example ${PRODUCT_EXAMPLES}): `)).trim();
     }
 
     if (name === null) {

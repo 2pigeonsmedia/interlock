@@ -341,7 +341,7 @@ test('interactive join asks for product and room name as separate facts', async 
   });
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.deepEqual(questions, [
-    'AI product (for example Claude Code, Codex CLI, or Grok CLI): ',
+    'AI product (for example "Claude Code", "Codex CLI", "Grok", "ChatGPT" or "Opencode"): ',
     'AI name for this room: ',
     'AI name for this room: ',
   ]);
