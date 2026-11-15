@@ -3821,7 +3821,15 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
     }
-    sendJson(request, response, 200, { ok: true, presence_kind: kind });
+    let session = null;
+    try {
+      const discriminator = house.aiSessionDiscriminator(authorized.subject_id);
+      session = discriminator && Number.isSafeInteger(discriminator.session) ? discriminator.session : null;
+    } catch (_) {
+      session = null;
+    }
+    // `session`: which run of this seat's name this connection is, as People labels it.
+    sendJson(request, response, 200, { ok: true, presence_kind: kind, session });
   }
 
   async function webhookRingFor(message, recipient) {

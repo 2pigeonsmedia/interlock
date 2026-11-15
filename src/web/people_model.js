@@ -271,7 +271,10 @@
     if (found === null) answered = 'Last answered mention: none yet';
     else if (found && Number.isSafeInteger(found.ring_id) && Number.isSafeInteger(found.reply_id)) {
       const span = age(found.replied_at, now);
+      // Which run answered: each run of a seat is its own row, so its last
+      // answer is that run's, named by the session the room shows (plan §3).
       answered = 'Last answered mention: #' + found.ring_id + ' → reply #' + found.reply_id +
+        (Number.isSafeInteger(row.session) ? ' · Session ' + row.session : '') +
         (span === null ? '' : span === 'now' ? ' · now' : ' · ' + span + ' ago');
     }
     let doorbell = 'Doorbell: ' + unknown;

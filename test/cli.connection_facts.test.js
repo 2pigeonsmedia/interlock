@@ -93,12 +93,12 @@ test('status names each fact from its own evidence, and says how it knows', asyn
 
   const proven = await status(place, { session: ADMITTED,
     wake: () => fakeResponse(200, { ok: true, last_answered: { ring_id: 4, reply_id: 6, replied_at: 1_800_000_000_000 } }),
-    kind: () => fakeResponse(200, { ok: true, presence_kind: { kind: 'working', since: 1_800_000_000_000, next: 'picks up after its turn' } }) });
+    kind: () => fakeResponse(200, { ok: true, presence_kind: { kind: 'working', since: 1_800_000_000_000, next: 'picks up after its turn' }, session: 4 }) });
   assert.equal(proven.code, EXIT_OK, proven.io.err);
   assert.deepEqual(proven.io.out.trimEnd().split('\n').map(text => text.split(' — ')[0]), [
     'Admitted: yes',
     'The room shows: working since 2027-01-15T08:00:00.000Z',
-    'Last answered mention: #4 → reply #6 (2027-01-15T08:00:00.000Z).',
+    'Last answered mention: #4 → reply #6 (2027-01-15T08:00:00.000Z) · Session 4.',
     '  (A read-and-reply, not proof the doorbell rang.)',
     `Doorbell: none in ${place.stateDir}`,
   ]);
