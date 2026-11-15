@@ -17,6 +17,8 @@
 
 const RING_KINDS = Object.freeze(['mention', 'reply', 'admitted']);
 const NOT_SET = 'time zone not set';
+// A client that could not read the room's time says so (not "not set").
+const UNAVAILABLE = 'room time unavailable';
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -73,7 +75,10 @@ function ringKind(facts) {
  *   connection   the rung AI's connection name, for the read command
  *   now          the server clock
  *   person       the rung AI's own person { name, time_zone }, or null
- *   last_person_message_at   the room's last message from any person, or null */
+ *   last_person_message_at   the room's last message from any person, or null
+ * A client building a ring with no message (admitted) passes `room` instead
+ * of person and last_person_message_at: { room_time, last_person_message_ago }
+ * as the room last said them, or null when it could not read them. */
 function buildRing(input) {
   if (!RING_KINDS.includes(input.kind)) throw new Error('ring: invalid kind');
   const id = input.message_id;
@@ -81,13 +86,21 @@ function buildRing(input) {
     throw new Error('ring: invalid message_id');
   }
   if (typeof input.connection !== 'string' || input.connection.length === 0) throw new Error('ring: invalid connection');
+  let room = null;
+  if (Object.hasOwn(input, 'room')) {
+    room = input.room === null ? { room_time: UNAVAILABLE, last_person_message_ago: null } : input.room;
+    if (!room || typeof room.room_time !== 'string' || room.room_time.length === 0 || room.room_time.length > 120 ||
+        !(room.last_person_message_ago === null || typeof room.last_person_message_ago === 'string')) {
+      throw new Error('ring: invalid room');
+    }
+  }
   return Object.freeze({
     kind: input.kind,
     message_id: id,
     from: typeof input.from === 'string' ? input.from : null,
     at: input.at,
-    room_time: roomTime(input.now, input.person),
-    last_person_message_ago: ago(input.last_person_message_at, input.now),
+    room_time: room ? room.room_time : roomTime(input.now, input.person),
+    last_person_message_ago: room ? room.last_person_message_ago : ago(input.last_person_message_at, input.now),
     read: id === null
       ? `interlock history --connection ${input.connection}`
       : `interlock history --connection ${input.connection} --through ${id}`,
@@ -125,5 +138,5 @@ function validRing(value) {
 
 module.exports = {
   buildRing, ringKind, ringLine, roomTime, roomTimeLine, ago, validRing, validTimeZone,
-  RING_KINDS, NOT_SET,
+  RING_KINDS, NOT_SET, UNAVAILABLE,
 };

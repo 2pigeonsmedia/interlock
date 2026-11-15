@@ -146,7 +146,7 @@ function aiGet(runtime, pathname, token) {
   return call(runtime, { path: pathname, headers: bearer(token) });
 }
 
-const Ring = require('../src/ring.js');
+const Ring = require('../src/rings.js');
 
 function uuid() {
   return crypto.randomUUID();
@@ -200,6 +200,9 @@ test('time zone: set by the person, read back, used for their AI\'s room time an
     const rich = await aiGet(runtime, '/api/ai/rings?after=0&limit=5&wait=0&facts=1', cue.token);
     assert.equal(rich.status, 200, rich.text);
     const ring = rich.json.rings[0].ring;
+    assert.deepEqual(Object.keys(rich.json).sort(), ['connection_session', 'cursor', 'ok', 'rings', 'room', 'timed_out'], 'A16: the page says the room time once');
+    assert.deepEqual(rich.json.room, { room_time: ring.room_time, last_person_message_ago: ring.last_person_message_ago });
+    assert.deepEqual(Object.keys(plain.json).sort(), ['connection_session', 'cursor', 'ok', 'rings', 'timed_out'], 'without facts=1: the 0.3.11 page');
     assert.equal(Ring.validRing(ring), true, JSON.stringify(ring));
     assert.deepEqual([ring.kind, ring.message_id, ring.from, ring.read],
       ['mention', said.json.message.id, 'Ana', `interlock history --connection Cue --through ${said.json.message.id}`]);

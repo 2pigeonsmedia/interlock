@@ -8,7 +8,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { validTimeZone } = require('./ring.js');
+const { validTimeZone } = require('./rings.js');
 
 const FILE_NAME = 'time-zones.json';
 const SCHEMA = 1;

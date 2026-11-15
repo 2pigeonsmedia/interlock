@@ -3,7 +3,7 @@ const { createApproverRule } = require('./work/approver.js');
 const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
 const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
 const PresenceKind = require('./chat/presence_kind.js');
-const Ring = require('./ring.js');
+const Ring = require('./rings.js');
 const TimeZones = require('./time_zones.js');
 
 const path = require('node:path');
@@ -2426,6 +2426,7 @@ function createFirstOwnerHandler(options) {
       return;
     }
     let rings = result.messages.map(publicRing);
+    let room = null;
     if (rings.some(ring => ring === null) || !Number.isSafeInteger(result.cursor)) {
       sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
       return;
@@ -2434,6 +2435,10 @@ function createFirstOwnerHandler(options) {
       try {
         const now = Date.now();
         const clock = await roomClockFor(reauthorized.subject_id);
+        room = Object.freeze({
+          room_time: Ring.roomTime(now, clock.person),
+          last_person_message_ago: Ring.ago(clock.last_person_message_at, now),
+        });
         rings = rings.map((ring, index) => Object.freeze(Object.assign({}, ring, {
           ring: Ring.buildRing({
             kind: ringKindFor(result.messages[index], reauthorized.subject_id),
@@ -2446,13 +2451,13 @@ function createFirstOwnerHandler(options) {
         return;
       }
     }
-    sendJson(request, response, 200, {
+    sendJson(request, response, 200, Object.assign({
       ok: true,
       rings: Object.freeze(rings),
       cursor: result.cursor,
       timed_out: result.timed_out === true,
       connection_session: connectionSession,
-    });
+    }, withFacts ? { room } : {}));
   }
 
   async function appendAiMessage(request, response, body) {

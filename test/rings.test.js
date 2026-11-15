@@ -5,7 +5,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const Ring = require('../src/ring.js');
+const Ring = require('../src/rings.js');
 
 // Sat 14 Nov 2026, 7:10 PM in New York = Sun 15 Nov 00:10 UTC.
 const SAT_710PM_NY = Date.UTC(2026, 10, 15, 0, 10);
@@ -49,6 +49,16 @@ test('an admitted ring has no message; it reads from the start', () => {
   assert.equal(Ring.validRing(ring), true);
   assert.throws(() => Ring.buildRing({ kind: 'admitted', message_id: 3, from: null, at: 0, connection: 'Cue', now: 0, person: null }));
   assert.throws(() => Ring.buildRing({ kind: 'nudge', message_id: 3, from: null, at: 0, connection: 'Cue', now: 0, person: null }));
+});
+
+test('a client-built ring (admitted) takes the room\'s own words, or says it could not read them (A16)', () => {
+  const said = { room_time: 'Sat 14 Nov, 7:10 PM for Patti (America/New_York)', last_person_message_ago: '5 min' };
+  const ring = Ring.buildRing({ kind: 'admitted', message_id: null, from: null, at: 1, connection: 'Cue', now: 2, room: said });
+  assert.deepEqual([ring.room_time, ring.last_person_message_ago], [said.room_time, '5 min']);
+  const blind = Ring.buildRing({ kind: 'admitted', message_id: null, from: null, at: 1, connection: 'Cue', now: 2, room: null });
+  assert.deepEqual([blind.room_time, blind.last_person_message_ago], ['room time unavailable', null]);
+  assert.equal(Ring.validRing(blind), true);
+  assert.throws(() => Ring.buildRing({ kind: 'admitted', message_id: null, from: null, at: 1, connection: 'Cue', now: 2, room: { room_time: '' } }));
 });
 
 test('ring kind (A12): a mention outranks a reply; nothing addressed does not ring', () => {
