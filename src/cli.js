@@ -2346,6 +2346,47 @@ async function confirmCandidate(fetcher, serverUrl, profile) {
   return (await candidateConfirmation(fetcher, serverUrl, profile)).connected;
 }
 
+// Settles the unfinished candidate for one connection name: confirms its own
+// credential with the room and, if the room admitted it, records that once.
+// It never knocks. `join --resume` and a doorbell waiting on a pending
+// profile both call it, possibly at the same moment; the profile store writes
+// under its lock, so one caller answers wrote: true and the other reads the
+// same record with wrote: false.
+//   { outcome: 'admitted', profile, wrote, staged }
+//   { outcome: 'not-admitted', candidate, staged, exactInvalid, wrote: false }
+//   { outcome: 'none', wrote: false }      no candidate or profile by that name
+async function settleCandidate(profiles, name, fetcher, serverUrl, clock = Date.now) {
+  let candidate = null;
+  let staged = false;
+  if (profiles.stagedExists(name)) {
+    try {
+      candidate = profiles.loadStaged(name);
+      staged = true;
+    } catch (error) {
+      // The other caller finished it between the two reads.
+      if (!error || error.code !== 'staged-profile-not-found') throw error;
+    }
+  }
+  if (candidate === null) {
+    if (!profiles.exists(name)) return Object.freeze({ outcome: 'none', wrote: false });
+    const current = profiles.load(name);
+    if (current.state === 'admitted') {
+      return Object.freeze({ outcome: 'admitted', profile: current, wrote: false, staged: false });
+    }
+    candidate = current;
+  }
+  const confirmation = await candidateConfirmation(fetcher, serverUrl, candidate);
+  if (!confirmation.connected) {
+    return Object.freeze({
+      outcome: 'not-admitted', candidate, staged,
+      exactInvalid: confirmation.exactInvalid, wrote: false,
+    });
+  }
+  const recorded = profiles.admitCandidate(candidate.name, Object.assign(
+    { request_id: candidate.request_id, admitted_at: clock() }, confirmation.connected));
+  return Object.freeze({ outcome: 'admitted', profile: recorded.profile, wrote: recorded.wrote, staged });
+}
+
 // The project and model a seat declares travel on the knock only when given,
 // so a knock to an older room is exactly what it was.
 function admissionBody(profile, declared = {}) {
@@ -2421,11 +2462,11 @@ async function applyAdmissionHead(fetcher, profile, profiles) {
 }
 
 async function completeJoin(profiles, profile, enrollment, clock, stdout, staged, fetcher, doorbellStateDir = null) {
-  const admit = staged ? profiles.markStagedAdmitted : profiles.markAdmitted;
-  const admitted = admit(profile.name, Object.assign(
+  // One write for either form; a caller that lost a race reads the record.
+  const admitted = profiles.admitCandidate(profile.name, Object.assign(
     { request_id: profile.request_id, admitted_at: clock() },
     enrollment,
-  ));
+  )).profile;
   const start = await applyAdmissionHead(fetcher, admitted, profiles);
   const current = start === 'tip' ? profiles.load(profile.name) : admitted;
   const facts = typeof fetcher === 'function'
@@ -3917,6 +3958,7 @@ module.exports = {
   runStart,
   runRestore,
   runCodexPolicy,
+  settleCandidate,
   commandOptions,
   joinOptions,
   storageOptions,
