@@ -1847,7 +1847,16 @@ function createFirstOwnerHandler(options) {
     // bound to this knock's request id (one-time). One refusal word for every
     // bad code, so a wrong guess teaches nothing.
     let reservation = null;
-    if (split.joinCode !== undefined) {
+    // An identical re-knock of a request the room already holds as pending is
+    // bound (or not) by that request: its code, if it carries one, is not
+    // checked again, so a join's re-knock is never refused for a switch
+    // turned off or a code spent in the meantime. It cannot rebind: the
+    // admission store matches it by request id, selector and digest.
+    let alreadyPending = false;
+    if (split.joinCode !== undefined && split.knock && typeof split.knock.request_id === 'string') {
+      try { alreadyPending = admission.list().some(row => row.request_id === split.knock.request_id); } catch (_) { alreadyPending = false; }
+    }
+    if (split.joinCode !== undefined && !alreadyPending) {
       const requestId = split.knock && split.knock.request_id;
       try { reservation = memberCodes.reserve(split.joinCode, requestId); } catch (_) { reservation = null; }
       if (!reservation || reservation.ok !== true) {
