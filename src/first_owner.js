@@ -5,6 +5,7 @@ const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
 const PresenceKind = require('./chat/presence_kind.js');
 const Ring = require('./rings.js');
 const TimeZones = require('./time_zones.js');
+const ClientVersions = require('./client_versions.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -460,6 +461,8 @@ function createFirstOwnerHandler(options) {
       dataDir.length === 0 || dataDir.includes('\0') || !path.isAbsolute(dataDir)) {
     throw new TypeError('first owner transport: idle release and an absolute data directory are required');
   }
+  // Which Interlock each AI's own computer runs (C3): warn, never refuse.
+  const clientVersions = ClientVersions.createClientVersions({ dataDir });
   const expectedHost = parsedOrigin.host;
   let bootstrapSecret = null;
 
@@ -1868,10 +1871,30 @@ function createFirstOwnerHandler(options) {
   }
 
   function seatAuthorization(request, capability) {
-    return house.authorizeSeatBearer({
+    const authorized = house.authorizeSeatBearer({
       authorization_header: request.headers.authorization,
       source: clientSource(request, hostedMode),
     }, capability, CHAT_RESOURCE);
+    if (authorized && authorized.allow === true && typeof authorized.subject_id === 'string') {
+      clientVersions.note(authorized.subject_id, request.headers[ClientVersions.HEADER], Date.now());
+    }
+    return authorized;
+  }
+
+  /* A seat's client version for one viewer: the version for everyone; the
+   * update line only for the first owner and the seat's own person. */
+  function clientFacts(row, viewerSubjectId, viewerIsFirstOwner) {
+    if (row.kind !== 'seat') return { client_version: null, client_notice: null };
+    const client = clientVersions.get(row.subject_id);
+    let principal = null;
+    try { principal = typeof house.principalOf === 'function' ? house.principalOf(row.subject_id) : null; }
+    catch (_) { principal = null; }
+    const mayAct = viewerSubjectId !== null &&
+      (viewerIsFirstOwner === true || Boolean(principal && principal.subject_id === viewerSubjectId));
+    return {
+      client_version: client ? Object.freeze({ version: client.version, seen_at: client.seen_at }) : null,
+      client_notice: mayAct ? ClientVersions.updateNotice(row.name, client, PACKAGE_VERSION) : null,
+    };
   }
 
   function seatActor(authorized, clientMessageId) {
@@ -3664,9 +3687,13 @@ function createFirstOwnerHandler(options) {
     }
     try {
       await releaseIdle(now);
+      const viewer = typeof authorized.subject_id === 'string' ? authorized.subject_id : null;
+      // A read asks passively: a People poll never keeps a session alive.
+      const viewerIsFirstOwner = viewer !== null && isFirstOwner(request, viewer, now, 'passive-delivery');
       const participants = (await chat.listParticipants()).map(row => {
         const base = publicParticipant(row);
-        return base === null ? null : Object.freeze(Object.assign({}, base, peopleFacts(row)));
+        return base === null ? null : Object.freeze(Object.assign({}, base, peopleFacts(row),
+          clientFacts(row, viewer, viewerIsFirstOwner)));
       });
       if (participants.some(row => row === null)) throw new Error('invalid participant');
       sendJson(request, response, 200, { ok: true, participants });

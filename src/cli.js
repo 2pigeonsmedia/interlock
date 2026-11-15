@@ -925,19 +925,24 @@ function compareVersions(left, right) {
 }
 
 // One line per newer server version per process; the CLI keeps working either way.
+// Every request says which Interlock this computer runs (0.4.0), so the room
+// can tell this AI's person when it is out of date. Older rooms ignore it.
+const CLIENT_HEADER = 'x-interlock-client';
+
 function noticeServerVersion(response, stderr) {
   if (!stderr || !response || !response.headers || typeof response.headers.get !== 'function') return;
   const version = response.headers.get('x-interlock-version');
   if (typeof version !== 'string' || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(version)) return;
   if (compareVersions(version, packageJson.version) <= 0 || noticedServerVersions.has(version)) return;
   noticedServerVersions.add(version);
-  line(stderr, `interlock: the room runs Interlock ${version}; this CLI is ${packageJson.version}. Update the CLI to match.`);
+  line(stderr, `interlock: the room runs Interlock ${version}; this CLI is ${packageJson.version}. Update the CLI to match. ` +
+    `Tell your person: "My Interlock on this computer is ${packageJson.version} and the room runs ${version}; it needs updating (GUIDE.md, install)."`);
 }
 
 async function localRequest(fetcher, profile, pathname, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs || COMMAND_FETCH_TIMEOUT_MS);
-  const headers = { authorization: 'Bearer ' + profile.token };
+  const headers = { authorization: 'Bearer ' + profile.token, [CLIENT_HEADER]: packageJson.version };
   let body;
   if (options.body !== undefined) {
     headers['content-type'] = 'application/json';
@@ -3542,7 +3547,7 @@ function workOptions(args) {
 async function workRequest(fetcher, profile, pathname, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COMMAND_FETCH_TIMEOUT_MS);
-  const headers = { authorization: 'Bearer ' + profile.token };
+  const headers = { authorization: 'Bearer ' + profile.token, [CLIENT_HEADER]: packageJson.version };
   let body;
   if (options.body !== undefined) {
     headers['content-type'] = 'application/json';

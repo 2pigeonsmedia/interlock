@@ -976,8 +976,11 @@ function validParticipant(value) {
   const woke = keys.includes('last_answered');
   // `presence_kind` (0.4.0): {kind, since, next} computed by the room, or null.
   const kinded = keys.includes('presence_kind');
+  // `client_version` and `client_notice` (0.4.0): which Interlock an AI's
+  // computer runs, and the update line for its person and the owner.
+  const versioned = keys.includes('client_version') && keys.includes('client_notice');
   if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) + (works ? 1 : 0) + (wrote ? 1 : 0) +
-      (woke ? 1 : 0) + (kinded ? 1 : 0) || ![
+      (woke ? 1 : 0) + (kinded ? 1 : 0) + (versioned ? 2 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
@@ -993,7 +996,12 @@ function validParticipant(value) {
       Object.keys(value.last_answered).length === 3 && Number.isSafeInteger(value.last_answered.ring_id) &&
       Number.isSafeInteger(value.last_answered.reply_id) &&
       Number.isSafeInteger(value.last_answered.replied_at)))) ||
-    (kinded && !(value.presence_kind === null || validPresenceKind(value.presence_kind)))) return false;
+    (kinded && !(value.presence_kind === null || validPresenceKind(value.presence_kind))) ||
+    (versioned && !(value.client_version === null || (value.client_version && typeof value.client_version === 'object' &&
+      Object.keys(value.client_version).length === 2 &&
+      (value.client_version.version === null || typeof value.client_version.version === 'string') &&
+      Number.isSafeInteger(value.client_version.seen_at)))) ||
+    (versioned && !(value.client_notice === null || (typeof value.client_notice === 'string' && value.client_notice.length <= 300)))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'
