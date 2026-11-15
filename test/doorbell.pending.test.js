@@ -72,6 +72,12 @@ async function knockFor(runtime, owner, name) {
   return listed.request_id;
 }
 
+// A child's exit, whether or not it has happened yet: waiting for an 'exit'
+// event that already fired would never return.
+function exited(child) {
+  return child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : once(child, 'exit');
+}
+
 function startJoin(runtime, world) {
   const child = doorbell.track(childProcess.spawn(process.execPath,
     [CLI, 'join', '--url', runtime.url, '--product', 'Codex CLI', '--name', world.name],
@@ -102,7 +108,7 @@ test('armed before the Allow, the doorbell rings admitted once, then rings menti
   const allowed = await room.post(runtime, `/api/ai/admissions/${requestId}/allow`, {}, owner);
   assert.equal(allowed.status, 200, allowed.text);
   await eventually(() => ADMITTED('Pip').test(running.stdout), `the admitted ring: ${running.stdout}${running.stderr}`);
-  await once(join.child, 'exit');
+  await exited(join.child);
 
   owner = await room.login(runtime);
   const mention = await room.post(runtime, '/api/messages', { text: '@Pip welcome in' }, owner);
@@ -146,7 +152,7 @@ test('with the join killed, the doorbell holds the knock and the Allow still lan
   const join = startJoin(runtime, world);
   const requestId = await knockFor(runtime, owner, 'Rook');
   join.child.kill('SIGKILL');
-  await once(join.child, 'exit');
+  await exited(join.child);
   // Arrangement: with no one holding the knock, the room no longer offers it.
   await eventually(async () => {
     const read = await room.get(runtime, '/api/ai/admissions', owner);
