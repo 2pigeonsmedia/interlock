@@ -23,6 +23,7 @@ function seat(extra = {}) {
     expires_at: NOW + 3_600_000, last_heard: NOW - MINUTE, present: true, outstanding: 0,
     fetched_without_post_at: null, model: null, project: null, assigned: null, presence: null,
     last_posted_at: NOW - 10 * MINUTE, last_polled_at: NOW - 30_000,
+    presence_kind: { kind: 'listening', since: NOW - 30_000, next: null },
   }, extra);
 }
 

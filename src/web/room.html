@@ -226,6 +226,16 @@
         <input id="profile-line" maxlength="120" autocomplete="off" placeholder="One line about you">
         <button id="profile-save-button" class="quiet-action" type="submit">Save profile</button>
       </form>
+      <form id="time-zone-form" class="settings-form">
+        <label for="time-zone">Your time zone</label>
+        <input id="time-zone" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Not set">
+        <p class="settings-hint">Your AIs are told the time in this zone. Interlock never guesses it. <span id="time-zone-browser"></span></p>
+        <div class="settings-row-actions">
+          <button id="time-zone-use-browser" class="quiet-action" type="button" hidden>Use this browser's zone</button>
+          <button id="time-zone-save" class="quiet-action" type="submit">Save time zone</button>
+          <button id="time-zone-clear" class="quiet-action" type="button">Clear</button>
+        </div>
+      </form>
       <p id="settings-your-status" class="status" role="status" aria-live="polite"></p>
     </section>
 

@@ -93,6 +93,11 @@ const presenceClearButton = document.querySelector('#presence-clear-button');
 const profileForm = document.querySelector('#profile-form');
 const profileLine = document.querySelector('#profile-line');
 const settingsYourStatus = document.querySelector('#settings-your-status');
+const timeZoneForm = document.querySelector('#time-zone-form');
+const timeZoneInput = document.querySelector('#time-zone');
+const timeZoneBrowser = document.querySelector('#time-zone-browser');
+const timeZoneUseBrowser = document.querySelector('#time-zone-use-browser');
+const timeZoneClear = document.querySelector('#time-zone-clear');
 const settingsGrants = document.querySelector('#settings-grants');
 const settingsGrantList = document.querySelector('#settings-grant-list');
 const grantCreateForm = document.querySelector('#grant-create-form');
@@ -119,6 +124,8 @@ let pendingAiTimer = null;
 let pendingAiLoading = false;
 let currentUser = null;
 let rosterParticipants = [];
+// Who left or ended lately, and why (GET /api/people/absences, 0.4.0).
+let rosterRecentlyLeft = [];
 let rosterSeats = [];
 let rosterKnown = false;
 let rosterLoading = false;
@@ -1033,7 +1040,7 @@ function participantFact(text, className = '') {
  * amber waiting, grey quiet. The words in the row carry the meaning, so the
  * lamp is aria-hidden; the state comes only from server-authored participant
  * facts, never from message text. */
-const LAMP_STATES = Object.freeze({ teal: 'working', amber: 'waiting', grey: 'quiet' });
+const LAMP_STATES = Object.freeze({ teal: 'working', amber: 'waiting', grey: 'quiet', red: 'alarm' });
 
 function presenceLamp(light) {
   const lamp = document.createElement('i');
@@ -1083,7 +1090,7 @@ function drawRoster() {
     leads: InterlockPeopleModel.leads(rosterGrants, now),
     viewerName: currentUser ? currentUser.name : null,
   });
-  rosterList.replaceChildren(...groups.map(group => {
+  const drawn = groups.map(group => {
     const details = document.createElement('details');
     details.className = 'people-group';
     details.dataset.group = group.key;
@@ -1097,8 +1104,44 @@ function drawRoster() {
     details.append(summary);
     for (const participant of group.rows) details.append(rosterCard(participant, now, focusable));
     return details;
-  }));
+  });
+  if (rosterRecentlyLeft.length > 0) drawn.push(recentlyLeftGroup(now, focusable));
+  rosterList.replaceChildren(...drawn);
   if (focusKey && focusable.has(focusKey)) focusable.get(focusKey).focus();
+}
+
+// Seats that left or ended this week, folded below the live roster: a
+// goodbye is not a fault. Each says how it ended, when, and who has its work.
+function recentlyLeftGroup(now, focusable) {
+  const key = 'recently-left';
+  const details = document.createElement('details');
+  details.className = 'people-group';
+  details.dataset.group = key;
+  details.open = rosterGroupChoice.has(key) ? rosterGroupChoice.get(key) : false;
+  const summary = document.createElement('summary');
+  summary.textContent = `Recently left · ${rosterRecentlyLeft.length}`;
+  summary.dataset.focusKey = 'group:' + key;
+  focusable.set(summary.dataset.focusKey, summary);
+  summary.addEventListener('click', () => rosterGroupChoice.set(key, !details.open));
+  details.append(summary);
+  for (const seat of rosterRecentlyLeft) {
+    const card = document.createElement('div');
+    card.className = 'person-card';
+    card.dataset.kind = 'seat';
+    card.append(presenceLamp('grey'));
+    const row = document.createElement('div');
+    row.className = 'person-row';
+    const name = document.createElement('strong');
+    name.textContent = seat.name;
+    const age = InterlockPeopleModel.age(seat.ended_at, now);
+    const how = seat.ended_how === 'left' ? 'left' : seat.ended_how === 'removed' ? 'removed' : 'ended';
+    row.append(name, participantFact([how].concat(age ? [age === 'now' ? 'now' : age + ' ago'] : []).join(' · '),
+      'participant-state'));
+    card.append(row);
+    if (seat.presence_kind.next) card.append(participantFact(seat.presence_kind.next, 'participant-connection'));
+    details.append(card);
+  }
+  return details;
 }
 
 function rosterCard(participant, now, focusable) {
@@ -1107,6 +1150,7 @@ function rosterCard(participant, now, focusable) {
   const card = document.createElement('div');
   card.className = 'person-card';
   card.dataset.kind = participant.kind;
+  if (state.light === 'red') card.dataset.alarm = 'true';
   card.append(presenceLamp(state.light));
   const toggle = document.createElement('button');
   toggle.type = 'button';
@@ -1126,6 +1170,8 @@ function rosterCard(participant, now, focusable) {
   ));
   card.append(toggle);
   if (state.notPickedUp) card.append(participantFact(state.notPickedUp, 'outstanding'));
+  // Shown to that AI's own person and the owner only (the room decides).
+  if (participant.client_notice) card.append(participantFact(participant.client_notice, 'client-notice'));
   const detail = rosterDetail(participant, now, toggle);
   detail.hidden = !expanded;
   toggle.addEventListener('click', () => {
@@ -1600,6 +1646,32 @@ addPasskeyForm.addEventListener('submit', async event => {
   }
 });
 
+function validAbsentSeat(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = ['name', 'session', 'ended_how', 'ended_at', 'project', 'work_with', 'presence_kind'];
+  return Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)) &&
+    typeof value.name === 'string' && value.name.length > 0 &&
+    (value.session === null || Number.isSafeInteger(value.session)) &&
+    ['left', 'removed', 'released', 'expired'].includes(value.ended_how) &&
+    Number.isSafeInteger(value.ended_at) && (value.project === null || typeof value.project === 'string') &&
+    typeof value.work_with === 'string' && validPresenceKind(value.presence_kind);
+}
+
+// Recently left is a courtesy beside the roster: if it cannot be read the
+// live roster still renders, and the list is simply not shown.
+async function loadRecentlyLeft() {
+  try {
+    const response = await fetch('/api/people/absences', { cache: 'no-store', credentials: 'same-origin' });
+    if (!response.ok) return [];
+    const result = await readJson(response);
+    if (!result || result.ok !== true || !Array.isArray(result.recently_left) ||
+        !result.recently_left.every(validAbsentSeat)) return [];
+    return result.recently_left;
+  } catch (_) {
+    return [];
+  }
+}
+
 async function loadRoster() {
   if (rosterLoading || roomView.hidden) return;
   rosterLoading = true;
@@ -1622,6 +1694,8 @@ async function loadRoster() {
         result.participants.some(row => !validParticipant(row))) {
       throw Object.assign(new Error('malformed-response'), { code: 'malformed-response' });
     }
+    rosterRecentlyLeft = await loadRecentlyLeft();
+    if (!roomRequestGeneration.isCurrent(requestGeneration)) return;
     renderRoster(result.participants);
   } catch (error) {
     if (!roomRequestGeneration.isCurrent(requestGeneration)) return;
@@ -1773,6 +1847,62 @@ presenceClearButton.addEventListener('click', () => {
   presenceNeed.value = '';
   saveYourStatus({ middle: null, waiting_on: null, need: null }, 'Your status is cleared.');
 });
+
+// Your time zone (0.4.0): the room tells your AIs the time in it. The
+// browser's own zone is offered, never saved without a click.
+function browserTimeZone() {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof zone === 'string' && zone.length > 0 && zone.length <= 64 ? zone : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fillTimeZone() {
+  const offered = browserTimeZone();
+  timeZoneBrowser.textContent = offered ? `This browser says ${offered}.` : '';
+  timeZoneUseBrowser.hidden = offered === null;
+  try {
+    const response = await fetch('/api/settings/time-zone', { cache: 'no-store', credentials: 'same-origin' });
+    const result = await readJson(response);
+    if (response.ok && result && result.ok === true && (result.time_zone === null || typeof result.time_zone === 'string')) {
+      timeZoneInput.value = result.time_zone || '';
+    }
+  } catch (_) {
+    // The field stays as it was; saving still works.
+  }
+}
+
+async function saveTimeZone(zone) {
+  setSettingsStatus(settingsYourStatus, 'Saving…');
+  try {
+    await ownerMutation('/api/settings/time-zone', { time_zone: zone });
+    timeZoneInput.value = zone || '';
+    setSettingsStatus(settingsYourStatus, zone === null
+      ? 'Your time zone is cleared. Your AIs are told it is not set.' : `Your time zone is ${zone}.`, 'success');
+  } catch (error) {
+    if (error.code === 'not-authenticated') {
+      forgetCsrf();
+      showLogin('Your session ended. Sign in again to continue.');
+      return;
+    }
+    setSettingsStatus(settingsYourStatus, error.code === 'invalid-request'
+      ? 'Interlock does not know that time zone. Use a name like America/New_York.'
+      : 'Interlock did not save your time zone. Try again.', 'error');
+  }
+}
+
+timeZoneForm.addEventListener('submit', event => {
+  event.preventDefault();
+  const zone = timeZoneInput.value.trim();
+  saveTimeZone(zone.length === 0 ? null : zone);
+});
+timeZoneUseBrowser.addEventListener('click', () => {
+  const offered = browserTimeZone();
+  if (offered) saveTimeZone(offered);
+});
+timeZoneClear.addEventListener('click', () => saveTimeZone(null));
 
 profileForm.addEventListener('submit', async event => {
   event.preventDefault();
@@ -3250,6 +3380,7 @@ settingsButton.addEventListener('click', async () => {
   setSettingsStatus(settingsYourStatus, '');
   setSettingsStatus(settingsGrantsStatus, '');
   fillYourStatus();
+  fillTimeZone();
   fillGrantForm();
   settingsGrants.hidden = !viewerIsAdmin();
   settingsDialog.showModal();

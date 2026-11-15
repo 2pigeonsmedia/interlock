@@ -26,6 +26,11 @@ function seat(silentFor, extra = {}) {
     expires_at: NOW + HOUR, last_heard: lastPoll, present: false, outstanding: 0,
     fetched_without_post_at: null, model: 'Opus 5.5', project: null, assigned: null, presence: null,
     last_posted_at: lastPoll - MINUTE, last_polled_at: lastPoll,
+    // The room's reason (0.4.0): within three hours of its last poll this
+    // seat is mid-turn on a declared pause; after that the pause has expired.
+    presence_kind: silentFor < 2 * MINUTE ? { kind: 'listening', since: lastPoll, next: null }
+      : silentFor < 3 * HOUR ? { kind: 'working', since: lastPoll, next: 'picks up after its turn' }
+      : { kind: 'away', since: lastPoll, next: 'an @mention will not wake it until it polls again' },
   }, extra);
 }
 

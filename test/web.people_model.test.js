@@ -6,6 +6,8 @@
 // something.
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const model = require('../src/web/people_model.js');
@@ -189,25 +191,38 @@ test('stateOf: a seat that only listens reads listening; a post or a presence li
   assert.equal(model.stateOf(seat('Cue'), NOW).word, 'working', 'a server that does not say when it last posted: as before');
 });
 
-test('state words by her definition: an AI listens, works or is not listening, by its doorbell; a person is here or away', () => {
+const K = (kind, since = null, next = null) => ({ presence_kind: { kind, since, next } });
+
+test('state words come from the room\'s presence_kind (#938): working only on a declared pause', () => {
   const ai = extra => model.stateOf(seat('Cue', Object.assign({ last_posted_at: null, last_polled_at: null }, extra)), NOW);
-  assert.equal(ai({ last_polled_at: NOW - 30_000 }).word, 'listening', 'its doorbell polled within two poll intervals: it picks up now');
-  const kingbird = ai({ last_polled_at: NOW - 10 * MINUTE, outstanding: 1, last_posted_at: null });
-  assert.equal(kingbird.word, 'working', 'it polled, a ring was delivered, and it has not polled for 10 minutes: mid-task');
+  assert.equal(ai(K('listening', NOW - 30_000)).word, 'listening');
+  assert.equal(ai(K('listening', NOW - 30_000)).light, 'teal');
+  // The Kingbird / Dunlin case: it polled 10 minutes ago and its doorbell
+  // died. 0.3.11 inferred "working" for three hours; the room now says away.
+  const kingbird = ai(Object.assign(K('away', NOW - 10 * MINUTE, 'an @mention will not wake it until it polls again'),
+    { last_polled_at: NOW - 10 * MINUTE, outstanding: 1 }));
+  assert.equal(kingbird.word, 'not listening', 'a gap is never read as working');
+  assert.equal(kingbird.age_since, NOW - 10 * MINUTE, 'since when');
   assert.equal(kingbird.notPickedUp, '1 not picked up', 'the card says what waits for it');
-  assert.equal(ai({ last_polled_at: NOW - 2 * 60 * MINUTE }).word, 'working', 'two hours into a long task');
-  assert.equal(ai({ last_polled_at: NOW - 4 * 60 * MINUTE }).word, 'not listening', 'no poll for hours: a mention will not wake it');
-  assert.equal(ai({ last_polled_at: null, last_posted_at: NOW - MINUTE }).word, 'not listening', 'posting is not a doorbell');
-  assert.equal(ai({ last_polled_at: NOW - 30_000,
-    presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW } }).word, 'listening · waiting on Patti', 'the state word, then the wait');
+  assert.deepEqual([ai(K('working', NOW - 2 * 60 * MINUTE)).word, ai(K('working', NOW)).light], ['working', 'grey'],
+    'declared pause: working, grey');
+  assert.equal(ai(K('rung', NOW)).word, 'rung by webhook');
+  assert.equal(ai(K('unknown', NOW)).word, 'not known since the room restarted');
+  assert.deepEqual([ai(K('unreachable', NOW)).word, ai(K('unreachable', NOW)).light], ['unreachable', 'red'],
+    'the one alarm');
+  for (const kind of ['listening', 'working', 'rung', 'away', 'unknown']) {
+    assert.notEqual(ai(K(kind, NOW)).light, 'red', kind + ' is never red');
+  }
+  assert.equal(ai(Object.assign(K('listening', NOW), { presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW } })).word,
+    'listening · waiting on Patti', 'the state word, then the wait');
   const human = extra => model.stateOf(person('Ana', Object.assign({ last_polled_at: null }, extra)), NOW).word;
-  assert.equal(human({ last_heard: NOW - MINUTE }), 'here', 'her page polled lately');
-  assert.equal(human({ last_heard: NOW - 30 * MINUTE }), 'away');
-  assert.equal(human({ last_heard: NOW - MINUTE, last_posted_at: NOW - MINUTE }), 'here', 'a person is never working');
+  assert.equal(human(K('here', NOW - MINUTE)), 'here');
+  assert.equal(human(K('away', NOW - 30 * MINUTE)), 'away');
 });
 
 test('waiting on: declared or derived from a blocked item, shown after the state word, cleared when the seat posts', () => {
-  const ai = extra => model.stateOf(seat('Pitta', Object.assign({ last_posted_at: null, last_polled_at: NOW - 30_000 }, extra)), NOW);
+  const ai = extra => model.stateOf(seat('Pitta', Object.assign({ last_posted_at: null, last_polled_at: NOW - 30_000 },
+    K('listening', NOW - 30_000), extra)), NOW);
   const derived = ai({ waiting: { name: 'Plantcutter', item: 'W-7', since: NOW - 20 * MINUTE } });
   assert.deepEqual([derived.word, derived.light], ['listening · waiting on Plantcutter · W-7', 'amber'], 'the state word, then who and what');
   assert.equal(ai({ waiting: { name: 'Plantcutter', item: 'W-7', since: NOW - 20 * MINUTE }, last_posted_at: NOW - MINUTE }).word,
@@ -217,18 +232,13 @@ test('waiting on: declared or derived from a blocked item, shown after the state
   assert.equal(ai({ waiting: null }).word, 'listening');
 });
 
-test('a Work write newer than the last doorbell poll reads working, not listening; posts still do not count', () => {
+test('a Work write no longer reads as working (#938): only a declared pause does', () => {
   const ai = extra => model.stateOf(seat('Cue', Object.assign({ last_posted_at: null, last_polled_at: null }, extra)), NOW);
-  assert.equal(ai({ last_polled_at: NOW - 30_000, last_work_at: NOW - 10_000 }).word, 'working',
-    'it polled, then wrote to Work: mid-turn, it picks up after its current task');
-  assert.equal(ai({ last_polled_at: NOW - 10_000, last_work_at: NOW - 30_000 }).word, 'listening',
-    'it wrote, then polled again: it picks up now');
-  assert.equal(ai({ last_polled_at: NOW - 30_000, last_work_at: null }).word, 'listening');
-  assert.equal(ai({ last_polled_at: NOW - 30_000 }).word, 'listening', 'a server that does not say is read as before');
-  assert.equal(ai({ last_polled_at: NOW - 30_000, last_posted_at: NOW - 10_000 }).word, 'listening',
-    'a post newer than the poll still does not count (her 10-31 definition)');
-  assert.equal(ai({ last_polled_at: null, last_work_at: NOW - 10_000 }).word, 'not listening',
-    'never polled: an @mention will not wake it, whatever it writes');
-  assert.equal(ai({ last_polled_at: NOW - 4 * 60 * MINUTE, last_work_at: NOW - 3.5 * 60 * MINUTE }).word, 'not listening',
-    'a write long ago does not keep it working');
+  assert.equal(ai(Object.assign(K('away', NOW - 3 * MINUTE), { last_polled_at: NOW - 3 * MINUTE, last_work_at: NOW - 10_000 })).word,
+    'not listening', 'it wrote to Work after its last poll, and declared no pause: not working');
+  assert.equal(ai(Object.assign(K('working', NOW - 3 * MINUTE), { last_polled_at: NOW - 3 * MINUTE, last_work_at: NOW - 10_000 })).word,
+    'working', 'the same seat, with a declared pause');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'people_model.js'), 'utf8');
+  assert.equal(/WORKING_MS|function pollWord/.test(source), false, 'the three-hour inference is gone');
 });
+
