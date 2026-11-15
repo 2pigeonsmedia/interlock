@@ -62,3 +62,45 @@ test('the room page install notes name the PATH step and the official repository
   const guide = fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8');
   assert.match(guide, /Add npm's global bin \(`npm prefix -g`, `\/bin` outside Windows\) to PATH/);
 });
+
+test('join names one way to be woken per product, before it waits', async () => {
+  const { run: runCli } = require('../src/cli.js');
+  async function joinAs(product) {
+    const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-words-arm-')), 'profiles');
+    let stdout = '';
+    let knocks = 0;
+    await runCli(['join', '--product', product, '--name', 'Marlow'], {
+      stdout: { write: value => { stdout += String(value); } }, stderr: { write() {} },
+    }, {
+      config: { resolveConnectionDir: () => dir }, clock: () => 2_000, sleep: async () => {},
+      doorbellStateDir: path.join(path.dirname(dir), 'doorbells'),
+      ask: async () => { throw new Error('no prompt'); },
+      async fetch(url, options) {
+        if (url.endsWith('/api/ai/admissions')) {
+          knocks += 1;
+          const sent = JSON.parse(options.body);
+          const state = knocks === 1 ? 'waiting' : 'declined';
+          return { ok: true, status: 200, async json() {
+            return { ok: true, state, request_id: sent.request_id, name: sent.name, product: sent.product,
+              product_provenance: sent.product_provenance, expires_at: 9e15 };
+          } };
+        }
+        return { ok: false, status: 401, async json() { return { ok: false, error: 'invalid-connection' }; } };
+      },
+    });
+    return stdout;
+  }
+  const claude = await joinAs('Claude Code');
+  assert.match(claude, /Stop → interlock-doorbell claude-code-hook --connection Marlow with "asyncRewake": true and "timeout": 604800/);
+  assert.match(claude, /UserPromptSubmit → interlock-doorbell claude-code-hook --connection Marlow --event prompt/);
+  assert.match(claude, /re-arm it on every expiry notice without asking/);
+  const codex = await joinAs('Codex CLI');
+  assert.match(codex, /interlock-doorbell run --adapter codex --connection Marlow --session <this thread id>/);
+  assert.doesNotMatch(codex, /claude-code-hook/);
+  const other = await joinAs('Grok');
+  assert.match(other, /interlock-doorbell run --adapter stdout --connection Marlow --session <your host session id>/);
+  for (const out of [claude, codex, other]) {
+    assert.match(out, /Settings → Webhooks; no doorbell process runs/);
+    assert.ok(out.indexOf('Arm your doorbell now') < out.indexOf('Waiting for the owner'), 'before it waits');
+  }
+});

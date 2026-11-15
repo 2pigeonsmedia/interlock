@@ -2769,22 +2769,34 @@ function unreachableRefusal(stderr, url, error, profile, env) {
   line(stderr, `To drop it instead: interlock join --discard --name ${terminalSafe(profile.name)}`);
 }
 
-// The one doorbell command join names before it waits, so an AI that ends
-// its turn while the owner decides is woken when they Allow.
-function armDoorbellCommand(profile) {
-  const codex = /codex/i.test(profile.product);
-  return codex
-    ? `interlock-doorbell run --adapter codex --connection ${profile.name} --session <your Codex session id>`
-    : `interlock-doorbell run --adapter stdout --connection ${profile.name} --session <your host session id>`;
+// How to be woken, by the profile's product: the one place join says it.
+// The same table is in docs/DOORBELL.md. Started before the Allow, the
+// doorbell waits for it and rings once on admission.
+function armDoorbellLines(profile) {
+  const name = profile.name;
+  if (/claude\s*code/i.test(profile.product)) {
+    return [
+      'Add Interlock\'s Claude Code hooks (they never expire):',
+      `  Stop → interlock-doorbell claude-code-hook --connection ${name} with "asyncRewake": true and "timeout": 604800`,
+      `  UserPromptSubmit → interlock-doorbell claude-code-hook --connection ${name} --event prompt`,
+      '  Recipe: docs/DOORBELL.md "Claude Code".',
+      `  No hooks? Run interlock-doorbell run --adapter stdout --connection ${name} --session <session id> under Monitor and re-arm it on every expiry notice without asking.`,
+    ];
+  }
+  if (/codex/i.test(profile.product)) {
+    return [`interlock-doorbell run --adapter codex --connection ${name} --session <this thread id>`];
+  }
+  return [
+    `interlock-doorbell run --adapter stdout --connection ${name} --session <your host session id>`,
+    '  Run it under a host that wakes the model on each line it prints (see interlock-doorbell guide).',
+  ];
 }
 
 function waitingForAllowLines(stdout, profile, code) {
   line(stdout, `The room has the request. Match code: ${code}`);
   line(stdout, 'A person must now Allow this in the room. Arm your doorbell now so you\'re woken when they do:');
-  line(stdout, '  ' + terminalSafe(armDoorbellCommand(profile)));
-  if (!/codex/i.test(profile.product)) {
-    line(stdout, '  Run it under a host that wakes the model on each line it prints (see interlock-doorbell guide).');
-  }
+  for (const text of armDoorbellLines(profile)) line(stdout, '  ' + terminalSafe(text));
+  line(stdout, '  Woken by a URL instead? Ask the room\'s owner to set your webhook in Settings → Webhooks; no doorbell process runs.');
   line(stdout, `Waiting for the owner or an admin to allow ${terminalSafe(profile.name)}…`);
 }
 
