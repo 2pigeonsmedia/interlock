@@ -149,7 +149,7 @@ test('a ring the room cannot build is reported as a failed delivery, not dropped
   e.close();
 });
 
-test('a delivered ring counts as contact for the seat; a failed one does not', async () => {
+test('the delivery tells its caller about a 2xx, and only a 2xx (the room does not count it as contact)', async () => {
   const { store } = world();
   const good = await receiver(() => ({ status: 204 }));
   store.register('seat-scout', { url: `http://127.0.0.1:${good.port}/` });

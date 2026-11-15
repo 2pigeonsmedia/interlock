@@ -489,8 +489,9 @@ async function startInterlockServer(options) {
     webhookDelivery = createWebhookDelivery(Object.assign(webhookTiming(process.env), {
       store: webhooks,
       isLive: subjectId => liveSeats().has(subjectId),
-      // A delivered ring is contact: the seat answered, so it is not idle.
-      delivered: subjectId => { chat.touchParticipant(subjectId, Date.now()).catch(() => {}); },
+      // A delivered ring is NOT contact: only the seat's own authenticated
+      // calls keep it from idle release, so a receiver answering 2xx cannot
+      // extend a credential nobody uses.
       hosted: Boolean(hosted),
       // The handler builds the ring, as its rings route does; it exists by
       // the time any message is saved.
