@@ -1650,6 +1650,12 @@ function joinedAdmission(profile) {
 // What the room itself shows for this seat (0.4.0): the reason it is or is
 // not answering, as the room computes it, and what would change it.
 const ROOM_KINDS = Object.freeze(['listening', 'working', 'rung', 'pending', 'away', 'left', 'ended', 'unreachable', 'unknown']);
+// People's words for them, so status and People say the same thing.
+const ROOM_WORDS = Object.freeze({
+  listening: 'listening', working: 'working', rung: 'rung by webhook', pending: 'waiting to be let in',
+  away: 'not listening', left: 'left', ended: 'ended', unreachable: 'unreachable',
+  unknown: 'not known since the room restarted',
+});
 async function roomShowsFact(fetcher, profile) {
   const blank = { kind: null, since: null, next: null, session: null };
   try {
@@ -1661,7 +1667,7 @@ async function roomShowsFact(fetcher, profile) {
     if (!(result.session === null || (Number.isSafeInteger(result.session) && result.session > 0))) throw incompatibleResponse();
     return {
       state: kind.kind, kind: kind.kind, since: kind.since, next: kind.next, session: result.session,
-      detail: `${kind.kind}${since}${kind.next === null ? '' : ` — ${kind.next}`}`,
+      detail: `${ROOM_WORDS[kind.kind] || kind.kind}${since}${kind.next === null ? '' : ` — ${kind.next}`}`,
     };
   } catch (error) {
     if (error && error.status === 404) {

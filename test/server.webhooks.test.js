@@ -113,7 +113,9 @@ test('an owner registers a webhook; an @mention calls it, signed; a plain post d
     assert.equal(listed.json.seats.find(row => row.name === O).webhook, null);
     assert.equal(listed.text.includes(secret), false);
     assert.equal(listed.text.includes('TOKEN-IN-PATH'), false);
-    assert.equal(await kindOf(runtime, owner, S), 'listening', 'a registered webhook seat reads listening');
+    // MED-2 (People cold read): before its first delivery the room does not
+    // know whether the webhook works, so it says so; never an all-clear.
+    assert.equal(await kindOf(runtime, owner, S), 'unknown', 'registered, no delivery yet: not known');
 
     // Not addressed: no call.
     assert.equal((await room.post(runtime, '/api/messages', { text: 'general news, no one named' }, owner)).status, 201);

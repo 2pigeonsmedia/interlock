@@ -103,6 +103,13 @@ test('status names each fact from its own evidence, and says how it knows', asyn
     `Doorbell: none in ${place.stateDir}`,
   ]);
 
+  // LOW-4: status says People's words, not the raw kind.
+  for (const [kind, word] of [['away', 'not listening'], ['unknown', 'not known since the room restarted'], ['rung', 'rung by webhook']]) {
+    const said = await status(place, { session: ADMITTED, wake: () => fakeResponse(200, { ok: true, last_answered: null }),
+      kind: () => fakeResponse(200, { ok: true, presence_kind: { kind, since: 1_800_000_000_000, next: null }, session: null }) });
+    assert.match(said.io.out, new RegExp(`^The room shows: ${word} since 2027-01-15T08:00:00\\.000Z\\.$`, 'm'), kind);
+  }
+
   const older = await status(place, { session: ADMITTED,
     wake: () => fakeResponse(404, { ok: false, error: 'not-found' }) });
   assert.match(older.io.out, /^Last answered mention: unknown — this room does not report it/m);

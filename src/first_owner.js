@@ -3768,9 +3768,11 @@ function createFirstOwnerHandler(options) {
       const mayAllow = Boolean(who && who.subject_id === authorized.subject_id && (who.first_owner === true ||
         (Array.isArray(who.roles) && who.roles.some(role => role && role.slug === 'administrator'))));
       const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
-      const workOf = name => {
+      const workOf = (name, subjectId) => {
         const assignment = people ? people.service.assignmentOf(name) : null;
         const project = assignment ? assignment.project : null;
+        const held = work && typeof work.heldBy === 'function' && typeof subjectId === 'string' ? work.heldBy(subjectId) : [];
+        if (held.length === 0) return { project, holder: null };
         if (!project) return { project: null, holder: 'the owner' };
         const lead = people.service.leadOf(project, now, live);
         return { project, holder: lead && typeof lead.name === 'string' ? lead.name : `whoever next leads ${project}` };
@@ -3782,10 +3784,10 @@ function createFirstOwnerHandler(options) {
         .map(seat => {
           const how = seat.ended_how === 'left' ? 'left' : seat.ended_how === 'revoked' ? 'removed'
             : seat.ended_how === 'released' ? 'released' : 'expired';
-          const work = workOf(seat.name);
+          const work = workOf(seat.name, seat.subject_id);
           return Object.freeze({
             name: seat.name, session: Number.isSafeInteger(seat.session) ? seat.session : null,
-            ended_how: how, ended_at: seat.ended_at, project: work.project, work_with: work.holder,
+            ended_how: how, ended_at: seat.ended_at, project: work.project, work_with: work.holder || 'nobody',
             presence_kind: PresenceKind.endedKind(how, seat.ended_at, work.holder),
           });
         });
@@ -3793,7 +3795,7 @@ function createFirstOwnerHandler(options) {
       const ownCode = row => (knockIssuer(row.request_id) || {}).subject_id === authorized.subject_id;
       const pending = admission.list().filter(row => mayAllow || ownCode(row)).map(row => Object.freeze({
         name: row.name, created_at: row.created_at,
-        presence_kind: PresenceKind.pendingKind(row.created_at, null),
+        presence_kind: PresenceKind.pendingKind(row.created_at, row.match_code),
       }));
       return sendJson(request, response, 200, { ok: true, recently_left: recentlyLeft, pending });
     } catch (_) {

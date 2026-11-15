@@ -66,8 +66,12 @@ test('webhook: rung until it answers, listening at rest, unreachable after one f
   assert.equal(seat({ webhook: hook({ ok: true, at: rungAt, error_class: null }) }).kind, 'rung');
   assert.equal(seat({ webhook: hook({ ok: true, at: rungAt, error_class: null }), last_posted_at: rungAt + 1 }).kind,
     'listening', 'it posted after the ring');
+  // MED-2: no delivery since this server started: not known, never an all-clear.
   const rest = seat({ webhook: hook(null) });
-  assert.deepEqual(rest, { kind: 'listening', since: null, next: 'the room rings it by webhook' });
+  assert.deepEqual(rest, { kind: 'unknown', since: T0 - 10 * HOUR, next: 'waits for its next ring' });
+  const delivered = seat({ webhook: hook({ ok: true, at: rungAt, error_class: null }), last_posted_at: rungAt + 1 });
+  assert.deepEqual(delivered, { kind: 'listening', since: rungAt, next: 'the room rings it by webhook' },
+    'a good delivery it answered: listening by webhook');
   const failed = seat({ webhook: hook({ ok: false, at: rungAt, error_class: 'timeout' }), last_polled_at: T0 - 1000 });
   assert.equal(failed.kind, 'unreachable', 'the alarm outranks a fresh poll');
   assert.match(failed.next, /\(timeout\).*Settings/);
