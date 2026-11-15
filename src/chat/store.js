@@ -1133,15 +1133,24 @@ function openStore(opts) {
   }
 
   /* For the host only, never a route: the posts by others since this
-   * subject's own latest post (newest first, at most REPLY_SCAN_LIMIT), each
+   * subject's own latest post (before `beforeId`, when given; newest first,
+   * at most REPLY_SCAN_LIMIT), each
    * with whom its ask named, so a reply can ring whoever addressed its author
    * (#859). Nothing is stored; it is read from the log the room already has. */
-  function postsSinceOwn(subjectId) {
+  function postsSinceOwn(subjectId, beforeId = null) {
     return exclusive(() => {
       requireOpen();
       if (!boundedString(subjectId, 64)) fail('invalid-read');
+      if (beforeId !== null && !(Number.isSafeInteger(beforeId) && beforeId > 0)) fail('invalid-read');
+      // `beforeId`: read as the room stood just before that message (a ring
+      // already made, asked about later); null: as it stands now.
+      let last = messages.length - 1;
+      if (beforeId !== null) {
+        last = messages.findIndex(message => message.id === beforeId) - 1;
+        if (last < -1) return Object.freeze([]);
+      }
       const found = [];
-      for (let i = messages.length - 1; i >= 0 && found.length < REPLY_SCAN_LIMIT; i--) {
+      for (let i = last; i >= 0 && found.length < REPLY_SCAN_LIMIT; i--) {
         const message = messages[i];
         if (message.subject_id === subjectId) break;
         const row = asks.posts.get(message.id);

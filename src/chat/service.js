@@ -159,14 +159,14 @@ function createChatService(options) {
    * @mentioned the author's name or asked the author.
    * Read from the room's stored facts, never from the reply's own text. Who
    * among them is an AI, and so rung, is ringRecipients's rule. */
-  async function addressersOf(actor, everyone) {
+  async function addressersOf(actor, everyone, beforeId = null) {
     if (!actor || typeof actor.subject_id !== 'string' || typeof store.postsSinceOwn !== 'function') return [];
     const self = everyone.find(row => row.subject_id === actor.subject_id);
     const name = self ? self.name : actor.name;
     if (typeof name !== 'string' || name.length === 0) return [];
     const kindOf = new Map(everyone.map(row => [row.subject_id, row.kind]));
     const found = new Map();
-    for (const post of await store.postsSinceOwn(actor.subject_id)) {
+    for (const post of await store.postsSinceOwn(actor.subject_id, beforeId)) {
       if (found.has(post.subject_id)) continue;
       // Only an @mention or an ask addresses. A ring the post made for any
       // other reason (an answer, or a reply ringing back) does not, or two AIs
@@ -299,6 +299,20 @@ function createChatService(options) {
   async function read(query) {
     requireOpen();
     return await store.read(query);
+  }
+
+  /* The A4 cause of a ring, for the ring builder's `kind` (contract A12):
+   * whether `seatSubjectId` had addressed the author of `message` (by an
+   * @mention or an ask) since the author's previous post, as the room stood
+   * when `message` was posted. The same rule that rang it (addressersOf). */
+  async function addressedSince(message, seatSubjectId) {
+    requireOpen();
+    if (!message || !Number.isSafeInteger(message.id) || typeof message.subject_id !== 'string' ||
+        typeof message.byline !== 'string' || typeof seatSubjectId !== 'string') return false;
+    const everyone = await participantSnapshot(Date.now());
+    const author = { subject_id: message.subject_id, name: message.byline };
+    const found = await addressersOf(author, everyone, message.id);
+    return found.some(row => row.subject_id === seatSubjectId);
   }
 
   /* How far each seat's ordinary history read (`/api/ai/messages`, the read
@@ -747,7 +761,7 @@ function createChatService(options) {
 
   return Object.freeze({
     append, appendAnnotated, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
-    read, readForSeat, wait, waitForSeat, waitForSeatRings,
+    read, addressedSince, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, notePoll, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,
   });

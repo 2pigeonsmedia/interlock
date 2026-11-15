@@ -174,3 +174,28 @@ test('an answer to an ask is not an address of the asker: the asker\'s next post
   assert.deepEqual(rung(next), []);
   await chat.close();
 });
+
+// The ring builder's A4 cause (A12): addressedSince(message, seat) answers,
+// for a message already posted, whether that seat had addressed its author
+// since the author's previous post, as the room stood then.
+test('addressedSince: true for the A4 ring, false for a bystander, false once the turn has passed', async () => {
+  const chat = service();
+  await chat.append({ text: "@Rowan reply 'rung'" }, lead());
+  const reply = await chat.append({ text: 'rung' }, rowan());
+  assert.equal(await chat.addressedSince(reply, LEAD_ID), true, 'the lead had addressed Rowan');
+  assert.equal(await chat.addressedSince(reply, PIP_ID), false, 'Pip had not');
+  const later = await chat.append({ text: 'anything else' }, rowan());
+  assert.equal(await chat.addressedSince(later, LEAD_ID), false, 'already answered once');
+  assert.equal(await chat.addressedSince(reply, LEAD_ID), true, 'still true of the earlier message, read as it stood');
+  await chat.close();
+});
+
+test('addressedSince: an ask counts, and a ring for another cause does not', async () => {
+  const chat = service();
+  await chat.appendAnnotated({ text: 'May I merge?' }, lead(), { ask: { of: 'Ana', means: 'merge PR 12' } });
+  const reply = await chat.append({ text: 'go ahead' }, ANA);
+  assert.equal(await chat.addressedSince(reply, LEAD_ID), true);
+  const back = await chat.append({ text: 'merging' }, lead());
+  assert.equal(await chat.addressedSince(back, ANA.subject_id), false, 'a plain reply is not an address');
+  await chat.close();
+});
