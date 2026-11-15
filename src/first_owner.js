@@ -3604,6 +3604,51 @@ function createFirstOwnerHandler(options) {
     return Ring.ringKind(causes) || 'mention';
   }
 
+  /* Who is not in the live roster, and why (C2): seats that left or ended in
+   * the last week, each with who has its work; and, for the people who can
+   * Allow them, knocks waiting to be let in. Its own route: the 0.3.11 page
+   * checks the participants body exactly. */
+  async function readPeopleAbsences(request, response) {
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const now = Date.now();
+    const authorized = house.authorizeRead(authorizationMeta(request, now), 'read', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) return refuseAuthorization(request, response, authorized);
+    try {
+      const who = house.whoami({ cookie_header: request.headers.cookie, activity: 'passive-delivery', now });
+      const mayAllow = Boolean(who && who.subject_id === authorized.subject_id && (who.first_owner === true ||
+        (Array.isArray(who.roles) && who.roles.some(role => role && role.slug === 'administrator'))));
+      const live = new Set(house.listParticipants({ now }).map(row => row.subject_id));
+      const workOf = name => {
+        const assignment = people ? people.service.assignmentOf(name) : null;
+        const project = assignment ? assignment.project : null;
+        if (!project) return { project: null, holder: 'the owner' };
+        const lead = people.service.leadOf(project, now, live);
+        return { project, holder: lead && typeof lead.name === 'string' ? lead.name : `whoever next leads ${project}` };
+      };
+      const recentlyLeft = house.listRecentEndedSeats({ now, since: now - SETTINGS_ENDED_MS })
+        .filter(seat => seat && typeof seat.name === 'string' && Number.isSafeInteger(seat.ended_at))
+        .slice().sort((left, right) => right.ended_at - left.ended_at)
+        .slice(0, SETTINGS_ENDED_PAGE)
+        .map(seat => {
+          const how = seat.ended_how === 'left' ? 'left' : seat.ended_how === 'revoked' ? 'removed'
+            : seat.ended_how === 'released' ? 'released' : 'expired';
+          const work = workOf(seat.name);
+          return Object.freeze({
+            name: seat.name, session: Number.isSafeInteger(seat.session) ? seat.session : null,
+            ended_how: how, ended_at: seat.ended_at, project: work.project, work_with: work.holder,
+            presence_kind: PresenceKind.endedKind(how, seat.ended_at, work.holder),
+          });
+        });
+      const pending = mayAllow ? admission.list().map(row => Object.freeze({
+        name: row.name, created_at: row.created_at,
+        presence_kind: PresenceKind.pendingKind(row.created_at, null),
+      })) : [];
+      return sendJson(request, response, 200, { ok: true, recently_left: recentlyLeft, pending });
+    } catch (_) {
+      return sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+    }
+  }
+
   // What the room shows for this seat (C2): `interlock status` prints it.
   async function readAiPresenceKind(request, response) {
     if (!completed()) {
@@ -4201,6 +4246,16 @@ function createFirstOwnerHandler(options) {
           return;
         }
         listAdmissions(request, response);
+        return;
+      }
+      if (pathname === '/api/people/absences') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-people-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        await readPeopleAbsences(request, response);
         return;
       }
       if (pathname === '/api/ai/presence-kind') {
