@@ -365,12 +365,21 @@ test('a seat that leaves takes its registration and secret with it; a leftover i
   assert.equal(audit.includes('ilwh_'), false);
 });
 
-test('a webhook ring for an answer to the seat\'s ask carries kind reply, a string, never a Promise', async () => {
+test('a webhook seat rung by @Name reads mention, and by an answer to its ask reads reply; kind is a string', async () => {
   const { runtime, owner, scout, names } = await setUp();
   const S = names.scout;
   const target = await receiver();
   const set = await room.post(runtime, '/api/settings/webhooks/set', { name: S, url: `http://127.0.0.1:${target.port}/hook` }, owner);
   assert.equal(set.status, 200, set.text);
+  // @Name first: ringCauses must see the seat's own current name, or this
+  // would fall through to another kind.
+  const mention = await room.post(runtime, '/api/messages', { text: `@${S} one question` }, owner);
+  assert.equal(mention.status, 201, mention.text);
+  await eventually(() => target.seen.length >= 1, 'the @mention called the webhook');
+  const first = JSON.parse(target.seen[0].body);
+  assert.equal(first.message_id, mention.json.message.id);
+  assert.equal(first.kind, 'mention', 'rung by @Name');
+  target.seen.length = 0;
   const asked = await room.aiPost(runtime, '/api/ai/annotated-messages', {
     text: 'may I merge?', client_message_id: crypto.randomUUID(),
     annotation: { ask: { of: 'Ana', means: 'I merge the candidate and nothing else' } },
@@ -378,7 +387,7 @@ test('a webhook ring for an answer to the seat\'s ask carries kind reply, a stri
   assert.equal(asked.status, 201, asked.text);
   // Arrangement: the seat's own ask rings nobody's webhook.
   await new Promise(resolve => setTimeout(resolve, 200));
-  assert.equal(target.seen.length, 0, 'arrangement: no call before the answer');
+  assert.equal(target.seen.length, 0, 'arrangement: the seat\'s own ask calls nothing');
   const answer = await room.post(runtime, '/api/annotated-messages',
     { text: 'yes', annotation: { answers: [{ ask_id: asked.json.message.id, choice: 'yes' }] } }, owner);
   assert.equal(answer.status, 201, answer.text);
@@ -388,4 +397,22 @@ test('a webhook ring for an answer to the seat\'s ask carries kind reply, a stri
   assert.equal(typeof body.kind, 'string', 'kind is a string (an un-awaited Promise would serialize as {})');
   assert.equal(body.kind, 'reply', 'the webhook says reply for an answer, as stdout does (C4)');
   assert.equal(Ring.validRing(body), true);
+
+  // The pin on the name: a post that both @s the seat and answers its ask is a
+  // mention (mention ranks first). With a wrong name only the answer is seen
+  // and it reads reply; a plain @ alone cannot tell, since an unknown cause
+  // falls back to mention.
+  target.seen.length = 0;
+  const again = await room.aiPost(runtime, '/api/ai/annotated-messages', {
+    text: 'may I tag?', client_message_id: crypto.randomUUID(),
+    annotation: { ask: { of: 'Ana', means: 'I tag the candidate and nothing else' } },
+  }, scout.token);
+  assert.equal(again.status, 201, again.text);
+  const both = await room.post(runtime, '/api/annotated-messages',
+    { text: `@${S} yes`, annotation: { answers: [{ ask_id: again.json.message.id, choice: 'yes' }] } }, owner);
+  assert.equal(both.status, 201, both.text);
+  await eventually(() => target.seen.length >= 1, 'the @ + answer called the webhook');
+  const third = JSON.parse(target.seen[0].body);
+  assert.equal(third.message_id, both.json.message.id);
+  assert.equal(third.kind, 'mention', 'an @ that also answers is a mention: the seat\'s own name was seen');
 });
