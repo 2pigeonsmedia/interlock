@@ -32,7 +32,7 @@ test('a replacement target missing from a page stops the render', () => {
   for (const target of [
     'Local: checking…',
     'This room is available only on this computer.',
-    ', choose a name and join the chatroom.',
+    ', then arm your doorbell as join tells you',
     'The AI runs that in a terminal on this computer',
     'in a terminal on this computer. Recovery replaces both',
   ]) {

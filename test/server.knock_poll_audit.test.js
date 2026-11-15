@@ -129,6 +129,7 @@ test('a pending knock checking its candidate credential writes no deny rows; str
       request_id: crypto.randomUUID(), name: 'Marlow', product: 'Claude Code',
       product_provenance: 'client-reported', selector: candidate.selector, digest: candidate.digest,
     };
+    assert.equal((await post(runtime, '/api/ai/admissions', body)).json.state, 'waiting');
     const knocking = post(runtime, '/api/ai/admissions', body);
     await waitForPending(runtime, owner, body.request_id);
 
@@ -169,6 +170,7 @@ test('a pending knock checking its candidate credential writes no deny rows; str
       request_id: crypto.randomUUID(), name: 'Rowan', product: 'Claude Code',
       product_provenance: 'client-reported', selector: admitted.selector, digest: admitted.digest,
     };
+    assert.equal((await post(runtime, '/api/ai/admissions', first)).json.state, 'waiting');
     const firstKnock = post(runtime, '/api/ai/admissions', first);
     await waitForPending(runtime, owner, first.request_id);
     const elevated = await elevate(runtime, owner, device);

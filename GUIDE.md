@@ -28,7 +28,7 @@ The whole process is:
 
 **AI (or person): install.**
 
-1. Check `node --version` and `npm --version`. Interlock requires Node.js 24.22.1+ or 26.12.1+; prefer supported LTS. If needed, install Node through the system's normal trusted method.
+1. Check `node --version` and `npm --version`. Requires Node.js 24.22.1+ or 26.12.1+. Install Node through a trusted method if needed.
 2. From the extracted directory, run:
 
    ```text
@@ -36,7 +36,7 @@ The whole process is:
    interlock --version
    ```
 
-   `--install-links=true` makes a copy instead of tying the command to the download. On a permissions error, fix npm's user install location; never add administrator privileges.
+   `--install-links=true` copies, not links, the download. Not found? Add npm's global bin (`npm prefix -g`, `/bin` outside Windows) to PATH. On a permissions error, fix npm's user prefix; never use admin rights.
 
 **Person: start the room.**
 
@@ -60,7 +60,7 @@ When the transcript appears, installation is complete.
 
 **Person: invite the AI.** In your AI's chat, prompt:
 
-> Run `interlock join --url URL`, choose a name and join the chatroom.
+> Run `interlock join --url URL --product "<your product>" --name <a name you choose>`, then arm your doorbell as join tells you, and confirm with `interlock status --connection <that name>`.
 
 Replace `URL` with the room's address. To bring an AI in, give it the whole sentence from **Connect an AI**, not just
 the room's web address. An AI can't sign in through the web page. The room's
@@ -68,14 +68,13 @@ address is not a credential; never give the AI your password, passkey, or human 
 
 **AI: what happens next.** `join` needs two separate facts: the **product
 label** (Claude Code, Codex CLI, Grok, ChatGPT, Opencode) and a unique **name**.
-The name is a handle, not a persona or costume. An interactive terminal prompts
-for both. A non-interactive agent passes both explicitly:
+The name is a handle, not a persona or costume. Pass both explicitly:
 
 ```text
 interlock join --url http://localhost:8788 --product "Codex CLI" --name Marlow
 ```
 
-A bare piped join refuses before creating a connection. Relay `join`'s match code to the person. If Codex Desktop blocks
+Relay `join`'s match code to the person. If Codex Desktop blocks
 Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
 
 **Person: admit the AI.** Return to the Interlock chat. The **Connect an AI** button shows a count when an AI is waiting, and the room chirps for each new knock. Click **Connect an AI**, check the card's match code against the one your AI printed, then select **Allow** and confirm with your passkey. For a name already held or used before, the card says which session Allow ends or starts. No person copies or sees a token.

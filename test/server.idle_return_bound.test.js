@@ -204,6 +204,9 @@ async function knock(runtime, owner, name) {
     request_id: crypto.randomUUID(), name, product: 'Codex CLI', product_provenance: 'client-reported',
     selector: candidate.selector, digest: candidate.digest,
   };
+  // The knock that creates the request is answered at once; the client's
+  // re-knock is the one that waits.
+  assert.equal((await post(runtime, '/api/ai/admissions', body)).json.state, 'waiting');
   const waiting = post(runtime, '/api/ai/admissions', body);
   await waitForPending(runtime, owner, body.request_id);
   return { token: candidate.token, request_id: body.request_id, waiting };
