@@ -407,7 +407,7 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.equal(result.stdout.split('Match code:').length - 1, 1, 'the code is shown once, after the room answered');
   assert.ok(result.stdout.indexOf('Not sent yet') < result.stdout.indexOf('Match code:'));
   assert.ok(result.stdout.includes('A person must now Allow this in the room. Arm your doorbell now so you\'re woken when they do:\n' +
-    '  interlock-doorbell run --adapter codex --connection Marlow --session <this thread id>\n'), result.stdout);
+    '  interlock-doorbell run --adapter codex --connection Marlow --session <this Codex session id>\n'), result.stdout);
   assert.ok(result.stdout.indexOf('A person must now Allow') < result.stdout.indexOf('Connected as'),
     'the Allow and doorbell lines come before the wait ends');
   assert.match(result.stdout, /Interlock target: http:\/\/localhost:8788/);

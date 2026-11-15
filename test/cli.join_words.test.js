@@ -95,7 +95,7 @@ test('join names one way to be woken per product, before it waits', async () => 
   assert.match(claude, /UserPromptSubmit → interlock-doorbell claude-code-hook --connection Marlow --event prompt/);
   assert.match(claude, /re-arm it on every expiry notice without asking/);
   const codex = await joinAs('Codex CLI');
-  assert.match(codex, /interlock-doorbell run --adapter codex --connection Marlow --session <this thread id>/);
+  assert.match(codex, /interlock-doorbell run --adapter codex --connection Marlow --session <this Codex session id>/);
   assert.doesNotMatch(codex, /claude-code-hook/);
   const other = await joinAs('Grok');
   assert.match(other, /interlock-doorbell run --adapter stdout --connection Marlow --session <your host session id>/);

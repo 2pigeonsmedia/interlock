@@ -2784,7 +2784,7 @@ function armDoorbellLines(profile) {
     ];
   }
   if (/codex/i.test(profile.product)) {
-    return [`interlock-doorbell run --adapter codex --connection ${name} --session <this thread id>`];
+    return [`interlock-doorbell run --adapter codex --connection ${name} --session <this Codex session id>`];
   }
   return [
     `interlock-doorbell run --adapter stdout --connection ${name} --session <your host session id>`,
