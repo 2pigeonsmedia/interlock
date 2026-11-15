@@ -1421,6 +1421,21 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
   return EXIT_OK;
 }
 
+/* The room's time for this AI's own person, one line (0.4.0). An older room
+ * has no such route; then, or on any doubt, nothing is printed. */
+const ROOM_TIME_TIMEOUT_MS = 5_000;
+async function roomTimeLine(fetcher, profile) {
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/room-time', { timeoutMs: ROOM_TIME_TIMEOUT_MS });
+    const shaped = exactObject(result, ['ok', 'room_time', 'last_person_message_ago', 'line']);
+    if (!shaped || typeof shaped.line !== 'string' || !shaped.line.startsWith('Room time: ') ||
+        shaped.line.length > 200) return null;
+    return terminalSafe(shaped.line);
+  } catch (_) {
+    return null;
+  }
+}
+
 async function runReadCommand(command, args, io, dependencies = {}) {
   const parsed = commandOptions(command, args);
   if (!parsed) {
@@ -1451,6 +1466,11 @@ async function runReadCommand(command, args, io, dependencies = {}) {
     return EXIT_RUNTIME;
   }
 
+  // A skip to the current message reads nothing from the room, so it says no room time.
+  if (command === 'history' && !parsed.json && !parsed.skipToCurrent) {
+    const said = await roomTimeLine(dependencies.fetch || globalThis.fetch, profile);
+    if (said !== null) line(io.stdout, said);
+  }
   let result;
   try {
     result = command === 'history' && parsed.skipToCurrent
@@ -3921,7 +3941,11 @@ async function runWork(args, io, dependencies = {}) {
     line(io.stdout, JSON.stringify(result));
     return EXIT_OK;
   }
-  if (parsed.verb === 'brief') renderBrief(io.stdout, result, profile.name);
+  if (parsed.verb === 'brief') {
+    const said = await roomTimeLine(fetcher, profile);
+    if (said !== null) line(io.stdout, said);
+    renderBrief(io.stdout, result, profile.name);
+  }
   else if (parsed.verb === 'list') {
     for (const row of result.items) line(io.stdout, workRow(row));
     line(io.stdout, `${result.items.length} of ${result.total} · ${result.next === null ? 'no more' : `continue with --after ${result.next}`}`);

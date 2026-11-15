@@ -27,6 +27,7 @@ const {
   startOptions,
   startPort,
 } = require('../src/cli.js');
+const { withoutRoomTime } = require('./helpers/room_time.js');
 
 function capture(argv) {
   let stdout = '';
@@ -202,7 +203,7 @@ async function captureCommand(argv, dependencies = {}, stdin = null) {
     stdout: { write: value => { stdout += String(value); } },
     stderr: { write: value => { stderr += String(value); } },
     stdin,
-  }, dependencies);
+  }, withoutRoomTime(dependencies));
   return { code, stderr, stdout };
 }
 

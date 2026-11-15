@@ -770,6 +770,18 @@ function create(config) {
     })));
   }
 
+  // A seat's principal: the person it acts for, fixed when it was admitted
+  // (a seat requires one, and it must be a person). A read only.
+  function principalOf(subjectId) {
+    if (typeof subjectId !== 'string' || subjectId.length === 0 ||
+        subjectId.length > 64 || subjectId.includes('\0')) return null;
+    const all = subjects.list(tenant);
+    const seat = all.find(subject => subject && subject.id === subjectId && subject.kind === 'seat');
+    if (!seat || typeof seat.principal !== 'string') return null;
+    const person = all.find(subject => subject && subject.id === seat.principal && subject.kind === 'person');
+    return person ? Object.freeze({ subject_id: person.id, name: person.name }) : null;
+  }
+
   function aiSessionDiscriminator(subjectId) {
     if (typeof subjectId !== 'string' || subjectId.length === 0 ||
         subjectId.length > 64 || subjectId.includes('\0')) return null;
@@ -1193,6 +1205,7 @@ function create(config) {
     redeem,
     inspectAiAdmission,
     aiSessionDiscriminator,
+    principalOf,
     listParticipants,
     releaseIdleSeats,
     listRecentEndedSeats,
