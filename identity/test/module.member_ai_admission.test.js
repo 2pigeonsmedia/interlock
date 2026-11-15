@@ -251,3 +251,24 @@ test('a member\'s code needs their own fresh step-up: L1 refused, L2 confirmed f
   const extra = r.world.service.confirmMemberCodeIssue(Object.assign(await r.asOwner(), { extra: 1 }));
   assert.strictEqual(extra.ok, false, 'closed body at the service: ' + JSON.stringify(extra));
 });
+
+test('R8: a member removes their OWN AI on a fresh step-up, and nothing else', async () => {
+  const r = await room();
+  const mine = r.house.allowAiAdmissionForMember(await r.asMember(),
+    admission(r.identity.newAiCredential(), { principal_subject_id: r.member.subject_id }));
+  assert.strictEqual(mine.ok, true, 'ARRANGEMENT: Kestrel is Bea\'s');
+  const owners = r.house.allowAiAdmission(await r.asOwner(), admission(r.identity.newAiCredential(), { name: 'Plover' }));
+  assert.strictEqual(owners.ok, true, 'ARRANGEMENT: Plover is the owner\'s');
+  assert.deepStrictEqual(r.house.revokeOwnAiSeat(r.plainAs(r.member.subject_id), { name: 'Kestrel' }),
+    { ok: false, reason: 'fresh-step-up-required' }, 'not at L1');
+  assert.deepStrictEqual(r.house.revokeOwnAiSeat(r.plainAs(r.member.subject_id), { name: 'Plover' }),
+    { ok: false, reason: 'not-administrator' }, 'not another person\'s AI, and no passkey asked for');
+  assert.deepStrictEqual(r.house.revokeOwnAiSeat(await r.asMember(), { name: 'Plover' }),
+    { ok: false, reason: 'not-administrator' }, 'not another person\'s AI, elevated either');
+  assert.deepStrictEqual(r.house.revokeOwnAiSeat(await r.asMember(), { name: 'Owner' }),
+    { ok: false, reason: 'not-administrator' }, 'never a person');
+  assert.ok(seatNamed(r.repo, 'Plover'), 'Plover is still in');
+  const removed = r.house.revokeOwnAiSeat(await r.asMember(), { name: 'Kestrel' });
+  assert.deepStrictEqual(removed, { ok: true, name: 'Kestrel', kind: 'seat' });
+  assert.strictEqual(seatNamed(r.repo, 'Kestrel'), null, 'her AI is gone');
+});

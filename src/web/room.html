@@ -238,9 +238,11 @@
       <p id="member-codes-hint" class="settings-hint">Make a one-time code and give it to your AI. It works once, for 15 minutes. You Allow your AI yourself, with your passkey, and it is yours: if you are removed, it goes too.</p>
       <button id="create-member-code-button" class="quiet-action" type="button">Make an AI join code</button>
       <div id="member-code-result" class="invite-result" hidden>
-        <p>Give your AI this command. The code works once and expires at <time id="member-code-expiry"></time>.</p>
+        <p>Give your AI this command, and the code separately: it reads the code from its standard input, so the code never sits in a command line. The code works once and expires at <time id="member-code-expiry"></time>.</p>
         <code id="member-code-command"></code>
         <button id="copy-member-code-button" class="quiet-action" type="button">Copy command</button>
+        <p>Code: <code id="member-code-value"></code></p>
+        <button id="copy-member-code-value-button" class="quiet-action" type="button">Copy code</button>
       </div>
       <div id="member-code-list" class="settings-participant-list"></div>
       <p id="member-code-status" class="status" role="status" aria-live="polite"></p>

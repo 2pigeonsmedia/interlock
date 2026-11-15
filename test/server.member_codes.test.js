@@ -13,6 +13,7 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const http = require('node:http');
 const test = require('node:test');
 
 const identity = require('identity');
@@ -172,6 +173,39 @@ test('a member brings their own AI: switch, code, knock, the member\'s Allow, an
     assert.equal(JSON.stringify(rows).includes(issued.json.code.replace('-', '')), false, 'no code in the audit');
     assert.ok((await participants(runtime, owner)).includes('Kestrel'), 'Kestrel is in the room');
 
+    // A code-bound knock whose client goes away stays bound: the room still
+    // holds it as pending, so it is still Bea's (released, an admin's Allow
+    // would make it the admin's AI).
+    bea = await elevate(runtime, bea, beaDevice);
+    const third = await post(runtime, '/api/member-codes/issue', {}, bea);
+    assert.equal(third.status, 201, third.text);
+    const gone = knockBody('Wren', { join_code: third.json.code });
+    const raw = http.request({ agent: false, host: runtime.address, port: runtime.port, path: '/api/ai/admissions',
+      method: 'POST', headers: { host: `localhost:${runtime.port}`, 'content-type': 'application/json' } });
+    raw.on('error', () => {});
+    raw.end(JSON.stringify(gone.body));
+    await waitForPending(runtime, owner, gone.body.request_id);
+    raw.destroy();
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // The switch off: no code-bound knock is let in by anyone, admins included,
+    // and a member lists no codes; the owner still sees them, to cancel.
+    owner = await elevate(runtime, owner, ownerDevice);
+    assert.equal((await post(runtime, '/api/settings/member-codes', { enabled: false }, owner)).status, 200);
+    owner = await elevate(runtime, owner, ownerDevice);
+    const offAllow = await post(runtime, `/api/ai/admissions/${gone.body.request_id}/allow`, {}, owner);
+    assert.equal(offAllow.status, 403, 'still bound after the abort, and off for everyone: ' + offAllow.text);
+    assert.equal(offAllow.json.error, 'member-codes-off');
+    const memberListOff = await call(runtime, { path: '/api/member-codes', headers: { cookie: bea.cookie } });
+    assert.deepEqual([memberListOff.json.enabled, memberListOff.json.codes], [false, []]);
+    const ownerListOff = await call(runtime, { path: '/api/member-codes', headers: { cookie: owner.cookie } });
+    assert.ok(ownerListOff.json.codes.length > 0, 'the owner still sees the codes');
+    owner = await elevate(runtime, owner, ownerDevice);
+    assert.equal((await post(runtime, `/api/ai/admissions/${gone.body.request_id}/decline`, {}, owner)).status, 200,
+      'a decline is still open to her');
+    owner = await elevate(runtime, owner, ownerDevice);
+    assert.equal((await post(runtime, '/api/settings/member-codes', { enabled: true }, owner)).status, 200);
+
     // A knock without her code is not hers to Allow, even elevated.
     const plainKnock = knockBody('Plover');
     const plainWaiting = post(runtime, '/api/ai/admissions', plainKnock.body);
@@ -184,18 +218,19 @@ test('a member brings their own AI: switch, code, knock, the member\'s Allow, an
     assert.equal(ownerDeclines.status, 200, ownerDeclines.text);
     await plainWaiting;
 
-    // Elevated, Bea still has no administrator act .
+    // Elevated, Bea still has no administrator act: she cannot remove a
+    // person (her own AI is hers to remove: the no-carry test proves that).
     bea = await elevate(runtime, bea, beaDevice);
     for (const [route, body] of [
       ['/api/invitations', {}],
-      ['/api/participants/revoke', { name: 'Kestrel' }],
+      ['/api/participants/revoke', { name: 'Cal' }],
       ['/api/settings/reuse', { allow_ended_reuse: false }],
     ]) {
       bea = await elevate(runtime, bea, beaDevice);
       const tried = await post(runtime, route, body, bea);
       assert.equal(tried.status, 403, `${route}: ${tried.text}`);
     }
-    assert.ok((await participants(runtime, owner)).includes('Kestrel'), 'Kestrel is still in');
+    assert.ok((await participants(runtime, owner)).includes('Cal'), 'Cal is still in');
 
     // Cancel: Bea's unused code is hers or an admin's to cancel, not another member's.
     bea = await elevate(runtime, bea, beaDevice);

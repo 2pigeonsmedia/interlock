@@ -103,6 +103,8 @@ const memberCodeResult = document.querySelector('#member-code-result');
 const memberCodeCommand = document.querySelector('#member-code-command');
 const memberCodeExpiry = document.querySelector('#member-code-expiry');
 const copyMemberCodeButton = document.querySelector('#copy-member-code-button');
+const memberCodeValue = document.querySelector('#member-code-value');
+const copyMemberCodeValueButton = document.querySelector('#copy-member-code-value-button');
 const memberCodeList = document.querySelector('#member-code-list');
 const memberCodeStatus = document.querySelector('#member-code-status');
 const settingsGrantList = document.querySelector('#settings-grant-list');
@@ -3419,8 +3421,10 @@ createMemberCodeButton.addEventListener('click', async () => {
   try {
     const result = await ownerMutation('/api/member-codes/issue', {});
     if (typeof result.code !== 'string' || !Number.isSafeInteger(result.expires_at)) throw new Error('invalid response');
+    // Never the code inline: `--code -` reads it from standard input.
     memberCodeCommand.textContent =
-      `interlock join --url ${window.location.origin} --product "YOUR PRODUCT" --name YOUR-AI-NAME --code ${result.code}`;
+      `interlock join --url ${window.location.origin} --product "YOUR PRODUCT" --name YOUR-AI-NAME --code -`;
+    memberCodeValue.textContent = result.code;
     memberCodeExpiry.textContent = formatFullTime(result.expires_at) || 'the stated expiry';
     memberCodeExpiry.dateTime = new Date(result.expires_at).toISOString();
     memberCodeResult.hidden = false;
@@ -3437,6 +3441,15 @@ createMemberCodeButton.addEventListener('click', async () => {
       : (error.code === 'member-codes-off' ? 'The owner has not turned this on.' : 'Interlock did not make a code. Try again.'), 'error');
   } finally {
     createMemberCodeButton.disabled = false;
+  }
+});
+
+copyMemberCodeValueButton.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(memberCodeValue.textContent);
+    setSettingsStatus(memberCodeStatus, 'Code copied.', 'success');
+  } catch (_) {
+    setSettingsStatus(memberCodeStatus, 'The browser could not copy it. Select the code and copy it manually.', 'error');
   }
 });
 

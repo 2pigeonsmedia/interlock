@@ -951,18 +951,34 @@ function createFirstOwnerHandler(options) {
         input.name.includes('\0') || Buffer.byteLength(input.name, 'utf8') > 256) {
       return sendJson(request, response, 400, { ok: false, error: 'invalid-participant' });
     }
-    if (!ownerSession(request, response, true)) return;
+    // An administrator removes anyone but the owner; a member removes only
+    // their own AI (R8, #821), on their own fresh step-up. Identity decides.
+    const person = personSession(request, response, true);
+    if (!person) return;
     const at = Date.now();
     // Who removes it, and which seats were in the room before: a removed
     // person takes the seats delegated from them out with them.
     const remover = authorizedActor(request, house.authorizeWrite(authorizationMeta(request, at), 'write', CHAT_RESOURCE), at);
     const seatsBefore = house.listParticipants({ now: at }).filter(row => row.kind === 'seat');
-    const result = house.revokeParticipant(requestMeta(request, at), input);
-    if (!result || result.ok !== true) return sendStepUpRefusal(request, response, result);
+    const result = person.admin
+      ? house.revokeParticipant(requestMeta(request, at), input)
+      : (typeof house.revokeOwnAiSeat === 'function'
+        ? house.revokeOwnAiSeat(requestMeta(request, at), input) : { ok: false, reason: 'not-authorized' });
+    if (!result || result.ok !== true) {
+      // A member's refusal for want of authority reads as the room's own word.
+      if (!person.admin && result && result.reason === 'not-administrator') {
+        return sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      }
+      return sendStepUpRefusal(request, response, result);
+    }
     const after = new Set(house.listParticipants({ now: Date.now() }).map(row => row.subject_id));
     if (remover) {
-      await settleDeparture(seatsBefore.filter(row => !after.has(row.subject_id)), 'revoked',
-        { subject_id: remover.subject_id, name: remover.name, kind: 'person', owner: true }, remover);
+      // A member's own AI: its grants were an administrator's to give, so the
+      // room ends them as the server; the member's act is in identity's record.
+      const peopleActor = person.admin
+        ? { subject_id: remover.subject_id, name: remover.name, kind: 'person', owner: true }
+        : { subject_id: 'server', name: 'server', kind: 'server', owner: false };
+      await settleDeparture(seatsBefore.filter(row => !after.has(row.subject_id)), 'revoked', peopleActor, remover);
     }
     return sendJson(request, response, 200, result);
   }
@@ -1792,6 +1808,17 @@ function createFirstOwnerHandler(options) {
         timeoutMs: AI_ADMISSION_WAIT_MS,
       });
     } catch (error) {
+      // A knock that failed before it was taken did not spend its code. One
+      // the room holds as pending keeps it: released, that pending knock
+      // would be no member's, and an administrator's Allow would make it the
+      // administrator's AI. A re-knock with the same request id finds it.
+      if (reservation && reservation.fresh === true) {
+        let pending = true;
+        try { pending = admission.list().some(row => row.request_id === split.knock.request_id); } catch (_) { pending = true; }
+        if (!pending) {
+          try { memberCodes.release(split.knock.request_id, reservation.id); } catch (_) { /* stays spent */ }
+        }
+      }
       if (controller.signal.aborted || response.destroyed) return;
       sendJson(request, response, 503, { ok: false, error: 'admission-unavailable' });
       return;
@@ -3732,9 +3759,11 @@ function createFirstOwnerHandler(options) {
     const person = personSession(request, response, false);
     if (!person) return undefined;
     try {
+      const enabled = memberCodes.enabled();
+      // Off: a member sees no codes; the owner and admins still see all, to cancel.
       return sendJson(request, response, 200, {
-        ok: true, enabled: memberCodes.enabled(),
-        codes: person.admin ? memberCodes.list() : memberCodes.list(person.subject_id),
+        ok: true, enabled,
+        codes: person.admin ? memberCodes.list() : (enabled ? memberCodes.list(person.subject_id) : []),
       });
     } catch (_) {
       return sendJson(request, response, 503, { ok: false, error: 'member-codes-unavailable' });
@@ -3953,7 +3982,9 @@ function createFirstOwnerHandler(options) {
         sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
         return;
       }
-      if (!person.admin && !memberCodes.enabled()) {
+      // With the switch off, no code-bound knock is let in, by anyone: a
+      // member's AI is a member's, and the owner has turned that off.
+      if (action === 'allow' && !memberCodes.enabled()) {
         sendJson(request, response, 403, { ok: false, error: 'member-codes-off' });
         return;
       }

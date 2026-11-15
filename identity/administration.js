@@ -1035,6 +1035,40 @@ function createService(opts) {
     });
   }
 
+  /* R8 (#821): a member removes their OWN AI, on their own fresh step-up.
+   * Only an active AI seat whose principal is the caller; never a person,
+   * never another's AI. Administrators keep revokeParticipant for the rest. */
+  function revokeOwnAiSeat(optsIn) {
+    if (!isPlainObject(optsIn) || hasAnyAccessor(optsIn) ||
+        Reflect.ownKeys(optsIn).some(key =>
+          typeof key !== 'string' || !REVOKE_PARTICIPANT_KEYS.includes(key))) return FAIL;
+    const targetName = ownData(optsIn, 'name').value;
+    if (typeof targetName !== 'string' || targetName.trim() !== targetName ||
+        targetName.length === 0) return FAIL;
+    // Whose AI it is comes first: someone who is not its principal is
+    // refused outright, never asked for a passkey that could not help.
+    function gate(actorId, assurance) {
+      const state = repo.read();
+      const target = state.subjects.find(subject =>
+        subject.tenant === TENANT() && subject.status === 'active' && subject.kind === 'seat' &&
+        subject.name === targetName);
+      if (!target || target.principal !== actorId || !principalStanding(state, actorId)) {
+        return { allow: false, reason: 'not-administrator' };
+      }
+      return assurance === 2 ? { allow: true } : { allow: false, reason: 'admin-l2-required' };
+    }
+    return withFreshAdmin(optsIn, 'participant.revoke-own', 'membership', ({ actorId, now }) => {
+      const state = repo.read();
+      const target = state.subjects.find(subject =>
+        subject.tenant === TENANT() && subject.status === 'active' && subject.kind === 'seat' &&
+        subject.name === targetName);
+      if (!target || target.principal !== actorId) throw new Error('not this member\'s AI');
+      revokeTargetSessions(target.id, now, 'subject-revocation');
+      if (!subjects.revoke(target.id, 'revoked')) throw new Error('participant revoke failed');
+      return Object.freeze({ ok: true, name: target.name, kind: target.kind });
+    }, gate);
+  }
+
   // The transcript bytes remain host-owned, but destructive intent and the
   // one-use fresh administrator step-up remain identity-owned. Success here is
   // a narrow authorization receipt; the host still reports archive/clear
@@ -1400,6 +1434,7 @@ function createService(opts) {
     allowAiAdmission,
     allowAiAdmissionForMember,
     confirmMemberCodeIssue,
+    revokeOwnAiSeat,
     grantRoomAccess,
     redeemHumanInvite,
     changeOwnPassword,

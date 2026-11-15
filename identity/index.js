@@ -947,6 +947,28 @@ function create(config) {
     return Object.freeze({ ok: true, name: result.name, kind: result.kind });
   }
 
+  // R8 (#821): a member removes their own AI, on their own fresh step-up.
+  function revokeOwnAiSeat(meta, body) {
+    if (meta === null || typeof meta !== 'object') {
+      reject('revokeOwnAiSeat(meta, …) requires the trusted metadata object');
+    }
+    const b = closedBody(body, ['name']);
+    if (!b || typeof b.name !== 'string' || b.name.length === 0 || b.name.includes('\0') ||
+        Buffer.byteLength(b.name, 'utf8') > 256) {
+      return Object.freeze({ ok: false, reason: 'not-authorized' });
+    }
+    const result = service.revokeOwnAiSeat({
+      cookie_header: meta.cookie_header,
+      csrf_token: meta.csrf_token,
+      request_origin: meta.request_origin,
+      sec_fetch_site: meta.sec_fetch_site,
+      now: meta.now,
+      name: b.name,
+    });
+    if (!result || result.ok !== true) return stepUpRefusal(result);
+    return Object.freeze({ ok: true, name: result.name, kind: result.kind });
+  }
+
   // ── ADMINISTRATORS: the first owner grants and removes them ──────────────
   // The rules live in administration.js (only the first owner grants or
   // removes; nobody can name her). These read the same state first so the
@@ -1295,6 +1317,7 @@ function create(config) {
     allowAiAdmissionForMember,
     confirmMemberCodeIssue,
     recordMemberCodeEvent,
+    revokeOwnAiSeat,
     firstOwner,
     // ── THE BOOT SURFACE ────────────────────────────────────────────────
     //

@@ -86,6 +86,20 @@ test('a member\'s code-bound AI under a released lead\'s name carries nothing of
     assert.equal(live.some(row => row.grant_id !== lead.grant.grant_id && row.project === 'ops'), false,
       'no new lead grant for Bea\'s AI');
     assert.equal((await item(runtime, ana, held.id)).revision, held.revision, 'the item was not moved');
+
+    // R8: Bea removes her own AI, on her own fresh step-up; at L1 she is asked for one.
+    let beaPlain = sessionFrom(await post(runtime, '/api/login', { name: 'Bea', password: beaPassword }));
+    const askedFirst = await post(runtime, '/api/participants/revoke', { name: 'Juno' }, beaPlain);
+    assert.equal(askedFirst.status, 403, askedFirst.text);
+    assert.equal(askedFirst.json.error, 'fresh-step-up-required');
+    const junos = async () => (await get(runtime, '/api/participants', ana)).json.participants
+      .filter(row => row.kind === 'seat' && row.name === 'Juno' && !row.ended_at).length;
+    const before = await junos();
+    assert.ok(before >= 1, 'ARRANGEMENT: Bea\'s Juno is listed');
+    beaPlain = await elevate(runtime, beaPlain, beaDevice);
+    const ownRemoved = await post(runtime, '/api/participants/revoke', { name: 'Juno' }, beaPlain);
+    assert.equal(ownRemoved.status, 200, ownRemoved.text);
+    assert.equal(await junos(), before - 1, 'Bea\'s Juno is gone');
   } finally {
     await runtime.close();
     mock.timers.reset();
