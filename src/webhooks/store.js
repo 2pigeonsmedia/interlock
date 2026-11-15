@@ -11,10 +11,16 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 const { atomicWriteJson } = require('../atomic_json.js');
 
 const FILE_NAME = 'webhooks.json';
+// One line per change (set, regenerate, excerpt, delete, ended): who, which
+// seat, where it points. Never a secret, never the URL's path. Its own file,
+// which no earlier release opens.
+const AUDIT_FILE_NAME = 'webhooks-audit.jsonl';
+const MAX_AUDIT_BYTES = 4 * 1024 * 1024;
 const SCHEMA = 1;
 const MAX_SEATS = 256;
 const MAX_URL_BYTES = 2048;
@@ -50,6 +56,11 @@ function parseUrl(value, { hosted }) {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
   if (hosted && url.protocol !== 'https:') return null;
   if (url.username !== '' || url.password !== '' || url.hash !== '' || url.hostname === '') return null;
+  // A literal private address is refused at once in a hosted room, so the
+  // owner is told now rather than by a refused delivery later. A name is
+  // still checked where it resolves, at delivery.
+  const literal = url.hostname.startsWith('[') ? url.hostname.slice(1, -1) : url.hostname;
+  if (hosted && net.isIP(literal) && !require('./deliver.js').publicAddress(literal)) return null;
   return url.href;
 }
 
@@ -88,7 +99,22 @@ function openWebhookStore(options) {
   const hosted = options.hosted === true;
   const clock = typeof options.clock === 'function' ? options.clock : Date.now;
   const file = path.join(options.dataDir, FILE_NAME);
+  const auditFile = path.join(options.dataDir, AUDIT_FILE_NAME);
   const records = new Map();
+
+  function audit(act, subjectId, by, record) {
+    let target = null;
+    try { target = record ? (u => `${u.protocol}//${u.host}`)(new URL(record.url)) : null; } catch (_) { target = null; }
+    const line = JSON.stringify({ at: clock(), act, seat: subjectId, by: by || null, target }) + '\n';
+    try {
+      let size = 0;
+      try { size = fs.statSync(auditFile).size; } catch (_) { size = 0; }
+      if (size + line.length > MAX_AUDIT_BYTES) {
+        try { fs.renameSync(auditFile, auditFile + '.1'); } catch (_) { /* best effort */ }
+      }
+      fs.appendFileSync(auditFile, line, { encoding: 'utf8', mode: 0o600 });
+    } catch (_) { /* the change stands; its line is best effort */ }
+  }
 
   let raw = null;
   try { raw = fs.readFileSync(file, 'utf8'); }
@@ -131,7 +157,7 @@ function openWebhookStore(options) {
 
   /* Registers or replaces a seat's webhook. A new secret is made each time
    * the URL is set, and returned once. */
-  function register(subjectId, input) {
+  function register(subjectId, input, by = null) {
     if (!validSubject(subjectId) || !input || typeof input !== 'object') throw fail('invalid-request');
     const url = parseUrl(input.url, { hosted });
     if (url === null) throw fail('invalid-url');
@@ -147,20 +173,22 @@ function openWebhookStore(options) {
     const next = new Map(records);
     next.set(subjectId, record);
     persist(next);
+    audit('set', subjectId, by, record);
     return Object.freeze({ webhook: maskedView(record), secret: record.secret });
   }
 
-  function regenerate(subjectId) {
+  function regenerate(subjectId, by = null) {
     const prior = signingRecord(subjectId);
     if (!prior) throw fail('not-found');
     const record = Object.freeze(Object.assign({}, prior, { secret: newSecret(), updated_at: clock() }));
     const next = new Map(records);
     next.set(subjectId, record);
     persist(next);
+    audit('regenerate', subjectId, by, record);
     return Object.freeze({ webhook: maskedView(record), secret: record.secret });
   }
 
-  function setExcerpt(subjectId, excerpt) {
+  function setExcerpt(subjectId, excerpt, by = null) {
     const prior = signingRecord(subjectId);
     if (!prior) throw fail('not-found');
     if (typeof excerpt !== 'boolean') throw fail('invalid-request');
@@ -168,20 +196,44 @@ function openWebhookStore(options) {
     const next = new Map(records);
     next.set(subjectId, record);
     persist(next);
+    audit(excerpt ? 'excerpt-on' : 'excerpt-off', subjectId, by, record);
     return maskedView(record);
   }
 
-  function remove(subjectId) {
+  function remove(subjectId, by = null, act = 'delete') {
     if (!has(subjectId)) return false;
+    const prior = records.get(subjectId);
     const next = new Map(records);
     next.delete(subjectId);
     persist(next);
+    audit(act, subjectId, by, prior);
     return true;
   }
 
-  return Object.freeze({ has, view, list, register, regenerate, setExcerpt, remove, signingRecord, file });
+  /* MED-2: a registration lives only as long as its seat. Every record whose
+   * seat is not in `live` (left, removed, revoked, ended) is deleted, and its
+   * secret with it. Returns how many went. */
+  function retainOnly(live) {
+    if (!(live instanceof Set)) throw fail('invalid-request');
+    const gone = [...records.keys()].filter(subjectId => !live.has(subjectId));
+    if (gone.length === 0) return 0;
+    const next = new Map(records);
+    for (const subjectId of gone) next.delete(subjectId);
+    persist(next);
+    for (const subjectId of gone) audit('ended', subjectId, null, records.get(subjectId) || null);
+    return gone.length;
+  }
+
+  // Records whose seat is not in `live`, masked, for Settings to show and
+  // delete.
+  function orphans(live) {
+    return Object.freeze([...records.values()].filter(record => !live.has(record.subject_id)).map(maskedView));
+  }
+
+  return Object.freeze({ has, view, list, register, regenerate, setExcerpt, remove, retainOnly, orphans,
+    signingRecord, file, auditFile });
 }
 
 module.exports = Object.freeze({
-  FILE_NAME, SECRET_PATTERN, openWebhookStore, parseUrl,
+  AUDIT_FILE_NAME, FILE_NAME, SECRET_PATTERN, openWebhookStore, parseUrl,
 });

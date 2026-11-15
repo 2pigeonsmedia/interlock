@@ -13,6 +13,7 @@ const test = require('node:test');
 const { once } = require('node:events');
 
 // Short retries, read when the room starts.
+process.env.INTERLOCK_TEST_MODE = '1';
 process.env.INTERLOCK_WEBHOOK_RETRY_SCHEDULE_MS = '10,10,10';
 process.env.INTERLOCK_WEBHOOK_TIMEOUT_MS = '2000';
 
@@ -300,4 +301,66 @@ test('the secret never appears in a log, a page, an API read or another file', a
   assert.equal(files.some(([, bytes]) => bytes.includes('RECEIVER-BODY-MARKER')), false);
   const mode = fs.statSync(path.join(dataDir, 'webhooks.json')).mode & 0o777;
   if (process.platform !== 'win32') assert.equal(mode, 0o600);
+});
+
+test('a seat removed while its ring is retried is not called again', async () => {
+  const { runtime, owner, device, names } = await setUp();
+  const S = names.scout;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const seen = [];
+  const server = http.createServer(async (request, response) => {
+    request.resume();
+    seen.push(request.url);
+    if (seen.length === 1) await gate;
+    response.writeHead(500);
+    response.end();
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  receivers.add(server);
+  const set = await room.post(runtime, '/api/settings/webhooks/set',
+    { name: S, url: `http://127.0.0.1:${server.address().port}/` }, owner);
+  assert.equal(set.status, 200, set.text);
+  await room.post(runtime, '/api/messages', { text: `@${S} are you there` }, owner);
+  await eventually(() => seen.length === 1, 'the first attempt is in flight');
+  const elevated = await room.elevate(runtime, await room.login(runtime), device);
+  const removed = await room.post(runtime, '/api/participants/revoke', { name: S }, elevated);
+  assert.equal(removed.status, 200, removed.text);
+  release();
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(seen.length, 1, 'no retry reached a removed seat');
+});
+
+test('a seat that leaves takes its registration and secret with it; a leftover is listed and deletable', async () => {
+  const { runtime, owner, scout, other, names, dataDir } = await setUp();
+  const S = names.scout;
+  const O = names.other;
+  const target = await receiver();
+  const first = (await room.post(runtime, '/api/settings/webhooks/set',
+    { name: S, url: `http://127.0.0.1:${target.port}/` }, owner)).json.secret;
+  const second = (await room.post(runtime, '/api/settings/webhooks/set',
+    { name: O, url: `http://127.0.0.1:${target.port}/` }, owner)).json.secret;
+  assert.equal((await room.aiPost(runtime, '/api/ai/leave', {}, scout.token)).status, 200);
+  assert.equal((await room.aiPost(runtime, '/api/ai/leave', {}, other.token)).status, 200);
+  // Until the room clears it, a leftover is listed with an id.
+  const listed = await room.get(runtime, '/api/settings/webhooks', owner);
+  assert.equal(listed.json.seats.some(row => row.name === S || row.name === O), false);
+  assert.equal(listed.json.ended.length >= 2, true, JSON.stringify(listed.json.ended));
+  assert.equal(listed.text.includes(first), false);
+  const leftover = listed.json.ended[0];
+  const deleted = await room.post(runtime, '/api/settings/webhooks/delete', { ended: leftover.id }, owner);
+  assert.equal(deleted.status, 200, deleted.text);
+  // Any change clears the rest (the room also does every minute).
+  const fresh = await setUp();
+  await room.post(runtime, '/api/settings/webhooks/set',
+    { name: fresh.names.scout, url: `http://127.0.0.1:${target.port}/` }, fresh.owner);
+  const after = await room.get(runtime, '/api/settings/webhooks', fresh.owner);
+  assert.deepEqual(after.json.ended, []);
+  const onDisk = fs.readFileSync(path.join(dataDir, 'webhooks.json'), 'utf8');
+  assert.equal(onDisk.includes(first), false, 'the gone seat\'s secret is erased');
+  assert.equal(onDisk.includes(second), false);
+  // The audit file holds no secret.
+  const audit = fs.readFileSync(path.join(dataDir, 'webhooks-audit.jsonl'), 'utf8');
+  assert.equal(audit.includes('ilwh_'), false);
 });

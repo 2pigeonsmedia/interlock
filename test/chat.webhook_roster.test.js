@@ -71,3 +71,16 @@ test('a refused post is never handed over', async () => {
   assert.equal(handed.length, 0);
   await chat.close();
 });
+
+test('a retried post answered by its first save is not handed over again', async () => {
+  const handed = [];
+  const chat = service({ hasWebhook: id => id === HOOKED, onSaved: message => handed.push(message.id) });
+  // A retry id is an AI's (a person's post carries none).
+  const actor = { subject_id: ROSTER[2].subject_id, name: 'Quiet', kind: 'seat', product: 'Codex CLI',
+    product_provenance: 'client-reported', client_message_id: '9b2f2c3e-4c1d-4a6e-9f0a-1b2c3d4e5f60' };
+  const first = await chat.append({ text: '@Hooked once' }, actor);
+  const retried = await chat.append({ text: '@Hooked once' }, actor);
+  assert.equal(retried.id, first.id, 'arrangement: the store answered the retry with the first save');
+  assert.deepEqual(handed, [first.id]);
+  await chat.close();
+});

@@ -395,7 +395,7 @@ function deliveryQuery(target) {
 }
 
 function createFirstOwnerHandler(options) {
-  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people, webhooks } = options || {};
+  const { house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted, work, people, webhooks, liveSeats } = options || {};
   const hostedMode = hosted ? hosted : null;
   if (!house || !house.firstOwner || !house.authenticators || !house.sessions || !house.login ||
       typeof house.authorizeRead !== 'function' || typeof house.authorizeWrite !== 'function' ||
@@ -3851,24 +3851,44 @@ function createFirstOwnerHandler(options) {
     return function (request, response, body) {
       if (!webhooks) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
       if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
-      if (!ownerSession(request, response, true)) return;
+      const actor = ownerSession(request, response, true);
+      if (!actor) return;
       const input = keySets.map(keys => closedObject(body, keys)).find(Boolean) || null;
       if (!input || (input.excerpt !== undefined && typeof input.excerpt !== 'boolean') ||
           (input.url !== undefined && typeof input.url !== 'string')) return sendJson(request, response, 400, { ok: false, error: 'invalid-webhook' });
+      // A seat that ended takes its registration with it (MED-2), so it
+      // never holds a place under the cap.
+      if (typeof liveSeats === 'function') { try { webhooks.retainOnly(liveSeats()); } catch (_) { /* below */ } }
       const seat = webhookSeat(request, response, input.name);
       if (!seat) return;
-      return webhookAnswer(request, response, seat.name, () => act(seat.subject_id, input));
+      return webhookAnswer(request, response, seat.name, () => act(seat.subject_id, input, actor.subject_id));
     };
   }
 
-  const setWebhook = webhookMutation([['name', 'url'], ['name', 'url', 'excerpt']], (subjectId, input) =>
-    webhooks.register(subjectId, input.excerpt === undefined ? { url: input.url } : { url: input.url, excerpt: input.excerpt }));
-  const regenerateWebhookSecret = webhookMutation([['name']], subjectId => webhooks.regenerate(subjectId));
-  const setWebhookExcerpt = webhookMutation([['name', 'excerpt']], (subjectId, input) => webhooks.setExcerpt(subjectId, input.excerpt));
-  const deleteWebhook = webhookMutation([['name']], subjectId => {
-    if (!webhooks.remove(subjectId)) { const error = new Error('not-found'); error.code = 'not-found'; throw error; }
+  const setWebhook = webhookMutation([['name', 'url'], ['name', 'url', 'excerpt']], (subjectId, input, by) =>
+    webhooks.register(subjectId, input.excerpt === undefined ? { url: input.url } : { url: input.url, excerpt: input.excerpt }, by));
+  const regenerateWebhookSecret = webhookMutation([['name']], (subjectId, input, by) => webhooks.regenerate(subjectId, by));
+  const setWebhookExcerpt = webhookMutation([['name', 'excerpt']], (subjectId, input, by) => webhooks.setExcerpt(subjectId, input.excerpt, by));
+  const deleteLiveWebhook = webhookMutation([['name']], (subjectId, input, by) => {
+    if (!webhooks.remove(subjectId, by)) { const error = new Error('not-found'); error.code = 'not-found'; throw error; }
     return null;
   });
+  // { name } for a seat in the room; { ended: id } for a registration left by
+  // a seat that has gone, as the list shows it.
+  function deleteWebhook(request, response, body) {
+    if (!(body && typeof body === 'object' && Object.keys(body).length === 1 && typeof body.ended === 'string')) {
+      return deleteLiveWebhook(request, response, body);
+    }
+    if (!webhooks) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
+    if (!completed()) return sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+    const actor = ownerSession(request, response, true);
+    if (!actor) return;
+    const live = typeof liveSeats === 'function' ? liveSeats() : new Set();
+    if (live.has(body.ended) || !webhooks.remove(body.ended, actor.subject_id)) {
+      return sendJson(request, response, 404, { ok: false, error: 'no-webhook' });
+    }
+    return sendJson(request, response, 200, { ok: true, name: null, webhook: null });
+  }
 
   function listWebhooks(request, response) {
     if (!webhooks) return sendJson(request, response, 404, { ok: false, error: 'not-found' });
@@ -3876,6 +3896,7 @@ function createFirstOwnerHandler(options) {
     if (!ownerSession(request, response, false)) return;
     try {
       const seats = house.listParticipants({ now: Date.now() }).filter(row => row && row.kind === 'seat');
+      const live = new Set(seats.map(row => row.subject_id));
       return sendJson(request, response, 200, {
         ok: true,
         https_only: Boolean(hostedMode),
@@ -3883,6 +3904,9 @@ function createFirstOwnerHandler(options) {
           name: row.name,
           webhook: webhooks.view(row.subject_id) ? publicWebhook(webhooks.view(row.subject_id)) : null,
         })),
+        // Left by seats that have gone and not yet cleared (the room clears
+        // them within a minute); each can be deleted by its id.
+        ended: webhooks.orphans(live).map(view => Object.freeze(Object.assign({ id: view.subject_id }, publicWebhook(view)))),
       });
     } catch (_) {
       return sendJson(request, response, 503, { ok: false, error: 'webhooks-unavailable' });

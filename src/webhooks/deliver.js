@@ -124,6 +124,15 @@ function excerptOf(text) {
   return chars.length > MAX_EXCERPT_CHARS ? chars.slice(0, MAX_EXCERPT_CHARS - 1).join('') + '…' : flat;
 }
 
+/* The delivery id for one ring to one seat: the same for every attempt and
+ * for any later hand-over of the same message, so a receiver that dedupes on
+ * it does nothing twice (a UUID-shaped hash of message id and seat). */
+function deliveryIdFor(messageId, subjectId) {
+  const hex = crypto.createHash('sha256').update(`interlock-webhook\0${messageId}\0${subjectId}`).digest('hex');
+  const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 function sign(secret, body) {
   return 'sha256=' + crypto.createHmac('sha256', secret).update(body, 'utf8').digest('hex');
 }
@@ -134,8 +143,14 @@ function sign(secret, body) {
  *   ringFor     (message, recipient) -> the ring object (C4) for that seat, or a promise of it
  *   noteDelivery (subjectId, { ok, at, error_class }) once per ring, after the last attempt
  *   version     the server's version, for the user agent
+ *   isLive      (subjectId) -> whether the seat is still admitted; checked
+ *               before every attempt, so a seat that left, was removed or
+ *               ended is never called again (A8)
+ *   delivered   (subjectId) -> called after a 2xx: the seat is reachable
  * Tests may also pass retryDelaysMs, timeoutMs, resolve (a dns.lookup) and
- * tls (extra options for https, e.g. a test CA). */
+ * tls (extra options for https, e.g. a test CA). `unfilteredLookupForTests`
+ * replaces the public-address resolver, so a test can show that the check on
+ * the connected socket refuses by itself. */
 function createWebhookDelivery(options) {
   const store = options && options.store;
   if (!store || typeof store.has !== 'function' || typeof store.signingRecord !== 'function' ||
@@ -145,14 +160,20 @@ function createWebhookDelivery(options) {
   const hosted = options.hosted === true;
   const delays = Array.isArray(options.retryDelaysMs) ? options.retryDelaysMs.slice() : RETRY_DELAYS_MS.slice();
   const timeoutMs = Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : ATTEMPT_TIMEOUT_MS;
-  const lookup = publicLookup(typeof options.resolve === 'function' ? options.resolve : dns.lookup);
+  const lookup = typeof options.unfilteredLookupForTests === 'function' ? options.unfilteredLookupForTests
+    : publicLookup(typeof options.resolve === 'function' ? options.resolve : dns.lookup);
+  const isLive = typeof options.isLive === 'function' ? options.isLive : () => true;
+  const delivered = typeof options.delivered === 'function' ? options.delivered : () => {};
   const tlsOptions = options.tls && typeof options.tls === 'object' ? options.tls : {};
   const userAgent = `Interlock-Webhook/${typeof options.version === 'string' ? options.version : '0'}`;
   const clock = typeof options.clock === 'function' ? options.clock : Date.now;
 
   let closed = false;
-  const chains = new Map();          // subject -> the promise its deliveries queue on
-  const remembered = new Set();      // `${message_id}:${subject}` already queued
+  // Per seat at most one ring in flight and one waiting, the LATEST (MED-3):
+  // a webhook ring is a wake signal, and the woken AI reads the room itself,
+  // so a newer ring replaces a waiting one rather than queueing behind it.
+  const seats = new Map();           // subject -> { running: Promise, pending: {message, recipient} | null }
+  const remembered = new Set();      // `${message_id}:${subject}` already handed over
   const timers = new Map();          // timer -> its resolve, so close() ends a wait
   const requests = new Set();
 
@@ -224,32 +245,55 @@ function createWebhookDelivery(options) {
     });
   }
 
+  function note(subjectId, outcome) {
+    try { options.noteDelivery(subjectId, outcome); } catch (_) { /* the delivery is over either way */ }
+  }
+
   async function deliverOne(subjectId, message, recipient) {
     const record = store.signingRecord(subjectId);
-    if (!record || closed) return;
+    if (!record || closed || !isLive(subjectId)) return;
     let ring;
-    try { ring = await options.ringFor(message, recipient); } catch (_) { return; }
-    if (!ring || typeof ring !== 'object') return;
+    try { ring = await options.ringFor(message, recipient); } catch (_) { ring = null; }
+    if (!ring || typeof ring !== 'object') {
+      // The room could not build the ring: said, not dropped silently.
+      note(subjectId, { ok: false, at: clock(), error_class: 'refused' });
+      return;
+    }
     const payload = Object.assign({}, ring, record.excerpt ? { excerpt: excerptOf(message.text) } : {});
     const body = JSON.stringify(payload);
-    const deliveryId = crypto.randomUUID();
+    const deliveryId = deliveryIdFor(message.id, subjectId);
     let failure = 'network';
     for (let index = 0; index <= delays.length; index += 1) {
       if (closed) return;
-      // The registration is read again before each attempt: a secret that
-      // was regenerated, or a webhook deleted, while retrying takes effect.
+      // The registration and the seat are read again before each attempt: a
+      // secret regenerated, a webhook deleted, or a seat that left, was
+      // removed or ended while retrying takes effect at once.
       const current = store.signingRecord(subjectId);
-      if (!current) return;
+      if (!current || !isLive(subjectId)) return;
       failure = await attempt(current, body, deliveryId);
       if (failure === null || closed) break;
       if (index < delays.length) await wait(delays[index]);
     }
     if (closed) return;
-    try {
-      options.noteDelivery(subjectId, failure === null
-        ? { ok: true, at: clock() }
-        : { ok: false, at: clock(), error_class: failure });
-    } catch (_) { /* the delivery is over either way */ }
+    note(subjectId, failure === null ? { ok: true, at: clock() } : { ok: false, at: clock(), error_class: failure });
+    if (failure === null) {
+      try { delivered(subjectId); } catch (_) { /* contact is a courtesy */ }
+    }
+  }
+
+  function start(subjectId, message, recipient) {
+    const slot = { running: null, pending: null };
+    seats.set(subjectId, slot);
+    const loop = async () => {
+      let next = { message, recipient };
+      while (next && !closed) {
+        await deliverOne(subjectId, next.message, next.recipient).catch(() => {});
+        next = slot.pending;
+        slot.pending = null;
+      }
+      seats.delete(subjectId);
+    };
+    slot.running = loop();
   }
 
   /* Called once a message is durably saved. Each recipient with a webhook
@@ -263,16 +307,20 @@ function createWebhookDelivery(options) {
       const key = `${message.id}:${subjectId}`;
       if (remembered.has(key)) continue;
       remember(key);
-      const prior = chains.get(subjectId) || Promise.resolve();
-      const next = prior.then(() => deliverOne(subjectId, message, recipient)).catch(() => {});
-      chains.set(subjectId, next);
-      next.then(() => { if (chains.get(subjectId) === next) chains.delete(subjectId); });
+      const slot = seats.get(subjectId);
+      if (slot) slot.pending = { message, recipient };
+      else start(subjectId, message, recipient);
     }
   }
 
-  // Resolves once every queued delivery has finished (tests, shutdown).
+  // Resolves once every delivery has finished (tests, shutdown).
   async function settled() {
-    while (chains.size > 0) await Promise.all([...chains.values()]);
+    while (seats.size > 0) await Promise.all([...seats.values()].map(slot => slot.running));
+  }
+
+  // For tests: how much is held per seat (never more than one waiting).
+  function backlog() {
+    return [...seats.values()].reduce((count, slot) => count + 1 + (slot.pending ? 1 : 0), 0);
   }
 
   function close() {
@@ -283,10 +331,10 @@ function createWebhookDelivery(options) {
     requests.clear();
   }
 
-  return Object.freeze({ deliver, settled, close });
+  return Object.freeze({ deliver, settled, close, backlog });
 }
 
 module.exports = Object.freeze({
-  ATTEMPT_TIMEOUT_MS, RETRY_DELAYS_MS, createWebhookDelivery, errorClass, excerptOf,
+  ATTEMPT_TIMEOUT_MS, RETRY_DELAYS_MS, createWebhookDelivery, deliveryIdFor, errorClass, excerptOf,
   publicAddress, publicLookup, sign, statusClass,
 });

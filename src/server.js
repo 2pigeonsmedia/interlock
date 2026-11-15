@@ -26,10 +26,13 @@ const { openWebhookStore } = require('./webhooks/store.js');
 const { createWebhookDelivery } = require('./webhooks/deliver.js');
 const PACKAGE_VERSION = require('../package.json').version;
 
-// Tests shorten webhook retries and timeouts; only short lists of positive
-// millisecond delays are accepted, and anything else keeps the defaults.
+// Tests shorten webhook retries and timeouts, and only in test mode
+// (INTERLOCK_TEST_MODE=1): a running room keeps the contract's 10 s and three
+// retries whatever else its environment says. Only short lists of positive
+// millisecond delays are accepted.
 function webhookTiming(env) {
   const timing = {};
+  if (env.INTERLOCK_TEST_MODE !== '1') return timing;
   const schedule = env.INTERLOCK_WEBHOOK_RETRY_SCHEDULE_MS;
   if (typeof schedule === 'string' && /^[1-9][0-9]{0,5}(,[1-9][0-9]{0,5}){0,7}$/.test(schedule)) {
     timing.retryDelaysMs = schedule.split(',').map(Number);
@@ -478,8 +481,16 @@ async function startInterlockServer(options) {
     // whether a seat is rung by webhook; delivery reports back to the chat
     // service once per ring.
     const webhooks = openWebhookStore({ dataDir, hosted: Boolean(hosted) });
+    // The seats in the room now: a webhook is called, and kept, only for these.
+    const liveSeats = () => new Set(house.listParticipants({ now: Date.now() })
+      .filter(row => row && row.kind === 'seat').map(row => row.subject_id));
+    const pruneWebhooks = () => { try { webhooks.retainOnly(liveSeats()); } catch (_) { /* next pass */ } };
+    pruneWebhooks();
     webhookDelivery = createWebhookDelivery(Object.assign(webhookTiming(process.env), {
       store: webhooks,
+      isLive: subjectId => liveSeats().has(subjectId),
+      // A delivered ring is contact: the seat answered, so it is not idle.
+      delivered: subjectId => { chat.touchParticipant(subjectId, Date.now()).catch(() => {}); },
       hosted: Boolean(hosted),
       // The handler builds the ring, as its rings route does; it exists by
       // the time any message is saved.
@@ -603,7 +614,7 @@ async function startInterlockServer(options) {
     }) : null;
     const handler = createFirstOwnerHandler({
       house, origin, assets, chat, admission, archive, releaseIdle, dataDir, hosted: hostedForHandler, work, people,
-      webhooks,
+      webhooks, liveSeats,
     });
     const addresses = await canonicalLoopbackAddresses();
     const servers = addresses.map(() => http.createServer(handler));
@@ -615,7 +626,9 @@ async function startInterlockServer(options) {
 
     const outboxTimer = house.startOutboxFlusher({ intervalMs: 1_000 });
     const idleTimer = setInterval(() => {
-      Promise.resolve(releaseIdle(Date.now())).catch(() => { /* next tick retries */ });
+      Promise.resolve(releaseIdle(Date.now())).catch(() => { /* next tick retries */ })
+        // A seat that ended takes its webhook and secret with it (MED-2).
+        .then(() => pruneWebhooks());
     }, 60_000);
     idleTimer.unref();
     try {
@@ -707,4 +720,5 @@ module.exports = Object.freeze({
   recordedDataDirOrigin,
   startHealthServer,
   startInterlockServer,
+  webhookTiming,
 });

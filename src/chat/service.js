@@ -291,6 +291,9 @@ function createChatService(options) {
     const recipients = ringRecipients(
       body && body.text, roster, actor && actor.subject_id, askTarget, deliver, askers,
     );
+    // The log's head before this post: a retried post answered by its first
+    // save comes back at or below it, and is not handed to webhooks again.
+    const headBefore = input.onSaved !== undefined ? (await store.head()).head : null;
     const saved = await store.append(body, Object.assign({}, actor, { recipients }), annotation, requireNew, approverOf, decisionOf);
     // Store append resolves only after its durable commit. A waiter can never
     // observe a wake for a message the append caller has not durably earned.
@@ -298,7 +301,7 @@ function createChatService(options) {
     // The same durable moment hands the message to the room's webhook
     // delivery, which rings only its frozen recipients. Never awaited: a slow
     // receiver cannot hold a post.
-    if (input.onSaved !== undefined) {
+    if (input.onSaved !== undefined && saved && Number.isSafeInteger(saved.id) && saved.id > headBefore) {
       try { input.onSaved(saved); } catch (_) { /* delivery reports its own outcome */ }
     }
     return saved;

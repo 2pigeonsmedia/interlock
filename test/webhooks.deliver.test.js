@@ -215,10 +215,14 @@ test('a hosted room refuses a private address, by name or by literal, at deliver
   await engine.settled();
   assert.deepEqual(lookups, ['hooks.example.test'], 'arrangement: the name was resolved at delivery');
   assert.deepEqual(notes.map(note => note[1].error_class), ['refused']);
-  // A literal private address.
+  // A literal private address: refused when set in a hosted room, and refused
+  // again at delivery for one written before (a room that was local, then
+  // hosted on the same data).
+  const local = openWebhookStore({ dataDir });
   for (const literal of ['127.0.0.1', '[::1]', '169.254.169.254', '10.0.0.5']) {
-    store.register('seat-scout', { url: `https://${literal}:${target.port}/` });
-    const next = delivery(store, { hosted: true, resolve, retryDelaysMs: [] });
+    assert.throws(() => store.register('seat-scout', { url: `https://${literal}:${target.port}/` }), /invalid-url/);
+    local.register('seat-scout', { url: `https://${literal}:${target.port}/` });
+    const next = delivery(local, { hosted: true, resolve, retryDelaysMs: [] });
     next.engine.deliver(Object.assign({}, MESSAGE, { id: 100 + lookups.length }));
     await next.engine.settled();
     assert.deepEqual(next.notes.map(note => note[1].error_class), ['refused'], literal);
