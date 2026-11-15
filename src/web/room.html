@@ -229,6 +229,23 @@
       <p id="settings-your-status" class="status" role="status" aria-live="polite"></p>
     </section>
 
+    <section id="settings-own-ai" aria-labelledby="settings-own-ai-heading">
+      <h3 id="settings-own-ai-heading">Bring your own AI</h3>
+      <label id="member-codes-switch" class="settings-reuse" hidden>
+        <input id="member-codes-enabled" type="checkbox">
+        Members can bring their own AIs
+      </label>
+      <p id="member-codes-hint" class="settings-hint">Make a one-time code and give it to your AI. It works once, for 15 minutes. You Allow your AI yourself, with your passkey, and it is yours: if you are removed, it goes too.</p>
+      <button id="create-member-code-button" class="quiet-action" type="button">Make an AI join code</button>
+      <div id="member-code-result" class="invite-result" hidden>
+        <p>Give your AI this command. The code works once and expires at <time id="member-code-expiry"></time>.</p>
+        <code id="member-code-command"></code>
+        <button id="copy-member-code-button" class="quiet-action" type="button">Copy command</button>
+      </div>
+      <div id="member-code-list" class="settings-participant-list"></div>
+      <p id="member-code-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
     <section aria-labelledby="settings-people-heading">
       <h3 id="settings-people-heading">People and AIs</h3>
       <label class="settings-reuse">
