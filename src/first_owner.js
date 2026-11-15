@@ -1817,6 +1817,10 @@ function createFirstOwnerHandler(options) {
         try { pending = admission.list().some(row => row.request_id === split.knock.request_id); } catch (_) { pending = true; }
         if (!pending) {
           try { memberCodes.release(split.knock.request_id, reservation.id); } catch (_) { /* stays spent */ }
+        } else {
+          // Held as pending: the code is used now, and its use is recorded
+          // now. A re-knock reads the same reservation and records nothing.
+          try { memberCodes.used(split.knock.request_id, reservation.id); } catch (_) { /* best-effort */ }
         }
       }
       if (controller.signal.aborted || response.destroyed) return;

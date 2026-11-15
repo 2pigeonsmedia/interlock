@@ -57,10 +57,15 @@ function display(flat) {
   return flat.slice(0, 5) + '-' + flat.slice(5);
 }
 
+// A row from before `expiry_logged` existed has every other key; it reads
+// as not yet logged. Every other key is required.
+const OPTIONAL_KEYS = Object.freeze(['expiry_logged']);
+
 function validRow(row) {
   if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
   const keys = Object.keys(row);
-  if (keys.length !== ROW_KEYS.length || keys.some(key => !ROW_KEYS.includes(key))) return false;
+  if (keys.some(key => !ROW_KEYS.includes(key)) ||
+      ROW_KEYS.some(key => !OPTIONAL_KEYS.includes(key) && !keys.includes(key))) return false;
   const time = value => Number.isSafeInteger(value) && value >= 0;
   const timeOrNull = value => value === null || time(value);
   return UUID_V4.test(row.id) && /^[0-9a-f]{64}$/.test(row.digest) &&
@@ -70,7 +75,7 @@ function validRow(row) {
     (row.request_id === null || UUID_V4.test(row.request_id)) &&
     timeOrNull(row.used_at) && timeOrNull(row.cancelled_at) &&
     (row.cancelled_by === null || typeof row.cancelled_by === 'string') &&
-    typeof row.expiry_logged === 'boolean';
+    (row.expiry_logged === undefined || typeof row.expiry_logged === 'boolean');
 }
 
 function atomicWrite(file, value) {
@@ -115,7 +120,7 @@ function createMemberCodes(options) {
     if (!raw || raw.schema !== SCHEMA || !Array.isArray(raw.codes) || !raw.codes.every(validRow)) {
       throw fail('invalid-state');
     }
-    const rows = raw.codes.map(row => Object.assign({}, row));
+    const rows = raw.codes.map(row => Object.assign({ expiry_logged: false }, row));
     // A code that ran out unused is recorded once, when the room next reads.
     const now = clock();
     const lapsed = rows.filter(row => !row.expiry_logged && row.used_at === null &&

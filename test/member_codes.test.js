@@ -127,3 +127,21 @@ test('the audit events: one each for issue, use, cancel and expiry; a released k
   assert.equal(events.find(e => e.event === 'cancel').actor_subject_id, 'admin-1');
   assert.equal(JSON.stringify(events).includes(a.code.replace('-', '')), false, 'no code in any event');
 });
+
+test('a codes file written before rows carried expiry_logged still reads, as not yet logged', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-member-codes-'));
+  const clock = { now: 1_800_000_000_000 };
+  const events = [];
+  const codes = createMemberCodes({ dataDir, clock: () => clock.now, onEvent: event => events.push(event) });
+  codes.setEnabled(true);
+  const made = codes.issue(BEA);
+  const file = path.join(dataDir, CODES_FILE);
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const row of raw.codes) delete row.expiry_logged;
+  fs.writeFileSync(file, JSON.stringify(raw) + '\n');
+  assert.deepEqual(codes.list().map(row => [row.id, row.state]), [[made.id, 'unused']], 'reads, no throw');
+  assert.equal(codes.canIssue(BEA.subject_id).ok, true);
+  clock.now += CODE_TTL_MS;
+  codes.list();
+  assert.deepEqual(events.filter(e => e.event === 'expire').map(e => e.code_id), [made.id], 'its expiry is still logged once');
+});

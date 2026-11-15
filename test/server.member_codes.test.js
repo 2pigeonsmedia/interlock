@@ -187,6 +187,10 @@ test('a member brings their own AI: switch, code, knock, the member\'s Allow, an
     await waitForPending(runtime, owner, gone.body.request_id);
     raw.destroy();
     await new Promise(resolve => setTimeout(resolve, 200));
+    // Its use is audited although the knock never returned.
+    await audit.drain();
+    assert.ok(audit.read('authz', { limit: 1000 }).some(row => row.capability === 'member-code.use' &&
+      row.resource === 'member-code:' + third.json.id), 'the held knock\'s use is in the audit');
 
     // The switch off: no code-bound knock is let in by anyone, admins included,
     // and a member lists no codes; the owner still sees them, to cancel.
