@@ -327,7 +327,7 @@ test('an Actions section every participant sees, between Reported to you and Pro
   for (const id of ['actions-heading', 'actions-toggle', 'actions-count', 'actions-list']) {
     assert.equal(ROOM.split(`id="${id}"`).length, 2, `${id} must be present exactly once`);
   }
-  assert.match(ROOM, /<button id="actions-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="actions-list">Actions <span id="actions-count" class="work-count">0<\/span><\/button>/);
+  assert.match(ROOM, /<button id="actions-toggle" class="work-toggle" type="button" aria-expanded="false" aria-controls="actions-list">Actions <span id="actions-count" class="work-count">0<\/span><\/button>/);
   assert.ok(ROOM.indexOf('id="reported-list"') < ROOM.indexOf('id="actions-list"') &&
     ROOM.indexOf('id="actions-list"') < ROOM.indexOf('id="project-list"'), 'Actions sits between Reported to you and Projects');
   assert.match(WORK_PANEL_JS, /function renderActions\(brief\)[\s\S]*?model\(\)\.actionsByPerson\(brief\)/);
@@ -346,17 +346,17 @@ test('Recently decided collapses like Needs you and Actions, its heading carryin
   for (const id of ['decided-heading', 'decided-toggle', 'decided-count', 'decided-list']) {
     assert.equal(ROOM.split(`id="${id}"`).length, 2, `${id} must be present exactly once`);
   }
-  assert.match(ROOM, /<button id="decided-toggle" class="work-toggle" type="button" aria-expanded="true" aria-controls="decided-list">Recently decided <span id="decided-count" class="work-count">0<\/span><\/button>/);
+  assert.match(ROOM, /<button id="decided-toggle" class="work-toggle" type="button" aria-expanded="false" aria-controls="decided-list">Recently decided <span id="decided-count" class="work-count">0<\/span><\/button>/);
   assert.match(WORK_PANEL_JS, /function renderDecided\(brief\)[\s\S]*?element\('decided-count'\)\.textContent = String\(rows\.length\)/);
   assert.match(WORK_PANEL_JS, /element\('decided-toggle'\)\.addEventListener\('click', toggleDecided/);
   assert.match(WORK_PANEL_JS, /function toggleDecided[\s\S]*?setAttribute\('aria-expanded'[\s\S]*?element\('decided-list'\)\.hidden = expanded/);
-  // Sign-out leaves nothing of the last viewer's decisions, and reopens the section like its siblings.
+  // Sign-out leaves nothing of the last viewer's decisions, and folds the section like its siblings.
   const reset = /function resetTile\(\) \{([\s\S]*?)\n  \}\n/.exec(WORK_PANEL_JS);
   assert.ok(reset, 'resetTile must exist');
   assert.match(reset[1], /'decided-list'/);
   assert.match(reset[1], /element\('decided-count'\)\.textContent = '0'/);
-  assert.match(reset[1], /element\('decided-toggle'\)\.setAttribute\('aria-expanded', 'true'\)/);
-  assert.match(reset[1], /element\('decided-list'\)\.hidden = false/);
+  assert.match(reset[1], /element\('decided-toggle'\)\.setAttribute\('aria-expanded', 'false'\)/);
+  assert.match(reset[1], /element\('decided-list'\)\.hidden = true/);
 });
 
 test('Actions group headings keep names as stored, and the drawer\'s actions are named apart from the section', () => {
@@ -374,10 +374,10 @@ test('each project lists its work in place: a heading, an inline edit, rows, and
   assert.match(WORK_PANEL_JS, /setAttribute\('aria-labelledby', 'project-' \+ id \+ '-heading'\)/);
   assert.match(WORK_PANEL_JS, /make\('h4', 'work-project-heading'\)/);
   assert.match(WORK_PANEL_JS, /make\('p', 'work-project-brief'\)/);
-  // The edit sits in a small menu on the heading; the project folds unless something in it is for the viewer.
+  // The edit sits in a small menu on the heading; the project starts folded, and a fold the viewer chose stays.
   assert.match(WORK_PANEL_JS, /make\('button', 'quiet-action', 'Edit objective and today'\)/);
   assert.match(WORK_PANEL_JS, /setAttribute\('aria-label', 'More for ' \+ section\.display_name\)/);
-  assert.match(WORK_PANEL_JS, /if \(!view\.foldChosen\) view\.folded = !\(count\.needsYou > 0\) && !view\.editing;/);
+  assert.match(WORK_PANEL_JS, /if \(!view\.foldChosen\) view\.folded = !view\.editing;/);
   assert.match(WORK_PANEL_JS, /model\(\)\.projectLine\(count\)/);
   assert.match(WORK_PANEL_JS, /'done \(' \+ section\.doneCount \+ '\)'/);
   // Withdrawn decisions stay reachable (and so can be reopened) under the same toggle.
@@ -500,4 +500,32 @@ test('the Work tile hides what is empty and shows ages, not raw timestamps', () 
   assert.doesNotMatch(WORK_PANEL_JS, /toISOString\(\)\)?;\s*\n\s*\}\s*\n\s*\/\/ A relative/, 'the tile never prints a raw ISO stamp');
   assert.match(WORK_PANEL_JS, /new CustomEvent\('interlock:answer-ask', \{ detail: \{ ask_id: askId, choice, revision \} \}\)/,
     'a card answers through the room, never the work record');
+});
+
+// Every Work section folds on load and on sign-out; its heading keeps the count.
+const WORK_SECTIONS = Object.freeze(['needs-you', 'decided', 'approvals', 'reported', 'actions']);
+
+test('every Work section starts collapsed, its toggle carrying the count', () => {
+  for (const key of WORK_SECTIONS) {
+    const button = new RegExp(`<button id="${key}-toggle" class="work-toggle" type="button" aria-expanded="false" aria-controls="${key}-list">[^<]*<span id="${key}-count" class="work-count">0</span>`);
+    assert.match(ROOM, button, `${key} toggle starts collapsed and shows its count`);
+    assert.match(ROOM, new RegExp(`<div id="${key}-list" class="work-list" hidden></div>`), `${key} list starts hidden`);
+    assert.match(WORK_PANEL_JS, new RegExp(`element\\('${key}-toggle'\\)\\.addEventListener\\('click', `), `${key} toggle is wired`);
+  }
+  const reset = /function resetTile\(\) \{([\s\S]*?)\n  \}\n/.exec(WORK_PANEL_JS);
+  assert.ok(reset, 'resetTile must exist');
+  for (const key of WORK_SECTIONS) {
+    assert.match(reset[1], new RegExp(`element\\('${key}-toggle'\\)\\.setAttribute\\('aria-expanded', 'false'\\)`), `sign-out folds ${key}`);
+    assert.match(reset[1], new RegExp(`element\\('${key}-list'\\)\\.hidden = true`), `sign-out hides ${key}`);
+  }
+  assert.match(WORK_PANEL_JS, /function renderReported[\s\S]*?element\('reported-count'\)\.textContent = String\(rows\.length\)/);
+});
+
+test('projects start folded even when something in them needs you; a fold the viewer chose stays', () => {
+  assert.match(WORK_PANEL_JS, /if \(!view\.foldChosen\) view\.folded = !view\.editing;/);
+  assert.doesNotMatch(WORK_PANEL_JS, /view\.folded = !\(count\.needsYou > 0\)/);
+});
+
+test('the Needs you count button opens a folded Needs you before focusing it', () => {
+  assert.match(WORK_PANEL_JS, /function showNeedsYou\(\) \{[\s\S]*?getAttribute\('aria-expanded'\) === 'false'\) toggleNeedsYou\(\);[\s\S]*?focus\(\)/);
 });

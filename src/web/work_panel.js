@@ -285,6 +285,7 @@
     const answers = new Map(brief.reported_to_me.map(row => [row.id, row.answer_summary]));
     const rows = model().reportedToYou(brief);
     sectionOf('reported-list').hidden = rows.length === 0;
+    element('reported-count').textContent = String(rows.length);
     element('reported-list').replaceChildren(...rows.map(row => {
       const card = make('div', 'work-row');
       const facts = make('p', 'work-tree-facts');
@@ -423,9 +424,9 @@
       const count = counts.get(section.id);
       view.project = section;
       view.edit.hidden = !section.mayEdit;
-      // Folded unless something in it is for the viewer; a fold the viewer
-      // chose stays as chosen.
-      if (!view.foldChosen) view.folded = !(count.needsYou > 0) && !view.editing;
+      // Folded on load, like every Work section; its line still counts what
+      // needs the viewer. A fold the viewer chose stays as chosen.
+      if (!view.foldChosen) view.folded = !view.editing;
       view.fold.replaceChildren(make('span', 'work-fold-name', section.display_name), make('span', 'work-tree-facts',
         model().projectLine(count)));
       applyFold(view);
@@ -626,9 +627,26 @@
     element('decided-list').hidden = expanded;
   }
 
+  function toggleApprovals() {
+    const toggle = element('approvals-toggle');
+    const expanded = toggle.getAttribute('aria-expanded') !== 'false';
+    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    element('approvals-list').hidden = expanded;
+  }
+
+  function toggleReported() {
+    const toggle = element('reported-toggle');
+    const expanded = toggle.getAttribute('aria-expanded') !== 'false';
+    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    element('reported-list').hidden = expanded;
+  }
+
+  // The header's "Needs you · N" opens Needs you if it is folded, then focuses it.
   function showNeedsYou() {
+    const toggle = element('needs-you-toggle');
+    if (toggle.getAttribute('aria-expanded') === 'false') toggleNeedsYou();
     element('work-heading').scrollIntoView();
-    element('needs-you-toggle').focus();
+    toggle.focus();
   }
 
   // ── the drawer ──────────────────────────────────────────────────────────
@@ -1595,12 +1613,18 @@
     element('decided-count').textContent = '0';
     element('actions-count').textContent = '0';
     element('work-count-button').textContent = 'Needs you · 0';
-    element('needs-you-toggle').setAttribute('aria-expanded', 'true');
-    element('needs-you-list').hidden = false;
-    element('decided-toggle').setAttribute('aria-expanded', 'true');
-    element('decided-list').hidden = false;
-    element('actions-toggle').setAttribute('aria-expanded', 'true');
-    element('actions-list').hidden = false;
+    element('reported-count').textContent = '0';
+    // Every section folds again, as on load.
+    element('needs-you-toggle').setAttribute('aria-expanded', 'false');
+    element('needs-you-list').hidden = true;
+    element('decided-toggle').setAttribute('aria-expanded', 'false');
+    element('decided-list').hidden = true;
+    element('approvals-toggle').setAttribute('aria-expanded', 'false');
+    element('approvals-list').hidden = true;
+    element('reported-toggle').setAttribute('aria-expanded', 'false');
+    element('reported-list').hidden = true;
+    element('actions-toggle').setAttribute('aria-expanded', 'false');
+    element('actions-list').hidden = true;
     element('settings-project-list').replaceChildren();
     hideShare();
     setStatus('');
@@ -1619,6 +1643,8 @@
     element('needs-you-toggle').addEventListener('click', toggleNeedsYou, { signal });
     element('decided-toggle').addEventListener('click', toggleDecided, { signal });
     element('actions-toggle').addEventListener('click', toggleActions, { signal });
+    element('approvals-toggle').addEventListener('click', toggleApprovals, { signal });
+    element('reported-toggle').addEventListener('click', toggleReported, { signal });
     element('work-count-button').addEventListener('click', showNeedsYou, { signal });
     element('work-drawer').addEventListener('close', scheduleOpenerFocus, { signal });
     element('work-share-decline').addEventListener('click', declineShare, { signal });
