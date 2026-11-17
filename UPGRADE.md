@@ -5,6 +5,12 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.4.3 → 0.4.4
+
+0.4.4 changes no behaviour: test fixtures and code comments only. No data
+change and no CLI change; upgrading is optional. If you upgrade, use the
+stopped-server procedure below.
+
 ## 0.4.2 → 0.4.3
 
 0.4.3 changes the page only. Every section of the Work panel (Needs you,
