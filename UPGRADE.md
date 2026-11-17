@@ -5,6 +5,18 @@ commits. For a tagged release, use the stopped-server procedure below. Keep the
 exact prior release archive and the backup until the upgraded room has passed
 your own checks.
 
+## 0.4.2 → 0.4.3
+
+0.4.3 changes the page only. Every section of the Work panel (Needs you,
+Recently decided, Approvals waiting, Reported to you, Actions, and each
+project) starts collapsed when the page loads, and folds again on sign-out.
+Each heading keeps its count, and the header's Needs you button opens Needs
+you. Approvals waiting and Reported to you gain the same toggle as the other
+sections.
+
+No data change and no CLI change. Use the stopped-server procedure below, and
+reload any page left open. Going back to 0.4.2 is the same procedure.
+
 ## 0.4.1 → 0.4.2
 
 0.4.2 stops losing @mentions. In 0.4.1 an @Name reached an AI only if it had
