@@ -974,7 +974,7 @@ test('a work item made to track a decision sits under the decision, never as a r
   const brief = {
     projects: [{ id: 'ops', display_name: 'Operations', revision: 1, updated_by: null, updated_at: 0 }],
     needs_me: [],
-    decisions: [{ id: 'D-1', kind: 'decision', project: 'ops', title: 'Pick', state: 'awaiting', ask_message_id: 2, asked_of: { name: 'Patti' }, asked_by: { name: 'Lark' }, updated_at: 1 }],
+    decisions: [{ id: 'D-1', kind: 'decision', project: 'ops', title: 'Pick', state: 'awaiting', ask_message_id: 2, asked_of: { name: 'Maren' }, asked_by: { name: 'Lark' }, updated_at: 1 }],
     open: [
       { id: 'W-2', kind: 'work', project: 'ops', title: 'Decision: Pick', state: 'open', source_message_id: 2, awaiting: null, updated_at: 2 },
       { id: 'W-3', kind: 'work', project: 'ops', title: 'Wait on it', state: 'blocked', awaiting: 'D-1', updated_at: 3 },
@@ -995,34 +995,34 @@ test('a folded project line names only the counts that are not zero', () => {
 
 test('Needs you follows the turn: a reply moves an ask off the replier, the asker gets it back, agreed stays with whoever acts', () => {
   const brief = { projects: [{ id: 'ops', display_name: 'Operations' }], open: [], decisions: [], needs_me: [] };
-  const ask = (turn, latest) => ({ ask_id: 6, asked_at: NOW - HOUR, by: 'Scout', of: 'Patti', means: 'I order one roller', project: 'ops',
+  const ask = (turn, latest) => ({ ask_id: 6, asked_at: NOW - HOUR, by: 'Scout', of: 'Maren', means: 'I order one roller', project: 'ops',
     question: 'The printer jams. Order a roller?', turn, latest: Object.assign({ message_id: 6, at: NOW - MINUTE }, latest) });
-  // (1) Scout asks Patti: it waits on her.
-  const asked = ask({ phase: 'waiting', waiting_on: 'Patti', acting: null }, { kind: 'ask', party: 'asker', by: 'Scout' });
-  const first = needsCards(brief, NOW, [asked], new Set(), { viewer: 'Patti' });
+  // (1) Scout asks Maren: it waits on her.
+  const asked = ask({ phase: 'waiting', waiting_on: 'Maren', acting: null }, { kind: 'ask', party: 'asker', by: 'Scout' });
+  const first = needsCards(brief, NOW, [asked], new Set(), { viewer: 'Maren' });
   assert.equal(first.count, 1);
   assert.equal(first.cards[0].turn, 'your turn');
   assert.equal(first.cards[0].latest, 'Scout asked (#6)');
-  // (2) Patti replies to discuss: it waits on Scout, off her Needs you, onto his.
-  const replied = ask({ phase: 'waiting', waiting_on: 'Scout', acting: null }, { kind: 'discussion', party: 'addressee', by: 'Patti', message_id: 8 });
-  assert.equal(needsCards(brief, NOW, [replied], new Set(), { viewer: 'Patti' }).count, 0, 'not her turn: not in her Needs you');
+  // (2) Maren replies to discuss: it waits on Scout, off her Needs you, onto his.
+  const replied = ask({ phase: 'waiting', waiting_on: 'Scout', acting: null }, { kind: 'discussion', party: 'addressee', by: 'Maren', message_id: 8 });
+  assert.equal(needsCards(brief, NOW, [replied], new Set(), { viewer: 'Maren' }).count, 0, 'not her turn: not in her Needs you');
   const forScout = needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [replied] });
   assert.equal(forScout.count, 1, 'the asker gets his ask back when it is his turn');
   assert.equal(forScout.cards[0].turn, 'your turn');
-  assert.equal(forScout.cards[0].latest, 'Patti replied (#8)');
+  assert.equal(forScout.cards[0].latest, 'Maren replied (#8)');
   // (3) She says yes to a person-asked permission: agreed, Scout (the asker) acts, it stays on his list.
-  const agreed = ask({ phase: 'agreed', waiting_on: null, acting: 'Scout' }, { kind: 'answer', party: 'addressee', by: 'Patti', message_id: 9 });
-  assert.equal(needsCards(brief, NOW, [agreed], new Set(), { viewer: 'Patti' }).count, 0, 'agreed is not hers to do');
+  const agreed = ask({ phase: 'agreed', waiting_on: null, acting: 'Scout' }, { kind: 'answer', party: 'addressee', by: 'Maren', message_id: 9 });
+  assert.equal(needsCards(brief, NOW, [agreed], new Set(), { viewer: 'Maren' }).count, 0, 'agreed is not hers to do');
   const scoutDoes = needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [agreed] });
   assert.equal(scoutDoes.count, 1);
   assert.equal(scoutDoes.cards[0].turn, 'approved → you are on it');
   // (4) done: off every list.
-  const done = ask({ phase: 'done', waiting_on: null, acting: null }, { kind: 'answer', party: 'addressee', by: 'Patti' });
-  assert.equal(needsCards(brief, NOW, [done], new Set(), { viewer: 'Patti' }).count + needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [done] }).count, 0);
+  const done = ask({ phase: 'done', waiting_on: null, acting: null }, { kind: 'answer', party: 'addressee', by: 'Maren' });
+  assert.equal(needsCards(brief, NOW, [done], new Set(), { viewer: 'Maren' }).count + needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [done] }).count, 0);
   // An older room has no turn: an ask addressed to the viewer still waits on them.
   const older = Object.assign({}, asked);
   delete older.turn;
-  assert.equal(needsCards(brief, NOW, [older], new Set(), { viewer: 'Patti' }).count, 1);
+  assert.equal(needsCards(brief, NOW, [older], new Set(), { viewer: 'Maren' }).count, 1);
   assert.equal(needsCards(brief, NOW, [], new Set(), { viewer: 'Scout', asked: [older] }).count, 0,
     'without a turn, an ask the viewer made never waits on them');
 });

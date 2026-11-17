@@ -28,7 +28,7 @@
   const CARRY_STATE_KEYS = Object.freeze([...CARRY_KEYS, 'revision', 'revisions', 'agreed']);
   const ANSWER_KEYS = Object.freeze(['ask_id', 'choice', 'crossed_by', 'by_addressee', 'closes', 'revision']);
   // A message that is exactly one of these words, in any case, answers the
-  // sender's one open ask with no tap (Patti, 2026-10-29). Anything else, or
+  // sender's one open ask with no tap (the owner, 2026-10-29). Anything else, or
   // two open asks, takes a tap: ordinary talk never closes an ask.
   const BARE_ANSWERS = Object.freeze({ yes: 'yes', go: 'yes', no: 'no' });
 

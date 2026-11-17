@@ -270,7 +270,7 @@ test('a write with no error code reads as unavailable, and an open form keeps on
 });
 
 test('the tile says who is responsible, the drawer says whom an owner answered for, and the project id pattern is valid', () => {
-  // A Needs-you card leads with its number (Patti, 2026-10-31), then the
+  // A Needs-you card leads with its number (the owner, 2026-10-31), then the
   // question and what a yes means; who asked moves to the footer line.
   assert.match(WORK_PANEL_JS, /head\.append\(idBadge\(card\.kind === 'ask' \? '#' \+ card\.askId : card\.id\)\);\s*if \(card\.turn\) head\.append\(make\('span', 'work-turn', card\.turn\)\);\s*head\.append\(ageNode\(card\.at\)\);/,
     'whose turn it is shows in words beside the item number');

@@ -1,7 +1,7 @@
 'use strict';
 
 // An ask naming a project that is not live is refused, and the refusal names
-// the closest live project (Patti's ruling, 2026-11-01): a typo is caught,
+// the closest live project (the owner's ruling, 2026-11-01): a typo is caught,
 // never quietly filed somewhere else. An ask naming none still lands in
 // Operations.
 

@@ -552,18 +552,18 @@ test('ask revise sends the new scope from a file; never from argv', async () => 
 });
 
 test('interlock asks shows whose turn it is and the latest exchange; an older room still reads', async () => {
-  const base = { ask_id: 6, asked_at: 1, by: 'Scout', of: 'Patti', of_kind: 'person', means: 'I order one roller', deliver: 'now',
+  const base = { ask_id: 6, asked_at: 1, by: 'Scout', of: 'Maren', of_kind: 'person', means: 'I order one roller', deliver: 'now',
     project: 'ops', state: 'open', kept_open: false, carried_from: null, answers: [] };
   const withStory = Object.assign({}, base, {
     revision: 1, revisions: [], done: false,
     turn: { phase: 'waiting', waiting_on: 'Scout', acting: null },
-    latest: { message_id: 8, kind: 'discussion', party: 'addressee', by: 'Patti', at: 2 },
+    latest: { message_id: 8, kind: 'discussion', party: 'addressee', by: 'Maren', at: 2 },
   });
   const world = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [withStory] } }));
   const listed = await storyRun(world, ['asks', '--connection', 'Scout']);
   assert.equal(listed.code, EXIT_OK, listed.stderr);
-  assert.match(listed.stdout, /ask 6 of Patti \[your turn\]/, 'from Scout\'s chair, waiting on Scout reads "your turn"');
-  assert.match(listed.stdout, /latest: Patti · replied #8/);
+  assert.match(listed.stdout, /ask 6 of Maren \[your turn\]/, 'from Scout\'s chair, waiting on Scout reads "your turn"');
+  assert.match(listed.stdout, /latest: Maren · replied #8/);
   const older = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [base] } }));
   assert.equal((await storyRun(older, ['asks', '--connection', 'Scout'])).code, EXIT_OK, 'an ask without the story fields still lists');
   const odd = storyWorld(() => ({ json: { ok: true, addressed: [], asked: [Object.assign({}, base, { surprise: 1 })] } }));

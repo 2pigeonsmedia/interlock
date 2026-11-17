@@ -1,6 +1,6 @@
 'use strict';
 
-// What People says a seat is doing, from the Work record (Patti, 2026-10-31:
+// What People says a seat is doing, from the Work record (the owner, 2026-10-31:
 // "Pitta says waiting on Fruiteater but he is working on something"): a seat
 // is waiting on someone only when every open item it holds or is next on is
 // blocked by someone else. Otherwise it is working on its unblocked item, and

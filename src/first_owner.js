@@ -3225,7 +3225,7 @@ function createFirstOwnerHandler(options) {
   // Every ask belongs to a project: the asker's choice, else the asker's own
   // project, else Operations. A missing project is never refused; a named one
   // that is not a live project is (a typo should not be quietly replaced).
-  /* The live project closest to a mistyped one (Patti's ruling, 2026-11-01:
+  /* The live project closest to a mistyped one (the owner's ruling, 2026-11-01:
    * refuse with "did you mean …?"): fewest single-letter edits, ignoring
    * case; ties by id. Null when no project is live. */
   function closestProject(name, live) {

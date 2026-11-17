@@ -106,13 +106,13 @@ test('the grant form names what whole room does, warns as the scope is typed, an
 
 test('the Holder list opens on a choose-someone placeholder, never on a participant', () => {
   const participants = [
-    { kind: 'seat', name: 'Boubou' }, { kind: 'person', name: 'Patti' }, { kind: 'person', name: 'Bea' },
+    { kind: 'seat', name: 'Boubou' }, { kind: 'person', name: 'Maren' }, { kind: 'person', name: 'Bea' },
   ];
   const options = model.grantHolderOptions(participants);
   // Arrange: there really are participants to default to.
   assert.equal(options.length, 4);
   assert.deepEqual(options[0], { value: '', label: 'Choose who holds it', placeholder: true });
-  assert.deepEqual(options.slice(1).map(row => row.label), ['Bea · Human', 'Patti · Human', 'Boubou · AI']);
+  assert.deepEqual(options.slice(1).map(row => row.label), ['Bea · Human', 'Maren · Human', 'Boubou · AI']);
   assert.ok(options.slice(1).every(row => row.placeholder === false));
   assert.deepEqual(JSON.parse(options[3].value), ['seat', 'Boubou']);
 });

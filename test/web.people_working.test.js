@@ -1,6 +1,6 @@
 'use strict';
 
-// People says what a seat is doing (Patti, 2026-10-31: "I see 'listening'
+// People says what a seat is doing (the owner, 2026-10-31: "I see 'listening'
 // for those who are waiting for a background task... Pitta says waiting on
 // Fruiteater but he is working on something"): its declared "in the middle
 // of" line ahead of the state word until it posts again; else the item it is

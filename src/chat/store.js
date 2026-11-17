@@ -1248,7 +1248,7 @@ function openStore(opts) {
           !archivedAnnotations.equals(Annotations.encodeArchive(boundPublicRows()))) {
         fail('archive-stale');
       }
-      // Open asks survive the clear (Patti's ruling, 2026-10-28): each becomes
+      // Open asks survive the clear (the owner's ruling, 2026-10-28): each becomes
       // a carry row in the next era, pointing at the archive that holds its
       // message. An ask already carried keeps its first archive.
       // An ask with a story to keep (a revision, or a yes not yet done) is

@@ -76,12 +76,12 @@ test('heldGrants and grantLine: the active grants a participant holds, in words'
 });
 
 test('stateOf: waiting outranks working, working is presence, quiet is the rest', () => {
-  const waiting = model.stateOf(seat('Scout', { presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW - 3 * MINUTE } }), NOW);
-  assert.deepEqual(waiting, { word: 'waiting on Patti', light: 'amber', age_since: NOW - 3 * MINUTE, notPickedUp: null });
+  const waiting = model.stateOf(seat('Scout', { presence: { middle: null, waiting_on: 'Maren', need: null, since: NOW - 3 * MINUTE } }), NOW);
+  assert.deepEqual(waiting, { word: 'waiting on Maren', light: 'amber', age_since: NOW - 3 * MINUTE, notPickedUp: null });
 
   const quietWaiting = model.stateOf(seat('Scout', { present: false,
-    presence: { middle: 'x', waiting_on: 'Patti', need: null, since: NOW } }), NOW);
-  assert.equal(quietWaiting.word, 'waiting on Patti', 'a quiet seat waiting on someone still says waiting');
+    presence: { middle: 'x', waiting_on: 'Maren', need: null, since: NOW } }), NOW);
+  assert.equal(quietWaiting.word, 'waiting on Maren', 'a quiet seat waiting on someone still says waiting');
 
   assert.deepEqual(model.stateOf(seat('Scout'), NOW),
     { word: 'working', light: 'teal', age_since: NOW - MINUTE, notPickedUp: null });
@@ -98,9 +98,9 @@ test('stateOf: N not picked up is its own amber fact, only when > 0', () => {
 });
 
 test('stateOf: a person is working when heard within five minutes, quiet otherwise', () => {
-  assert.equal(model.stateOf(person('Patti', { last_heard: NOW - MINUTE }), NOW).word, 'working');
-  assert.equal(model.stateOf(person('Patti', { last_heard: NOW - 6 * MINUTE }), NOW).word, 'quiet');
-  assert.equal(model.stateOf(person('Patti'), NOW).word, 'quiet');
+  assert.equal(model.stateOf(person('Maren', { last_heard: NOW - MINUTE }), NOW).word, 'working');
+  assert.equal(model.stateOf(person('Maren', { last_heard: NOW - 6 * MINUTE }), NOW).word, 'quiet');
+  assert.equal(model.stateOf(person('Maren'), NOW).word, 'quiet');
 });
 
 test('age: short words, null when unknown or in the future', () => {
@@ -113,7 +113,7 @@ test('age: short words, null when unknown or in the future', () => {
 });
 
 test('plate: Human, AI · model, or AI when the client reported no model', () => {
-  assert.equal(model.plate(person('Patti')), 'Human');
+  assert.equal(model.plate(person('Maren')), 'Human');
   assert.equal(model.plate(seat('Scout', { model: 'opus-5.5' })), 'AI · opus-5.5');
   assert.equal(model.plate(seat('Scout', { model: null })), 'AI');
 });
@@ -132,38 +132,38 @@ test('groups: People first, projects in the live order with lead and count, Not 
   const rows = [
     seat('Loose'),
     seat('Wren', { project: 'ops' }),
-    person('Patti'),
+    person('Maren'),
     seat('Scout', { project: 'finance' }),
     seat('Kite', { project: 'finance' }),
     seat('Old', { project: 'archive' }),
     person('Ana'),
   ];
-  const groups = model.groups(rows, { projects: PROJECTS, leads: new Map([['finance', 'Scout']]), viewerName: 'Patti' });
+  const groups = model.groups(rows, { projects: PROJECTS, leads: new Map([['finance', 'Scout']]), viewerName: 'Maren' });
   assert.deepEqual(groups.map(group => group.key), ['people', 'project:finance', 'project:ops', 'project:archive', 'unassigned']);
   assert.deepEqual(groups.map(group => group.heading), [
     'People', 'Household Budget · lead Scout · 2 AIs', 'Ops · 1 AI', 'archive · 1 AI', 'Not yet assigned · 1 AI',
   ]);
-  assert.deepEqual(groups[0].rows.map(row => row.name), ['Patti', 'Ana']);
+  assert.deepEqual(groups[0].rows.map(row => row.name), ['Maren', 'Ana']);
   assert.deepEqual(groups[1].rows.map(row => row.name), ['Scout', 'Kite']);
 });
 
 test('groups: a project with no seats has no group, and no seats means no Not yet assigned', () => {
-  const withOps = model.groups([person('Patti'), seat('Wren', { project: 'ops' })], { projects: PROJECTS, leads: new Map(), viewerName: 'Patti' });
+  const withOps = model.groups([person('Maren'), seat('Wren', { project: 'ops' })], { projects: PROJECTS, leads: new Map(), viewerName: 'Maren' });
   assert.ok(withOps.some(group => group.key === 'project:ops'), 'ARRANGEMENT: a project with a seat has a group');
   assert.ok(!withOps.some(group => group.key === 'project:finance'));
   assert.ok(!withOps.some(group => group.key === 'unassigned'));
 });
 
 test('groups: People is open; others fold unless someone in them waits on the viewer', () => {
-  const waitingOnPatti = { middle: null, waiting_on: 'Patti', need: null, since: NOW };
+  const waitingOnPatti = { middle: null, waiting_on: 'Maren', need: null, since: NOW };
   const waitingOnAna = { middle: null, waiting_on: 'Ana', need: null, since: NOW };
   const rows = [
-    person('Patti'),
+    person('Maren'),
     seat('Scout', { project: 'finance', presence: waitingOnPatti }),
     seat('Wren', { project: 'ops', presence: waitingOnAna }),
     seat('Loose', { presence: waitingOnPatti }),
   ];
-  const byKey = new Map(model.groups(rows, { projects: PROJECTS, leads: new Map(), viewerName: 'Patti' })
+  const byKey = new Map(model.groups(rows, { projects: PROJECTS, leads: new Map(), viewerName: 'Maren' })
     .map(group => [group.key, group]));
   assert.equal(byKey.get('people').open, true);
   assert.equal(byKey.get('project:finance').open, true);
@@ -213,8 +213,8 @@ test('state words come from the room\'s presence_kind (#938): working only on a 
   for (const kind of ['listening', 'working', 'rung', 'away', 'unknown']) {
     assert.notEqual(ai(K(kind, NOW)).light, 'red', kind + ' is never red');
   }
-  assert.equal(ai(Object.assign(K('listening', NOW), { presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW } })).word,
-    'listening · waiting on Patti', 'the state word, then the wait');
+  assert.equal(ai(Object.assign(K('listening', NOW), { presence: { middle: null, waiting_on: 'Maren', need: null, since: NOW } })).word,
+    'listening · waiting on Maren', 'the state word, then the wait');
   const human = extra => model.stateOf(person('Ana', Object.assign({ last_polled_at: null }, extra)), NOW).word;
   assert.equal(human(K('here', NOW - MINUTE)), 'here');
   assert.equal(human(K('away', NOW - 30 * MINUTE)), 'away');
@@ -227,8 +227,8 @@ test('waiting on: declared or derived from a blocked item, shown after the state
   assert.deepEqual([derived.word, derived.light], ['listening · waiting on Plantcutter · W-7', 'amber'], 'the state word, then who and what');
   assert.equal(ai({ waiting: { name: 'Plantcutter', item: 'W-7', since: NOW - 20 * MINUTE }, last_posted_at: NOW - MINUTE }).word,
     'listening', 'it posted since: it is not just waiting');
-  const declared = ai({ presence: { middle: null, waiting_on: 'Patti', need: null, since: NOW - MINUTE } });
-  assert.deepEqual([declared.word, declared.light], ['listening · waiting on Patti', 'amber'], 'a declared wait, after the state word');
+  const declared = ai({ presence: { middle: null, waiting_on: 'Maren', need: null, since: NOW - MINUTE } });
+  assert.deepEqual([declared.word, declared.light], ['listening · waiting on Maren', 'amber'], 'a declared wait, after the state word');
   assert.equal(ai({ waiting: null }).word, 'listening');
 });
 

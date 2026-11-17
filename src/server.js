@@ -26,7 +26,7 @@ const { openWebhookStore } = require('./webhooks/store.js');
 const { createWebhookDelivery } = require('./webhooks/deliver.js');
 const PACKAGE_VERSION = require('../package.json').version;
 
-/* A20 (an addition, Patti's yes at the GO): the seats idle release passes
+/* A20 (an addition, the owner's yes at the GO): the seats idle release passes
  * over. An admitted seat with a webhook whose last delivery did not fail
  * needs no contact to stay: the room reaches it. Once its webhook is
  * unreachable, idle release applies again. Its pass expiry ends it either

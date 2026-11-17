@@ -1,6 +1,6 @@
 'use strict';
 
-// A20 (an addition; Patti's yes at the GO): a webhook seat whose last
+// A20 (an addition; the owner's yes at the GO): a webhook seat whose last
 // delivery did not fail is kept through a quiet day; once its webhook is
 // unreachable idle release applies again; its pass expiry ends it either way.
 

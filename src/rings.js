@@ -6,7 +6,7 @@
 //
 //   { kind: "mention" | "reply" | "admitted",
 //     message_id, from, at,
-//     room_time: "Sat 14 Nov, 7:10 PM for Patti (America/New_York)",
+//     room_time: "Sat 14 Nov, 7:10 PM for Maren (America/New_York)",
 //     last_person_message_ago: "2 h",
 //     read: "interlock history --connection <Name> --through <N>" }
 //

@@ -553,7 +553,7 @@
       });
   }
 
-  // One full card per item (Patti, 2026-10-30): an item already in the
+  // One full card per item (the owner, 2026-10-30): an item already in the
   // viewer's Needs you is counted in its project, not shown there again.
   function projectSections(brief) {
     const inNeeds = new Set((brief.needs_me || []).map(row => row.id));

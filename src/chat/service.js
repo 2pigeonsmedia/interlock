@@ -255,7 +255,7 @@ function createChatService(options) {
     const roster = everyone.filter(row => row.present || (row.kind === 'seat' &&
       (hasWebhook(row.subject_id) || named.has(row.name))));
     // A message that starts with "re #N", N an ask in this era, is a reply on
-    // that ask, exactly as the Reply button makes it (Patti, 2026-10-30): a
+    // that ask, exactly as the Reply button makes it (the owner, 2026-10-30): a
     // deterministic prefix like an @mention, never a reading of the text.
     // Mid-sentence it stays plain text, and a post that asks or answers is
     // left as it is.

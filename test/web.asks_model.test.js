@@ -185,19 +185,19 @@ test('the page replays the printer story in both directions and reads the same t
 
   // An AI asks a person for approval: the asker acts after a yes.
   const room = createAsksState();
-  room.apply([ask(1, 6, 'Scout', 'Patti', 'person', 'I order one roller, up to $30'), approval(1.5, 'Scout', 6)]);
-  assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Patti', acting: null });
-  room.apply([reply(2, 8, 'Patti', 6, 'addressee')]);
+  room.apply([ask(1, 6, 'Scout', 'Maren', 'person', 'I order one roller, up to $30'), approval(1.5, 'Scout', 6)]);
+  assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Maren', acting: null });
+  room.apply([reply(2, 8, 'Maren', 6, 'addressee')]);
   assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Scout', acting: null }, 'her reply passes the turn');
   assert.equal(room.ask(6).latest.kind, 'discussion');
   room.apply([revise(3, 'Scout', 6, 'I order one refurbished roller, up to $15')]);
   assert.equal(room.ask(6).means, 'I order one refurbished roller, up to $15');
   assert.deepEqual(room.ask(6).revisions, [{ means: 'I order one roller, up to $30', revision: 1 }], 'the old scope stays, struck');
-  assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Patti', acting: null }, 'the revision is hers to answer');
-  room.apply([answer(4, 9, 'Patti', 6, 'yes', 2)]);
+  assert.deepEqual(room.ask(6).turn, { phase: 'waiting', waiting_on: 'Maren', acting: null }, 'the revision is hers to answer');
+  room.apply([answer(4, 9, 'Maren', 6, 'yes', 2)]);
   assert.deepEqual(room.ask(6).turn, { phase: 'agreed', waiting_on: null, acting: 'Scout' });
   assert.deepEqual(room.openFor('Scout').asked.map(row => row.ask_id), [6], 'agreed stays on the acting asker\'s list');
-  assert.deepEqual(room.openFor('Patti').addressed.map(row => row.ask_id), [], 'and off hers, as on the server');
+  assert.deepEqual(room.openFor('Maren').addressed.map(row => row.ask_id), [], 'and off hers, as on the server');
   room.apply([reply(5, 10, 'Scout', 6, 'asker', 'done')]);
   assert.equal(room.ask(6).done.message_id, 10, 'the acting party\'s done reply is the receipt');
   assert.equal(room.ask(6).turn.phase, 'done');
@@ -205,13 +205,13 @@ test('the page replays the printer story in both directions and reads the same t
 
   // A revision after a yes reopens: no yes carries over to a scope she did not see.
   const again = createAsksState();
-  again.apply([ask(1, 6, 'Scout', 'Patti', 'person', 'one roller'), approval(1.5, 'Scout', 6), answer(2, 7, 'Patti', 6, 'yes', 1), revise(3, 'Scout', 6, 'two rollers')]);
-  assert.deepEqual(again.ask(6).turn, { phase: 'waiting', waiting_on: 'Patti', acting: null });
+  again.apply([ask(1, 6, 'Scout', 'Maren', 'person', 'one roller'), approval(1.5, 'Scout', 6), answer(2, 7, 'Maren', 6, 'yes', 1), revise(3, 'Scout', 6, 'two rollers')]);
+  assert.deepEqual(again.ask(6).turn, { phase: 'waiting', waiting_on: 'Maren', acting: null });
 
   // A person asks an AI a plain question: a bystander's reply moves nothing,
   // his yes answers it, and nobody is on anything.
   const reverse = createAsksState();
-  reverse.apply([ask(1, 3, 'Patti', 'Scout', 'seat', 'You order one roller')]);
+  reverse.apply([ask(1, 3, 'Maren', 'Scout', 'seat', 'You order one roller')]);
   reverse.apply([reply(2, 4, 'Lark', 3, 'other')]);
   assert.deepEqual(reverse.ask(3).turn, { phase: 'waiting', waiting_on: 'Scout', acting: null }, 'a bystander does not pass the turn');
   reverse.apply([answer(3, 5, 'Scout', 3, 'yes', 1)]);

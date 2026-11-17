@@ -148,7 +148,7 @@ function row(name, kind, extra = {}) {
 const MIXED = [
   row('Loose', 'seat'),
   row('Scout', 'seat', { project: 'finance', model: 'opus-5.5' }),
-  row('Patti', 'person'),
+  row('Maren', 'person'),
   row('Quiet', 'seat', { project: 'finance', present: false, last_heard: NOW - 3 * 3_600_000 }),
   row('Wren', 'seat', { project: 'ops' }),
 ];
@@ -203,7 +203,7 @@ test('the row toggles its detail, and only an owner or admin sees the project se
   assert.equal(scoutCard().find(node => node.className === 'person-detail').hidden, false,
     'an opened row stays open across a refresh');
 
-  vm.runInContext("currentUser = { name: 'Patti', kind: 'person', roles: ['owner'], first_owner: true };", page);
+  vm.runInContext("currentUser = { name: 'Maren', kind: 'person', roles: ['owner'], first_owner: true };", page);
   page.renderRoster(MIXED);
   const select = scoutCard().find(node => node.tagName === 'SELECT');
   assert.ok(select, 'an owner gets the project select');
