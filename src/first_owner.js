@@ -4,6 +4,7 @@ const { CREATE_KEYS: WORK_CREATE_KEYS } = require('./work/service.js');
 const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
 const PresenceKind = require('./chat/presence_kind.js');
 const Ring = require('./rings.js');
+const { roomExcerpt } = require('./room_excerpt.js');
 const TimeZones = require('./time_zones.js');
 const ClientVersions = require('./client_versions.js');
 
@@ -3002,7 +3003,7 @@ function createFirstOwnerHandler(options) {
       chatActor = authorized && authorized.allow === true ? authorizedActor(request, authorized, workActor.now) : null;
     }
     if (!chatActor || chatActor.subject_id !== workActor.subject_id) return;
-    const title = String(item.title).split('\n')[0].slice(0, 200).replace(/@/g, '@\u2060');
+    const title = roomExcerpt(item.title, item.id).replace(/@/g, '@\u2060');
     try {
       await chat.append({ text: `@${holder} — ${item.id} ${says}: ${title}` }, chatActor);
     } catch (_) {
@@ -3169,7 +3170,7 @@ function createFirstOwnerHandler(options) {
     if (!chatActor || chatActor.subject_id !== workActor.subject_id) return;
     // The answer's words are copied, not said again: an @name in them rings
     // nobody (a word joiner after each @), so only the asker is rung.
-    const firstLine = String(item.answer.text).split('\n')[0].slice(0, 200).replace(/@/g, '@\u2060');
+    const firstLine = roomExcerpt(item.answer.text, item.id).replace(/@/g, '@\u2060');
     // Not the ask's own answer (no room ask, or given on someone's behalf):
     // the room is told by name, so the asker hears it all the same.
     if (!Number.isSafeInteger(item.ask_message_id) || !byAddressee) {

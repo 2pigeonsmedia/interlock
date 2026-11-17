@@ -183,6 +183,22 @@ test('a record made someone else\'s rings them once and sits in their Needs you'
     assert.equal(rang[0].byline, 'Cue', 'bylined to whoever assigned it');
     assert.deepEqual(rang[0].delivery.map(row => row.name), ['Lead'], 'it rings the holder');
 
+    // A long title is cut at a word in the stored room line, with where to read it whole.
+    const nLong = (await messages()).length;
+    const longTitle = ('Reconcile the F-050 quarterly including adjustments ').repeat(5).slice(0, 250);
+    assert.ok(longTitle.length === 250 && longTitle[199] !== ' ' && longTitle[200] !== ' ',
+      'the arrangement: 250 characters, and character 200 falls inside a word');
+    const long = await aiPost(runtime, '/api/ai/work/items/create', {
+      operation_id: uuid(), kind: 'work', project: 'ops', title: longTitle, body: 'b', responsible: 'Lead',
+    }, cue.token);
+    assert.equal(long.status, 201, long.text);
+    const longLine = (await messages()).slice(nLong);
+    assert.equal(longLine.length, 1);
+    const pointer = '… (full: `interlock work get ' + long.json.item.id + '`)';
+    assert.ok(longLine[0].text.endsWith(pointer), longLine[0].text);
+    const quoted = longLine[0].text.slice(('@Lead — ' + long.json.item.id + ' is yours: ').length, -pointer.length);
+    assert.ok(longTitle.startsWith(quoted) && longTitle[quoted.length] === ' ', 'cut on a space, not mid-word');
+
     // Taking it yourself rings nobody; naming someone next moves it to their Needs you.
     const n1 = (await messages()).length;
     const mine = await aiPost(runtime, '/api/ai/work/items/create', {
