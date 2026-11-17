@@ -5,6 +5,7 @@ const { MAX_MEANS_CHARS, validMeans } = require('./chat/annotations.js');
 const PresenceKind = require('./chat/presence_kind.js');
 const Ring = require('./rings.js');
 const { roomExcerpt } = require('./room_excerpt.js');
+const { selectJoinedTail } = require('./chat/joined_tail.js');
 const TimeZones = require('./time_zones.js');
 const ClientVersions = require('./client_versions.js');
 
@@ -353,6 +354,18 @@ function messageQuery(target) {
   }
   return Object.freeze(hasEra ? { after, limit, wait: waitRaw === '1', era }
     : { after, limit, wait: waitRaw === '1' });
+}
+
+/* `/api/ai/joined-tail?before=N&since=T&until=T`: N is one past the seat's
+ * cursor at joining, T its knock and its admission (ms). */
+function joinedTailQuery(target) {
+  const names = [...target.searchParams.keys()].sort();
+  if (names.join(',') !== 'before,since,until') return null;
+  const values = ['before', 'since', 'until'].map(key => target.searchParams.get(key));
+  if (!values.every(value => /^[0-9]{1,16}$/.test(value))) return null;
+  const [before, since, until] = values.map(Number);
+  if (!values.map(Number).every(Number.isSafeInteger) || before < 1 || since > until) return null;
+  return Object.freeze({ before, since, until });
 }
 
 function peekQuery(target) {
@@ -2293,6 +2306,46 @@ function createFirstOwnerHandler(options) {
       await echoAnswerToRoom(request, actor, result.body.item, ai);
     }
     sendWorkResult(request, response, result);
+  }
+
+  /* A new seat's first read: the short tail of the room before it joined
+   * A view only: no receipt, no delivery, no cursor, no presence. */
+  async function readAiJoinedTail(request, response, target) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const query = joinedTailQuery(target);
+    if (!query) {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-joined-tail-query' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    let page;
+    try {
+      page = await chat.peekBefore({ before: query.before, limit: CHAT_READ_LIMIT });
+    } catch (_) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    const messages = page.messages.map(publicMessage);
+    if (messages.some(message => message === null)) {
+      sendJson(request, response, 503, { ok: false, error: 'chat-unavailable' });
+      return;
+    }
+    const assignment = people && typeof people.service.assignmentOf === 'function' &&
+      typeof authorized.subject_name === 'string'
+      ? people.service.assignmentOf(authorized.subject_name) : null;
+    const project = assignment && typeof assignment.project === 'string' ? assignment.project : null;
+    sendJson(request, response, 200, {
+      ok: true,
+      messages: Object.freeze(selectJoinedTail(messages, { since: query.since, until: query.until, project })),
+      project,
+    });
   }
 
   async function readAiPeek(request, response, target) {
@@ -4828,6 +4881,15 @@ function createFirstOwnerHandler(options) {
         await readAiRings(request, response, target);
         return;
       }
+      if (pathname === '/api/ai/joined-tail') {
+        if (request.method !== 'GET') {
+          sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
+            { allow: 'GET' });
+          return;
+        }
+        await readAiJoinedTail(request, response, target);
+        return;
+      }
       if (pathname === '/api/ai/peek') {
         if (request.method !== 'GET') {
           sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
@@ -4905,7 +4967,7 @@ function createFirstOwnerHandler(options) {
     }
 
     if ((pathname === '/api/ai/head' || pathname === '/api/ai/peek' ||
-        pathname === '/api/ai/rings') &&
+        pathname === '/api/ai/rings' || pathname === '/api/ai/joined-tail') &&
         request.method !== 'GET') {
       sendJson(request, response, 405, { ok: false, error: 'method-not-allowed' },
         { allow: 'GET' });

@@ -247,6 +247,9 @@ function admittedConnection(overrides = {}) {
     dependencies: {
       clock: () => 100,
       config: { resolveConnectionDir: () => '/tmp/interlock-cli-connections' },
+      // These tests pin the ordinary read's own requests; this seat's
+      // one-time "before you joined" tail was already shown.
+      joinedTailMarks: { has: () => true, add() {} },
       profiles: {
         validName: value => /^[A-Za-z0-9-]{2,24}$/.test(value),
         openProfiles: () => profiles,
@@ -1830,6 +1833,8 @@ test('one real local connection has only one active history/listen consumer', as
   const dependencies = {
     clock: () => 100,
     config: { resolveConnectionDir: () => world.connectionDir },
+    // This test counts the ordinary readers' requests; the one-time tail is shown.
+    joinedTailMarks: { has: () => true, add() {} },
     fetch: async () => {
       fetchCalls += 1;
       if (fetchCalls === 1) {
@@ -1860,6 +1865,33 @@ test('one real local connection has only one active history/listen consumer', as
   );
   assert.equal(afterRelease.code, EXIT_OK, afterRelease.stderr);
   assert.equal(fetchCalls, 2);
+});
+
+test('the "before you joined" tail is asked for once per admission, marked beside the profiles', async () => {
+  const world = localJoinProfile({ expires_at: 50_000 });
+  const paths = [];
+  const dependencies = {
+    clock: () => 3_000,
+    config: { resolveConnectionDir: () => world.connectionDir },
+    fetch: async url => {
+      paths.push(new URL(url).pathname);
+      if (url.includes('/api/ai/joined-tail')) {
+        assert.ok(url.endsWith(`?before=1&since=1000&until=2000`), url);
+        return fakeResponse(200, { ok: true, messages: [], project: null });
+      }
+      return fakeResponse(200, { ok: true, messages: [], cursor: 0, timed_out: false, connection_session: null });
+    },
+  };
+  const first = await captureCommand(['history', '--connection', 'Marlow'], dependencies);
+  assert.equal(first.code, EXIT_OK, first.stderr);
+  assert.equal(first.stdout, 'No new messages.\n', 'an empty tail prints nothing of its own');
+  const mark = path.join(world.connectionDir, '.joined-tail', world.body.request_id);
+  assert.equal(fs.existsSync(mark), true, 'shown once: marked for this admission');
+  assert.deepEqual(profileModule.openProfiles({ connectionDir: world.connectionDir }).summaries().map(row => row.name),
+    ['Marlow'], 'the mark is not read as a profile');
+  const second = await captureCommand(['history', '--connection', 'Marlow'], dependencies);
+  assert.equal(second.code, EXIT_OK, second.stderr);
+  assert.deepEqual(paths, ['/api/ai/joined-tail', '/api/ai/messages', '/api/ai/messages']);
 });
 
 test('history receives, acknowledges, renders, and durably advances one explicit connection', async () => {

@@ -1210,6 +1210,68 @@ async function readStdin(stream) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+/* The first ordinary text read after a seat is let in: a short tail
+ * of what was said before it joined, shown once per admission, so a lead's
+ * earlier "report in" is not invisible. It is a view only: its messages are
+ * never sent a receipt, and it never moves the cursor. A seat let in more
+ * than a day ago (an upgrade) is not shown one. The shown-once mark is a
+ * file per admission beside the connection profiles, outside the profile. */
+const JOINED_TAIL_FRESH_MS = 24 * 60 * 60 * 1000;
+
+function joinedTailMarks(dependencies) {
+  if (dependencies.joinedTailMarks) return dependencies.joinedTailMarks;
+  const config = dependencies.config || require('./config.js');
+  const directory = path.join(config.resolveConnectionDir({
+    env: dependencies.env || process.env,
+    platform: dependencies.platform || process.platform,
+    homedir: dependencies.homedir,
+  }), '.joined-tail');
+  return {
+    has: id => fs.existsSync(path.join(directory, id)),
+    add: id => {
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(path.join(directory, id), '', { mode: 0o600 });
+    },
+  };
+}
+
+async function showJoinedTail(profile, io, dependencies, clock) {
+  if (!Number.isSafeInteger(profile.admitted_at) || clock() - profile.admitted_at >= JOINED_TAIL_FRESH_MS ||
+      !Number.isSafeInteger(profile.created_at) || profile.created_at > profile.admitted_at) return;
+  let marks;
+  try {
+    marks = joinedTailMarks(dependencies);
+    if (marks.has(profile.request_id)) return;
+  } catch (_) {
+    return;
+  }
+  const fetcher = dependencies.fetch || globalThis.fetch;
+  let page;
+  try {
+    page = await localRequest(fetcher, profile,
+      `/api/ai/joined-tail?before=${profile.cursor + 1}&since=${profile.created_at}&until=${profile.admitted_at}`,
+      { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
+  } catch (error) {
+    // A room older than this CLI has no tail to show, now or later.
+    if (error && error.status === 404) {
+      try { marks.add(profile.request_id); } catch (_) { /* shown next time instead */ }
+    }
+    return;
+  }
+  const tail = exactObject(page, ['ok', 'messages', 'project']);
+  if (!tail || tail.ok !== true || !Array.isArray(tail.messages) || tail.messages.length > HISTORY_PEEK_LIMIT ||
+      !tail.messages.every(validPublicMessage) || tail.messages.some(message => message.id > profile.cursor)) return;
+  // Shown once: the mark is made before the tail is shown, so a later read
+  // never repeats it.
+  try { marks.add(profile.request_id); } catch (_) { return; }
+  if (tail.messages.length === 0) return;
+  const count = tail.messages.length;
+  line(io.stdout, `Before you joined (${count} ${count === 1 ? 'post' : 'posts'}, shown once; not marked read. ` +
+    `Earlier: interlock history --connection ${terminalSafe(profile.name)} --before ${tail.messages[0].id}):`);
+  renderMessages(io.stdout, tail.messages);
+  line(io.stdout, 'Since you joined:');
+}
+
 async function executeReadCommand(command, parsed, profile, profiles, io, dependencies) {
   const fetcher = dependencies.fetch || globalThis.fetch;
   const wait = command === 'listen';
@@ -1603,6 +1665,10 @@ async function runReadCommand(command, args, io, dependencies = {}) {
   if (command === 'history' && !parsed.json && !parsed.skipToCurrent) {
     const said = await roomTimeLine(dependencies.fetch || globalThis.fetch, profile);
     if (said !== null) line(io.stdout, said);
+  }
+  if (command === 'history' && !parsed.json && !parsed.skipToCurrent && parsed.through === null &&
+      parsed.before === null && parsed.find === null) {
+    await showJoinedTail(profile, io, dependencies, clock);
   }
   let result;
   try {
