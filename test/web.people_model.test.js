@@ -199,7 +199,7 @@ test('state words come from the room\'s presence_kind (#938): working only on a 
   assert.equal(ai(K('listening', NOW - 30_000)).light, 'teal');
   // The Kingbird / Dunlin case: it polled 10 minutes ago and its doorbell
   // died. 0.3.11 inferred "working" for three hours; the room now says away.
-  const kingbird = ai(Object.assign(K('away', NOW - 10 * MINUTE, 'an @mention will not wake it until it polls again'),
+  const kingbird = ai(Object.assign(K('away', NOW - 10 * MINUTE, 'an @mention is held until it next polls'),
     { last_polled_at: NOW - 10 * MINUTE, outstanding: 1 }));
   assert.equal(kingbird.word, 'not listening', 'a gap is never read as working');
   assert.equal(kingbird.age_since, NOW - 10 * MINUTE, 'since when');

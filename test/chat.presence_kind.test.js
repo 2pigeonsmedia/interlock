@@ -37,7 +37,7 @@ test('working only on a declared pause, never inferred from a gap (#938)', () =>
   const dead = seat({ last_polled_at: T0 - 40 * MINUTE });
   assert.equal(dead.kind, 'away');
   assert.equal(dead.since, T0 - 40 * MINUTE);
-  assert.match(dead.next, /will not wake it/);
+  assert.equal(dead.next, 'an @mention is held until it next polls', 'held since rings wait for the poll');
   const paused = seat({ last_polled_at: T0 - 40 * MINUTE, pause: { reason: 'turn', since: T0 - 39 * MINUTE, renewed_at: T0 - 39 * MINUTE } });
   assert.deepEqual(paused, { kind: 'working', since: T0 - 39 * MINUTE, next: 'picks up after its turn' });
 });

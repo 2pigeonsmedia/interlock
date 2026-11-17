@@ -1698,7 +1698,14 @@ function doorbellFact(connection, stateDir, inspect = null) {
     return { state: 'running', label: 'running, polls failing', detail: status.detail };
   }
   if (status.state === 'absent') {
-    return { state: 'none', label: `none in ${where}`, detail: `no doorbell adapter is recorded there for ${connection}` };
+    // Not proof the seat is deaf: a hook-driven poller records itself only
+    // after its first pass, and since 0.4.2 a ring waits for that poll.
+    return {
+      state: 'none', label: `none yet in ${where}`,
+      detail: `no doorbell has run yet for ${connection} on this computer; a hook-driven poller ` +
+        "(e.g. Claude Code's Stop hook) appears after its first pass, and until then an @mention is held " +
+        'until it next polls. With no hook, arm the doorbell join printed',
+    };
   }
   if (status.state === 'stale') {
     return {

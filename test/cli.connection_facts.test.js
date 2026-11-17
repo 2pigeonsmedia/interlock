@@ -76,13 +76,21 @@ async function status(place, answers, extra = []) {
   return { code, io };
 }
 
+// Before any adapter has run for the seat on this computer: a
+// hook-driven poller records itself only after its first pass.
+const NOT_RUN_YET = dir => `none yet in ${dir} — no doorbell has run yet for Marlow on this computer; ` +
+  "a hook-driven poller (e.g. Claude Code's Stop hook) appears after its first pass, and until then " +
+  'an @mention is held until it next polls. With no hook, arm the doorbell join printed.';
+
 test('join reports the three facts, before the doorbell step', async () => {
   const place = world();
   const { code, io } = await joined(place, () => fakeResponse(200, { ok: true, last_answered: null }));
   assert.equal(code, EXIT_OK, io.err);
   assert.match(io.out, /^ {2}Admitted: yes — the room accepts this connection until /m);
   assert.match(io.out, /^ {2}Last answered mention: none — the room has no delivered @mention followed by a post from you/m);
-  assert.ok(io.out.includes(`\n  Doorbell: none in ${place.stateDir} — no doorbell adapter is recorded there for Marlow.\n`), io.out);
+  assert.ok(io.out.includes(`\n  Doorbell: ${NOT_RUN_YET(place.stateDir)}\n`), io.out);
+  // A fresh seat is not told it is deaf: no 'will not wake', no 'not recorded'.
+  assert.doesNotMatch(io.out, /will not wake|no doorbell adapter is recorded/);
   assert.ok(io.out.indexOf('Last answered mention:') < io.out.indexOf('Next, before you say hello'));
 });
 
@@ -100,7 +108,7 @@ test('status names each fact from its own evidence, and says how it knows', asyn
     'The room shows: working since 2027-01-15T08:00:00.000Z',
     'Last answered mention: #4 → reply #6 (2027-01-15T08:00:00.000Z) · Session 4.',
     '  (A read-and-reply, not proof the doorbell rang.)',
-    `Doorbell: none in ${place.stateDir}`,
+    `Doorbell: none yet in ${place.stateDir}`,
   ]);
 
   // LOW-4: status says People's words, not the raw kind.
@@ -133,7 +141,7 @@ test('interlock-doorbell status prints the three facts after the adapter line', 
   const lines = result.stdout.trimEnd().split('\n');
   assert.match(lines[0], /^Marlow: absent — /, 'arrangement: no adapter recorded');
   assert.deepEqual(lines.filter(text => /^(Admitted|Last answered mention|Doorbell):/.test(text)).map(text => text.split(' — ')[0]),
-    ['Admitted: unknown', 'Last answered mention: unknown', `Doorbell: none in ${place.stateDir}`]);
+    ['Admitted: unknown', 'Last answered mention: unknown', `Doorbell: none yet in ${place.stateDir}`]);
   assert.match(result.stdout, /Admitted: unknown — no local connection with this name on this computer\./);
 });
 
@@ -156,5 +164,6 @@ test('the doorbell fact says where it looked, and a live adapter whose polls fai
   assert.match(factLines(failing).at(-1),
     /^Doorbell: running, polls failing — no successful poll in the last 75 s; the adapter may be retrying an unreachable room\.$/);
   const none = await connectionFactsFor('Marlow', { dependencies, stateDir: place.stateDir });
-  assert.equal(factLines(none).at(-1), `Doorbell: none in ${place.stateDir} — no doorbell adapter is recorded there for Marlow.`);
+  assert.equal(factLines(none).at(-1), `Doorbell: ${NOT_RUN_YET(place.stateDir)}`);
+  assert.equal(none.doorbell.state, 'none', 'the --json state word is unchanged');
 });

@@ -76,7 +76,8 @@ function seatKind(input) {
     return result('listening', last.at, 'the room rings it by webhook');
   }
 
-  const NOT_WOKEN = 'an @mention will not wake it until it polls again';
+  // Since 0.4.2 a ring to an absent seat waits for its next poll.
+  const NOT_WOKEN = 'an @mention is held until it next polls';
   if (pause) return result('away', pause.since, NOT_WOKEN);
   // Nothing heard since this server started: the facts went with the restart.
   const resumed = time(input.resumed_at);

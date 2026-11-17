@@ -30,7 +30,7 @@ function seat(silentFor, extra = {}) {
     // seat is mid-turn on a declared pause; after that the pause has expired.
     presence_kind: silentFor < 2 * MINUTE ? { kind: 'listening', since: lastPoll, next: null }
       : silentFor < 3 * HOUR ? { kind: 'working', since: lastPoll, next: 'picks up after its turn' }
-      : { kind: 'away', since: lastPoll, next: 'an @mention will not wake it until it polls again' },
+      : { kind: 'away', since: lastPoll, next: 'an @mention is held until it next polls' },
   }, extra);
 }
 
