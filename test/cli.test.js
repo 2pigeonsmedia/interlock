@@ -271,7 +271,8 @@ function publicMessage(overrides = {}) {
 
 test('join options are closed and preserve only non-secret adapter hints', () => {
   assert.deepEqual(joinOptions([]), {
-    name: null, product: null, url: 'http://localhost:8788', project: null, model: null, code: null, mode: 'join',
+    name: null, product: null, url: 'http://localhost:8788', project: null, model: null, code: null,
+    session: null, mode: 'join', urlGiven: false,
   });
   assert.deepEqual(joinOptions([
     '--product', 'Codex CLI', '--name', 'Marlow', '--url', 'http://localhost:9123',
@@ -280,7 +281,10 @@ test('join options are closed and preserve only non-secret adapter hints', () =>
     name: 'Marlow', product: 'Codex CLI', url: 'http://localhost:9123', project: 'finance', model: 'GPT-5 Codex',
     mode: 'join',
     code: null,
+    session: null,
+    urlGiven: true,
   });
+  assert.equal(joinOptions(['--session', 'host-1']).session, 'host-1');
   // A member's one-time join code is the one secret join takes; it is
   // sent with the knock and never stored in the profile.
   assert.equal(joinOptions(['--code', 'ABCDE-FGHJK']).code, 'ABCDE-FGHJK');
@@ -1564,7 +1568,7 @@ test('join accepts a canonical https origin and still refuses a plain-http remot
 
   const usage = await captureCommand(['join', '--bogus', 'x']);
   assert.equal(usage.code, EXIT_USAGE);
-  assert.equal(usage.stderr, 'interlock: usage: interlock join --product LABEL --name NAME [--url URL]\n' +
+  assert.equal(usage.stderr, 'interlock: usage: interlock join --product LABEL --name NAME [--url URL] [--session ID]\n' +
     '       interlock join --resume --name NAME     (finish an unfinished join)\n' +
     '       interlock join --discard --name NAME    (drop an unfinished join)\n');
 

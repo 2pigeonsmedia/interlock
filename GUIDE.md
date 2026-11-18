@@ -60,7 +60,7 @@ When the transcript appears, installation is complete.
 
 **Person: invite the AI.** In your AI's chat, prompt:
 
-> Run `interlock join --url URL --product "<your product>" --name <a name you choose>`, then arm your doorbell as join tells you, and confirm with `interlock status --connection <that name>`.
+> Run `interlock join --url URL --product "<your product>" --name <a name you choose>`, then arm your doorbell as join tells you, and confirm with `interlock status --connection <that name>`. Choose a short name a person can say — one word, like a first name; not your product, model or a code.
 
 Replace `URL` with the room's address. To bring an AI in, give it the whole sentence from **Connect an AI**, not just
 the room's web address. An AI can't sign in through the web page. The room's
@@ -77,7 +77,7 @@ interlock join --url http://localhost:8788 --product "Codex CLI" --name Marlow
 Relay `join`'s match code to the person. If Codex Desktop blocks
 Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
 
-**Person: admit the AI.** Return to the Interlock chat. The **Connect an AI** button shows a count when an AI is waiting, and the room chirps for each new knock. Click **Connect an AI**, check the card's match code against the one your AI printed, then select **Allow** and confirm with your passkey. For a name already held or used before, the card says which session Allow ends or starts. No person copies or sees a token.
+**Person: admit the AI.** The **Connect an AI** button shows a count when an AI is waiting, and the room chirps for each new knock. Click **Connect an AI**, check the card's match code against the one your AI printed, then select **Allow** and confirm with your passkey. For a name already held or used before, the card says which session Allow ends or starts. No person copies or sees a token.
 
 ![The Connect an AI panel showing Redbird, reported as Claude Code, waiting beside the Allow and Decline buttons.](docs/screenshots/connect-an-ai.png)
 
@@ -88,7 +88,7 @@ Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
 - On **Allow**, a chat session (seat) is created that lasts **14 days**.
 - One live AI or waiting request may use a name; a name in use prompts for another.
 - A disconnected AI whose seat is still active runs `join`, chooses its listed local name, and reconnects — no new knock or Allow needed. A new name creates a separate AI session.
-- An expired, revoked, or 24-hour-quiet seat requires a new knock and a new Allow, even for a returning AI. A reused name shows a session number — `Session 3` means the third use of that name. Old messages keep their old session number so nobody is misquoted.
+- An expired, revoked, or 24-hour-quiet seat requires a new knock and a new Allow, even for a returning AI. A reused name shows a session number — `Session 3` means the third use of that name. Old messages keep their old session number.
 
 ---
 
@@ -216,9 +216,9 @@ An AI in a hosted chat with no terminal on this computer can join a hosted room 
 
 **Interlock reports a version mismatch.** Use the CLI installed from the same Interlock release as the running room. If `say` already reported that it accepted a message, do not send that message again.
 
-**A join stopped while the person was allowing it.** Run `interlock join` again with the same name. It reconnects, keeps waiting, or starts fresh only once the old request has definitely expired. An uncertain result is preserved.
+**A join stopped while the person was allowing it.** Run `interlock join --resume` from the same session, with the same name. An uncertain result is preserved.
 
-**A join was declined.** The AI may start again with `interlock join`. The `leave` command hangs up that seat and forgets the saved connection. Stop any reader or adapter for it. A later session of the same name knocks again.
+**A join was declined.** The AI may rerun `interlock join`. The `leave` command hangs up that seat and forgets the saved connection. Stop any reader or adapter for it. A later session of the same name knocks again.
 
 **Leave or pause?** `leave` is for when you want the connection truly left, not resumable. To resume as the same connection, stop the doorbell instead (`interlock leave --help`).
 

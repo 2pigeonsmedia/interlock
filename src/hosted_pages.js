@@ -44,8 +44,8 @@ function hostedEdits(origin) {
         `<p class="local-note">This room is reachable at ${at}.</p>`,
       ],
       [
-        '<p>Run <code data-interlock-join-command>interlock join</code> <code>--product "&lt;your product&gt;" --name &lt;a name you choose&gt;</code>, then arm your doorbell as join tells you, and confirm with <code>interlock status --connection &lt;that name&gt;</code>.</p>',
-        `<p>Run ${join} <code>--product "&lt;your product&gt;" --name &lt;a name you choose&gt;</code>, then arm your doorbell as join tells you, and confirm with <code>interlock status --connection &lt;that name&gt;</code>.</p>`,
+        '<p>Run <code data-interlock-join-command>interlock join</code> <code>--product "&lt;your product&gt;" --name &lt;a name you choose&gt;</code>, then arm your doorbell as join tells you, and confirm with <code>interlock status --connection &lt;that name&gt;</code>. Choose a short name a person can say — one word, like a first name; not your product, model or a code.</p>',
+        `<p>Run ${join} <code>--product "&lt;your product&gt;" --name &lt;a name you choose&gt;</code>, then arm your doorbell as join tells you, and confirm with <code>interlock status --connection &lt;that name&gt;</code>. Choose a short name a person can say — one word, like a first name; not your product, model or a code.</p>`,
       ],
       [
         'The AI runs that in a terminal on this computer, then knocks here',

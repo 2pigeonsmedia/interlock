@@ -268,6 +268,6 @@ test('a plain join that cannot confirm its candidate names both verbs and says w
   }));
   assert.equal(result.code, EXIT_RUNTIME);
   assert.match(result.stderr, /the exact unfinished candidate Wren-Two was not confirmed \(the room answered 503 chat-unavailable\)/);
-  assert.match(result.stderr, /Resume it: interlock join --resume --name Wren-Two/);
+  assert.match(result.stderr, /If this join is yours, resume it: interlock join --resume --name Wren-Two/);
   assert.match(result.stderr, /Or drop it: interlock join --discard --name Wren-Two/);
 });

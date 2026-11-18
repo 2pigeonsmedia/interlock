@@ -926,6 +926,37 @@ function pendingJoin(name) {
   } catch (_) { return null; }
 }
 
+/* Once per host session: this doorbell runs in a session other than the
+ * one that joined the connection (or started its waiting join), so two
+ * sessions may be sharing it. Silent when either session is unknown. */
+function warnOtherJoiner(options) {
+  const name = options.connection;
+  let module;
+  let profiles;
+  try {
+    module = require('../src/client/profiles.js');
+    const connectionDir = require('../src/config.js').resolveConnectionDir({ env: process.env, platform: process.platform });
+    profiles = module.openProfiles({ connectionDir });
+  } catch (_) { return; }
+  if (typeof profiles.sessionOf !== 'function' || !module.validSession(options.session)) return;
+  let target = null;
+  try {
+    if (profiles.stagedExists(name)) target = profiles.loadStaged(name);
+    else if (profiles.exists(name)) target = profiles.load(name);
+  } catch (_) { return; }
+  if (!target) return;
+  let starter = null;
+  try { starter = profiles.sessionOf(name, target.request_id); } catch (_) { return; }
+  const mine = module.sessionDigest(options.session);
+  if (starter === null || starter === mine) return;
+  // A record that cannot be written warns every time rather than never.
+  let first = true;
+  try { first = profiles.noteOtherSession(name, target.request_id, mine); } catch (_) { first = true; }
+  if (!first) return;
+  process.stderr.write(`interlock doorbell adapter: warning: ${name} was joined by another session on this computer; ` +
+    'two sessions may be sharing it. Use your own name: interlock join --name …\n');
+}
+
 function waitMs(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
@@ -1086,6 +1117,7 @@ async function runAdapter(argv) {
   // A join still waiting for its Allow: this run waits with it (C6).
   const pending = pendingJoin(options.connection);
   warnSameSession(options, sameSessionOtherConnections(options, stateDir));
+  warnOtherJoiner(options);
   fs.mkdirSync(lockDir, { recursive: true, mode: 0o700 });
   let adapterLock;
   try {

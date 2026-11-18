@@ -96,7 +96,7 @@ test('the Connect an AI sheet gives one instruction, the same one the Guide teac
   const login = ROOM.slice(0, ROOM.indexOf('<main id="room-view"'));
   assert.match(login, /AI joining this room\?/);
   assert.match(login, /Do not sign in here\. Run <code data-interlock-join-command>interlock join<\/code>/);
-  assert.ok(ROOM.includes('Run <code data-interlock-join-command>interlock join</code> <code>--product "&lt;your product&gt;" --name &lt;a name you choose&gt;</code>, then arm your doorbell as join tells you, and confirm with <code>interlock status --connection &lt;that name&gt;</code>.</p>'),
+  assert.ok(ROOM.includes('Run <code data-interlock-join-command>interlock join</code> <code>--product "&lt;your product&gt;" --name &lt;a name you choose&gt;</code>, then arm your doorbell as join tells you, and confirm with <code>interlock status --connection &lt;that name&gt;</code>. Choose a short name a person can say — one word, like a first name; not your product, model or a code.</p>'),
     'the sheet must quote the one line the owner says to the AI');
   assert.match(GUIDE, /Run `interlock join --url URL --product "<your product>" --name <a name you choose>`, then arm your doorbell/,
     'the sheet and the Guide must teach the same sentence, or they drift');

@@ -33,6 +33,17 @@ const READER_LOCK_DIRECTORY = 'reader';
 const PROFILE_LOCK_ATTEMPTS = 200;
 const PROFILE_LOCK_WAIT_MS = 10;
 const PROFILE_LOCK_SLEEP = new Int32Array(new SharedArrayBuffer(4));
+// Which host session started a join, kept beside the profile in a file of
+// its own (NAME.session), so a profile stays readable by an earlier release.
+// It holds a one-way digest of the session id, never the id itself, keyed by
+// the candidate's request id, plus the other sessions already warned about
+// sharing that connection. It guards against two sessions on one computer
+// colliding by accident; any process that can read it can read the token.
+const SESSION_SCHEMA = 1;
+const SESSION_KEYS = Object.freeze(['schema', 'entries']);
+const SESSION_ENTRY_KEYS = Object.freeze(['request_id', 'session', 'warned']);
+const SESSION_DIGEST = /^[0-9a-f]{64}$/;
+const SESSION_WARNED_MAX = 16;
 
 function failure(code) {
   const error = new Error('client.profiles: ' + code);
@@ -80,6 +91,36 @@ function validCandidate(profile) {
       !/^[0-9a-f]{64}$/.test(profile.digest)) return false;
   const secret = profile.token.split('.')[1];
   return crypto.createHash('sha256').update(secret, 'utf8').digest('hex') === profile.digest;
+}
+
+// A host session id as a host hands it over: 1–200 printable characters.
+function validSession(value) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 200 &&
+    !/[\p{Cc}\p{Cf}\p{Cs}\s]/u.test(value);
+}
+
+function sessionDigest(value) {
+  if (!validSession(value)) throw failure('invalid-session');
+  return crypto.createHash('sha256').update('interlock-host-session\0' + value, 'utf8').digest('hex');
+}
+
+// The session record, or an empty one when it is absent or unreadable: an
+// unreadable record means "not known", never "someone else's".
+function parseSessions(raw) {
+  let value;
+  try { value = JSON.parse(raw); } catch (_) { return null; }
+  const record = closedObject(value, SESSION_KEYS, true);
+  if (!record || record.schema !== SESSION_SCHEMA || !Array.isArray(record.entries)) return null;
+  const entries = [];
+  for (const item of record.entries) {
+    const entry = closedObject(item, SESSION_ENTRY_KEYS, true);
+    if (!entry || !UUID_V4.test(entry.request_id) || !SESSION_DIGEST.test(entry.session) ||
+        !Array.isArray(entry.warned) || !entry.warned.every(d => typeof d === 'string' && SESSION_DIGEST.test(d))) {
+      return null;
+    }
+    entries.push({ request_id: entry.request_id, session: entry.session, warned: entry.warned.slice(0, SESSION_WARNED_MAX) });
+  }
+  return { schema: SESSION_SCHEMA, entries };
 }
 
 function validTime(value) {
@@ -179,6 +220,79 @@ function openProfiles(options) {
   function stagedFileFor(name) {
     if (!validName(name)) throw failure('invalid-name');
     return path.join(directory, name.toLowerCase() + '.joining');
+  }
+
+  function sessionFileFor(name) {
+    if (!validName(name)) throw failure('invalid-name');
+    return path.join(directory, name.toLowerCase() + '.session');
+  }
+
+  function readSessions(name) {
+    let raw;
+    try { raw = fs.readFileSync(sessionFileFor(name), 'utf8'); }
+    catch (error) {
+      if (error && error.code === 'ENOENT') return { schema: SESSION_SCHEMA, entries: [] };
+      throw error;
+    }
+    return parseSessions(raw) || { schema: SESSION_SCHEMA, entries: [] };
+  }
+
+  // The request ids that can still matter: the profile's and a staged one's.
+  function liveRequestIds(name) {
+    const live = new Set();
+    try { live.add(readProfile(name).profile.request_id); } catch (_) { /* none */ }
+    try { if (stagedExists(name)) live.add(readStaged(name).candidate.request_id); } catch (_) { /* none */ }
+    return live;
+  }
+
+  // Called with the profile lock held. Drops entries for candidates that are
+  // gone, then removes the file when nothing is left.
+  function writeSessionsLocked(name, record) {
+    const live = liveRequestIds(name);
+    const entries = record.entries.filter(entry => live.has(entry.request_id));
+    const file = sessionFileFor(name);
+    if (entries.length === 0) {
+      try { fs.unlinkSync(file); fsyncDirectory(directory); }
+      catch (error) { if (!error || error.code !== 'ENOENT') throw error; }
+      return;
+    }
+    writeAtomic(file, { schema: SESSION_SCHEMA, entries }, directory);
+  }
+
+  function recordSessionLocked(name, requestId, digest) {
+    const record = readSessions(name);
+    record.entries = record.entries.filter(entry => entry.request_id !== requestId);
+    record.entries.push({ request_id: requestId, session: digest, warned: [] });
+    writeSessionsLocked(name, record);
+  }
+
+  function pruneSessionsLocked(name) {
+    try { writeSessionsLocked(name, readSessions(name)); } catch (_) { /* best effort */ }
+  }
+
+  // The digest of the session that started this candidate, or null when no
+  // session was known then.
+  // Read under the profile lock: a candidate and its starter are written in
+  // one locked step, so a reader never sees the candidate without its starter.
+  function sessionOf(name, requestId) {
+    return withProfileLock(name, () => {
+      const entry = readSessions(name).entries.find(item => item.request_id === requestId);
+      return entry ? entry.session : null;
+    });
+  }
+
+  // Records that `digest` (a session other than the starter) was told about
+  // sharing this connection. True the first time only.
+  function noteOtherSession(name, requestId, digest) {
+    if (!SESSION_DIGEST.test(digest)) throw failure('invalid-session');
+    return withProfileLock(name, () => {
+      const record = readSessions(name);
+      const entry = record.entries.find(item => item.request_id === requestId);
+      if (!entry || entry.session === digest || entry.warned.includes(digest)) return false;
+      entry.warned = entry.warned.concat([digest]).slice(-SESSION_WARNED_MAX);
+      writeSessionsLocked(name, record);
+      return true;
+    });
   }
 
   function lockDirectoryFor(name) {
@@ -325,7 +439,19 @@ function openProfiles(options) {
     return Object.freeze(rows);
   }
 
-  function createUnadmitted(body) {
+  // options.session: the digest of the host session starting this join, or
+  // null. It is recorded under the same lock as the candidate, so no other
+  // join can see the candidate before its starter is known.
+  function createOptions(options) {
+    const value = options === undefined ? { session: null } : closedObject(options, ['session'], true);
+    if (!value || (value.session !== null && !SESSION_DIGEST.test(value.session))) {
+      throw failure('invalid-profile');
+    }
+    return value;
+  }
+
+  function createUnadmitted(body, options) {
+    const { session } = createOptions(options);
     const candidate = closedObject(body, CREATE_KEYS, true);
     if (!candidate) throw failure('invalid-profile');
     const profile = {
@@ -358,11 +484,21 @@ function openProfiles(options) {
         if (error && error.code === 'EEXIST') throw failure('profile-exists');
         throw error;
       }
+      if (session !== null) {
+        try { recordSessionLocked(profile.name, profile.request_id, session); }
+        catch (error) {
+          // A candidate whose starter could not be written is not left behind.
+          fs.unlinkSync(file);
+          fsyncDirectory(directory);
+          throw error;
+        }
+      }
       return Object.freeze(Object.assign({}, profile));
     });
   }
 
-  function createStaged(body) {
+  function createStaged(body, options) {
+    const { session } = createOptions(options);
     const candidate = closedObject(body, CREATE_KEYS, true);
     if (!candidate) throw failure('invalid-profile');
     const profile = {
@@ -404,6 +540,14 @@ function openProfiles(options) {
       } catch (error) {
         if (error && error.code === 'EEXIST') throw failure('staged-profile-exists');
         throw error;
+      }
+      if (session !== null) {
+        try { recordSessionLocked(profile.name, profile.request_id, session); }
+        catch (error) {
+          fs.unlinkSync(file);
+          fsyncDirectory(directory);
+          throw error;
+        }
       }
       return Object.freeze(Object.assign({}, profile));
     });
@@ -481,6 +625,7 @@ function openProfiles(options) {
     writeAtomic(fileFor(name), next, directory);
     fs.unlinkSync(stagedFileFor(name));
     fsyncDirectory(directory);
+    pruneSessionsLocked(name);
     return { profile: Object.freeze(next), wrote: true };
   }
 
@@ -535,6 +680,7 @@ function openProfiles(options) {
       }
       fs.unlinkSync(fileFor(name));
       fsyncDirectory(directory);
+      pruneSessionsLocked(name);
     });
   }
 
@@ -544,6 +690,7 @@ function openProfiles(options) {
       if (prior.request_id !== requestId) throw failure('profile-collision');
       fs.unlinkSync(stagedFileFor(name));
       fsyncDirectory(directory);
+      pruneSessionsLocked(name);
     });
   }
 
@@ -567,14 +714,18 @@ function openProfiles(options) {
       if (prior.state !== 'admitted' || stagedExists(name)) throw failure('profile-collision');
       fs.unlinkSync(fileFor(name));
       fsyncDirectory(directory);
+      pruneSessionsLocked(name);
     });
   }
 
   return Object.freeze({
     createUnadmitted, createStaged, exists, stagedExists, load, loadStaged, summaries,
+    sessionOf, noteOtherSession,
     admitCandidate, markAdmitted, markStagedAdmitted, removeUnadmitted, removeStaged, updateCursor,
     forgetAdmitted, acquireReadLease,
   });
 }
 
-module.exports = Object.freeze({ openProfiles, SCHEMA, validName, validProduct, validUrl });
+module.exports = Object.freeze({
+  openProfiles, SCHEMA, validName, validProduct, validUrl, validSession, sessionDigest,
+});
