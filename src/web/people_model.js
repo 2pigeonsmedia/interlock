@@ -334,8 +334,19 @@
       ? kind.next : null;
   }
 
+  // While a person's own time zone is unset, People says so in one line and
+  // offers the browser's zone for one click; with no browser zone it points
+  // to Settings. The room never guesses (it is saved only on that click).
+  function timeZonePrompt(zone, offered) {
+    if (typeof zone === 'string' && zone.length > 0) return null;
+    const text = 'Your AIs are told "time zone not set".';
+    return typeof offered === 'string' && offered.length > 0
+      ? { text, use: 'Use ' + offered }
+      : { text: text + ' Set it in Settings.', use: null };
+  }
+
   const contract = Object.freeze({
-    deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {

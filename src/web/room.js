@@ -98,6 +98,9 @@ const timeZoneInput = document.querySelector('#time-zone');
 const timeZoneBrowser = document.querySelector('#time-zone-browser');
 const timeZoneUseBrowser = document.querySelector('#time-zone-use-browser');
 const timeZoneClear = document.querySelector('#time-zone-clear');
+const timeZonePromptLine = document.querySelector('#time-zone-prompt');
+const timeZonePromptText = document.querySelector('#time-zone-prompt-text');
+const timeZonePromptUse = document.querySelector('#time-zone-prompt-use');
 const settingsGrants = document.querySelector('#settings-grants');
 // A member brings their own AI.
 const memberCodesSwitch = document.querySelector('#member-codes-switch');
@@ -422,6 +425,8 @@ function showRoom(user) {
   roomView.hidden = false;
   restartAuthenticatedReaders();
   if (user.kind === 'person') loadPendingAis();
+  if (user.kind === 'person') checkTimeZonePrompt();
+  else renderTimeZonePrompt('none');
   if (!owner) renderPendingAis([]);
   stopRoomFacts();
   roomFactTicks = 0;
@@ -1937,22 +1942,51 @@ async function fillTimeZone() {
   }
 }
 
+// People's one-line prompt while the viewer's own zone is unset. `zone` is
+// the saved zone, null when unset; anything else hides the line.
+function renderTimeZonePrompt(zone) {
+  const prompt = zone === null ? InterlockPeopleModel.timeZonePrompt(null, browserTimeZone()) : null;
+  timeZonePromptLine.hidden = prompt === null;
+  timeZonePromptText.textContent = prompt ? prompt.text : '';
+  timeZonePromptUse.textContent = prompt && prompt.use ? prompt.use : '';
+  timeZonePromptUse.hidden = !(prompt && prompt.use);
+}
+
+// Reads the viewer's zone on entering the room. It never saves: the browser's
+// zone is only offered. A failed read shows nothing rather than a false line.
+async function checkTimeZonePrompt() {
+  try {
+    const response = await fetch('/api/settings/time-zone', { cache: 'no-store', credentials: 'same-origin' });
+    const result = await readJson(response);
+    if (response.ok && result && result.ok === true && (result.time_zone === null || typeof result.time_zone === 'string')) {
+      renderTimeZonePrompt(result.time_zone);
+      return;
+    }
+  } catch (_) {
+    // Shown nothing; Settings still sets it.
+  }
+  renderTimeZonePrompt('unknown');
+}
+
 async function saveTimeZone(zone) {
   setSettingsStatus(settingsYourStatus, 'Saving…');
   try {
     await ownerMutation('/api/settings/time-zone', { time_zone: zone });
     timeZoneInput.value = zone || '';
+    renderTimeZonePrompt(zone);
     setSettingsStatus(settingsYourStatus, zone === null
       ? 'Your time zone is cleared. Your AIs are told it is not set.' : `Your time zone is ${zone}.`, 'success');
+    return true;
   } catch (error) {
     if (error.code === 'not-authenticated') {
       forgetCsrf();
       showLogin('Your session ended. Sign in again to continue.');
-      return;
+      return false;
     }
     setSettingsStatus(settingsYourStatus, error.code === 'invalid-request'
       ? 'Interlock does not know that time zone. Use a name like America/New_York.'
       : 'Interlock did not save your time zone. Try again.', 'error');
+    return false;
   }
 }
 
@@ -1966,6 +2000,15 @@ timeZoneUseBrowser.addEventListener('click', () => {
   if (offered) saveTimeZone(offered);
 });
 timeZoneClear.addEventListener('click', () => saveTimeZone(null));
+timeZonePromptUse.addEventListener('click', async () => {
+  const offered = browserTimeZone();
+  if (!offered) return;
+  timeZonePromptUse.disabled = true;
+  if (!await saveTimeZone(offered)) {
+    timeZonePromptText.textContent = 'Interlock did not save your time zone. Try again, or set it in Settings.';
+  }
+  timeZonePromptUse.disabled = false;
+});
 
 profileForm.addEventListener('submit', async event => {
   event.preventDefault();
