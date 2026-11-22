@@ -2220,6 +2220,31 @@ const RING_PREVIEW_DELAY_MS = 250;
 let ringPreviewTimer = null;
 let ringPreviewGeneration = 0;
 
+// The composer's line for `text` as the room answers it. A request for
+// approval is not a chat post, so it has no preview; an ask of a person the
+// send would refuse until what a yes means is filled in says so.
+async function ringPreviewLine(text) {
+  const csrf = readCsrf();
+  if (!csrf || approvalMode()) return InterlockMentions.previewWords(null);
+  if (!askFields.hidden && askMeans.required && askMeans.value.trim() === '') {
+    return InterlockMentions.previewWords('means-required');
+  }
+  try {
+    const annotation = composerAnnotation();
+    const response = await fetch('/api/ring-preview', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify(annotation === null ? { text } : { text, annotation }),
+    });
+    const result = await readJson(response);
+    if (response.ok && result && result.ok === true) return InterlockMentions.previewWords(result.recipients);
+  } catch (_) {
+    // Falls through: no answer from the room.
+  }
+  return InterlockMentions.previewWords(null);
+}
+
 function updateMentionPreview() {
   clearTimeout(ringPreviewTimer);
   ringPreviewGeneration += 1;
@@ -2230,23 +2255,7 @@ function updateMentionPreview() {
     return;
   }
   ringPreviewTimer = setTimeout(async () => {
-    let words = InterlockMentions.previewWords(null);
-    try {
-      const csrf = readCsrf();
-      // A request for approval is not a chat post: no preview of it.
-      if (!csrf || approvalMode()) throw new Error('no preview');
-      const annotation = composerAnnotation();
-      const response = await fetch('/api/ring-preview', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
-        body: JSON.stringify(annotation === null ? { text } : { text, annotation }),
-      });
-      const result = await readJson(response);
-      if (response.ok && result && result.ok === true) words = InterlockMentions.previewWords(result.recipients);
-    } catch (_) {
-      words = InterlockMentions.previewWords(null);
-    }
+    const words = await ringPreviewLine(text);
     if (generation !== ringPreviewGeneration) return;
     mentionPreview.textContent = words;
   }, RING_PREVIEW_DELAY_MS);
@@ -3451,6 +3460,7 @@ askToggle.addEventListener('click', () => setAskMode(askFields.hidden));
 askApproval.addEventListener('change', updateApprovalMode);
 askOf.addEventListener('change', updateAskMeansRequired);
 askOf.addEventListener('change', updateMentionPreview);
+askMeans.addEventListener('input', updateMentionPreview);
 askLater.addEventListener('change', updateMentionPreview);
 askApproval.addEventListener('change', updateMentionPreview);
 askToggle.addEventListener('click', updateMentionPreview);

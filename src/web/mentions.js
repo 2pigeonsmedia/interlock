@@ -54,6 +54,8 @@
   // (POST /api/ring-preview). Anything but a list of names means the room
   // did not answer, and the line says so rather than guessing.
   function previewWords(recipients) {
+    // An ask of a person needs what a yes means before the room will take it.
+    if (recipients === 'means-required') return 'Fill in what a yes means to preview who this rings.';
     if (!Array.isArray(recipients) || !recipients.every(name => typeof name === 'string' && name.length > 0)) {
       return "Can't preview who this rings.";
     }

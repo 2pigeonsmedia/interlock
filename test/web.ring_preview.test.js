@@ -24,7 +24,7 @@ test('no answer from the room reads as no preview, never as a guess', () => {
   }
 });
 
-const preview = () => ROOM_JS.slice(ROOM_JS.indexOf('function updateMentionPreview'),
+const preview = () => ROOM_JS.slice(ROOM_JS.indexOf('async function ringPreviewLine'),
   ROOM_JS.indexOf('function insertMention'));
 
 test('the composer asks the room, and drops a stale answer', () => {
@@ -46,4 +46,11 @@ test('changing the ask or the bound answers refreshes the preview', () => {
     assert.match(ROOM_JS, new RegExp(control + "\\.addEventListener\\('change', updateMentionPreview\\)"), control);
   }
   assert.match(ROOM_JS, /askToggle\.addEventListener\('click', updateMentionPreview\)/);
+});
+
+test('an ask of a person with "what a yes means" still empty says why there is no preview', () => {
+  assert.equal(previewWords('means-required'), 'Fill in what a yes means to preview who this rings.');
+  const fn = preview();
+  assert.match(fn, /askMeans\.required && askMeans\.value\.trim\(\) === ''[\s\S]*previewWords\('means-required'\)/);
+  assert.match(ROOM_JS, /askMeans\.addEventListener\('input', updateMentionPreview\)/);
 });
