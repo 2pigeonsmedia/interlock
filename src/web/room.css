@@ -592,6 +592,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 /* The one alarm: a room that cannot reach the seat (webhook failing). */
 .presence-lamp[data-state="alarm"] { background: var(--ember); box-shadow: 0 0 7px rgb(255 107 122 / 0.8); }
 .person-card[data-alarm="true"] .participant-state { color: var(--ember); }
+.person-card[data-alarm="true"] .participant-alarm-reason { color: var(--ember); }
 /* An AI whose Interlock is older than the room's: said to its person and the owner. */
 .client-notice { color: var(--wait-text); }
 .people-group[data-group="recently-left"] .person-row { cursor: default; }

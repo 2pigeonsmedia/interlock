@@ -315,8 +315,27 @@
     return Object.hasOwn(ENDED_WORDS, how) ? ENDED_WORDS[how] : 'ended';
   }
 
+  // The line under a message for an AI that has not picked it up: People's
+  // own word for the seat and its age, from the room's presence_kind (never
+  // inferred from poll times). "not in People" only when the live roster has
+  // no such seat.
+  function deliveryLabel(row, now) {
+    if (!row) return 'Not picked up · not in People';
+    if (!row.presence_kind || typeof row.presence_kind.kind !== 'string') return 'Not picked up';
+    const { word } = kindWord(row, null);
+    const since = age(row.presence_kind.since, now);
+    return ['Not picked up', word].concat(since ? [since] : []).join(' · ');
+  }
+
+  // An unreachable (red) card says why on its face: the room's own reason.
+  function alarmReason(row) {
+    const kind = row && row.kind === 'seat' ? row.presence_kind : null;
+    return kind && kind.kind === 'unreachable' && typeof kind.next === 'string' && kind.next.length > 0
+      ? kind.next : null;
+  }
+
   const contract = Object.freeze({
-    endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {

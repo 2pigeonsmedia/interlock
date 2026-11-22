@@ -889,8 +889,7 @@ function pendingDeliveryLabel(value) {
   if (!rosterKnown) return 'Not picked up';
   const participant = rosterParticipants.find(row => row.kind === 'seat' &&
     row.name === value.name && deliverySessionKey(row) === deliverySessionKey(value));
-  return participant && participant.present
-    ? 'Not picked up' : 'Not picked up · not in People';
+  return InterlockPeopleModel.deliveryLabel(participant || null, Date.now());
 }
 
 function refreshPendingDeliveryPresence() {
@@ -1231,6 +1230,8 @@ function rosterCard(participant, now, focusable) {
     'participant-state',
   ));
   card.append(toggle);
+  const reason = InterlockPeopleModel.alarmReason(participant);
+  if (reason) card.append(participantFact(reason, 'participant-alarm-reason'));
   if (state.notPickedUp) card.append(participantFact(state.notPickedUp, 'outstanding'));
   // Shown to that AI's own person and the owner only (the room decides).
   if (participant.client_notice) card.append(participantFact(participant.client_notice, 'client-notice'));

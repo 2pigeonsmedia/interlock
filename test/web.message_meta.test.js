@@ -94,7 +94,7 @@ test('People keeps quiet AI clients listed as quiet, without deleting their mana
   assert.match(room,
     /!isOwner && participant\.live !== false/,
     'live seats stay removable in Settings; already-ended seats do not');
-  assert.match(room,
+  assert.match(peopleModel,
     /'Not picked up · not in People'/,
     'an old pending receipt must not make an absent AI look present and ignoring');
   assert.match(readme,
