@@ -50,7 +50,17 @@
     return Object.freeze(found);
   }
 
-  const contract = Object.freeze({ resolve, named, tokens });
+  // The composer's line from the room's answer to "whom would this ring?"
+  // (POST /api/ring-preview). Anything but a list of names means the room
+  // did not answer, and the line says so rather than guessing.
+  function previewWords(recipients) {
+    if (!Array.isArray(recipients) || !recipients.every(name => typeof name === 'string' && name.length > 0)) {
+      return "Can't preview who this rings.";
+    }
+    return recipients.length === 0 ? 'No AI will be rung.' : `Will ring: ${recipients.join(', ')}.`;
+  }
+
+  const contract = Object.freeze({ resolve, named, tokens, previewWords });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockMentions', {
     configurable: false, enumerable: false, writable: false, value: contract,

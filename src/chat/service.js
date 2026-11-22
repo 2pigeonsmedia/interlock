@@ -211,10 +211,9 @@ function createChatService(options) {
     return [...found.values()];
   }
 
-  /* A message and its annotation in one call: the ask has to be known before
-   * recipients are frozen on the row, or it could neither ring nor hold. */
-  async function appendAnnotated(body, actor, annotationIn, requireNew = false, approverOf = null, decisionOf = null) {
-    // Every key is optional on the wire; absent means none.
+  /* The annotation as the room reads it: every key optional on the wire,
+   * absent meaning none. Throws the refusal a send would get. */
+  function normalizeAnnotation(annotationIn) {
     const input = closedObject(annotationIn, ['ask', 'answers', 'status', 'read_through', 'discusses']);
     if (!input) throw fail('invalid-annotation');
     const answers = input.answers === undefined ? [] : input.answers;
@@ -232,19 +231,26 @@ function createChatService(options) {
         revision: entry.revision === undefined ? 1 : entry.revision,
       };
     });
-    return await appendWith(body, actor, requireNew === true, {
+    return {
       ask: input.ask === undefined ? null : input.ask,
       answers: normalized,
       status: input.status === undefined ? null : input.status,
       read_through: input.read_through === undefined ? null : input.read_through,
       discusses: input.discusses === undefined ? null : input.discusses,
-    }, approverOf instanceof Set ? approverOf : null, decisionOf instanceof Set ? decisionOf : null);
+    };
   }
 
-  async function appendWith(body, actor, requireNew, annotationIn, approverOf = null, decisionOf = null) {
-    requireOpen();
-    const now = Date.now();
-    await store.touch(actor.subject_id, now);
+  /* A message and its annotation in one call: the ask has to be known before
+   * recipients are frozen on the row, or it could neither ring nor hold. */
+  async function appendAnnotated(body, actor, annotationIn, requireNew = false, approverOf = null, decisionOf = null) {
+    return await appendWith(body, actor, requireNew === true, normalizeAnnotation(annotationIn),
+      approverOf instanceof Set ? approverOf : null, decisionOf instanceof Set ? decisionOf : null);
+  }
+
+  /* Who a post rings, and the annotation it is saved with: every recipient
+   * rule in one place, shared by a send and its preview. It reads the room
+   * and writes nothing. */
+  async function planDelivery(body, actor, annotationIn, now) {
     const everyone = await participantSnapshot(now);
     // A seat the room rings by webhook has no poller, so it is never
     // "present" by its polls; it is rung while it is admitted (A8).
@@ -334,6 +340,26 @@ function createChatService(options) {
       body && body.text, roster, actor && actor.subject_id, askTarget, deliver,
       targeted ? askers : askers.concat(await addressersOf(actor, everyone)),
     );
+    return { annotation, recipients };
+  }
+
+  /* The composer's forecast: who this post would ring if it were sent now,
+   * by the same rules on the same state as a send (planDelivery). A send
+   * freezes its own recipients on the saved row, and that row's delivery
+   * stays the truth. Read-only: no presence touch, no receipt, no write.
+   * Throws the refusal a send would get from the same step. */
+  async function previewRecipients(body, actor, annotationIn = null) {
+    requireOpen();
+    const normalized = annotationIn === null ? null : normalizeAnnotation(annotationIn);
+    const { recipients } = await planDelivery(body, actor, normalized, Date.now());
+    return Object.freeze(recipients.map(recipient => recipient.name));
+  }
+
+  async function appendWith(body, actor, requireNew, annotationIn, approverOf = null, decisionOf = null) {
+    requireOpen();
+    const now = Date.now();
+    await store.touch(actor.subject_id, now);
+    const { annotation, recipients } = await planDelivery(body, actor, annotationIn, now);
     // The log's head before this post: a retried post answered by its first
     // save comes back at or below it, and is not handed to webhooks again.
     const headBefore = input.onSaved !== undefined ? (await store.head()).head : null;
@@ -871,7 +897,7 @@ function createChatService(options) {
   }
 
   return Object.freeze({
-    append, appendAnnotated, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
+    append, appendAnnotated, previewRecipients, annotate, askerOf, stamp, readAnnotations, openAsks, repliedAskProject, postFacts, addresseeAnswers, revisionOf,
     read, addressedSince, readForSeat, wait, waitForSeat, waitForSeatRings,
     acknowledge, peekBefore, peekFind, head,
     touchParticipant, notePoll, notePause, noteWebhookDelivery, lastPersonMessageAt, ringCauses, noteOrdinaryRead, listParticipants, participantState, readDeliveryChanges, transcriptCleared, close,

@@ -2211,19 +2211,45 @@ async function revokeGrant(grant, button) {
   }
 }
 
-// As the room rings: @all reaches the present AIs, and an @Name any
-// admitted AI, present or not (its ring waits for its next poll).
-function mentionRecipients(text) {
-  const named = new Set(InterlockMentions.named(text, rosterAllSeats.map(seat => seat.name)));
-  const ringable = rosterAllSeats.filter(seat => seat.present || named.has(seat.name));
-  return InterlockMentions.resolve(text, ringable.map(seat => seat.name));
-}
+// Whom the draft will ring, as the room answers it (POST /api/ring-preview):
+// the room runs its own recipient rules on its own state, so the line names
+// the AIs a reply or an answer rings without a tag, not only the @mentions.
+// The saved message's delivery stays the truth; this is its forecast. Typing
+// waits a moment before asking, and an answer for older text is dropped.
+const RING_PREVIEW_DELAY_MS = 250;
+let ringPreviewTimer = null;
+let ringPreviewGeneration = 0;
 
 function updateMentionPreview() {
-  const recipients = mentionRecipients(messageBody.value);
-  mentionPreview.textContent = recipients.length === 0
-    ? 'No AI will be rung.'
-    : `Will ring: ${recipients.join(', ')}.`;
+  clearTimeout(ringPreviewTimer);
+  ringPreviewGeneration += 1;
+  const generation = ringPreviewGeneration;
+  const text = messageBody.value;
+  if (text.trim() === '') {
+    mentionPreview.textContent = InterlockMentions.previewWords([]);
+    return;
+  }
+  ringPreviewTimer = setTimeout(async () => {
+    let words = InterlockMentions.previewWords(null);
+    try {
+      const csrf = readCsrf();
+      // A request for approval is not a chat post: no preview of it.
+      if (!csrf || approvalMode()) throw new Error('no preview');
+      const annotation = composerAnnotation();
+      const response = await fetch('/api/ring-preview', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
+        body: JSON.stringify(annotation === null ? { text } : { text, annotation }),
+      });
+      const result = await readJson(response);
+      if (response.ok && result && result.ok === true) words = InterlockMentions.previewWords(result.recipients);
+    } catch (_) {
+      words = InterlockMentions.previewWords(null);
+    }
+    if (generation !== ringPreviewGeneration) return;
+    mentionPreview.textContent = words;
+  }, RING_PREVIEW_DELAY_MS);
 }
 
 function insertMention(name) {
@@ -2718,6 +2744,7 @@ function renderBindChips(addressed) {
         shownRevisions.set(ask.ask_id, ask.revision);
       }
       chip.setAttribute('aria-pressed', pickedAsks.has(ask.ask_id) ? 'true' : 'false');
+      updateMentionPreview();
     });
     askBindChips.append(chip);
   }
@@ -3423,6 +3450,10 @@ document.addEventListener('interlock:answer-ask', event => {
 askToggle.addEventListener('click', () => setAskMode(askFields.hidden));
 askApproval.addEventListener('change', updateApprovalMode);
 askOf.addEventListener('change', updateAskMeansRequired);
+askOf.addEventListener('change', updateMentionPreview);
+askLater.addEventListener('change', updateMentionPreview);
+askApproval.addEventListener('change', updateMentionPreview);
+askToggle.addEventListener('click', updateMentionPreview);
 
 logoutButton.addEventListener('click', async () => {
   const logoutCsrf = readCsrf();

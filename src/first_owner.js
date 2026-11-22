@@ -3412,6 +3412,47 @@ function createFirstOwnerHandler(options) {
     }
   }
 
+  /* The composer's ring preview: whom this post would ring if the viewer
+   * sent it now, by the room's own recipient rules on the room's own state
+   * (the chat service's planDelivery, shared with a send). View-only: it
+   * posts nothing, touches no presence, writes no receipt. The saved row's
+   * delivery stays the truth; this is a forecast of it. */
+  async function previewRing(request, response, body) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const input = closedObject(body, ['text']) || closedObject(body, ['text', 'annotation']);
+    if (!input || typeof input.text !== 'string') {
+      sendJson(request, response, 400, { ok: false, error: 'invalid-message' });
+      return;
+    }
+    const now = Date.now();
+    const authorized = house.authorizeWrite(authorizationMeta(request, now), 'write', CHAT_RESOURCE);
+    if (!authorized || authorized.allow !== true) {
+      refuseAuthorization(request, response, authorized, house.resolveSession({
+        cookie_header: request.headers.cookie, activity: 'passive-delivery', now,
+      }));
+      return;
+    }
+    const actor = authorizedActor(request, authorized, now, 'passive-delivery');
+    if (actor === null) {
+      sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
+      return;
+    }
+    const asked = input.annotation === undefined ? { annotation: null } : withAskProject(input.annotation, actor);
+    if (asked.error) {
+      sendJson(request, response, 400, asked.refusal || { ok: false, error: asked.error });
+      return;
+    }
+    try {
+      const recipients = await chat.previewRecipients({ text: input.text }, actor, asked.annotation);
+      sendJson(request, response, 200, { ok: true, recipients: [...recipients] });
+    } catch (error) {
+      annotationRefusal(request, response, error);
+    }
+  }
+
   function lifecycleInput(body) {
     // The asker's link from a withdrawn ask to the ask that replaces it.
     const successor = closedObject(body, ['kind', 'ask_id', 'successor_id']);
@@ -4574,6 +4615,7 @@ function createFirstOwnerHandler(options) {
     ['/api/transcript/clear', clearTranscript],
     ['/api/messages', appendMessage],
     ['/api/annotated-messages', appendAnnotatedMessage],
+    ['/api/ring-preview', previewRing],
     ['/api/annotations', annotateAsPerson],
     ['/api/grants/create', createGrant],
     ['/api/grants/revoke', revokeGrant],
