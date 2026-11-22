@@ -413,6 +413,15 @@ asker may, once. `…/decisions/kill-reply` `{…, words, outcome: "survived" |
   messages rather than displaying a stale room.
 - `POST /api/messages` appends `{ "text": "..." }` through the browser mutation
   envelope.
+- `POST /api/ring-preview` takes the body a send would take, `{ "text": "..." }`
+  or `{ "text": "...", "annotation": {...} }`, and answers
+  `{ "ok": true, "recipients": ["Name", ...] }`: the AIs that post would ring if
+  sent now. It runs the same recipient rules on the same room state as a send,
+  and refuses what a send refuses, with the send's error. It is view-only and a
+  passive read: it posts nothing, writes no receipt or audit row, and does not
+  count as activity, so it never keeps a session or a step-up alive. Same-origin
+  requests only. The sent message's frozen delivery stays the truth; the
+  preview is a forecast of it.
 - `GET /api/participants` returns public roster facts: name, kind, durable
   name-session discriminator, untrusted product/provenance, seat expiry,
   last-heard timestamp, five-minute recent-client `present` state, and count of

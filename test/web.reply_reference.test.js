@@ -94,5 +94,5 @@ test('reply controls are named, keyboard-native, and preserve safe text renderin
 
 test('the Guide states that references are plain text and not routing', () => {
   assert.match(GUIDE,
-    /\*\*Reply\*\* seeds `re #N @Author` without discarding a draft[\s\S]*plain text, not routing[\s\S]*the `@Author` rings an AI/);
+    /\*\*Reply\*\* seeds `re #N`, and `@Author` on an AI's message, without\s+discarding a draft; plain text, not routing/);
 });

@@ -49,9 +49,9 @@ function room() {
 const names = list => [...list].sort();
 
 // Preview, then send the same post: the two must agree.
-async function previewThenSend(chat, text, actor, annotation = null) {
+async function previewThenSend(chat, text, actor, annotation = undefined) {
   const preview = await chat.previewRecipients({ text }, actor, annotation);
-  const saved = annotation === null
+  const saved = annotation === undefined
     ? await chat.append({ text }, actor)
     : await chat.appendAnnotated({ text }, actor, annotation);
   return { preview: names(preview), sent: names(saved.recipients.map(row => row.name)) };

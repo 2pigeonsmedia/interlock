@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { seed, tagAuthor } = require('../src/web/reply_reference.js');
+const { seed, tagAuthor, replyAuthor } = require('../src/web/reply_reference.js');
 const { resolve } = require('../src/web/mentions.js');
 
 const ROOM_JS = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.js'), 'utf8');
@@ -39,5 +39,14 @@ test('a draft already under way keeps its words after the tag', () => {
 test('the page seeds the message\'s author on Reply, and the ask\'s asker from the work panel', () => {
   const seedFn = ROOM_JS.slice(ROOM_JS.indexOf('function seedReply'), ROOM_JS.indexOf('function renderMessage('));
   assert.match(seedFn, /tagAuthor\(/);
-  assert.match(ROOM_JS, /seedReply\(message\.id, message\.byline\)/);
+  assert.match(ROOM_JS, /seedReply\(message\.id, InterlockReplyReference\.replyAuthor\(message\)\)/);
+});
+
+test('Reply tags an AI\'s message, and seeds no tag on a person\'s, so that reply still rings back', () => {
+  const ai = { kind: 'seat', byline: 'Rowan' };
+  const person = { kind: 'person', byline: 'Bea' };
+  assert.equal(tagAuthor(seed('', 4), replyAuthor(ai), 'Ana'), 're #4 @Rowan ');
+  assert.equal(tagAuthor(seed('', 5), replyAuthor(person), 'Ana'), 're #5 ',
+    'a tag on a person would make the post targeted and drop the AIs that addressed the author');
+  assert.equal(replyAuthor(null), null);
 });

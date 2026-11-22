@@ -46,7 +46,14 @@
     return `${text.slice(0, reference.prefixEnd)} @${author} ${rest}`;
   }
 
-  const contract = Object.freeze({ parse, seed, tagAuthor });
+  // The author Reply tags: an AI's, so the reply rings it. A person is never
+  // tagged: any @ makes a post targeted, and an untagged reply to a person
+  // still rings back the AIs that addressed its author.
+  function replyAuthor(message) {
+    return message && message.kind === 'seat' && typeof message.byline === 'string' ? message.byline : null;
+  }
+
+  const contract = Object.freeze({ parse, seed, tagAuthor, replyAuthor });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockReplyReference', {
     configurable: false, enumerable: false, writable: false, value: contract,

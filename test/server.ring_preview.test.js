@@ -6,6 +6,8 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const { admitSeat, aiPost, bootstrap, call, elevate, get, login, post, startRoom } = require('./helpers/room_server.js');
@@ -65,10 +67,38 @@ test('a preview needs a signed-in person and the request envelope', async () => 
   const { runtime, ana, rowan } = await setUp();
   const signedOut = await post(runtime, '/api/ring-preview', { text: 'x' }, {});
   assert.equal(signedOut.status, 401, signedOut.text);
-  const noCsrf = await post(runtime, '/api/ring-preview', { text: 'x' }, { cookie: ana.cookie });
-  assert.notEqual(noCsrf.status, 200, 'no CSRF token, no preview');
+  // A passive read, like the People poll: the same-origin envelope guards it.
+  const crossSite = await post(runtime, '/api/ring-preview', { text: 'x' }, ana, { 'sec-fetch-site': 'cross-site' });
+  assert.equal(crossSite.status, 403, crossSite.text);
+  const noOrigin = await post(runtime, '/api/ring-preview', { text: 'x' }, ana, { origin: 'https://elsewhere.example' });
+  assert.equal(noOrigin.status, 403, noOrigin.text);
   const asAi = await aiPost(runtime, '/api/ring-preview', { text: 'x' }, rowan.token);
   assert.notEqual(asAi.status, 200, 'the page route is for a signed-in person');
   const read = await call(runtime, { path: '/api/ring-preview', headers: { cookie: ana.cookie } });
   assert.ok([404, 405].includes(read.status), `a GET is not a preview (${read.status})`);
+});
+
+test('the preview refuses what a send refuses, with the send\'s own answer', async () => {
+  const { runtime, ana } = await setUp();
+  const cases = [
+    ['empty text', { text: '' }, '/api/messages'],
+    ['text over 32 KiB', { text: 'x'.repeat(33 * 1024) }, '/api/messages'],
+    ['a NUL in the text', { text: 'hello\u0000there' }, '/api/messages'],
+    ['annotation null', { text: 'hello', annotation: null }, '/api/annotated-messages'],
+  ];
+  const before = await head(runtime, ana);
+  for (const [label, body, sendRoute] of cases) {
+    const sent = await post(runtime, sendRoute, body, ana);
+    assert.equal(sent.status, 400, `arrangement: the send refuses ${label} (${sent.text})`);
+    const preview = await post(runtime, '/api/ring-preview', body, ana);
+    assert.deepEqual([preview.status, preview.json && preview.json.error], [sent.status, sent.json.error], label);
+  }
+  assert.equal(await head(runtime, ana), before, 'nothing was posted');
+  const fine = await post(runtime, '/api/ring-preview', { text: 'hello' }, ana);
+  assert.equal(fine.status, 200, 'control: an ordinary draft still previews');
+});
+
+test('the protocol describes the preview as a passive, view-only read with a send\'s rules', () => {
+  const protocol = fs.readFileSync(path.join(__dirname, '..', 'docs', 'PROTOCOL.md'), 'utf8');
+  assert.match(protocol, /`POST \/api\/ring-preview`[\s\S]{0,600}same recipient rules[\s\S]{0,300}view-only and a\s+passive read/);
 });

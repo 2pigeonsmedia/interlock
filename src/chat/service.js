@@ -6,6 +6,7 @@
 const InterlockMentions = require('../web/mentions.js');
 const InterlockReplyReference = require('../web/reply_reference.js');
 const Annotations = require('./annotations.js');
+const { isAllowedText } = require('./store.js');
 const PresenceKind = require('./presence_kind.js');
 
 const MAX_WAIT_MS = 45_000;
@@ -347,11 +348,17 @@ function createChatService(options) {
    * by the same rules on the same state as a send (planDelivery). A send
    * freezes its own recipients on the saved row, and that row's delivery
    * stays the truth. Read-only: no presence touch, no receipt, no write.
-   * Throws the refusal a send would get from the same step. */
-  async function previewRecipients(body, actor, annotationIn = null) {
+   * It refuses what a send refuses, by the send's own checks: the store's
+   * text rule, the annotation's shape and parse, and planDelivery's own
+   * refusals. (The host's approver gate is the host's, and not run here.)
+   * `annotationIn` undefined means a plain message; null is refused, as a
+   * send with an annotation refuses it. */
+  async function previewRecipients(body, actor, annotationIn = undefined) {
     requireOpen();
-    const normalized = annotationIn === null ? null : normalizeAnnotation(annotationIn);
-    const { recipients } = await planDelivery(body, actor, normalized, Date.now());
+    if (!body || !isAllowedText(body.text)) throw fail('invalid-text');
+    const normalized = annotationIn === undefined ? null : normalizeAnnotation(annotationIn);
+    const { annotation, recipients } = await planDelivery(body, actor, normalized, Date.now());
+    if (annotation !== null && Annotations.parseRequest(annotation) === null) throw fail('invalid-annotation');
     return Object.freeze(recipients.map(recipient => recipient.name));
   }
 

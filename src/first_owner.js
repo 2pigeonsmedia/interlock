@@ -3423,16 +3423,17 @@ function createFirstOwnerHandler(options) {
       return;
     }
     const input = closedObject(body, ['text']) || closedObject(body, ['text', 'annotation']);
-    if (!input || typeof input.text !== 'string') {
+    if (!input) {
       sendJson(request, response, 400, { ok: false, error: 'invalid-message' });
       return;
     }
+    // A passive read, like the People poll: a draft left in the composer
+    // must not keep a session signed in, keep a step-up fresh, or write an
+    // audit row. The router's same-origin envelope already guards every POST.
     const now = Date.now();
-    const authorized = house.authorizeWrite(authorizationMeta(request, now), 'write', CHAT_RESOURCE);
+    const authorized = house.authorizeRead(authorizationMeta(request, now), 'read', CHAT_RESOURCE);
     if (!authorized || authorized.allow !== true) {
-      refuseAuthorization(request, response, authorized, house.resolveSession({
-        cookie_header: request.headers.cookie, activity: 'passive-delivery', now,
-      }));
+      refuseAuthorization(request, response, authorized, null);
       return;
     }
     const actor = authorizedActor(request, authorized, now, 'passive-delivery');
@@ -3440,7 +3441,7 @@ function createFirstOwnerHandler(options) {
       sendJson(request, response, 403, { ok: false, error: 'not-authorized' });
       return;
     }
-    const asked = input.annotation === undefined ? { annotation: null } : withAskProject(input.annotation, actor);
+    const asked = input.annotation === undefined ? { annotation: undefined } : withAskProject(input.annotation, actor);
     if (asked.error) {
       sendJson(request, response, 400, asked.refusal || { ok: false, error: asked.error });
       return;

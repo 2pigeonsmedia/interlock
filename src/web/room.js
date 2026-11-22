@@ -147,6 +147,8 @@ let rosterPending = [];
 let rosterPendingNote = '';
 let rosterSeats = [];
 let rosterAllSeats = [];
+// The AIs the draft could ring (name and present), as of the last People read.
+let ringableKey = null;
 let rosterKnown = false;
 let rosterLoading = false;
 // People facts beside the roster: the room's grants and its live projects.
@@ -1107,7 +1109,13 @@ function renderRoster(participants) {
   rosterKnown = true;
   drawRoster();
   renderMentionSuggestions();
-  updateMentionPreview();
+  // Re-ask whom the draft rings only when the AIs it could ring change: a
+  // poll that changes nothing sends nothing.
+  const ringable = rosterAllSeats.map(seat => `${seat.name}:${seat.present}`).sort().join('|');
+  if (ringable !== ringableKey) {
+    ringableKey = ringable;
+    updateMentionPreview();
+  }
   refreshPendingDeliveryPresence();
   if (!askFields.hidden) renderAskTargets();
 }
@@ -2974,7 +2982,7 @@ function openRevise(chip, ask) {
   input.focus();
 }
 
-/* Reply names the message's author, so a reply to an AI rings it. Reply on a
+/* Reply names an AI author, so a reply to an AI rings it. Reply on a
  * message that carries an ask is a discussion, not an answer: it names the
  * asker and points at the ask, and it binds and closes nothing. */
 function seedReply(messageId, author = null) {
@@ -3024,7 +3032,7 @@ function renderMessage(message) {
   reply.type = 'button';
   reply.textContent = 'Reply';
   reply.setAttribute('aria-label', `Reply to message #${message.id}`);
-  reply.addEventListener('click', () => seedReply(message.id, message.byline));
+  reply.addEventListener('click', () => seedReply(message.id, InterlockReplyReference.replyAuthor(message)));
   const work = document.createElement('button');
   work.className = 'message-reply';
   work.type = 'button';

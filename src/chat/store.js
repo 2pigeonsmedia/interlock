@@ -1590,6 +1590,8 @@ function openStore(opts) {
 
 module.exports = Object.freeze({
   openStore,
+  // The text rule a send is held to, for the ring preview to hold a draft to it.
+  isAllowedText,
   SCHEMA,
   MAX_TEXT_BYTES,
   MAX_READ_LIMIT,

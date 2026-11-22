@@ -54,3 +54,11 @@ test('an ask of a person with "what a yes means" still empty says why there is n
   assert.match(fn, /askMeans\.required && askMeans\.value\.trim\(\) === ''[\s\S]*previewWords\('means-required'\)/);
   assert.match(ROOM_JS, /askMeans\.addEventListener\('input', updateMentionPreview\)/);
 });
+
+test('a People poll re-asks only when the AIs a draft could ring change, never on every poll', () => {
+  const roster = ROOM_JS.slice(ROOM_JS.indexOf('rosterAllSeats = participants.filter'),
+    ROOM_JS.indexOf('refreshPendingDeliveryPresence();', ROOM_JS.indexOf('rosterAllSeats = participants.filter')));
+  assert.doesNotMatch(roster, /renderMentionSuggestions\(\);\s*updateMentionPreview\(\);/, 'no unconditional re-preview on a poll');
+  assert.match(roster, /if \(ringable !== ringableKey\) \{\s*ringableKey = ringable;\s*updateMentionPreview\(\);/);
+  assert.match(ROOM_JS, /const ringable = rosterAllSeats\.map\(seat => `\$\{seat\.name\}:\$\{seat\.present\}`\)\.sort\(\)\.join\('\|'\);/);
+});
