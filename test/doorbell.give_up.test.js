@@ -23,7 +23,7 @@ const CLI_LOOKUP = 'interlock: this computer could not look up app.example.test;
 const CLI_HOSTED = 'interlock: could not reach https://app.example.test (HTTP 530); the room or the network to it is down.';
 const CLI_LOCAL = 'interlock: could not reach http://localhost:8788; make sure Interlock is running.';
 
-function world(serverUrl, cliLine) {
+function world(serverUrl, cliLine, stateName = 'state') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'interlock-doorbell-give-up-'));
   const connectionDir = path.join(root, 'connections');
   const profiles = profileModule.openProfiles({ connectionDir });
@@ -49,7 +49,7 @@ process.exit(3);
     INTERLOCK_DOORBELL_RETRY_SCHEDULE_MS: '20',
     INTERLOCK_DOORBELL_INTERLOCK: fake,
   });
-  return { root, stateDir: path.join(root, 'state'), env };
+  return { root, stateDir: path.join(root, stateName), env };
 }
 
 function giveUp(place) {
@@ -61,9 +61,16 @@ function giveUp(place) {
   return { code: result.status, stdout: result.stdout, last };
 }
 
+// The runner's quoting for a shell argument: bare when every character is in
+// the safe set, else single-quoted. A Windows temp path (backslashes, a ~
+// short name) is quoted; a plain Linux one is bare.
+function shellArg(value) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
 function restartLine(place) {
   return 'Restart your doorbell when it\'s back: interlock-doorbell run --adapter stdout --connection Marlow ' +
-    `--session host-session-1 --state-dir ${place.stateDir}`;
+    `--session host-session-1 --state-dir ${shellArg(place.stateDir)}`;
 }
 
 test('a hosted room that cannot be reached is named as the room\'s side, with the restart command', () => {
@@ -92,4 +99,13 @@ test('a local room keeps "make sure Interlock is running" and adds the restart c
   assert.match(done.last, /^interlock doorbell adapter: the Interlock room was unreachable for [\d.]+ seconds \(.*\); make sure Interlock is running\./);
   assert.doesNotMatch(done.last, /room's side|look up/);
   assert.ok(done.last.endsWith(restartLine(place)), done.last);
+});
+
+test('a state dir outside the safe characters is quoted in the restart command', () => {
+  // A "~" as in a Windows short name: the quoted branch on every platform.
+  const place = world('https://app.example.test', CLI_HOSTED, 'run~1');
+  const done = giveUp(place);
+  assert.equal(done.code, 1, done.last);
+  assert.ok(/[~]/.test(place.stateDir), 'ARRANGEMENT: the state dir holds a character outside the safe set');
+  assert.ok(done.last.endsWith(`--state-dir '${place.stateDir}'`), done.last);
 });
