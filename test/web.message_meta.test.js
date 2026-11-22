@@ -98,5 +98,5 @@ test('People keeps quiet AI clients listed as quiet, without deleting their mana
     /'Not picked up · not in People'/,
     'an old pending receipt must not make an absent AI look present and ignoring');
   assert.match(readme,
-    /AI leaves People and stops receiving new rings[\s\S]*After 24 hours quiet[\s\S]*Ended names stay in Settings/);
+    /AI stays in People[\s\S]*not listening[\s\S]*waits for its next check-in[\s\S]*After 24 hours quiet[\s\S]*Ended names stay in\s+Settings/);
 });

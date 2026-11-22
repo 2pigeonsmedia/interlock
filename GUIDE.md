@@ -1,6 +1,6 @@
 # The Interlock Guide
 
-**Interlock** is a locally hosted chat room where a person and multiple AI sessions share the same visible conversation.
+**Interlock** is a self-hosted chat room where a person and multiple AI sessions share the same visible conversation.
 
 *This file is written for both readers: the **person** who owns the room, and the **AI** sessions that join it.*
 
@@ -94,7 +94,7 @@ Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
 
 ## 3. Talk in the room
 
-**Person:** type in the browser. `@Name` rings one AI in People; lowercase `@all` rings all of them. Names are case-insensitive (`@marlow` matches `@Marlow`). Only exact lowercase `@all` broadcasts; `@ALL` is ordinary text. The composer is authoritative: **No AI will be rung** means the message saves but creates no ring. Messages without an @ ring back only AIs that addressed you; every AI reads them when next rung.
+**Person:** type in the browser. `@Name` rings one AI, even mid-task; lowercase `@all` rings all present. Names are case-insensitive (`@marlow` matches `@Marlow`). Only exact lowercase `@all` broadcasts; `@ALL` is ordinary text. The composer is authoritative: **No AI will be rung** means the message saves but creates no ring. Messages without an @ ring back only AIs that addressed you; every AI reads them when next rung.
 
 **AI:** every command after joining must name your connection explicitly. To post, write your message to a file, then:
 

@@ -8,6 +8,7 @@ const test = require('node:test');
 const ROOT = path.join(__dirname, '..');
 const NOTICE = fs.readFileSync(path.join(ROOT, 'THIRD_PARTY_NOTICES.md'), 'utf8');
 const README = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+const TESTED_ON = fs.readFileSync(path.join(ROOT, 'docs', 'TESTED_ON.md'), 'utf8');
 const PROTOCOL = fs.readFileSync(path.join(ROOT, 'docs', 'PROTOCOL.md'), 'utf8');
 const DOORBELL = fs.readFileSync(path.join(ROOT, 'docs', 'DOORBELL.md'), 'utf8');
 const ADAPTER_AUTHORING = fs.readFileSync(
@@ -103,38 +104,40 @@ test('the upgrade path backs up first and never teaches an in-place downgrade', 
 });
 
 test('the tested-on list and exact host surfaces retain their evidence boundaries', () => {
-  assert.match(README,
+  assert.match(TESTED_ON,
     /v0\.1\.5 tested-on evidence[^]*Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked release-candidate tree[^\n]*408\/408/);
-  assert.match(README,
+  assert.match(TESTED_ON,
     /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*isolated packed installation[^\n]*408\/408/);
-  assert.match(README,
+  assert.match(TESTED_ON,
     /v0\.1\.5 makes[^]*public doorbell[^]*replacement recovery[^]*cold Claude Code CLI\/TUI operator[^]*forced adapter failure[^]*recovery warm-up[^]*No AI was rung[^]*focused live verification/);
-  assert.match(README, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked candidate tree[^\n]*398\/398/);
-  assert.match(README,
+  assert.match(TESTED_ON, /Node 24\.14\.1[^\n]*WSL\/Linux[^\n]*tracked candidate tree[^\n]*398\/398/);
+  assert.match(TESTED_ON,
     /Node 24\.13\.0[^\n]*Native Windows[^\n]*clean tracked-source archive[^\n]*`npm ci`[^\n]*398\/398/);
-  assert.match(README,
+  assert.match(TESTED_ON,
     /v0\.1\.4 adds[^]*body-free ring observation[^]*non-empty backward history[^]*non-interactive join[^]*Owner[^]*notifications/);
-  assert.match(README,
+  assert.match(TESTED_ON,
     /addressed nonce[^]*host nudge[^]*ordinary\s+history[^]*model reply[^]*Codex CLI\/TUI[^]*Claude Code Monitor[^]*Grok Build\s+TUI Monitor/);
-  assert.match(README,
+  assert.match(TESTED_ON,
     /v0\.1\.3 release commit `6abf837` passed 379\/379[^]*context-navigation baseline/);
-  assert.match(README, /v0\.1\.2 release commit `cffcc4a` passed 364\/364 on WSL\/Linux/);
-  assert.match(README, /native\s+Windows clean-archive proof passed 362\/362[^]*product-complete RC1/,
+  assert.match(TESTED_ON, /v0\.1\.2 release commit `cffcc4a` passed 364\/364 on WSL\/Linux/);
+  assert.match(TESTED_ON, /native\s+Windows clean-archive proof passed 362\/362[^]*product-complete RC1/,
     'the historical v0.1.2 Windows result must retain its exact pre-final-delta boundary');
-  assert.match(README,
+  assert.match(TESTED_ON,
     /final\s+Codex-policy delta[^]*live-proven through native Windows → WSL/,
     'the final policy-only delta needs its real cross-host evidence, not an invented full-suite claim');
-  assert.match(README, /fresh\s+source\s+trees that passed 308\/308 tests/,
+  assert.match(TESTED_ON, /fresh\s+source\s+trees that passed 308\/308 tests/,
     'the v0.1.0 tag proofs stay described as that tag\'s, never re-claimed');
-  assert.match(README, /automated runtime compatibility/);
-  assert.match(README, /historical proofs retain their original\s+boundaries/,
+  assert.match(TESTED_ON, /automated runtime compatibility/);
+  assert.match(TESTED_ON, /historical proofs retain their original\s+boundaries/,
     'unrepeated proofs must keep their original release boundary');
+  assert.match(README, /\[`docs\/TESTED_ON\.md`\]\(docs\/TESTED_ON\.md\)/,
+    'the README points to the tested-on history it no longer carries');
   assert.match(README, /Plain-text Reply references[\s\S]*never silently ring an\s+AI/);
   assert.match(README, /Durable History[\s\S]*signed-in person[\s\S]*verified transcript archive/);
-  assert.match(README, /native(?: Ubuntu)?\s+browser\/passkey journey/i);
-  assert.match(README, /no\s+native macOS journey was run/i);
-  assert.match(README, /post-v0\.1\s+evidence goals,\s+not claims made by this tested-on table/i);
-  assert.doesNotMatch(README, /cold-newcomer[\s\S]*open evidence goal/i);
+  assert.match(TESTED_ON, /native(?: Ubuntu)?\s+browser\/passkey journey/i);
+  assert.match(TESTED_ON, /no\s+native macOS journey was run/i);
+  assert.match(TESTED_ON, /post-v0\.1\s+evidence goals,\s+not claims made by this tested-on table/i);
+  assert.doesNotMatch(TESTED_ON, /cold-newcomer[\s\S]*open evidence goal/i);
   assert.match(README,
     /Verified model-host surfaces[^]*Codex CLI\/TUI[^]*Claude Code CLI\/TUI[^]*Grok Build TUI 1\.0\.13 on WSL\/Linux/);
   assert.match(README,
@@ -157,7 +160,7 @@ test('the tested-on list and exact host surfaces retain their evidence boundarie
     /adapter state directory outside[^]*ahead of the restored transcript[^]*cannot reset[^]*in place[^]*different name/i);
   assert.match(SECURITY,
     /Host wake adapters are local code[^]*without room text, delivery receipt, or history movement[^]*desktop-app[^]*unverified[^]*never edits model-host\s+configuration/);
-  assert.doesNotMatch(README, /journeys remain open[^]*not yet a public release/i,
+  assert.doesNotMatch(TESTED_ON, /journeys remain open[^]*not yet a public release/i,
     'the tested-on boundary must not silently reopen gates moved to post-v0.1');
   assert.match(README, /After its seat ends[^]*fresh session[^]*Session 1[^]*Session 2/);
   assert.match(README, /releases\/latest[^]*extract[^]*`package` directory/,
