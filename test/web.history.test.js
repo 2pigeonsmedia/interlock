@@ -59,7 +59,7 @@ test('History keeps names available when archives fail and carries honest empty 
   assert.match(HISTORY_JS,
     /Transcript archives are unavailable\. No archive was hidden or changed/);
   assert.match(HISTORY_JS, /Removed by owner/);
-  assert.match(HISTORY_JS, /Released after 24 hours quiet/);
+  assert.match(HISTORY_JS, /Released after 24 h without a check-in/);
   assert.match(HISTORY_JS, /Admission expired/);
   assert.match(HISTORY_JS, /Ended before cause tracking/);
 });

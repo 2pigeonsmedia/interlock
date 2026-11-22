@@ -98,7 +98,7 @@ function endLabel(value) {
   return {
     left: 'Left',
     removed: 'Removed by owner',
-    released: 'Released after 24 hours quiet',
+    released: 'Released after 24 h without a check-in',
     expired: 'Admission expired',
     legacy: 'Ended before cause tracking',
   }[value];

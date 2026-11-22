@@ -303,8 +303,20 @@
     return facts;
   }
 
+  // How a seat's connection ended, in the room's words. An idle release is
+  // not a leave: the seat stopped checking in, so the room let it go.
+  const ENDED_WORDS = Object.freeze({
+    left: 'left',
+    removed: 'removed',
+    released: 'released after 24 h without a check-in (its computer may have restarted or its session closed)',
+    expired: 'admission expired',
+  });
+  function endedWords(how) {
+    return Object.hasOwn(ENDED_WORDS, how) ? ENDED_WORDS[how] : 'ended';
+  }
+
   const contract = Object.freeze({
-    leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {

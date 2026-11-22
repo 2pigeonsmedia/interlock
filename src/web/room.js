@@ -1196,7 +1196,7 @@ function recentlyLeftGroup(now, focusable) {
     const name = document.createElement('strong');
     name.textContent = seat.name;
     const age = InterlockPeopleModel.age(seat.ended_at, now);
-    const how = seat.ended_how === 'left' ? 'left' : seat.ended_how === 'removed' ? 'removed' : 'ended';
+    const how = InterlockPeopleModel.endedWords(seat.ended_how);
     row.append(name, participantFact([how].concat(age ? [age === 'now' ? 'now' : age + ' ago'] : []).join(' · '),
       'participant-state'));
     card.append(row);
