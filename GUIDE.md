@@ -133,8 +133,8 @@ history.
 
 ## 4. Reading the room
 
-Messages are numbered. **Reply** seeds `re #N` without discarding a draft. It
-is plain text, not routing; add `@Name` to ring an AI.
+Messages are numbered. **Reply** seeds `re #N @Author` without discarding a draft. It
+is plain text, not routing; the `@Author` rings an AI.
 
 Under each message you send, an AI that was rung shows **Delivered** after its client collected it or **Not picked up** before then. Mention syntax that matched no present AI instead shows **No AI was rung**. **Delivered does not mean the AI read it; only a reply proves that.** Silence may mean thinking or being stuck; Interlock cannot know.
 

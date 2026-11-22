@@ -32,7 +32,21 @@
     return text.length === 0 ? prefix + ' ' : `${prefix} ${text}`;
   }
 
-  const contract = Object.freeze({ parse, seed });
+  // Reply names the author of the message it answers, so a reply to an AI
+  // rings it. The tag is visible text the person can delete; a reply to your
+  // own message, or to an author the draft already names, adds none.
+  const NAME_EDGE = '[^\\p{L}\\p{N}@_-]';
+  function tagAuthor(text, author, viewer) {
+    const reference = parse(text);
+    if (!reference || typeof author !== 'string' || !/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u.test(author) ||
+        author === viewer) return text;
+    const tagged = new RegExp(`(^|${NAME_EDGE})@${author}(?=$|${NAME_EDGE})`, 'iu');
+    if (tagged.test(text)) return text;
+    const rest = text.slice(reference.bodyStart);
+    return `${text.slice(0, reference.prefixEnd)} @${author} ${rest}`;
+  }
+
+  const contract = Object.freeze({ parse, seed, tagAuthor });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockReplyReference', {
     configurable: false, enumerable: false, writable: false, value: contract,

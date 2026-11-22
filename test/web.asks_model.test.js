@@ -153,7 +153,7 @@ test('one Reply on an ask, and it is a discussion that names the asker and binds
   const decorate = ROOM_JS.slice(ROOM_JS.indexOf('function decorateMessage'), ROOM_JS.indexOf('function renderBindChips'));
   assert.doesNotMatch(decorate, /askButton\('Reply'/, 'the ask chip has no Reply of its own');
   const seed = ROOM_JS.slice(ROOM_JS.indexOf('function seedReply'), ROOM_JS.indexOf('function renderMessage('));
-  assert.match(seed, /@\$\{ask\.by\}/, 'a reply to an ask names the asker');
+  assert.match(seed, /const named = ask \? ask\.by : author;/, 'a reply to an ask names the asker');
   assert.doesNotMatch(seed, /pickedAsks/, 'a discussion reply never binds an ask');
   assert.match(decorate, /Re: \$\{asked\.by\}'s ask #\$\{target\}/, 'the reference says whose ask');
 });

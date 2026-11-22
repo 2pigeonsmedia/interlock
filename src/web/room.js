@@ -2894,14 +2894,14 @@ function openRevise(chip, ask) {
   input.focus();
 }
 
-/* Reply on a message that carries an ask is a discussion, not an answer: it
- * names the asker and points at the ask, and it binds and closes nothing. */
-function seedReply(messageId) {
+/* Reply names the message's author, so a reply to an AI rings it. Reply on a
+ * message that carries an ask is a discussion, not an answer: it names the
+ * asker and points at the ask, and it binds and closes nothing. */
+function seedReply(messageId, author = null) {
   const ask = asksState.ask(messageId);
-  messageBody.value = InterlockReplyReference.seed(messageBody.value, messageId);
-  if (ask && ask.by !== viewerName() && !messageBody.value.includes(`@${ask.by}`)) {
-    messageBody.value = messageBody.value.replace(/^(re #\d+ ?)/u, `$1@${ask.by} `);
-  }
+  const named = ask ? ask.by : author;
+  messageBody.value = InterlockReplyReference.tagAuthor(
+    InterlockReplyReference.seed(messageBody.value, messageId), named, viewerName());
   updateBindVisibility();
   updateMentionPreview();
   messageBody.focus();
@@ -2944,7 +2944,7 @@ function renderMessage(message) {
   reply.type = 'button';
   reply.textContent = 'Reply';
   reply.setAttribute('aria-label', `Reply to message #${message.id}`);
-  reply.addEventListener('click', () => seedReply(message.id));
+  reply.addEventListener('click', () => seedReply(message.id, message.byline));
   const work = document.createElement('button');
   work.className = 'message-reply';
   work.type = 'button';

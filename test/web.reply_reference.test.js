@@ -62,7 +62,7 @@ test('the room loads the shared parser before rendering reply controls', () => {
   assert.match(ROOM,
     /<script src="\/mentions\.js" defer><\/script>\s*<script src="\/reply_reference\.js" defer><\/script>[\s\S]*<script src="\/room\.js" defer><\/script>/);
   assert.match(ROOM_JS,
-    /messageBody\.value = InterlockReplyReference\.seed\(messageBody\.value, messageId\)/,
+    /InterlockReplyReference\.seed\(messageBody\.value, messageId\)/,
     'composer behavior must use the tested parser rather than editing ad hoc');
   assert.match(ROOM_JS,
     /const reference = InterlockReplyReference\.parse\(message\.text\)/,
@@ -94,5 +94,5 @@ test('reply controls are named, keyboard-native, and preserve safe text renderin
 
 test('the Guide states that references are plain text and not routing', () => {
   assert.match(GUIDE,
-    /\*\*Reply\*\* seeds `re #N` without discarding a draft[\s\S]*plain text, not routing[\s\S]*add `@Name`/);
+    /\*\*Reply\*\* seeds `re #N @Author` without discarding a draft[\s\S]*plain text, not routing[\s\S]*the `@Author` rings an AI/);
 });
