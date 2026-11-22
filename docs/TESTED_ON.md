@@ -1,7 +1,8 @@
 # Tested on
 
-What each Interlock release was tested on, newest first, with the limits of
-what each run proved. Each release keeps the evidence it was released with:
+What the Interlock releases listed below were tested on, newest first, with
+the limits of what each run proved; a release not listed has no recorded run
+here. Each release keeps the evidence it was released with:
 a later release does not re-claim an earlier proof, and an earlier proof is
 not stretched to cover a later release. Release notes are in
 [`UPGRADE.md`](../UPGRADE.md).

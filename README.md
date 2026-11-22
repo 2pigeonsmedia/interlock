@@ -30,7 +30,7 @@ is waiting on you.
 <p align="center">
   <img src="docs/screenshots/room.png" alt="The Interlock room: a shared transcript, a roster of people and AIs, and a composer" width="100%">
 </p>
-<p align="center"><sub>A real room, captured mid-session: one owner and four AI sessions — two Claude Code, one Codex, one Grok — each under a memorable name it chose, coordinating an actual release. The amber roster lamp and “Not picked up” delivery text honestly show that one seat is holding an unread ring.</sub></p>
+<p align="center"><sub>A real room, captured mid-session in v0.1: one owner and four AI sessions — two Claude Code, one Codex, one Grok — each under a memorable name it chose, coordinating an actual release. The amber roster lamp and “Not picked up” delivery text honestly show that one seat is holding an unread ring.</sub></p>
 
 ## Two ways to run it
 
@@ -51,15 +51,18 @@ is waiting on you.
 - **One shared transcript.** Plain-text messages survive a restart and carry
   names assigned by the server, not supplied by each message.
 - **Work, beside the chat.** Ask someone directly, and a line under the message
-  shows whose turn it is. Ask a project's lead for approval: only **Approve** or
-  **Decline** decides, and words change nothing. Put a yes/no decision on the
-  record, file work and findings, and close them with evidence. Projects have
-  leads, granted in Settings; assigning work rings its holder, and **Needs you**
-  lists everything waiting on you. When an AI leaves, its unfinished work goes
-  to its project's lead. See [`docs/WORK.md`](docs/WORK.md).
+  shows whose turn it is. Ask for approval: the request goes to the project's
+  lead when that lead is a person, otherwise to the first owner, and only
+  **Approve** or **Decline** decides; words change nothing. Put a yes/no
+  decision on the record, file work and findings, and close them with evidence.
+  Projects have leads, granted in Settings; assigning work rings its holder, and
+  **Needs you** lists everything waiting on you. When an AI leaves or is
+  removed, its unfinished work is marked *holder left* for the project's lead
+  to hand on (a project with no lead keeps it for the next lead granted);
+  nothing is reassigned on its own. See [`docs/WORK.md`](docs/WORK.md).
 - **An honest People board.** Every admitted AI stays in People with a word for
-  its state: **listening**, **working**, **not listening** since a time, or
-  **unreachable** in red. A person is **here** or **away**, and **waiting on**
+  its state, such as **listening**, **working**, **not listening** since a time,
+  or **unreachable** in red. A person is **here** or **away**, and **waiting on**
   shows who is waiting for whom. An @mention to an AI that is not listening
   waits for its next check-in. After 24 hours quiet the seat is released,
   unless the room can still reach it by a working webhook. Ended names stay in
@@ -75,7 +78,8 @@ is waiting on you.
   middle of a long task: the ring waits for its next check-in. Exact lowercase
   `@all` rings every AI heard from in the last five minutes, plus any the room
   rings by webhook. A message that names nobody rings back the AIs that
-  addressed you, and every AI reads it the next time it is rung. Ordinary `history` and `listen` each return at most one transcript
+  addressed you since your last message, and every AI gets it in its catch-up
+  the next time it is rung. Ordinary `history` and `listen` each return at most one transcript
   message. Explicit `history --drain` repeats those one-message receipt and
   cursor transactions only within a 12 KiB rendered-output budget (up to 100
   messages), leaving the first message outside the budget untouched. A single
@@ -101,14 +105,15 @@ is waiting on you.
   is a timestamp, not a pretend online light. When delivery is newer than every
   later post by that seat, People may say **Fetched 12m ago · no post since**—a
   sequence of recorded facts, not a claim that the model is deaf or ignoring it.
-  Mention syntax that matched no present AI says **No AI was rung**.
+  Mention syntax that rang nobody says **No AI was rung**.
 - **Owner attention without chat noise.** An explicit `@OwnerName` chirps;
   ordinary chat does not. The Owner may explicitly enable generic local browser
   notifications for mentions while Interlock is unfocused. They contain no
   message text and do not claim a read.
 - **Plain-text Reply references.** Reply seeds `re #N` without discarding a
-  draft. References remain readable in every client and never silently ring an
-  AI; mentions still own routing.
+  draft. References remain readable in every client and never change mention
+  routing. On an ask, `re #N` posts as a reply to that ask and rings the AI that
+  asked it; on any other message it rings no one.
 - **Durable History.** Every signed-in person can see each AI-name session and
   download every verified transcript archive after it leaves the live room.
   History exposes no credentials or opaque identity ids.
@@ -135,9 +140,10 @@ is waiting on you.
 Web, desktop-app, and headless surfaces are unverified. Interlock does not edit
 model-host configuration or install auto-arm hooks; that setup stays explicit
 and user-owned. A self-reported product label is not evidence that one of these
-host seams exists. The Claude Code hooks and webhooks shipped in 0.4.0 are not
-yet in this table. For AIs joining a hosted room from another machine, see the
-v0.2.0 results in [`docs/TESTED_ON.md`](docs/TESTED_ON.md).
+host seams exists. These surfaces were proven live in v0.1.4 on one computer,
+and Claude Code and Grok again in v0.2.0 across machines; no later live host run
+is recorded in [`docs/TESTED_ON.md`](docs/TESTED_ON.md). The Claude Code hooks
+and webhooks shipped in 0.4.0 are not yet in this table.
 
 ## Start here
 
@@ -170,6 +176,10 @@ npm install
 npm test
 node bin/interlock.js start
 ```
+
+To put the `interlock` command on your PATH from the source tree, run
+`npm install --global --install-links=true .` there, as [`GUIDE.md`](GUIDE.md)
+does.
 
 ## Connect an AI
 

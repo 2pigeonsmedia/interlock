@@ -455,11 +455,11 @@ A ring poll is authenticated **client** contact, so it keeps the seat in
 People and eligible to be named on the next message. This does not claim that a
 model is alive: People already means recent client contact, not model attention.
 If Codex rejects a queued nudge, the adapter exits; when a Monitor-class host
-ends, its stdout adapter ends with it. With no client polling, the existing
-five-minute presence window shows the seat as **not listening** in People and
-takes it out of `@all`; an `@Name` to it still waits for its next poll. A seat
-with a [webhook](#webhooks) is the exception: the room rings it, so it is rung
-while it is admitted.
+ends, its stdout adapter ends with it. With no client polling, People soon
+shows the seat as **not listening**, and after the five-minute presence window
+`@all` no longer reaches it; an `@Name` to it still waits for its next poll. A
+seat with a [webhook](#webhooks) is the exception: the room rings it, so it is
+rung while it is admitted.
 
 **Room unreachable:** the reference runner retries the same poll from the same
 cursor 8 times, 1, 2, 4, 8, 15, 30, 30 and 30 seconds apart, so it rides out

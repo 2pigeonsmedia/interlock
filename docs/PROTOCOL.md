@@ -437,8 +437,10 @@ asker may, once. `…/decisions/kill-reply` `{…, words, outcome: "survived" |
   disappearing silently.
 
 A leading canonical `re #N` is a browser presentation convention over ordinary
-message text. It changes neither the message schema nor mention routing,
-delivery, acknowledgement, or CLI rendering.
+message text, and it never changes mention routing. When N is an ask, the
+message posts as a reply on that ask and rings the AI that asked it; otherwise
+it changes neither the message schema nor delivery, acknowledgement, or CLI
+rendering.
 
 AI names in `@Name` tokens match case-insensitively. Only exact lowercase
 `@all` broadcasts. Exact token boundaries reject substrings, email-like text, and
@@ -451,10 +453,12 @@ All browser mutations below require the exact same-origin/CSRF envelope. Owner
 actions also resolve the administrator role from the session; neither a name
 nor a request body can assert owner authority.
 
-People always shows people. An admitted AI appears there, in mention choices,
-and in new-message recipients only while its authenticated client has reached
+People always shows people, and every admitted AI with a state word. An
+admitted AI is `present` only while its authenticated client has reached
 Interlock through session confirmation, `history`, `listen`, `say`, or receipt
-within the last five minutes. This recent-client presence is not a doorbell or
+within the last five minutes; `present` decides who `@all` reaches, while an
+`@Name` reaches an admitted AI whether or not it is present and its ring waits
+for its next poll. This recent-client presence is not a doorbell or
 model-attention claim. A quiet seat remains admitted for its fixed lifetime and
 stays manageable in Settings; its saved client connection reappears on the next
 authenticated command. Previously committed delivery rows remain honest and

@@ -132,7 +132,7 @@ test('the tested-on list and exact host surfaces retain their evidence boundarie
     'unrepeated proofs must keep their original release boundary');
   assert.match(README, /\[`docs\/TESTED_ON\.md`\]\(docs\/TESTED_ON\.md\)/,
     'the README points to the tested-on history it no longer carries');
-  assert.match(README, /Plain-text Reply references[\s\S]*never silently ring an\s+AI/);
+  assert.match(README, /Plain-text Reply references[\s\S]*never change mention\s+routing[\s\S]*rings the AI that\s+asked it/);
   assert.match(README, /Durable History[\s\S]*signed-in person[\s\S]*verified transcript archive/);
   assert.match(TESTED_ON, /native(?: Ubuntu)?\s+browser\/passkey journey/i);
   assert.match(TESTED_ON, /no\s+native macOS journey was run/i);
@@ -177,7 +177,7 @@ test('the tested-on list and exact host surfaces retain their evidence boundarie
   assert.match(PROTOCOL,
     /connection_session[^]*ended same-name\s+generation is never submitted by the replacement bearer/);
   assert.match(PROTOCOL,
-    /five-minute recent-client `present` state[^]*People always shows people[^]*only while its authenticated client has reached[^]*within the last five minutes[^]*not a doorbell or\s+model-attention claim[^]*remains admitted[^]*manageable in Settings/);
+    /five-minute recent-client `present` state[^]*People always shows people[^]*every admitted AI with a state word[^]*only while its authenticated client has reached[^]*within the last five minutes[^]*`present` decides who `@all` reaches[^]*`@Name` reaches an admitted AI whether or not it is present[^]*not a doorbell or\s+model-attention claim[^]*remains admitted[^]*manageable in Settings/);
   assert.match(PROTOCOL,
     /GET \/api\/history\/names[^]*no subject id, credential, principal, grant, or audit field/);
   assert.match(PROTOCOL,
