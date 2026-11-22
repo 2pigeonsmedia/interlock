@@ -6,7 +6,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { EXIT_OK, run } = require('../src/cli.js');
+const { EXIT_OK, run, workFileHelp } = require('../src/cli.js');
 
 function capture(argv) {
   let out = '';
@@ -49,8 +49,10 @@ test('every command in the help, with --help anywhere, prints only its own usage
       assert.doesNotMatch(result.out, /refusing/, `${label}: never the refusal`);
       const lines = result.out.split('\n').filter(text => text !== '');
       assert.ok(lines.length >= 1, `${label}: prints usage`);
+      // A work verb's help adds what its request file takes, and nothing else.
+      const fileLines = new Set(command === 'work' && verb ? workFileHelp(verb).split('\n') : []);
       for (const text of lines) {
-        assert.ok(fullLines.has(text), `${label}: every line comes from the help: ${text}`);
+        assert.ok(fullLines.has(text) || fileLines.has(text), `${label}: every line comes from the help: ${text}`);
       }
       assert.ok(lines.some(text => text.startsWith('  interlock ' + command + (verb ? ' ' : '')) &&
         (!verb || text.split(' ')[4].split('|').includes(verb))), `${label}: its own usage line is printed`);

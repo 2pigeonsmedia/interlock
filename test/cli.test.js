@@ -2604,7 +2604,7 @@ test('doorbell gives an unreachable room its own exit status', async () => {
     ['connection refused', async () => { throw transportFailure('ECONNREFUSED'); }, /could not reach http:\/\/localhost:8788/],
     ['connection reset', async () => { throw transportFailure('ECONNRESET'); }, /could not reach http:\/\/localhost:8788/],
     ['socket closed', async () => { throw transportFailure('UND_ERR_SOCKET'); }, /could not reach http:\/\/localhost:8788/],
-    ['name lookup', async () => { throw transportFailure('EAI_AGAIN'); }, /could not reach http:\/\/localhost:8788/],
+    ['name lookup', async () => { throw transportFailure('EAI_AGAIN'); }, /could not look up localhost:8788; the room may be fine/],
     ['request timeout', async () => {
       throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
     }, /timed out/],
@@ -2619,7 +2619,10 @@ test('doorbell gives an unreachable room its own exit status', async () => {
     const result = await captureCommand(
       ['doorbell', '--connection', 'Marlow', '--json'], world.dependencies);
     assert.equal(result.code, EXIT_UNREACHABLE, label);
-    assert.equal(result.stdout, '', label);
+    // --json readers get the same refusal as one JSON line, never a ring page.
+    const facts = JSON.parse(result.stdout);
+    assert.equal(facts.ok, false, label);
+    assert.ok(['unreachable', 'timeout', 'lookup-failed'].includes(facts.error), label + ': ' + facts.error);
     assert.match(result.stderr, expected, label);
     assert.doesNotMatch(result.stderr, /refused the command/, label);
     assert.deepEqual(world.events, [['load', 'Marlow']], label);
@@ -2631,9 +2634,9 @@ test('doorbell keeps refusals and unknown failures apart from an unreachable roo
     ['HTTP 401', async () => fakeResponse(401, { ok: false, error: 'unauthorized' }), /expired or revoked/],
     ['HTTP 403', async () => fakeResponse(403, { ok: false, error: 'forbidden' }), /refused the command/],
     ['HTTP 400', async () => fakeResponse(400, { ok: false, error: 'invalid-ring-query' }), /refused the command/],
-    ['HTTP 404', async () => gatewayPage(404), /refused the command/],
+    ['HTTP 404', async () => gatewayPage(404), /answered with a non-Interlock page \(HTTP 404/],
     ['HTTP 429', async () => fakeResponse(429, { ok: false, error: 'busy' }), /refused the command/],
-    ['HTTP 500', async () => gatewayPage(500), /refused the command/],
+    ['HTTP 500', async () => gatewayPage(500), /answered with a non-Interlock page \(HTTP 500/],
     ['unclassified failure', async () => { throw new Error('offline'); }, /could not reach/],
     ['malformed page', async () => fakeResponse(200, { ok: true, rings: 'bad' }), /could not validate the response/],
   ];
@@ -2643,7 +2646,7 @@ test('doorbell keeps refusals and unknown failures apart from an unreachable roo
     const result = await captureCommand(
       ['doorbell', '--connection', 'Marlow', '--json'], world.dependencies);
     assert.equal(result.code, EXIT_RUNTIME, label);
-    assert.equal(result.stdout, '', label);
+    assert.equal(JSON.parse(result.stdout).ok, false, label);
     assert.match(result.stderr, expected, label);
   }
   const expired = admittedConnection({ expires_at: 50 });
@@ -2661,7 +2664,7 @@ test('a refused command names the room that was contacted', async () => {
     ['doorbell', '--connection', 'Marlow', '--json'], hosted.dependencies);
   assert.equal(refused.code, EXIT_RUNTIME);
   assert.equal(refused.stderr,
-    'interlock: the Interlock room at https://room.example.test refused the command.\n');
+    'interlock: the Interlock room at https://room.example.test refused the command (HTTP 409 conflict).\n');
 
   const hostedOutage = admittedConnection({ server_url: 'https://room.example.test' });
   hostedOutage.dependencies.fetch = async () => gatewayPage(530);
@@ -2692,7 +2695,7 @@ test('a refused command names the room that was contacted', async () => {
   const local = await captureCommand(
     ['doorbell', '--connection', 'Marlow', '--json'], loopback.dependencies);
   assert.equal(local.code, EXIT_RUNTIME);
-  assert.equal(local.stderr, 'interlock: the local Interlock refused the command.\n');
+  assert.equal(local.stderr, 'interlock: the local Interlock refused the command (HTTP 409 conflict).\n');
 });
 
 test('machine-readable output is available only behind the explicit json flag', async () => {
@@ -2743,7 +2746,7 @@ test('say reads a file, retries one ambiguous send with one stable id, and never
     'say', '--connection', 'Marlow', '--file', 'message.md',
   ], world.dependencies);
   assert.equal(result.code, EXIT_OK, result.stderr);
-  assert.equal(result.stdout, 'Sent as Marlow (message 9).\n');
+  assert.equal(result.stdout, 'Sent as Marlow (message 9). Rang no AI.\n');
   assert.equal(result.stderr.includes('private message body'), false);
   assert.equal(bodies.length, 2);
   assert.equal(bodies[0].client_message_id, bodies[1].client_message_id);
@@ -2805,7 +2808,7 @@ test('say --stdin preserves UTF-8 characters split across stream chunks', async 
     'say', '--connection', 'Marlow', '--stdin',
   ], world.dependencies, stdin);
   assert.equal(result.code, EXIT_OK, result.stderr);
-  assert.equal(result.stdout, 'Sent as Marlow (message 10).\n');
+  assert.equal(result.stdout, 'Sent as Marlow (message 10). Rang no AI.\n');
 });
 
 test('terminal output neutralizes control sequences returned by the local server', async () => {
@@ -2889,7 +2892,7 @@ test('say prints one line when the room runs a newer Interlock, and never for th
   }
   const same = await sayWith(version);
   assert.equal(same.code, EXIT_OK, same.stderr);
-  assert.match(same.stdout, /^Sent as Marlow \(message 7\)\.\n$/, 'ARRANGEMENT: the send itself succeeds');
+  assert.match(same.stdout, /^Sent as Marlow \(message 7\)\. Rang no AI\.\n$/, 'ARRANGEMENT: the send itself succeeds');
   assert.equal(same.stderr, '');
   for (const quiet of ['0.0.1', 'not-a-version', null]) {
     assert.equal((await sayWith(quiet)).stderr, '', String(quiet));

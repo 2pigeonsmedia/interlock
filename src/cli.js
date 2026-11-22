@@ -8,6 +8,8 @@ const readline = require('node:readline/promises');
 
 const packageJson = require('../package.json');
 const Ring = require('./rings.js');
+// The room's own mention parser, so the CLI reads @all exactly as the room does.
+const InterlockMentions = require('./web/mentions.js');
 
 const EXIT_OK = 0;
 const EXIT_RUNTIME = 1;
@@ -115,6 +117,7 @@ Usage:
   interlock work changes --connection NAME --after N [--limit N] [--json]
   interlock work create --connection NAME --file PATH [--json]
   interlock work update|move|evidence|note|share|answer|report-answer|confirm|reopen|revise ID --connection NAME --file PATH [--json]
+      interlock work VERB --help names the fields its file takes, with one example file
   interlock work withdraw ID --connection NAME --file PATH [--json]
       ID is W-n work or finding, or D-n decision; the file holds expected_revision and reason
   interlock work project-update PROJECT --connection NAME --file PATH [--json]
@@ -579,6 +582,46 @@ function responseError(result, status) {
   return error;
 }
 
+// How much of a refused body a refusal may show: enough to tell a proxy's
+// page from the room's, never more. The room's own bodies carry no secret,
+// but a proxy may echo the request, so the credential is redacted first.
+const BODY_SNIPPET_BYTES = 120;
+// How much of the body is searched for the credential before the cut, so a
+// token that starts inside the shown bytes is always found whole.
+const BODY_SCAN_BYTES = 16 * 1024;
+
+// The body with this connection's credential (whole or either half) and
+// anything after "Bearer " replaced, then cut to the bytes a refusal shows.
+function redactedSnippet(text, token) {
+  let safe = text;
+  const parts = typeof token === 'string' && token.length > 0
+    ? [token, ...token.split('.')].filter(part => part.length >= 8) : [];
+  for (const part of parts) safe = safe.split(part).join('[redacted]');
+  safe = safe.replace(/(Bearer\s+)\S+/gi, '$1[redacted]');
+  return Buffer.from(safe, 'utf8').subarray(0, BODY_SNIPPET_BYTES).toString('utf8').replace(/\uFFFD+$/u, '');
+}
+
+// What answered a refused request: its content type, whether the body was
+// the room's own JSON, and (when it was not) the start of the body.
+async function answerFacts(response, copy, result, token) {
+  const type = response.headers && typeof response.headers.get === 'function'
+    ? response.headers.get('content-type') : null;
+  const interlock = result !== null && typeof result === 'object' && !Array.isArray(result) &&
+    typeof result.ok === 'boolean';
+  let snippet = null;
+  if (!interlock && copy !== null) {
+    try {
+      const bytes = Buffer.from(await copy.arrayBuffer());
+      snippet = redactedSnippet(bytes.subarray(0, BODY_SCAN_BYTES).toString('utf8'), token);
+    } catch (_) { snippet = null; }
+  }
+  return {
+    interlock_body: interlock,
+    content_type: typeof type === 'string' && type.length > 0 ? type.slice(0, 200) : null,
+    body_snippet: snippet,
+  };
+}
+
 function incompatibleResponse() {
   const error = new Error('incompatible Interlock response');
   error.code = 'incompatible-response';
@@ -1021,8 +1064,13 @@ async function localRequest(fetcher, profile, pathname, options = {}) {
       method: options.method || 'GET', headers, body, signal: controller.signal,
     });
     noticeServerVersion(response, options.stderr);
+    // A copy of the body, read only when the answer is refused, so a refusal
+    // can show what answered (a proxy's page is not the room's).
+    const copy = typeof response.clone === 'function' ? response.clone() : null;
     const result = await response.json().catch(() => null);
-    if (!response.ok || !result || result.ok !== true) throw responseError(result, response.status);
+    if (!response.ok || !result || result.ok !== true) {
+      throw Object.assign(responseError(result, response.status), await answerFacts(response, copy, result, profile.token));
+    }
     return result;
   } finally {
     clearTimeout(timer);
@@ -1179,7 +1227,7 @@ function roomLabel(profile) {
     : `the Interlock room at ${terminalSafe(profile.server_url)}`;
 }
 
-function reportRequestError(stderr, error, profile) {
+function reportRequestError(stderr, error, profile, jsonOut = null) {
   const room = roomLabel(profile);
   if (error && error.status === 401) {
     line(stderr, `interlock: connection ${terminalSafe(profile.name)} was refused; it may be expired or revoked.`);
@@ -1194,12 +1242,56 @@ function reportRequestError(stderr, error, profile) {
   } else if (error && error.exact && UNREACHABLE_STATUSES.has(error.status)) {
     line(stderr, `interlock: ${room} is temporarily unavailable (HTTP ${error.status}); run the command again.`);
   } else if (error && Number.isSafeInteger(error.status) && UNREACHABLE_STATUSES.has(error.status)) {
-    line(stderr, `interlock: could not reach ${terminalSafe(profile.server_url)} (HTTP ${error.status}); make sure Interlock is running.`);
+    line(stderr, `interlock: could not reach ${terminalSafe(profile.server_url)} (HTTP ${error.status}); ` +
+      (loopbackRoom(profile) ? 'make sure Interlock is running.' : 'the room or the network to it is down.'));
+  } else if (error && Number.isSafeInteger(error.status) && error.interlock_body === false) {
+    // Something answered at the room's address, but not the room: a proxy,
+    // an edge or a captive page. Say what it was, not that the room refused.
+    const type = error.content_type === null || error.content_type === undefined ? 'no content-type'
+      : `content-type ${terminalSafe(error.content_type)}`;
+    const began = typeof error.body_snippet === 'string' && error.body_snippet.length > 0
+      ? ` It began: "${terminalSafe(error.body_snippet.replace(/\s+/g, ' ').trim())}".` : '';
+    line(stderr, `interlock: ${loopbackRoom(profile) ? 'the local Interlock\'s address' : `the room's address (${terminalSafe(profile.server_url)})`} ` +
+      `answered with a non-Interlock page (HTTP ${error.status}, ${type}); the room itself may be fine.${began}`);
   } else if (error && Number.isSafeInteger(error.status)) {
-    line(stderr, `interlock: ${room} refused the command.`);
-  } else {
+    const code = typeof error.code === 'string' && error.exact ? ` ${terminalSafe(error.code)}` : '';
+    line(stderr, `interlock: ${room} refused the command (HTTP ${error.status}${code}).`);
+  } else if (lookupFailed(error)) {
+    line(stderr, `interlock: this computer could not look up ${terminalSafe(roomHost(profile))}; the room may be fine. Check this computer's DNS.`);
+  } else if (loopbackRoom(profile)) {
     line(stderr, `interlock: could not reach ${terminalSafe(profile.server_url)}; make sure Interlock is running.`);
+  } else {
+    line(stderr, `interlock: could not reach ${terminalSafe(profile.server_url)}; the room or the network to it is down.`);
   }
+  if (jsonOut) line(jsonOut, JSON.stringify(requestErrorFacts(error)));
+}
+
+// The same refusal for --json readers, on stdout: what answered and how.
+function requestErrorFacts(error) {
+  const status = error && Number.isSafeInteger(error.status) ? error.status : null;
+  return {
+    ok: false,
+    error: lookupFailed(error) ? 'lookup-failed'
+      : status === null ? (error && error.name === 'AbortError' ? 'timeout'
+        : error && error.code === 'incompatible-response' ? 'incompatible-response' : 'unreachable')
+        : UNREACHABLE_STATUSES.has(status) && !error.exact ? 'unreachable'
+          : error.interlock_body === false ? 'not-interlock' : 'refused',
+    status,
+    code: error && error.exact && typeof error.code === 'string' ? error.code : null,
+    content_type: error && typeof error.content_type === 'string' ? error.content_type : null,
+    body_snippet: error && typeof error.body_snippet === 'string' ? error.body_snippet : null,
+  };
+}
+
+// A name lookup that failed is this computer's network, not the room.
+function lookupFailed(error) {
+  const code = transportCode(error);
+  return code === 'ENOTFOUND' || code === 'EAI_AGAIN';
+}
+
+function roomHost(profile) {
+  try { return new URL(profile.server_url).host; }
+  catch (_) { return String(profile.server_url); }
 }
 
 async function readStdin(stream) {
@@ -1282,7 +1374,7 @@ async function executeReadCommand(command, parsed, profile, profiles, io, depend
       { timeoutMs: wait ? LISTEN_FETCH_TIMEOUT_MS : COMMAND_FETCH_TIMEOUT_MS, stderr: io.stderr });
     if (!validPage(page, profile.cursor)) throw incompatibleResponse();
   } catch (error) {
-    reportRequestError(io.stderr, error, profile);
+    reportRequestError(io.stderr, error, profile, parsed.json ? io.stdout : null);
     return EXIT_RUNTIME;
   }
 
@@ -1351,7 +1443,7 @@ async function executeThroughHistory(parsed, profile, profiles, io, dependencies
     if (!validPage(probe, through - 1)) throw incompatibleResponse();
   } catch (error) {
     if (error && error.status === 400 && error.code === 'invalid-message-query') return notInRoom();
-    reportRequestError(io.stderr, error, profile);
+    reportRequestError(io.stderr, error, profile, parsed.json ? io.stdout : null);
     return EXIT_RUNTIME;
   }
   // A seat's reads skip its own posts, so N may be its own message: the read
@@ -1419,7 +1511,7 @@ async function executeDrainHistory(parsed, profile, profiles, io, dependencies,
             page.connection_session !== connectionSession)) throw incompatibleResponse();
     } catch (error) {
       if (messages.length > 0) await output(batch());
-      reportRequestError(io.stderr, error, profile);
+      reportRequestError(io.stderr, error, profile, parsed.json ? io.stdout : null);
       return EXIT_RUNTIME;
     }
 
@@ -1506,7 +1598,7 @@ async function executeSkipToCurrent(parsed, profile, profiles, io, dependencies)
     });
     if (!validHead(result)) throw incompatibleResponse();
   } catch (error) {
-    reportRequestError(io.stderr, error, profile);
+    reportRequestError(io.stderr, error, profile, parsed.json ? io.stdout : null);
     return EXIT_RUNTIME;
   }
 
@@ -1581,7 +1673,7 @@ async function executePeekHistory(parsed, profile, profiles, io, dependencies) {
     });
     if (!validPeek(page)) throw incompatibleResponse();
   } catch (error) {
-    reportRequestError(io.stderr, error, profile);
+    reportRequestError(io.stderr, error, profile, parsed.json ? io.stdout : null);
     return EXIT_RUNTIME;
   }
 
@@ -1707,7 +1799,14 @@ async function admittedFact(fetcher, profile) {
     return { state: 'yes', detail: `the room accepts this connection until ${new Date(connection.expires_at).toISOString()}` };
   } catch (error) {
     if (error && error.status === 401 && error.code === 'invalid-connection') {
-      return { state: 'no', detail: 'the room no longer accepts this connection; run "interlock join" again' };
+      // The room answers a released seat and a removed one alike, so both are
+      // named; only the profile's own end date tells expiry apart.
+      if (Number.isSafeInteger(profile.expires_at) && profile.expires_at <= Date.now()) {
+        return { state: 'no', detail: `this connection expired at ${new Date(profile.expires_at).toISOString()}; rejoin with \`interlock join\`` };
+      }
+      return { state: 'no', detail: 'the room released this connection after 24 h without a check-in ' +
+        '(its computer may have restarted or its session closed), or the owner removed it in Settings; ' +
+        'rejoin with `interlock join`' };
     }
     return { state: 'unknown', detail: roomUnreachable(error) ? 'the room could not be reached' : 'the room did not answer usably' };
   }
@@ -1803,7 +1902,9 @@ async function roomShowsFact(fetcher, profile) {
     const kind = exactObject(result, ['ok', 'presence_kind', 'session']) ? exactObject(result.presence_kind, ['kind', 'since', 'next']) : null;
     if (!kind || !ROOM_KINDS.includes(kind.kind) || !(kind.since === null || Number.isSafeInteger(kind.since)) ||
         !(kind.next === null || typeof kind.next === 'string')) throw incompatibleResponse();
-    const since = kind.since === null ? '' : ` since ${new Date(kind.since).toISOString()}`;
+    // "unknown" already reads "since the room restarted": its time is when.
+    const since = kind.since === null ? ''
+      : `${kind.kind === 'unknown' ? ' at' : ' since'} ${new Date(kind.since).toISOString()}`;
     if (!(result.session === null || (Number.isSafeInteger(result.session) && result.session > 0))) throw incompatibleResponse();
     return {
       state: kind.kind, kind: kind.kind, since: kind.since, next: kind.next, session: result.session,
@@ -2021,7 +2122,7 @@ async function runDoorbell(args, io, dependencies = {}) {
     facts = facts && page !== null && typeof page === 'object' && Object.prototype.hasOwnProperty.call(page, 'room');
     if (!validRingPage(page, after, facts)) throw incompatibleResponse();
   } catch (error) {
-    reportRequestError(io.stderr, error, profile);
+    reportRequestError(io.stderr, error, profile, parsed.json ? io.stdout : null);
     return roomUnreachable(error) ? EXIT_UNREACHABLE : EXIT_RUNTIME;
   }
   if (parsed.json) {
@@ -2101,6 +2202,18 @@ function sayAnnotation(parsed, means, cursor) {
   return Object.keys(annotation).length > 0 ? annotation : null;
 }
 
+// Whom a sent message rang, from the room's own frozen delivery list: the
+// author sees it at once instead of re-reading history.
+function rangWords(message) {
+  const names = message.delivery.map(entry => terminalSafe(entry.name) +
+    (entry.session === null ? '' : ` (Session ${entry.session})`));
+  // The list holds AIs only: a person named in the post is still notified.
+  if (names.length === 0) return 'Rang no AI.';
+  const everyone = InterlockMentions.tokens(message.text).some(token => token.handle === 'all');
+  // The tag is named in words: a line an AI may paste must not broadcast.
+  return `Rang${everyone ? ` ${names.length} (all-seats tag)` : ''}: ${names.join(', ')}.`;
+}
+
 async function runSay(args, io, dependencies = {}) {
   if (args.some(arg => arg === '--means' || arg.startsWith('--means='))) {
     line(io.stderr, 'interlock: refusing an ask\'s scope line in command arguments; use --means-file PATH or --means-stdin.');
@@ -2165,7 +2278,7 @@ async function runSay(args, io, dependencies = {}) {
       break;
     } catch (error) {
       if (attempt === 0 && !Number.isSafeInteger(error && error.status)) continue;
-      if (annotation === null) reportRequestError(io.stderr, error, profile);
+      if (annotation === null) reportRequestError(io.stderr, error, profile, parsed.json ? io.stdout : null);
       else reportAnnotationError(io.stderr, error, profile, parsed.connection);
       return EXIT_RUNTIME;
     }
@@ -2175,7 +2288,9 @@ async function runSay(args, io, dependencies = {}) {
     return EXIT_OK;
   }
   if (parsed.json) line(io.stdout, JSON.stringify(result));
-  else line(io.stdout, `Sent as ${profile.name} (message ${result.message.id}).`);
+  else {
+    line(io.stdout, `Sent as ${profile.name} (message ${result.message.id}). ${rangWords(result.message)}`);
+  }
   // Words with no choice close a plain ask, but only discuss a decision or a
   // request for approval: say so, so nobody takes them for a decision.
   if (!parsed.json && Array.isArray(parsed.answers) && parsed.answers.length > 0 && parsed.choice === null) {
@@ -4314,6 +4429,7 @@ async function workRequest(fetcher, profile, pathname, options = {}) {
 
 // What a refused field needs, for the refusals that do not name it.
 const WORK_REFUSAL_HINTS = Object.freeze({
+  'invalid-operation': 'operation_id must be a UUID v4. Leave it out of the file and interlock writes one (and prints it, for a retry).',
   'invalid-participant': 'A name in responsible, next_to or asked_of is not a participant in this room.',
   'invalid-links': 'links are ids of records in this room (W-n, D-n); put an outside reference in source.',
   'scope-too-long': 'What a yes means (scope) is at most 300 characters; put the rest in body.',
@@ -4664,6 +4780,48 @@ function usageEntries() {
   return entries;
 }
 
+// What each work verb's request file holds, from docs/WORK.md's route table,
+// with one example file. The ID comes from the command line and operation_id
+// is written by interlock, so neither is listed.
+const WORK_FILE_HELP = Object.freeze({
+  create: ['kind ("work", "finding" or "decision"), project, title, body; optional source, source_message ' +
+    '({ message_id, quote }), links, parent; work: responsible, next_to, next_action, target, consequence, ' +
+    'severity; decision: asked_of, proposal, rationale, scope, conditions',
+  '{"kind": "work", "project": "PROJECT", "title": "Short title", "body": "What and why."}'],
+  update: ['expected_revision, note (required), and any of: responsible, next_to, next_action, target, ' +
+    'consequence, severity, state, block_reason, done_account, done_evidence or no_evidence, title, body',
+  '{"expected_revision": 3, "note": "Started on it.", "state": "active"}'],
+  move: ['expected_revision, project', '{"expected_revision": 3, "project": "PROJECT"}'],
+  evidence: ['target, observed, limits, reference (optional when source_message is given); optional relates_to, ' +
+    'source_message ({ message_id, quote })',
+  '{"target": "What was checked", "observed": "What was seen", "limits": "What this does not show", "reference": "Where to look"}'],
+  note: ['text', '{"text": "A note on the record."}'],
+  share: ['purpose ("exposure" or "notify"), outcome ("sent", "declined" or "failed"), to, message_id (required ' +
+    'when sent); optional detail',
+  '{"purpose": "notify", "outcome": "sent", "to": "NAME", "message_id": 12}'],
+  answer: ['expected_revision, text; optional choice ("yes", "no" or null), conditions, reason (required when ' +
+    'replacing an answer or answering for someone else)',
+  '{"expected_revision": 2, "text": "Yes, as proposed.", "choice": "yes"}'],
+  'report-answer': ['expected_revision, text, source; optional conditions',
+    '{"expected_revision": 2, "text": "The answer, as given.", "source": "Where it was given"}'],
+  confirm: ['expected_revision; optional reason', '{"expected_revision": 2}'],
+  reopen: ['expected_revision, reason; optional asked_of', '{"expected_revision": 2, "reason": "Why it is open again."}'],
+  revise: ['expected_revision, reason, and at least one of: title, body, proposal, rationale, scope',
+    '{"expected_revision": 2, "reason": "Why it changed.", "proposal": "The new proposal."}'],
+  withdraw: ['expected_revision, reason', '{"expected_revision": 3, "reason": "Why it is withdrawn."}'],
+  'project-update': ['expected_revision, objective and/or today', '{"expected_revision": 4, "today": "What today is for."}'],
+  'ask-approval': ['project, title, scope (what a yes means, at most 300 characters); optional body',
+    '{"project": "PROJECT", "title": "Short title", "scope": "What a yes means."}'],
+});
+
+function workFileHelp(verb) {
+  const entry = Object.prototype.hasOwnProperty.call(WORK_FILE_HELP, verb) ? WORK_FILE_HELP[verb] : null;
+  if (entry === null) return '';
+  return `      The file for ${verb} takes: ${entry[0]}.\n` +
+    '      Leave out operation_id: interlock writes one and prints it, for a retry.\n' +
+    `      Example file: ${entry[1]}\n`;
+}
+
 // `--help` or `-h` anywhere wins: the usage of the command named (narrowed to
 // its verb when one is named), else the whole help. Nothing else is checked.
 function helpFor(argv) {
@@ -4678,7 +4836,8 @@ function helpFor(argv) {
     const third = entry[0].split(' ')[4];
     return typeof third === 'string' && !third.startsWith('-') && third.split('|').includes(verb);
   });
-  return (named.length > 0 ? named : entries).map(entry => entry.join('\n')).join('\n') + '\n';
+  return (named.length > 0 ? named : entries).map(entry => entry.join('\n')).join('\n') + '\n' +
+    (command === 'work' && named.length > 0 ? workFileHelp(verb) : '');
 }
 
 function run(argv, io, dependencies = {}) {
@@ -4728,6 +4887,7 @@ function run(argv, io, dependencies = {}) {
 
 module.exports = {
   connectionFactsFor,
+  workFileHelp,
   factLines,
   EXIT_OK,
   EXIT_RUNTIME,

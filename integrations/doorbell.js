@@ -681,6 +681,46 @@ function seconds(milliseconds) {
   return String(Math.round(milliseconds / 100) / 10);
 }
 
+// The connection's room address, from this computer's profile; null when
+// it cannot be read.
+function roomAddress(name) {
+  try {
+    const connectionDir = require('../src/config.js').resolveConnectionDir({ env: process.env, platform: process.platform });
+    const profiles = require('../src/client/profiles.js').openProfiles({ connectionDir });
+    const url = new URL(profiles.load(name).server_url);
+    return { host: url.host, local: require('../src/client/proxy.js').LOOPBACK.includes(url.hostname) };
+  } catch (_) { return null; }
+}
+
+// Where a give-up outage was: this computer's name lookup, a hosted room's
+// side, or the local Interlock. A hosted outage is not the AI's machine.
+function outageWhere(name, polled, elapsed) {
+  const reason = pollReason(polled);
+  const room = roomAddress(name);
+  if (/could not look up/.test(reason)) {
+    return `this computer could not look up ${room ? room.host : 'the room'} for ${minutes(elapsed)} min; ` +
+      `the room may be fine. Check this computer's DNS (${reason}).`;
+  }
+  if (room && !room.local) {
+    return `the room at ${room.host} could not be reached for ${minutes(elapsed)} min; ` +
+      `this is the room's side, not your machine (${reason}).`;
+  }
+  return `the Interlock room was unreachable for ${seconds(elapsed)} seconds (${reason}); ` +
+    'make sure Interlock is running.';
+}
+
+function minutes(milliseconds) {
+  return String(Math.round(milliseconds / 6_000) / 10);
+}
+
+// The one command that starts this doorbell again, as it was started.
+function restartCommand(options) {
+  const quote = value => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${String(value).replace(/'/g, `'\\''`)}'`);
+  return ['interlock-doorbell', 'run', '--adapter', options.adapter, '--connection', options.connection,
+    '--session', options.session, ...(options.stateDir ? ['--state-dir', options.stateDir] : [])]
+    .map(quote).join(' ');
+}
+
 // The first line the interlock command wrote to stderr, made safe to repeat.
 function pollReason(polled) {
   const text = polled.error ? polled.error.message : (polled.stderr || '');
@@ -1234,9 +1274,9 @@ async function runAdapter(argv) {
           continue;
         }
         const saved = saveFailure(stateDir, polled.stdout || '', polled.stderr || '');
-        fail(`the Interlock room was unreachable for ${seconds(elapsed)} seconds ` +
-          `(${pollReason(polled)}); the cursor is unchanged and any waiting ring stays eligible. ` +
-          `Raw output preserved at ${saved}. Rerun this command once the room answers again.`);
+        fail(`${outageWhere(options.connection, polled, elapsed)} The cursor is unchanged and any waiting ring ` +
+          `stays eligible. Raw output preserved at ${saved}. Restart your doorbell when it's back: ` +
+          `${restartCommand(options)}`);
         return;
       }
       if (polled.error || polled.status !== 0) {

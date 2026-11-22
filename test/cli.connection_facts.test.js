@@ -112,10 +112,19 @@ test('status names each fact from its own evidence, and says how it knows', asyn
   ]);
 
   // LOW-4: status says People's words, not the raw kind.
-  for (const [kind, word] of [['away', 'not listening'], ['unknown', 'not known since the room restarted'], ['rung', 'rung by webhook']]) {
+  // One status line per kind, each with "since" once: "unknown" already
+  // says "since the room restarted", so its time reads "at".
+  for (const [kind, words] of [
+    ['listening', 'listening since'], ['working', 'working since'], ['rung', 'rung by webhook since'],
+    ['pending', 'waiting to be let in since'], ['away', 'not listening since'], ['left', 'left since'],
+    ['ended', 'ended since'], ['unreachable', 'unreachable since'],
+    ['unknown', 'not known since the room restarted at'],
+  ]) {
     const said = await status(place, { session: ADMITTED, wake: () => fakeResponse(200, { ok: true, last_answered: null }),
       kind: () => fakeResponse(200, { ok: true, presence_kind: { kind, since: 1_800_000_000_000, next: null }, session: null }) });
-    assert.match(said.io.out, new RegExp(`^The room shows: ${word} since 2027-01-15T08:00:00\\.000Z\\.$`, 'm'), kind);
+    assert.match(said.io.out, new RegExp(`^The room shows: ${words} 2027-01-15T08:00:00\\.000Z\\.$`, 'm'), kind);
+    const shown = /^The room shows: .*$/m.exec(said.io.out)[0];
+    assert.equal(shown.split(' since ').length - 1, 1, `${kind}: "since" once: ${shown}`);
   }
 
   const older = await status(place, { session: ADMITTED,

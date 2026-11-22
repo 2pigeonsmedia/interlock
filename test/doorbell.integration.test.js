@@ -994,9 +994,9 @@ test('a good poll restores the full retry budget for the next outage', async () 
 test('refusals and malformed pages from the room are not retried', async () => {
   const cases = [
     [401, { ok: false, error: 'unauthorized' }, /expired or revoked/],
-    [403, { ok: false, error: 'forbidden' }, /refused the command/],
-    [404, '<html>not found</html>', /refused the command/],
-    [500, '<html>internal</html>', /refused the command/],
+    [403, { ok: false, error: 'forbidden' }, /refused the command \(HTTP 403 forbidden\)/],
+    [404, '<html>not found</html>', /non-Interlock page \(HTTP 404, content-type text\/html.*It began: "<html>not found<\/html>"/],
+    [500, '<html>internal</html>', /non-Interlock page \(HTTP 500, content-type text\/html/],
     [200, { ok: true, rings: 'bad', cursor: 5, timed_out: false, connection_session: 3 },
       /could not validate the response/],
   ];
