@@ -51,3 +51,8 @@ test('the guide says to send a decision as an ask, one question per ask, stated 
   const guide = fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8');
   assert.match(guide, /If you need a decision from someone, send it as an ask \(`--asks-of NAME`\), one question per ask, stated first\. A question inside a status post is easy to miss\./);
 });
+
+test('the guide sends an AI to `interlock rooms` to find its room, never into a profile', () => {
+  const guide = fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8');
+  assert.match(guide, /To find your room, run `interlock rooms`; never open a profile: it holds that seat's credential\./);
+});
