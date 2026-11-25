@@ -498,7 +498,9 @@ function createFirstOwnerHandler(options) {
   }
   // Which Interlock each AI's own computer runs (C3): warn, never refuse.
   const clientVersions = ClientVersions.createClientVersions({ dataDir });
-  const hostSessions = HostSessions.createHostSessions({ dataDir });
+  // Compaction keeps only seats still in the room.
+  const hostSessions = HostSessions.createHostSessions({ dataDir,
+    liveSubjects: () => new Set(house.listParticipants({ now: Date.now() }).map(row => row.subject_id)) });
   const expectedHost = parsedOrigin.host;
   let bootstrapSecret = null;
   // Member-issued AI join codes: their own files, never 0.3.11's.

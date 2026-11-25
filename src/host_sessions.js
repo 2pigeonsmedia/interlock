@@ -12,17 +12,24 @@
 // cannot prevent it. A re-join is a new seat and starts clean.
 //
 // Facts are held in memory and appended to host-sessions.jsonl when they
-// change, so they survive a restart. Nothing here refuses a request.
+// change, so they survive a restart. The file stays small: each load rewrites
+// it as one `first` line and the latest `other` line per live seat (ended
+// seats are dropped), and an append that would pass the size cap compacts it
+// first. A file found over the cap is set aside with one log line and a fresh
+// one is started, so recording never silently stops. Nothing here refuses a
+// request.
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const FILE_NAME = 'host-sessions.jsonl';
 const HEADER = 'x-interlock-session';
 const DIGEST = /^[0-9a-f]{64}$/;
-// Past this size the file has stopped being a few lines per seat; stop
-// reading and writing it rather than load it into memory.
+// Compacted, the file is about 200 bytes a seat; this is far past any room.
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
+// At most one `other` line a minute for a seat used from another session.
+const OTHER_WRITE_MS = 60_000;
 
 function validSubject(value) {
   return typeof value === 'string' && value.length > 0 && value.length <= 64 && !value.includes('\0');
@@ -39,9 +46,15 @@ function createHostSessions(options) {
     throw new Error('host_sessions: invalid data dir');
   }
   const file = path.join(dataDir, FILE_NAME);
+  const cap = Number.isSafeInteger(options.maxFileBytes) && options.maxFileBytes > 0 ? options.maxFileBytes : MAX_FILE_BYTES;
+  // The live seats, or null when they cannot be read (then nothing is dropped).
+  const liveSubjects = typeof options.liveSubjects === 'function' ? options.liveSubjects : () => null;
+  const log = typeof options.log === 'function' ? options.log
+    : text => { try { process.stderr.write(text + '\n'); } catch (_) { /* nowhere to say it */ } };
   // subject -> { session, first_seen_at, other_session_at }
   const seats = new Map();
-  let writable = true;
+  let size = 0;
+  let saidFull = false;
 
   function apply(row) {
     const prior = seats.get(row.subject_id);
@@ -52,11 +65,53 @@ function createHostSessions(options) {
     }
   }
 
-  // Load: a torn or foreign line is skipped, never fatal.
-  try {
-    const size = fs.statSync(file).size;
-    if (size > MAX_FILE_BYTES) writable = false;
-    else {
+  function live() {
+    try {
+      const value = liveSubjects();
+      return value instanceof Set ? value : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Rewrites the file from memory: one `first` line and the latest `other`
+  // line per seat, dropping seats that have ended. Atomic: a crash leaves the
+  // old file or the new one.
+  function compact() {
+    const keep = live();
+    if (keep !== null) {
+      for (const subject of [...seats.keys()]) if (!keep.has(subject)) seats.delete(subject);
+    }
+    let text = '';
+    for (const [subject, entry] of seats) {
+      text += JSON.stringify({ subject_id: subject, kind: 'first', session: entry.session, at: entry.first_seen_at }) + '\n';
+      if (entry.other_session_at !== null) {
+        text += JSON.stringify({ subject_id: subject, kind: 'other', at: entry.other_session_at }) + '\n';
+      }
+    }
+    const tmp = `${file}.tmp-${process.pid}-${crypto.randomUUID()}`;
+    try {
+      fs.writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      fs.renameSync(tmp, file);
+      size = Buffer.byteLength(text, 'utf8');
+      return true;
+    } catch (_) {
+      try { fs.unlinkSync(tmp); } catch (__) { /* never written */ }
+      return false;
+    }
+  }
+
+  // Load. A torn or foreign line is skipped, never fatal; the rewrite below
+  // leaves no torn line behind for the next append to join.
+  let found = null;
+  try { found = fs.statSync(file).size; } catch (error) { found = null; }
+  if (found !== null && found > cap) {
+    const aside = `${file}.over-cap-${Date.now()}`;
+    try { fs.renameSync(file, aside); } catch (_) { /* the rewrite below replaces it */ }
+    log(`interlock: ${FILE_NAME} was over its ${cap}-byte cap; it was set aside as ${path.basename(aside)} ` +
+      'and a new one started. Which session first used each AI is known again as each next uses the room.');
+  } else if (found !== null) {
+    try {
       for (const text of fs.readFileSync(file, 'utf8').split('\n')) {
         if (text.length === 0) continue;
         let row;
@@ -66,15 +121,27 @@ function createHostSessions(options) {
         if (row.kind === 'first' && Object.keys(row).length === 4 && DIGEST.test(row.session)) apply(row);
         else if (row.kind === 'other' && Object.keys(row).length === 3) apply(row);
       }
-    }
-  } catch (error) {
-    if (!error || error.code !== 'ENOENT') writable = false;
+    } catch (_) { /* unreadable: start from what memory has */ }
   }
+  if (found !== null) compact();
 
   function append(row) {
-    if (!writable) return;
+    const text = JSON.stringify(row) + '\n';
+    const bytes = Buffer.byteLength(text, 'utf8');
+    if (size + bytes > cap) {
+      compact();
+      if (size + bytes > cap) {
+        // Even compacted, the live seats fill the cap: memory still knows.
+        if (!saidFull) {
+          saidFull = true;
+          log(`interlock: ${FILE_NAME} is at its ${cap}-byte cap even compacted; new host-session facts are kept in memory only until the room restarts.`);
+        }
+        return;
+      }
+    }
     try {
-      fs.appendFileSync(file, JSON.stringify(row) + '\n', { encoding: 'utf8', mode: 0o600 });
+      fs.appendFileSync(file, text, { encoding: 'utf8', mode: 0o600 });
+      size += bytes;
     } catch (_) {
       // Memory still knows; a restart loses only this fact.
     }
@@ -93,10 +160,10 @@ function createHostSessions(options) {
       return;
     }
     if (prior.session === session) return;
-    // One line per minute at most for a seat used from another session.
-    const fresh = prior.other_session_at === null || now - prior.other_session_at >= 60_000;
+    const fresh = prior.other_session_at === null || now - prior.other_session_at >= OTHER_WRITE_MS;
+    if (!fresh) return;
     prior.other_session_at = now;
-    if (fresh) append({ subject_id: subjectId, kind: 'other', at: now });
+    append({ subject_id: subjectId, kind: 'other', at: now });
   }
 
   /* { first_seen_at, other_session_at } for a seat; nulls when unknown. */
