@@ -46,3 +46,8 @@ test('the composer offers the ask as a button and makes no ask by itself', () =>
   assert.match(ROOM_JS, /askSuggestionUse\.addEventListener\('click', [\s\S]{0,300}setAskMode\(true\)[\s\S]{0,200}askOf\.value = /);
   assert.match(ROOM_JS, /messageBody\.addEventListener\('input', updateAskSuggestion\)/);
 });
+
+test('the guide says to send a decision as an ask, one question per ask, stated first', () => {
+  const guide = fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8');
+  assert.match(guide, /If you need a decision from someone, send it as an ask \(`--asks-of NAME`\), one question per ask, stated first\. A question inside a status post is easy to miss\./);
+});
