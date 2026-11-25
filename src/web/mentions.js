@@ -11,8 +11,19 @@
   // a space, so the length and every offset stay those of the original text.
   const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 
+  // A line ends at \n, \r\n or a lone \r, as in Markdown: a post written
+  // by a Windows tool arrives with \r\n.
+  const isLineEnd = char => char === '\n' || char === '\r';
+
   function blank(chars, from, to) {
-    for (let index = from; index < to; index += 1) if (chars[index] !== '\n') chars[index] = ' ';
+    for (let index = from; index < to; index += 1) if (!isLineEnd(chars[index])) chars[index] = ' ';
+  }
+
+  // Whether the line end at `index` is followed by a blank line.
+  function blankLineAfter(chars, index, to) {
+    let probe = index + (chars[index] === '\r' && chars[index + 1] === '\n' ? 2 : 1);
+    while (probe < to && (chars[probe] === ' ' || chars[probe] === '\t')) probe += 1;
+    return probe < to && isLineEnd(chars[probe]);
   }
 
   // Inline spans, within one stretch of text that holds no fence. A span
@@ -29,7 +40,7 @@
       let probe = openEnd;
       let close = -1;
       while (probe < to) {
-        if (chars[probe] === '\n' && /^\n[ \t]*\n/.test(chars.slice(probe, probe + 64).join(''))) break;
+        if (isLineEnd(chars[probe]) && blankLineAfter(chars, probe, to)) break;
         if (chars[probe] !== '`') { probe += 1; continue; }
         let runEnd = probe;
         while (runEnd < to && chars[runEnd] === '`') runEnd += 1;
@@ -48,8 +59,9 @@
     const lines = [];
     let start = 0;
     for (let index = 0; index <= chars.length; index += 1) {
-      if (index === chars.length || chars[index] === '\n') {
+      if (index === chars.length || isLineEnd(chars[index])) {
         lines.push({ start, end: index, text: chars.slice(start, index).join('') });
+        if (chars[index] === '\r' && chars[index + 1] === '\n') index += 1;
         start = index + 1;
       }
     }

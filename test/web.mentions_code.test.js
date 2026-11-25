@@ -117,3 +117,39 @@ test('the room rings nobody for code-formatted mentions, and the preview agrees'
   assert.deepEqual(outside.preview, outside.sent);
   await chat.close();
 });
+
+// Windows line ends: a post written by a Windows tool arrives with CRLF (or,
+// rarely, a lone CR), and every line rule above holds for it too.
+for (const [label, eol] of [['CRLF', '\r\n'], ['lone CR', '\r']]) {
+  test(`${label}: a fence closes, and a mention after it still rings`, () => {
+    const text = ['fix:', '```js', 'x @all', '```', '@Pip please review'].join(eol);
+    assert.deepEqual(Mentions.resolve(text, NAMES), ['Pip']);
+    const tilde = ['~~~', '@Pip', '~~~', '@Rowan'].join(eol);
+    assert.deepEqual(Mentions.resolve(tilde, NAMES), ['Rowan']);
+  });
+
+  test(`${label}: a fence opener is recognised, so its block is quoted`, () => {
+    assert.deepEqual(Mentions.resolve(['```', '@Pip', '```'].join(eol), NAMES), []);
+  });
+
+  test(`${label}: an inline span still quotes, and does not reach across a blank line`, () => {
+    assert.deepEqual(Mentions.resolve(`run \`say @Pip\` now${eol}ok`, NAMES), []);
+    assert.deepEqual(Mentions.resolve(`a stray \` here${eol}${eol}@Rowan next \`x\``, NAMES), ['Rowan']);
+    assert.deepEqual(Mentions.resolve(`a stray \` here${eol} \t${eol}@Rowan next \`x\``, NAMES), ['Rowan']);
+  });
+
+  test(`${label}: token offsets still point into the original text`, () => {
+    const text = ['```', '@Rowan', '```', 'and @Pip'].join(eol);
+    const [token] = Mentions.tokens(text);
+    assert.equal(text.slice(token.start, token.end), '@Pip');
+  });
+}
+
+test('CRLF: the room rings what the preview names', async () => {
+  const chat = service();
+  const text = ['fix:', '```js', 'x @Rowan', '```', '@Pip please review'].join('\r\n');
+  const { preview, sent } = await previewAndSend(chat, text);
+  assert.deepEqual(sent, ['Pip']);
+  assert.deepEqual(preview, sent);
+  await chat.close();
+});
