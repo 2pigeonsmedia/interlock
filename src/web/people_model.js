@@ -88,6 +88,18 @@
     return project === '' && /\blead/i.test(String(scope || ''));
   }
 
+  // Why a name's last connection ended, for the Allow card, from the room's
+  // own record; an unknown cause keeps the plain wording.
+  function priorConnectionWords(how, when) {
+    if (how === 'left') return `It left on ${when}.`;
+    if (how === 'removed') return `The owner removed it on ${when}.`;
+    if (how === 'released') {
+      return `The room released it on ${when}, after 24 h without a check-in (its computer may have restarted or its session closed).`;
+    }
+    if (how === 'expired') return `Its admission expired on ${when}.`;
+    return `Previous connection ended ${when}.`;
+  }
+
   // The owner's ruling: whole-room grants stay, with a warning. One whose
   // title reads like a lead asks before it is made, since it leads no project.
   function grantLeadQuestion(project, scope, holder) {
@@ -353,7 +365,7 @@
   }
 
   const contract = Object.freeze({
-    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, grantLeadQuestion, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, grantLeadQuestion, priorConnectionWords, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {

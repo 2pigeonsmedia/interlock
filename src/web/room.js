@@ -616,11 +616,12 @@ async function freshOwnerStepUp() {
 function validPendingAi(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 14 || ![
+  if (keys.length !== 15 || ![
     'request_id', 'name', 'product', 'product_provenance',
-    'previously_used', 'last_ended_at', 'reuse', 'reuse_session',
+    'previously_used', 'last_ended_at', 'last_ended_how', 'reuse', 'reuse_session',
     'created_at', 'expires_at', 'match_code', 'connected', 'declared_project', 'returns',
   ].every(key => keys.includes(key)) ||
+    ![null, 'left', 'removed', 'released', 'expired'].includes(value.last_ended_how) ||
     !(value.declared_project === null || typeof value.declared_project === 'string') ||
     !(value.returns === null || (typeof value.returns === 'string' && value.returns.length <= 2000))) return false;
   return typeof value.request_id === 'string' && typeof value.name === 'string' &&
@@ -688,7 +689,7 @@ function pendingAiCard(row, status) {
     priorUse.textContent = `Held by another session · Session ${row.reuse_session}. Allow ends the old session and admits this one.`;
   } else if (row.reuse === 'ended') {
     const ended = row.last_ended_at
-      ? ` Previous connection ended ${new Date(row.last_ended_at).toLocaleString()}.`
+      ? ' ' + InterlockPeopleModel.priorConnectionWords(row.last_ended_how, new Date(row.last_ended_at).toLocaleString())
       : '';
     priorUse.textContent =
       `Used before · Session ${row.reuse_session}. Allow admits a new session.${ended}`;

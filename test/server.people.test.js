@@ -144,7 +144,8 @@ test('a seat\'s declared project and model reach the Allow card, People and Sett
       assert.ok(card || attempt < 50, 'ARRANGEMENT: the knock became visible');
       if (!card) await new Promise(resolve => setImmediate(resolve));
     }
-    assert.equal(Object.keys(card).length, 14, JSON.stringify(card));
+    assert.equal(Object.keys(card).length, 15, JSON.stringify(card));
+    assert.equal(card.last_ended_how, null, 'a fresh name has no prior ending');
     assert.equal(card.returns, null, 'a fresh name returns with nothing');
     assert.equal(card.declared_project, 'ops', 'the Allow card shows the declared project as typed');
     const allowed = await post(runtime, `/api/ai/admissions/${knock.request_id}/allow`, {}, owner);
