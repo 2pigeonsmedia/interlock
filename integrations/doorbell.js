@@ -746,8 +746,9 @@ function openAsksWords(asks) {
 /* The room's open asks for this AI, read with the one existing command, or
  * null when it cannot say (an older room, an outage, an odd answer): the
  * ring is never held for it. */
-function openAsksFor(interlock, prefix, connection) {
-  const read = command(interlock, [...prefix, 'asks', '--connection', connection, '--json']);
+function openAsksFor(interlock, prefix, options) {
+  // Run as the doorbell's own polls run, so the room reads one host session.
+  const read = command(interlock, [...prefix, 'asks', '--connection', options.connection, '--json']);
   if (read.error || read.status !== 0) return null;
   try {
     const page = JSON.parse(String(read.stdout).trim().split('\n').pop());
@@ -1352,7 +1353,7 @@ async function runAdapter(argv) {
         // before handing it a ring.
         if (watch && watch.parentGone()) { deaf('parent-gone'); return; }
         const message = nudge(options, page.rings,
-          page.rings.every(ring => ring.ring) ? openAsksFor(interlock, interlockPrefix, options.connection) : null);
+          page.rings.every(ring => ring.ring) ? openAsksFor(interlock, interlockPrefix, options) : null);
         if (options.adapter === 'codex') {
           const delivered = command(codex,
             ['queue', '--thread', options.session, '--message', message]);
