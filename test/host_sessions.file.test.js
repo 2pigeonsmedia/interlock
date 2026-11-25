@@ -93,3 +93,20 @@ test('a torn last line never swallows the next row', () => {
   assert.deepEqual(reloaded.get('seat-a'), { first_seen_at: 1_000, other_session_at: null });
   assert.deepEqual(reloaded.get('seat-c'), { first_seen_at: 2_000, other_session_at: null }, 'the next row was kept');
 });
+
+test('when the rewrite cannot run, the next append still starts on a fresh line', () => {
+  const dataDir = dir();
+  const file = path.join(dataDir, FILE_NAME);
+  fs.writeFileSync(file, JSON.stringify({ subject_id: 'seat-a', kind: 'first', session: FIRST, at: 1_000 }) + '\n' +
+    '{"subject_id":"seat-b","kind":"fir');
+  // The load's rewrite fails, as on a full or read-only directory.
+  const realRename = fs.renameSync;
+  fs.renameSync = () => { throw Object.assign(new Error('simulated'), { code: 'EROFS' }); };
+  let sessions;
+  try { sessions = createHostSessions({ dataDir, liveSubjects: () => null }); } finally { fs.renameSync = realRename; }
+  assert.ok(!fs.readFileSync(file, 'utf8').endsWith('\n'), 'ARRANGEMENT: the torn line is still on disk');
+  sessions.note('seat-c', FIRST, 2_000);
+  const reloaded = createHostSessions({ dataDir, liveSubjects: () => null });
+  assert.deepEqual(reloaded.get('seat-c'), { first_seen_at: 2_000, other_session_at: null }, 'the next row was kept');
+  assert.deepEqual(reloaded.get('seat-a'), { first_seen_at: 1_000, other_session_at: null });
+});

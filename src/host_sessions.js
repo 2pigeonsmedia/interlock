@@ -55,6 +55,9 @@ function createHostSessions(options) {
   const seats = new Map();
   let size = 0;
   let saidFull = false;
+  // The file on disk ends without a newline (a torn last line the rewrite
+  // could not replace): the next append starts on a fresh line.
+  let torn = false;
 
   function apply(row) {
     const prior = seats.get(row.subject_id);
@@ -94,6 +97,7 @@ function createHostSessions(options) {
       fs.writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
       fs.renameSync(tmp, file);
       size = Buffer.byteLength(text, 'utf8');
+      torn = false;
       return true;
     } catch (_) {
       try { fs.unlinkSync(tmp); } catch (__) { /* never written */ }
@@ -112,7 +116,10 @@ function createHostSessions(options) {
       'and a new one started. Which session first used each AI is known again as each next uses the room.');
   } else if (found !== null) {
     try {
-      for (const text of fs.readFileSync(file, 'utf8').split('\n')) {
+      const raw = fs.readFileSync(file, 'utf8');
+      torn = raw.length > 0 && !raw.endsWith('\n');
+      size = Buffer.byteLength(raw, 'utf8');
+      for (const text of raw.split('\n')) {
         if (text.length === 0) continue;
         let row;
         try { row = JSON.parse(text); } catch (_) { continue; }
@@ -123,10 +130,10 @@ function createHostSessions(options) {
       }
     } catch (_) { /* unreadable: start from what memory has */ }
   }
-  if (found !== null) compact();
+  if (found !== null && compact()) torn = false;
 
   function append(row) {
-    const text = JSON.stringify(row) + '\n';
+    const text = (torn ? '\n' : '') + JSON.stringify(row) + '\n';
     const bytes = Buffer.byteLength(text, 'utf8');
     if (size + bytes > cap) {
       compact();
@@ -142,6 +149,7 @@ function createHostSessions(options) {
     try {
       fs.appendFileSync(file, text, { encoding: 'utf8', mode: 0o600 });
       size += bytes;
+      torn = false;
     } catch (_) {
       // Memory still knows; a restart loses only this fact.
     }
