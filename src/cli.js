@@ -98,6 +98,8 @@ Usage:
   interlock doorbell pause --connection NAME [--reason turn] [--json]
   interlock doorbell resume --connection NAME [--json]
   interlock status --connection NAME [--state-dir ABSOLUTE_PATH] [--json]
+  interlock rooms [--json]
+      every connection on this computer, its room address and its state; never a token
   interlock leave --connection NAME [--json]
       Leave is for when you want the connection truly left, not resumable:
       the seat ends, its grants end, and its work goes to its lead or waits
@@ -2219,6 +2221,55 @@ function rangWords(message) {
   const everyone = InterlockMentions.tokens(message.text).some(token => token.handle === 'all');
   // The tag is named in words: a line an AI may paste must not broadcast.
   return `Rang${everyone ? ` ${names.length} (all-seats tag)` : ''}: ${names.join(', ')}.`;
+}
+
+// Every local connection, its room address and its state, read from the
+// profiles alone: no token file is opened and no secret is printed. This is
+// the way to find a connection's room without opening its profile.
+function runRooms(args, io, dependencies = {}) {
+  const json = args.length === 1 && args[0] === '--json';
+  if (args.length > 0 && !json) {
+    line(io.stderr, 'interlock: usage: interlock rooms [--json]');
+    return EXIT_USAGE;
+  }
+  const profileModule = dependencies.profiles || require('./client/profiles.js');
+  const config = dependencies.config || require('./config.js');
+  let connectionDir;
+  let rows;
+  try {
+    connectionDir = config.resolveConnectionDir({
+      env: dependencies.env || process.env,
+      platform: dependencies.platform || process.platform,
+      homedir: dependencies.homedir,
+    });
+    rows = profileModule.openProfiles({ connectionDir }).summaries();
+  } catch (error) {
+    line(io.stderr, `interlock: the connections on this computer could not be read (${terminalSafe(error && error.code || 'unknown')}).`);
+    return EXIT_RUNTIME;
+  }
+  const now = (dependencies.clock || Date.now)();
+  const connections = rows.map(row => ({
+    name: row.name,
+    server_url: row.server_url,
+    state: row.state === 'admitted' && row.expires_at <= now ? 'expired' : row.state,
+    expires_at: row.expires_at,
+  }));
+  if (json) {
+    line(io.stdout, JSON.stringify({ ok: true, connections }));
+    return EXIT_OK;
+  }
+  if (connections.length === 0) {
+    line(io.stdout, `No connections on this computer (${terminalSafe(connectionDir)}). Join a room: interlock join --url URL --name NAME`);
+    return EXIT_OK;
+  }
+  line(io.stdout, `Connections on this computer (${terminalSafe(connectionDir)}):`);
+  for (const row of connections) {
+    const state = row.state === 'unadmitted' ? 'waiting to be let in'
+      : row.state === 'expired' ? `expired at ${new Date(row.expires_at).toISOString()}`
+        : `admitted until ${new Date(row.expires_at).toISOString()}`;
+    line(io.stdout, `  ${terminalSafe(row.name)} → ${terminalSafe(row.server_url)} → ${state}`);
+  }
+  return EXIT_OK;
 }
 
 async function runSay(args, io, dependencies = {}) {
@@ -4865,6 +4916,8 @@ function run(argv, io, dependencies = {}) {
   if (argv[0] === 'restore') return runRestore(argv.slice(1), io, dependencies);
 
   if (argv[0] === 'join') return runJoin(argv.slice(1), io, dependencies);
+
+  if (argv[0] === 'rooms') return runRooms(argv.slice(1), io, dependencies);
 
   if (argv[0] === 'history' || argv[0] === 'listen') {
     return runReadCommand(argv[0], argv.slice(1), io, dependencies);
