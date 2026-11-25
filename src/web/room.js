@@ -85,6 +85,9 @@ const askProject = document.querySelector('#ask-project');
 const askToggle = document.querySelector('#ask-toggle');
 const mentionSuggestions = document.querySelector('#mention-suggestions');
 const mentionPreview = document.querySelector('#mention-preview');
+const askSuggestion = document.querySelector('#ask-suggestion');
+const askSuggestionText = document.querySelector('#ask-suggestion-text');
+const askSuggestionUse = document.querySelector('#ask-suggestion-use');
 const presenceForm = document.querySelector('#presence-form');
 const presenceMiddle = document.querySelector('#presence-middle');
 const presenceWaitingOn = document.querySelector('#presence-waiting-on');
@@ -2269,6 +2272,20 @@ function updateMentionPreview() {
   }, RING_PREVIEW_DELAY_MS);
 }
 
+// A draft that reads as a question for the one person or AI it names gets
+// a suggestion to send it as an ask: a decision asked in a plain post is easy
+// to miss, and an ask is tracked in Needs you. Only a suggestion: the button
+// opens Ask with that name picked, and nothing is sent until Send.
+function updateAskSuggestion() {
+  const names = rosterParticipants.map(row => row.name).filter(name => name !== viewerName());
+  const name = askFields.hidden && !composingDiscussion()
+    ? InterlockAsks.suggestAsk(messageBody.value, InterlockMentions.named(messageBody.value, names)) : null;
+  askSuggestion.hidden = name === null;
+  askSuggestionText.textContent = name === null ? '' : `This reads as a question for ${name}.`;
+  askSuggestionUse.textContent = name === null ? '' : `Make it an ask of ${name}`;
+  askSuggestionUse.dataset.name = name || '';
+}
+
 function insertMention(name) {
   const token = '@' + name;
   const start = messageBody.selectionStart;
@@ -3421,6 +3438,7 @@ messageForm.addEventListener('submit', async event => {
       loadAnnotations();
     }
     updateMentionPreview();
+    updateAskSuggestion();
     setRoomNotice('Message saved.', 'success');
     followTranscriptBottom(true);
     if (seenMessageIds.has(forceFollowMessageId)) {
@@ -3442,6 +3460,18 @@ messageForm.addEventListener('submit', async event => {
 });
 
 messageBody.addEventListener('input', updateMentionPreview);
+messageBody.addEventListener('input', updateAskSuggestion);
+askToggle.addEventListener('click', updateAskSuggestion);
+askSuggestionUse.addEventListener('click', () => {
+  const name = askSuggestionUse.dataset.name;
+  if (!name) return;
+  setAskMode(true);
+  askOf.value = name;
+  updateAskMeansRequired();
+  updateMentionPreview();
+  updateAskSuggestion();
+  askOf.focus();
+});
 messageBody.addEventListener('input', updateBindVisibility);
 // The work panel's Reply on an ask is the same act as the message's Reply.
 document.addEventListener('interlock:reply-ask', event => {

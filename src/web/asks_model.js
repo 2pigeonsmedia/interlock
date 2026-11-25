@@ -468,8 +468,21 @@
     return `${ask.by} withdrew #${ask.ask_id}${replaced}. Your reply still goes to ${ask.by} as discussion.`;
   }
 
+  // A post that reads as a question for the one person or AI it addresses
+  // gets a suggestion to send it as an ask, never an automatic ask: asks
+  // carry a turn and land in Needs you, so they stay deliberate. A decision
+  // left in the tail of a status post is easy to miss. `addressed` is the
+  // names the post @mentions, resolved by the caller; returns the one name to
+  // suggest, or null.
+  const DECISION_PHRASES = /(?:^|[^\p{L}\p{N}])(?:your call|in scope\?|should I)(?![\p{L}\p{N}])/iu;
+  function suggestAsk(text, addressed) {
+    if (typeof text !== 'string' || !Array.isArray(addressed) || addressed.length !== 1) return null;
+    const trimmed = text.trim();
+    return trimmed.endsWith('?') || DECISION_PHRASES.test(trimmed) ? addressed[0] : null;
+  }
+
   const contract = Object.freeze({
-    BARE_ANSWERS, bareAnswer, validRow, stampPlate, addressesViewer, filterClass, hiddenSelector, filterRule, validPage, createAsksState, askLine, age, chosen, mayAnswer, bindAnswers, noteShown, answerText, mayMarkDone, replyNote,
+    suggestAsk, BARE_ANSWERS, bareAnswer, validRow, stampPlate, addressesViewer, filterClass, hiddenSelector, filterRule, validPage, createAsksState, askLine, age, chosen, mayAnswer, bindAnswers, noteShown, answerText, mayMarkDone, replyNote,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockAsks', {
