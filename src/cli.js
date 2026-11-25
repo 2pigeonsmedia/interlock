@@ -1149,11 +1149,18 @@ function selectedConnection(name, dependencies = {}, stderr = null) {
     homedir: dependencies.homedir,
   });
   const profiles = profileModule.openProfiles({ connectionDir });
-  const profile = profiles.load(name);
+  let profile = profiles.load(name);
   if (profile.state !== 'admitted') {
     const error = new Error('connection not admitted');
     error.code = 'not-admitted';
     throw error;
+  }
+  // An expired connection's token is spent: its file goes, and every command
+  // that reaches here says "has expired" without using it.
+  const now = (dependencies.clock || Date.now)();
+  if (profile.expires_at <= now && typeof profiles.dropSpentToken === 'function') {
+    profiles.dropSpentToken(name, now);
+    profile = Object.freeze(Object.assign({}, profile, { token: null }));
   }
   sharedConnectionNotice(stderr, profiles, profile,
     hostSession(null, dependencies.env || process.env, profileModule));

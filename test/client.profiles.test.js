@@ -54,6 +54,17 @@ function replacementBody(world, overrides = {}) {
   }, overrides);
 }
 
+// Writes a profile as the store keeps it: the record without its token, and
+// the token in the connection's own token file.
+function writeStored(file, record) {
+  const stored = Object.assign({}, record);
+  delete stored.token;
+  fs.writeFileSync(file, JSON.stringify(stored) + '\n', { mode: 0o600 });
+  fs.writeFileSync(path.join(path.dirname(file), `${record.name.toLowerCase()}.${record.request_id}.token`),
+    JSON.stringify({ schema: 1, request_id: record.request_id, token: record.token }) + '\n', { mode: 0o600 });
+  return stored;
+}
+
 test('an unadmitted candidate is private, explicit, and never overwritten implicitly', () => {
   const world = fixture();
   const created = world.store.createUnadmitted(world.body);
@@ -417,12 +428,17 @@ test('a schema-1 profile migrates once with its cursor beginning at zero', () =>
   const legacy = JSON.parse(fs.readFileSync(file, 'utf8'));
   legacy.schema = 1;
   delete legacy.cursor;
+  legacy.token = world.credential.token;
   fs.writeFileSync(file, JSON.stringify(legacy) + '\n', { mode: 0o600 });
 
   const migrated = openProfiles({ connectionDir: world.connectionDir }).load('Marlow');
-  assert.equal(migrated.schema, 2);
+  assert.equal(migrated.schema, 3);
   assert.equal(migrated.cursor, 0);
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), migrated);
+  assert.equal(migrated.token, world.credential.token);
+  // On disk: the same record without its token, which has its own file.
+  const stored = Object.assign({}, migrated);
+  delete stored.token;
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), stored);
 });
 
 test('leave removes only an admitted profile', () => {
@@ -523,7 +539,7 @@ test('staged replacement refuses a changed predecessor and preserves both files'
     digest: changedCredential.digest,
     subject_id: 'seat-concurrent',
   });
-  fs.writeFileSync(mainFile, JSON.stringify(changed) + '\n', { mode: 0o600 });
+  writeStored(mainFile, changed);
   const changedBytes = fs.readFileSync(mainFile, 'utf8');
 
   assert.throws(() => world.store.markStagedAdmitted('Marlow', {
@@ -552,7 +568,7 @@ test('staged replacement cleanup is idempotent after the main rename committed',
     subject_id: 'seat-2',
     expires_at: 80_000,
   });
-  fs.writeFileSync(mainFile, JSON.stringify(committed) + '\n', { mode: 0o600 });
+  writeStored(mainFile, committed);
 
   const recovered = world.store.markStagedAdmitted('Marlow', {
     request_id: replacement.request_id,

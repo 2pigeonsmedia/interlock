@@ -210,6 +210,15 @@ async function captureCommand(argv, dependencies = {}, stdin = null) {
   return { code, stderr, stdout };
 }
 
+// A profile as stored: its record, which holds no token, plus the token from
+// the connection's own token file.
+function storedProfile(file) {
+  const profile = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(Object.prototype.hasOwnProperty.call(profile, 'token'), false, 'the profile file holds no token');
+  const tokenFile = path.join(path.dirname(file), `${profile.name.toLowerCase()}.${profile.request_id}.token`);
+  return Object.assign({}, profile, { token: JSON.parse(fs.readFileSync(tokenFile, 'utf8')).token });
+}
+
 function admittedConnection(overrides = {}) {
   const profile = Object.assign({
     schema: 2,
@@ -453,7 +462,7 @@ test('join stores the bearer locally, knocks digest-only, and prints exact follo
   assert.equal(confirmationCalls, 1,
     'each bounded waiting response checks whether its exact candidate was already admitted');
   assert.deepEqual(seen[1], seen[0], 'every retained wait resubmits the exact stable digest-only knock');
-  const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'marlow.json'), 'utf8'));
+  const profile = storedProfile(path.join(connectionDir, 'marlow.json'));
   assert.equal(profile.state, 'admitted');
   assert.equal(profile.cursor, 12, 'fresh admit initializes the local cursor at the head, not 0');
   assert.equal(typeof profile.token, 'string');
@@ -532,7 +541,7 @@ test('join deliberately finishes its exact interrupted candidate without knockin
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.equal(requests.length, 2);
   assert.equal(requests.some(request => request.url.includes('/admissions')), false);
-  const admitted = JSON.parse(fs.readFileSync(world.file, 'utf8'));
+  const admitted = storedProfile(world.file);
   assert.equal(admitted.state, 'admitted');
   assert.equal(admitted.subject_id, 'seat-interrupted');
   assert.equal(admitted.token, world.profile.token);
@@ -923,7 +932,7 @@ test('expired and server-refused seats stage a fresh bearer and replace only aft
       assert.equal(requests.filter(request => request.url.endsWith('/api/ai/session')).length,
         scenario.oldChecks);
       assert.equal(requests.filter(request => request.url.endsWith('/api/ai/admissions')).length, 1);
-      const admitted = JSON.parse(fs.readFileSync(world.file, 'utf8'));
+      const admitted = storedProfile(world.file);
       assert.equal(admitted.subject_id, 'seat-replacement');
       assert.notEqual(admitted.request_id, world.profile.request_id);
       assert.notEqual(admitted.token, world.profile.token);
@@ -1013,7 +1022,7 @@ test('an ambiguous replacement preserves both credentials and deliberate join re
   assert.equal(resumed.code, EXIT_OK, resumed.stderr);
   assert.equal(resumedRequests.length, 2);
   assert.equal(resumedRequests.some(request => request.url.includes('/admissions')), false);
-  const admitted = JSON.parse(fs.readFileSync(world.file, 'utf8'));
+  const admitted = storedProfile(world.file);
   assert.equal(admitted.subject_id, 'seat-resumed');
   assert.equal(admitted.token, staged.token);
   assert.equal(fs.existsSync(path.join(world.connectionDir, 'marlow.joining')), false);
@@ -1058,7 +1067,7 @@ test('join confirms its own minted seat after an ambiguous Allow response', asyn
   assert.equal(confirmationCalls, 1);
   assert.match(result.stdout, /Connected as Marlow \(Codex CLI\)/);
   assert.equal(result.stderr, '');
-  const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'marlow.json'), 'utf8'));
+  const profile = storedProfile(path.join(connectionDir, 'marlow.json'));
   assert.equal(profile.state, 'admitted');
   assert.equal(profile.subject_id, 'seat-confirmed');
   assert.equal(confirmationAuthorization, 'Bearer ' + profile.token,
@@ -1597,7 +1606,7 @@ test('join accepts a canonical https origin and still refuses a plain-http remot
   assert.equal(result.code, EXIT_OK, result.stderr);
   assert.match(result.stdout, /Interlock target: https:\/\/app\.example\.test\n/);
   assert.ok(urls.length > 0 && urls.every(url => url.startsWith(`${HOSTED_ORIGIN}/api/ai/`)), urls.join(' '));
-  const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'marlow.json'), 'utf8'));
+  const profile = storedProfile(path.join(connectionDir, 'marlow.json'));
   assert.equal(profile.server_url, HOSTED_ORIGIN, 'the profile pins the https origin it joined');
   assert.equal(profile.state, 'admitted');
 });
@@ -2405,7 +2414,7 @@ test('fresh join fail-open keeps cursor 0 when the head GET hiccups after Allow'
   assert.match(result.stdout, /Connected as Marlow/);
   assert.match(result.stdout, /could not read the current tip[^]*seat starts at the[^]*beginning/i);
   assert.doesNotMatch(result.stdout, /starts at the current tip/);
-  const profile = JSON.parse(fs.readFileSync(path.join(connectionDir, 'marlow.json'), 'utf8'));
+  const profile = storedProfile(path.join(connectionDir, 'marlow.json'));
   assert.equal(profile.state, 'admitted');
   assert.equal(profile.cursor, 0);
 });

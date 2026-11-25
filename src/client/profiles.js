@@ -6,18 +6,26 @@ const path = require('node:path');
 
 const { acquireInstanceLock } = require('../instance_lock.js');
 
-const SCHEMA = 2;
+// Schema 3 keeps the token out of the profile, in its own file
+// (NAME.REQUEST_ID.token). Schemas 1 and 2 held it inside; they are split in
+// place on first use.
+const SCHEMA = 3;
+const TOKEN_IN_PROFILE_SCHEMA = 2;
 const LEGACY_SCHEMA = 1;
-const STAGED_SCHEMA = 1;
+const STAGED_SCHEMA = 2;
+const TOKEN_IN_STAGED_SCHEMA = 1;
+const TOKEN_FILE_SCHEMA = 1;
 const AI_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
 const TOKEN = /^[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const PROFILE_KEYS = Object.freeze([
+const TOKEN_PROFILE_KEYS = Object.freeze([
   'schema', 'name', 'product', 'product_provenance', 'server_url', 'request_id',
   'token', 'selector', 'digest', 'state', 'created_at', 'admitted_at',
   'subject_id', 'expires_at', 'cursor',
 ]);
-const LEGACY_PROFILE_KEYS = Object.freeze(PROFILE_KEYS.filter(key => key !== 'cursor'));
+const PROFILE_KEYS = Object.freeze(TOKEN_PROFILE_KEYS.filter(key => key !== 'token'));
+const LEGACY_PROFILE_KEYS = Object.freeze(TOKEN_PROFILE_KEYS.filter(key => key !== 'cursor'));
+const TOKEN_FILE_KEYS = Object.freeze(['schema', 'request_id', 'token']);
 const CREATE_KEYS = Object.freeze([
   'name', 'product', 'product_provenance', 'server_url', 'request_id',
   'token', 'selector', 'digest', 'created_at',
@@ -86,6 +94,12 @@ function validUrl(value) {
   return false;
 }
 
+// The profile's public half of the credential: the selector and the digest
+// of the secret, which bind a token file to it.
+function validBinding(profile) {
+  return /^[A-Za-z0-9_-]{22}$/.test(profile.selector) && /^[0-9a-f]{64}$/.test(profile.digest);
+}
+
 function validCandidate(profile) {
   if (!TOKEN.test(profile.token) || profile.token.split('.')[0] !== profile.selector ||
       !/^[0-9a-f]{64}$/.test(profile.digest)) return false;
@@ -127,20 +141,14 @@ function validTime(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
-function parseProfile(raw) {
-  let value;
-  try { value = JSON.parse(raw); } catch (_) { throw failure('corrupt-profile'); }
-  const current = closedObject(value, PROFILE_KEYS, true);
-  const legacy = current === null && closedObject(value, LEGACY_PROFILE_KEYS, true);
-  const profile = legacy && legacy.schema === LEGACY_SCHEMA
-    ? Object.assign({}, legacy, { schema: SCHEMA, cursor: 0 })
-    : current;
+// Checks a profile record without its token (schema 3).
+function checkProfile(profile) {
   if (!profile || profile.schema !== SCHEMA || !validName(profile.name) ||
       !validProduct(profile.product) ||
       (profile.product_provenance !== 'client-reported' &&
         profile.product_provenance !== 'adapter-reported') ||
       !validUrl(profile.server_url) || !UUID_V4.test(profile.request_id) ||
-      !validCandidate(profile) || !validTime(profile.created_at) ||
+      !validBinding(profile) || !validTime(profile.created_at) ||
       !Number.isSafeInteger(profile.cursor) || profile.cursor < 0 ||
       (profile.state !== 'unadmitted' && profile.state !== 'admitted')) {
     throw failure('corrupt-profile');
@@ -159,19 +167,64 @@ function parseProfile(raw) {
   return Object.freeze(Object.assign({}, profile));
 }
 
+function withoutToken(record) {
+  const profile = {};
+  for (const key of PROFILE_KEYS) profile[key] = key === 'schema' ? SCHEMA : record[key];
+  return profile;
+}
+
+// A stored profile in any schema: { profile (no token), token (the token an
+// older schema held inside, else null), split (true for schema 3) }.
+function parseStoredValue(value) {
+  const current = closedObject(value, PROFILE_KEYS, true);
+  if (current && current.schema === SCHEMA) {
+    return { profile: checkProfile(current), token: null, split: true };
+  }
+  const inside = closedObject(value, TOKEN_PROFILE_KEYS, true);
+  const legacy = inside === null && closedObject(value, LEGACY_PROFILE_KEYS, true);
+  const old = inside && inside.schema === TOKEN_IN_PROFILE_SCHEMA ? inside
+    : legacy && legacy.schema === LEGACY_SCHEMA ? Object.assign({}, legacy, { cursor: 0 }) : null;
+  if (!old || !validCandidate(old)) throw failure('corrupt-profile');
+  return { profile: checkProfile(withoutToken(old)), token: old.token, split: false };
+}
+
+function parseStored(raw) {
+  let value;
+  try { value = JSON.parse(raw); } catch (_) { throw failure('corrupt-profile'); }
+  return parseStoredValue(value);
+}
+
+// A token file: the token for one request of one connection.
+function parseTokenFile(raw, profile) {
+  let value;
+  try { value = JSON.parse(raw); } catch (_) { throw failure('corrupt-profile'); }
+  const record = closedObject(value, TOKEN_FILE_KEYS, true);
+  if (!record || record.schema !== TOKEN_FILE_SCHEMA || record.request_id !== profile.request_id ||
+      typeof record.token !== 'string' ||
+      !validCandidate({ token: record.token, selector: profile.selector, digest: profile.digest })) {
+    throw failure('corrupt-profile');
+  }
+  return record.token;
+}
+
+// A waiting rejoin in either schema: { replaces_request_id, candidate (no
+// token), token (an older schema's, else null), split }.
 function parseStaged(raw) {
   let value;
   try { value = JSON.parse(raw); } catch (_) { throw failure('corrupt-profile'); }
   const staged = closedObject(value, STAGED_KEYS, true);
-  if (!staged || staged.schema !== STAGED_SCHEMA ||
+  if (!staged || (staged.schema !== STAGED_SCHEMA && staged.schema !== TOKEN_IN_STAGED_SCHEMA) ||
       !UUID_V4.test(staged.replaces_request_id)) throw failure('corrupt-profile');
-  const candidate = parseProfile(JSON.stringify(staged.candidate));
+  const stored = parseStoredValue(staged.candidate);
+  if ((staged.schema === STAGED_SCHEMA) !== stored.split) throw failure('corrupt-profile');
+  const candidate = stored.profile;
   if (candidate.state !== 'unadmitted' ||
       candidate.request_id === staged.replaces_request_id) throw failure('corrupt-profile');
   return Object.freeze({
-    schema: STAGED_SCHEMA,
     replaces_request_id: staged.replaces_request_id,
     candidate,
+    token: stored.token,
+    split: stored.split,
   });
 }
 
@@ -370,6 +423,47 @@ function openProfiles(options) {
     return fs.existsSync(fileFor(name));
   }
 
+  // The token file of one request of a connection.
+  function tokenFileFor(name, requestId) {
+    if (!validName(name)) throw failure('invalid-name');
+    if (!UUID_V4.test(requestId)) throw failure('invalid-profile');
+    return path.join(directory, `${name.toLowerCase()}.${requestId}.token`);
+  }
+
+  // The token for `profile` (a record of this connection), or null when its
+  // token file is absent.
+  function readTokenFor(name, profile) {
+    let raw;
+    try { raw = fs.readFileSync(tokenFileFor(name, profile.request_id), 'utf8'); }
+    catch (error) {
+      if (error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+    return parseTokenFile(raw, profile);
+  }
+
+  function writeTokenLocked(name, requestId, token) {
+    writeAtomic(tokenFileFor(name, requestId), { schema: TOKEN_FILE_SCHEMA, request_id: requestId, token }, directory);
+  }
+
+  // Called with the profile lock held: removes this connection's token files
+  // that no record uses (an ended or replaced request).
+  function pruneTokensLocked(name) {
+    const keep = new Set();
+    if (exists(name)) keep.add(readProfile(name).profile.request_id);
+    if (stagedExists(name)) keep.add(readStaged(name).candidate.request_id);
+    const prefix = name.toLowerCase() + '.';
+    let removed = false;
+    for (const entry of fs.readdirSync(directory)) {
+      if (!entry.startsWith(prefix) || !entry.endsWith('.token')) continue;
+      const requestId = entry.slice(prefix.length, -'.token'.length);
+      if (!UUID_V4.test(requestId) || keep.has(requestId)) continue;
+      fs.unlinkSync(path.join(directory, entry));
+      removed = true;
+    }
+    if (removed) fsyncDirectory(directory);
+  }
+
   function readProfile(name) {
     const file = fileFor(name);
     let raw;
@@ -378,19 +472,68 @@ function openProfiles(options) {
       if (error && error.code === 'ENOENT') throw failure('profile-not-found');
       throw error;
     }
-    const profile = parseProfile(raw);
-    if (profile.name.toLowerCase() !== name.toLowerCase()) throw failure('corrupt-profile');
-    return { file, legacy: JSON.parse(raw).schema === LEGACY_SCHEMA, profile };
+    const stored = parseStored(raw);
+    if (stored.profile.name.toLowerCase() !== name.toLowerCase()) throw failure('corrupt-profile');
+    return { file, profile: stored.profile, token: stored.token, split: stored.split };
+  }
+
+  // Called with the profile lock held: the profile in schema 3. An older one is
+  // split first: its token file is written, then the profile is rewritten
+  // without the token. A crash between leaves the token in both, never in
+  // neither, and the next use finishes the split.
+  function currentLocked(name) {
+    const current = readProfile(name);
+    if (!current.split) {
+      writeTokenLocked(name, current.profile.request_id, current.token);
+      writeAtomic(current.file, current.profile, directory);
+    }
+    pruneTokensLocked(name);
+    return current.profile;
+  }
+
+  // The profile with its token, for using this one connection. A connection
+  // whose spent token was dropped reads null; any other missing token is an
+  // error.
+  function withToken(name, profile) {
+    const token = readTokenFor(name, profile);
+    if (token === null && spent(profile, Date.now())) {
+      return Object.freeze(Object.assign({}, profile, { token: null }));
+    }
+    if (token === null) throw failure('corrupt-profile');
+    return Object.freeze(Object.assign({}, profile, { token }));
+  }
+
+  function spent(profile, now) {
+    return profile.state === 'admitted' && profile.expires_at <= now;
+  }
+
+  // The caller has seen this connection expire by its own clock: its token is
+  // spent and its file is removed. The profile stays, reading as expired.
+  function dropSpentToken(name, now) {
+    if (!Number.isSafeInteger(now)) throw failure('invalid-options');
+    return withProfileLock(name, () => {
+      const current = currentLocked(name);
+      if (!spent(current, now)) return false;
+      try { fs.unlinkSync(tokenFileFor(name, current.request_id)); }
+      catch (error) {
+        if (error && error.code === 'ENOENT') return false;
+        throw error;
+      }
+      fsyncDirectory(directory);
+      return true;
+    });
   }
 
   function load(name) {
     const first = readProfile(name);
-    if (!first.legacy) return first.profile;
-    return withProfileLock(name, () => {
-      const current = readProfile(name);
-      if (current.legacy) writeAtomic(current.file, current.profile, directory);
-      return current.profile;
-    });
+    if (first.split) {
+      // Unlocked, a rejoin can switch the profile to a new request and drop
+      // the old token between the two reads; a missing token is read again
+      // under the lock, where the profile and its token agree.
+      const token = readTokenFor(name, first.profile);
+      if (token !== null) return Object.freeze(Object.assign({}, first.profile, { token }));
+    }
+    return withProfileLock(name, () => withToken(name, currentLocked(name)));
   }
 
   function stagedExists(name) {
@@ -412,17 +555,32 @@ function openProfiles(options) {
     return staged;
   }
 
-  function loadStaged(name) {
-    return readStaged(name).candidate;
+  // Called with the profile lock held: the waiting rejoin, split like a profile.
+  function stagedLocked(name) {
+    const staged = readStaged(name);
+    if (!staged.split) {
+      writeTokenLocked(name, staged.candidate.request_id, staged.token);
+      writeAtomic(stagedFileFor(name), {
+        schema: STAGED_SCHEMA, replaces_request_id: staged.replaces_request_id, candidate: staged.candidate,
+      }, directory);
+    }
+    return Object.freeze(Object.assign({}, staged, { token: null, split: true }));
   }
 
+  function loadStaged(name) {
+    const first = readStaged(name);
+    const staged = first.split ? first : withProfileLock(name, () => stagedLocked(name));
+    return withToken(name, staged.candidate);
+  }
+
+  // Every local connection without its token: no token file is read.
   function summaries() {
     const rows = [];
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       const localName = entry.name.slice(0, -'.json'.length);
       if (!validName(localName)) throw failure('corrupt-profile');
-      const profile = load(localName);
+      const profile = readProfile(localName).profile;
       rows.push(Object.freeze({
         name: profile.name,
         product: profile.product,
@@ -450,10 +608,10 @@ function openProfiles(options) {
     return value;
   }
 
-  function createUnadmitted(body, options) {
-    const { session } = createOptions(options);
+  // A new candidate's record without its token, after checking the token.
+  function candidateRecord(body) {
     const candidate = closedObject(body, CREATE_KEYS, true);
-    if (!candidate) throw failure('invalid-profile');
+    if (!candidate || !validCandidate(candidate)) throw failure('invalid-profile');
     const profile = {
       schema: SCHEMA,
       name: candidate.name,
@@ -461,7 +619,6 @@ function openProfiles(options) {
       product_provenance: candidate.product_provenance,
       server_url: candidate.server_url,
       request_id: candidate.request_id,
-      token: candidate.token,
       selector: candidate.selector,
       digest: candidate.digest,
       state: 'unadmitted',
@@ -471,59 +628,58 @@ function openProfiles(options) {
       expires_at: null,
       cursor: 0,
     };
-    parseProfile(JSON.stringify(profile));
+    try { checkProfile(profile); } catch (_) { throw failure('invalid-profile'); }
+    return { profile, token: candidate.token };
+  }
+
+  // Writes a new record file exclusively after its token file. A refused
+  // write takes its token file back with it.
+  function createWithToken(name, requestId, token, file, record, existsCode) {
+    pruneTokensLocked(name);
+    writeTokenLocked(name, requestId, token);
+    try {
+      fs.writeFileSync(file, JSON.stringify(record) + '\n', {
+        encoding: 'utf8', mode: 0o600, flag: 'wx',
+      });
+      fsyncFile(file);
+      fsyncDirectory(directory);
+    } catch (error) {
+      fs.unlinkSync(tokenFileFor(name, requestId));
+      fsyncDirectory(directory);
+      if (error && error.code === 'EEXIST') throw failure(existsCode);
+      throw error;
+    }
+  }
+
+  function createUnadmitted(body, options) {
+    const { session } = createOptions(options);
+    const { profile, token } = candidateRecord(body);
     return withProfileLock(profile.name, () => {
       const file = fileFor(profile.name);
-      try {
-        fs.writeFileSync(file, JSON.stringify(profile) + '\n', {
-          encoding: 'utf8', mode: 0o600, flag: 'wx',
-        });
-        fsyncFile(file);
-        fsyncDirectory(directory);
-      } catch (error) {
-        if (error && error.code === 'EEXIST') throw failure('profile-exists');
-        throw error;
-      }
+      if (fs.existsSync(file)) throw failure('profile-exists');
+      createWithToken(profile.name, profile.request_id, token, file, profile, 'profile-exists');
       if (session !== null) {
         try { recordSessionLocked(profile.name, profile.request_id, session); }
         catch (error) {
           // A candidate whose starter could not be written is not left behind.
           fs.unlinkSync(file);
           fsyncDirectory(directory);
+          pruneTokensLocked(profile.name);
           throw error;
         }
       }
-      return Object.freeze(Object.assign({}, profile));
+      return Object.freeze(Object.assign({}, profile, { token }));
     });
   }
 
   function createStaged(body, options) {
     const { session } = createOptions(options);
-    const candidate = closedObject(body, CREATE_KEYS, true);
-    if (!candidate) throw failure('invalid-profile');
-    const profile = {
-      schema: SCHEMA,
-      name: candidate.name,
-      product: candidate.product,
-      product_provenance: candidate.product_provenance,
-      server_url: candidate.server_url,
-      request_id: candidate.request_id,
-      token: candidate.token,
-      selector: candidate.selector,
-      digest: candidate.digest,
-      state: 'unadmitted',
-      created_at: candidate.created_at,
-      admitted_at: null,
-      subject_id: null,
-      expires_at: null,
-      cursor: 0,
-    };
-    parseProfile(JSON.stringify(profile));
+    const { profile, token } = candidateRecord(body);
     return withProfileLock(profile.name, () => {
-      const prior = readProfile(candidate.name).profile;
-      if (prior.state !== 'admitted' || prior.product !== candidate.product ||
-          prior.product_provenance !== candidate.product_provenance ||
-          prior.server_url !== candidate.server_url) throw failure('profile-collision');
+      const prior = currentLocked(profile.name);
+      if (prior.state !== 'admitted' || prior.product !== profile.product ||
+          prior.product_provenance !== profile.product_provenance ||
+          prior.server_url !== profile.server_url) throw failure('profile-collision');
       const staged = {
         schema: STAGED_SCHEMA,
         replaces_request_id: prior.request_id,
@@ -531,25 +687,18 @@ function openProfiles(options) {
       };
       parseStaged(JSON.stringify(staged));
       const file = stagedFileFor(profile.name);
-      try {
-        fs.writeFileSync(file, JSON.stringify(staged) + '\n', {
-          encoding: 'utf8', mode: 0o600, flag: 'wx',
-        });
-        fsyncFile(file);
-        fsyncDirectory(directory);
-      } catch (error) {
-        if (error && error.code === 'EEXIST') throw failure('staged-profile-exists');
-        throw error;
-      }
+      if (fs.existsSync(file)) throw failure('staged-profile-exists');
+      createWithToken(profile.name, profile.request_id, token, file, staged, 'staged-profile-exists');
       if (session !== null) {
         try { recordSessionLocked(profile.name, profile.request_id, session); }
         catch (error) {
           fs.unlinkSync(file);
           fsyncDirectory(directory);
+          pruneTokensLocked(profile.name);
           throw error;
         }
       }
-      return Object.freeze(Object.assign({}, profile));
+      return Object.freeze(Object.assign({}, profile, { token }));
     });
   }
 
@@ -559,14 +708,14 @@ function openProfiles(options) {
   // record back with wrote: false. A different admission for the same
   // candidate is a collision, never a second write.
   function admitUnadmittedLocked(name, admission) {
-    const prior = readProfile(name).profile;
+    const prior = currentLocked(name);
     if (prior.state === 'admitted') {
       const exact = admission.request_id === prior.request_id && admission.name === prior.name &&
         admission.subject_id === prior.subject_id && admission.product === prior.product &&
         admission.product_provenance === prior.product_provenance &&
         admission.expires_at === prior.expires_at;
       if (!exact) throw failure('profile-collision');
-      return { profile: prior, wrote: false };
+      return { profile: withToken(name, prior), wrote: false };
     }
     if (admission.request_id !== prior.request_id || admission.name !== prior.name ||
         admission.product !== prior.product ||
@@ -581,14 +730,15 @@ function openProfiles(options) {
       subject_id: admission.subject_id,
       expires_at: admission.expires_at,
     });
-    parseProfile(JSON.stringify(next));
+    checkProfile(next);
     writeAtomic(fileFor(name), next, directory);
-    return { profile: Object.freeze(next), wrote: true };
+    pruneTokensLocked(name);
+    return { profile: withToken(name, next), wrote: true };
   }
 
   function admitStagedLocked(name, staged, admission) {
     const prior = staged.candidate;
-    const replaced = readProfile(name).profile;
+    const replaced = currentLocked(name);
     if (admission.request_id !== prior.request_id || admission.name !== prior.name ||
         admission.product !== prior.product ||
         admission.product_provenance !== prior.product_provenance ||
@@ -600,7 +750,7 @@ function openProfiles(options) {
       const exact = replaced.state === 'admitted' && replaced.name === prior.name &&
         replaced.product === prior.product &&
         replaced.product_provenance === prior.product_provenance &&
-        replaced.server_url === prior.server_url && replaced.token === prior.token &&
+        replaced.server_url === prior.server_url &&
         replaced.selector === prior.selector && replaced.digest === prior.digest &&
         replaced.created_at === prior.created_at &&
         replaced.subject_id === admission.subject_id &&
@@ -608,7 +758,8 @@ function openProfiles(options) {
       if (!exact) throw failure('profile-collision');
       fs.unlinkSync(stagedFileFor(name));
       fsyncDirectory(directory);
-      return { profile: replaced, wrote: false };
+      pruneTokensLocked(name);
+      return { profile: withToken(name, replaced), wrote: false };
     }
     if (replaced.state !== 'admitted' ||
         replaced.request_id !== staged.replaces_request_id ||
@@ -621,12 +772,15 @@ function openProfiles(options) {
       subject_id: admission.subject_id,
       expires_at: admission.expires_at,
     });
-    parseProfile(JSON.stringify(next));
+    checkProfile(next);
+    // The candidate's token file already exists, so the profile switches to
+    // a request whose token is on disk; the replaced token goes after.
     writeAtomic(fileFor(name), next, directory);
     fs.unlinkSync(stagedFileFor(name));
     fsyncDirectory(directory);
+    pruneTokensLocked(name);
     pruneSessionsLocked(name);
-    return { profile: Object.freeze(next), wrote: true };
+    return { profile: withToken(name, next), wrote: true };
   }
 
   function admission(body) {
@@ -642,7 +796,7 @@ function openProfiles(options) {
     const value = admission(body);
     return withProfileLock(name, () => {
       if (stagedExists(name)) {
-        const staged = readStaged(name);
+        const staged = stagedLocked(name);
         if (staged.candidate.request_id === value.request_id) {
           return admitStagedLocked(name, staged, value);
         }
@@ -662,64 +816,67 @@ function openProfiles(options) {
       // Another caller may have finished this staged admission already. Only
       // the exact admitted record for this request is read back.
       if (!stagedExists(name)) {
-        const current = readProfile(name).profile;
+        const current = currentLocked(name);
         if (current.state !== 'admitted' || current.request_id !== value.request_id) {
           throw failure('staged-profile-not-found');
         }
         return admitUnadmittedLocked(name, value).profile;
       }
-      return admitStagedLocked(name, readStaged(name), value).profile;
+      return admitStagedLocked(name, stagedLocked(name), value).profile;
     });
   }
 
   function removeUnadmitted(name, requestId) {
     return withProfileLock(name, () => {
-      const prior = readProfile(name).profile;
+      const prior = currentLocked(name);
       if (prior.state !== 'unadmitted' || prior.request_id !== requestId) {
         throw failure('profile-collision');
       }
       fs.unlinkSync(fileFor(name));
       fsyncDirectory(directory);
+      pruneTokensLocked(name);
       pruneSessionsLocked(name);
     });
   }
 
   function removeStaged(name, requestId) {
     return withProfileLock(name, () => {
-      const prior = readStaged(name).candidate;
+      const prior = stagedLocked(name).candidate;
       if (prior.request_id !== requestId) throw failure('profile-collision');
       fs.unlinkSync(stagedFileFor(name));
       fsyncDirectory(directory);
+      pruneTokensLocked(name);
       pruneSessionsLocked(name);
     });
   }
 
   function updateCursor(name, requestId, cursor) {
     return withProfileLock(name, () => {
-      const prior = readProfile(name).profile;
+      const prior = currentLocked(name);
       if (prior.state !== 'admitted' || prior.request_id !== requestId ||
           !UUID_V4.test(requestId) || !Number.isSafeInteger(cursor) || cursor < 0) {
         throw failure('profile-collision');
       }
-      if (cursor <= prior.cursor) return prior;
+      if (cursor <= prior.cursor) return withToken(name, prior);
       const next = Object.assign({}, prior, { cursor });
       writeAtomic(fileFor(name), next, directory);
-      return Object.freeze(next);
+      return withToken(name, next);
     });
   }
 
   function forgetAdmitted(name) {
     return withProfileLock(name, () => {
-      const prior = readProfile(name).profile;
+      const prior = currentLocked(name);
       if (prior.state !== 'admitted' || stagedExists(name)) throw failure('profile-collision');
       fs.unlinkSync(fileFor(name));
       fsyncDirectory(directory);
+      pruneTokensLocked(name);
       pruneSessionsLocked(name);
     });
   }
 
   return Object.freeze({
-    createUnadmitted, createStaged, exists, stagedExists, load, loadStaged, summaries,
+    createUnadmitted, createStaged, exists, stagedExists, load, loadStaged, summaries, dropSpentToken,
     sessionOf, noteOtherSession,
     admitCandidate, markAdmitted, markStagedAdmitted, removeUnadmitted, removeStaged, updateCursor,
     forgetAdmitted, acquireReadLease,

@@ -125,14 +125,15 @@ test('ARRANGEMENT: the record names the starting session as a digest, never the 
   assert.equal(world.profiles.sessionOf(NAME, world.candidate.request_id), sessionDigest(A));
   assert.notEqual(sessionDigest(A), sessionDigest(B));
   const files = fs.readdirSync(world.dir).filter(name => !name.startsWith('.')).sort();
-  assert.deepEqual(files, ['wren-two.json', 'wren-two.session']);
+  assert.deepEqual(files, [`wren-two.${world.candidate.request_id}.token`, 'wren-two.json', 'wren-two.session'].sort());
   const record = fs.readFileSync(path.join(world.dir, 'wren-two.session'), 'utf8');
   assert.ok(!record.includes(A), 'the raw session id is never stored');
-  // The profile keeps its exact earlier key set, so an earlier release reads it.
+  // The session record changes nothing in the profile: its key set is the
+  // split profile's, with the token in its own file.
   const profile = JSON.parse(fs.readFileSync(path.join(world.dir, 'wren-two.json'), 'utf8'));
   assert.deepEqual(Object.keys(profile).sort(), [
     'admitted_at', 'created_at', 'cursor', 'digest', 'expires_at', 'name', 'product',
-    'product_provenance', 'request_id', 'schema', 'selector', 'server_url', 'state', 'subject_id', 'token',
+    'product_provenance', 'request_id', 'schema', 'selector', 'server_url', 'state', 'subject_id',
   ]);
 });
 
