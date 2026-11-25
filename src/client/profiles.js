@@ -455,8 +455,9 @@ function openProfiles(options) {
     const prefix = name.toLowerCase() + '.';
     let removed = false;
     for (const entry of fs.readdirSync(directory)) {
-      if (!entry.startsWith(prefix) || !entry.endsWith('.token')) continue;
-      const requestId = entry.slice(prefix.length, -'.token'.length);
+      const suffix = entry.endsWith('.token') ? '.token' : entry.endsWith('.ended') ? '.ended' : null;
+      if (!entry.startsWith(prefix) || suffix === null) continue;
+      const requestId = entry.slice(prefix.length, -suffix.length);
       if (!UUID_V4.test(requestId) || keep.has(requestId)) continue;
       fs.unlinkSync(path.join(directory, entry));
       removed = true;
@@ -491,34 +492,41 @@ function openProfiles(options) {
     return current.profile;
   }
 
+  // The marker that the room confirmed this request's connection ended, so
+  // its profile reads with no token instead of as damaged.
+  function endedFileFor(name, requestId) {
+    if (!validName(name)) throw failure('invalid-name');
+    if (!UUID_V4.test(requestId)) throw failure('invalid-profile');
+    return path.join(directory, `${name.toLowerCase()}.${requestId}.ended`);
+  }
+
   // The profile with its token, for using this one connection. A connection
-  // whose spent token was dropped reads null; any other missing token is an
-  // error.
+  // the room confirmed ended reads null; any other missing token is an error.
   function withToken(name, profile) {
     const token = readTokenFor(name, profile);
-    if (token === null && spent(profile, Date.now())) {
+    if (token === null && fs.existsSync(endedFileFor(name, profile.request_id))) {
       return Object.freeze(Object.assign({}, profile, { token: null }));
     }
     if (token === null) throw failure('corrupt-profile');
     return Object.freeze(Object.assign({}, profile, { token }));
   }
 
-  function spent(profile, now) {
-    return profile.state === 'admitted' && profile.expires_at <= now;
-  }
-
-  // The caller has seen this connection expire by its own clock: its token is
-  // spent and its file is removed. The profile stays, reading as expired.
-  function dropSpentToken(name, now) {
-    if (!Number.isSafeInteger(now)) throw failure('invalid-options');
+  // The room answered this request's token as invalid: the connection ended
+  // (left, released, removed or expired), so its token is dropped. Only the
+  // room's word does this, never this computer's clock, and only for the
+  // request the room refused, so a newer rejoin's token is never touched.
+  // The marker is written before the token goes: a crash between leaves the
+  // token, and the next refusal drops it.
+  function dropDeadToken(name, requestId) {
+    if (!UUID_V4.test(requestId)) throw failure('invalid-profile');
     return withProfileLock(name, () => {
+      if (!exists(name)) return false;
       const current = currentLocked(name);
-      if (!spent(current, now)) return false;
-      try { fs.unlinkSync(tokenFileFor(name, current.request_id)); }
-      catch (error) {
-        if (error && error.code === 'ENOENT') return false;
-        throw error;
-      }
+      if (current.request_id !== requestId) return false;
+      const file = tokenFileFor(name, requestId);
+      if (!fs.existsSync(file)) return false;
+      fs.writeFileSync(endedFileFor(name, requestId), '', { encoding: 'utf8', mode: 0o600 });
+      fs.unlinkSync(file);
       fsyncDirectory(directory);
       return true;
     });
@@ -875,8 +883,26 @@ function openProfiles(options) {
     });
   }
 
+  // A crash between removing a record and pruning its token can leave a
+  // token file with no record. Each run removes those, under the name's lock,
+  // as best effort: a busy or unreadable name waits for the next run.
+  function pruneOrphansOnOpen() {
+    let entries;
+    try { entries = fs.readdirSync(directory); } catch (_) { return; }
+    const names = new Set();
+    for (const entry of entries) {
+      const match = /^([a-z0-9]+(?:-[a-z0-9]+)*)\.[0-9a-f-]{36}\.(?:token|ended)$/.exec(entry);
+      if (match) names.add(match[1]);
+    }
+    for (const name of names) {
+      if (!validName(name) || exists(name) || stagedExists(name)) continue;
+      try { withProfileLock(name, () => pruneTokensLocked(name)); } catch (_) { /* next run */ }
+    }
+  }
+  pruneOrphansOnOpen();
+
   return Object.freeze({
-    createUnadmitted, createStaged, exists, stagedExists, load, loadStaged, summaries, dropSpentToken,
+    createUnadmitted, createStaged, exists, stagedExists, load, loadStaged, summaries, dropDeadToken,
     sessionOf, noteOtherSession,
     admitCandidate, markAdmitted, markStagedAdmitted, removeUnadmitted, removeStaged, updateCursor,
     forgetAdmitted, acquireReadLease,

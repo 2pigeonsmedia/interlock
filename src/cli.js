@@ -1065,6 +1065,30 @@ function sessionHeaderValue(profile) {
   return crypto.createHash('sha256').update(`${profile.request_id}:${host.digest}`, 'utf8').digest('hex');
 }
 
+// For a profile read by selectedConnection: what to do when the room answers
+// its token as invalid.
+const roomRefusals = new WeakMap();
+
+// The room's exact "invalid connection": the connection ended (left,
+// released, removed or expired), so the token is dropped.
+function noteRefusal(profile, error) {
+  if (error && error.status === 401 && error.code === 'invalid-connection' && error.exact) {
+    const drop = roomRefusals.get(profile);
+    if (drop) drop();
+  }
+}
+
+// A connection whose token was dropped refuses here, with the room's own
+// meaning, and nothing is sent.
+function endedLocally() {
+  const error = new Error('invalid-connection');
+  error.code = 'invalid-connection';
+  error.status = 401;
+  error.exact = true;
+  error.local = true;
+  return error;
+}
+
 function authHeaders(profile) {
   const headers = { authorization: 'Bearer ' + profile.token, [CLIENT_HEADER]: packageJson.version };
   const session = sessionHeaderValue(profile);
@@ -1073,6 +1097,7 @@ function authHeaders(profile) {
 }
 
 async function localRequest(fetcher, profile, pathname, options = {}) {
+  if (profile.token === null) throw endedLocally();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs || COMMAND_FETCH_TIMEOUT_MS);
   const headers = authHeaders(profile);
@@ -1091,7 +1116,9 @@ async function localRequest(fetcher, profile, pathname, options = {}) {
     const copy = typeof response.clone === 'function' ? response.clone() : null;
     const result = await response.json().catch(() => null);
     if (!response.ok || !result || result.ok !== true) {
-      throw Object.assign(responseError(result, response.status), await answerFacts(response, copy, result, profile.token));
+      const error = Object.assign(responseError(result, response.status), await answerFacts(response, copy, result, profile.token));
+      noteRefusal(profile, error);
+      throw error;
     }
     return result;
   } finally {
@@ -1171,18 +1198,18 @@ function selectedConnection(name, dependencies = {}, stderr = null) {
     homedir: dependencies.homedir,
   });
   const profiles = profileModule.openProfiles({ connectionDir });
-  let profile = profiles.load(name);
+  const profile = profiles.load(name);
   if (profile.state !== 'admitted') {
     const error = new Error('connection not admitted');
     error.code = 'not-admitted';
     throw error;
   }
-  // An expired connection's token is spent: its file goes, and every command
-  // that reaches here says "has expired" without using it.
-  const now = (dependencies.clock || Date.now)();
-  if (profile.expires_at <= now && typeof profiles.dropSpentToken === 'function') {
-    profiles.dropSpentToken(name, now);
-    profile = Object.freeze(Object.assign({}, profile, { token: null }));
+  // When the room answers this token as invalid, the token is dropped (never
+  // on this computer's clock alone).
+  if (typeof profiles.dropDeadToken === 'function') {
+    roomRefusals.set(profile, () => {
+      try { profiles.dropDeadToken(profile.name, profile.request_id); } catch (_) { /* kept; the next refusal tries again */ }
+    });
   }
   sharedConnectionNotice(stderr, profiles, profile,
     hostSession(null, dependencies.env || process.env, profileModule));
@@ -4526,6 +4553,7 @@ function workOptions(args) {
 }
 
 async function workRequest(fetcher, profile, pathname, options = {}) {
+  if (profile.token === null) throw endedLocally();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COMMAND_FETCH_TIMEOUT_MS);
   const headers = authHeaders(profile);
@@ -4553,6 +4581,8 @@ async function workRequest(fetcher, profile, pathname, options = {}) {
       if (result && typeof result.did_you_mean === 'string') error.didYouMean = result.did_you_mean;
       if (result && Array.isArray(result.can_assign)) error.canAssign = result.can_assign.filter(name => typeof name === 'string');
       if (result && result.change === 'state') error.change = 'state';
+      error.exact = exactObject(result, ['ok', 'error']) !== null && result.ok === false;
+      noteRefusal(profile, error);
       throw error;
     }
     return result;

@@ -208,26 +208,28 @@ test('ended connections drop their token file', () => {
   assert.deepEqual(tokenFiles(connectionDir), [`bea.${live.request_id}.token`]);
 });
 
-test('an expired connection drops its token file but still reads as expired', () => {
+test('a connection the room refused drops its token file but still reads, with no token', () => {
   const { connectionDir, profiles } = place();
   const body = candidate('Marlow');
   profiles.createUnadmitted(body);
   admit(profiles, body, 5_000);
-  assert.equal(tokenFiles(connectionDir).length, 1, 'ARRANGEMENT: the token file exists before the expiry is seen');
-  assert.equal(profiles.dropSpentToken('Marlow', 4_999), false, 'not yet expired by the caller\'s clock: kept');
-  assert.equal(tokenFiles(connectionDir).length, 1);
-  assert.equal(profiles.dropSpentToken('Marlow', 5_000), true);
+  assert.equal(tokenFiles(connectionDir).length, 1, 'ARRANGEMENT: the token file exists before the refusal');
+  assert.equal(profiles.dropDeadToken('Marlow', body.request_id), true);
   assert.deepEqual(tokenFiles(connectionDir), []);
   assert.deepEqual(holders(connectionDir, body.token), []);
   const loaded = profiles.load('Marlow');
   assert.deepEqual([loaded.state, loaded.expires_at, loaded.token], ['admitted', 5_000, null]);
 
-  // An older profile that has already expired loses its token on the same call.
+  // An older profile, token inside, is split and then loses its token the same way.
   const old = candidate('Ana');
   writeLegacy(connectionDir, old, 'admitted', 5_000);
-  assert.equal(profiles.dropSpentToken('Ana', 6_000), true);
+  assert.equal(profiles.dropDeadToken('Ana', old.request_id), true);
   assert.deepEqual(holders(connectionDir, old.token), []);
   assert.equal(profiles.load('Ana').token, null);
+
+  // Leaving afterwards removes the marker with the profile.
+  profiles.forgetAdmitted('Marlow');
+  assert.deepEqual(fs.readdirSync(connectionDir).filter(name => name.startsWith('marlow.')), []);
 });
 
 test('the listing reads no token file', () => {
