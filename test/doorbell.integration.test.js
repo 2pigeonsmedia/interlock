@@ -195,7 +195,7 @@ async function waitForRuntimeOf(directory, pid) {
   return current;
 }
 
-test('Codex adapter queues a generic nudge before committing its observation cursor', () => {
+test('Codex adapter queues a generic nudge and commits its observation cursor', () => {
   const world = fixture(ringPage());
   const result = run(world);
   assert.equal(result.status, 0, JSON.stringify({

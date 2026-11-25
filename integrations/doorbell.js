@@ -1337,27 +1337,6 @@ async function runAdapter(argv) {
         fail('--replace-connection was supplied, but the current connection still matches the adapter state; rerun without the flag');
         return;
       }
-      if (page.rings.length > 0) {
-        // The poll may have waited a long time: check the reader again
-        // before handing it a ring.
-        if (watch && watch.parentGone()) { deaf('parent-gone'); return; }
-        const message = nudge(options, page.rings);
-        if (options.adapter === 'codex') {
-          const delivered = command(codex,
-            ['queue', '--thread', options.session, '--message', message]);
-          if (delivered.error || delivered.status !== 0) {
-            const saved = saveFailure(stateDir, delivered.stdout || '',
-              (delivered.stderr || '') + (delivered.error ? `\n${delivered.error.message}` : ''));
-            fail(`Codex rejected the nudge; ring remains eligible and output is at ${saved}`);
-            return;
-          }
-          prove('delivered_at');
-        } else {
-          const refused = writeLine(process.stdout.fd, message + '\n');
-          if (refused) { deaf('output-closed', refused); return; }
-          prove('written_at');
-        }
-      }
       const nextState = {
           schema: SCHEMA,
           adapter: options.adapter,
@@ -1366,12 +1345,57 @@ async function runAdapter(argv) {
           connection_request_id: page.connection_request_id,
           cursor: page.cursor,
       };
-      try {
-        atomicJson(file, nextState);
-        state = nextState;
-      } catch (error) {
-        fail(`host accepted the nudge but cursor commit failed; a duplicate is possible: ${error.message}`);
-        return;
+      let committed = false;
+      if (page.rings.length > 0) {
+        // The poll may have waited a long time: check the reader again
+        // before handing it a ring.
+        if (watch && watch.parentGone()) { deaf('parent-gone'); return; }
+        const message = nudge(options, page.rings);
+        if (options.adapter === 'codex') {
+          // The nudge starts the host's turn, and a host that pauses the
+          // doorbell for a turn may stop this process before `queue` returns.
+          // So the cursor of what is nudged is saved first: a fresh adapter
+          // started after such a stop does not ring the same message again.
+          // A refused nudge puts the saved state back, so its ring stays
+          // eligible.
+          try {
+            atomicJson(file, nextState);
+          } catch (error) {
+            fail(`cursor commit failed before the nudge; nothing was nudged and the ring remains eligible: ${error.message}`);
+            return;
+          }
+          const delivered = command(codex,
+            ['queue', '--thread', options.session, '--message', message]);
+          if (delivered.error || delivered.status !== 0) {
+            const saved = saveFailure(stateDir, delivered.stdout || '',
+              (delivered.stderr || '') + (delivered.error ? `\n${delivered.error.message}` : ''));
+            try {
+              if (state === null) fs.rmSync(file, { force: true });
+              else atomicJson(file, state);
+            } catch (error) {
+              fail(`Codex rejected the nudge, and the cursor could not be put back, so this ring may not be offered again: ${error.message}; output is at ${saved}`);
+              return;
+            }
+            fail(`Codex rejected the nudge; ring remains eligible and output is at ${saved}`);
+            return;
+          }
+          committed = true;
+          state = nextState;
+          prove('delivered_at');
+        } else {
+          const refused = writeLine(process.stdout.fd, message + '\n');
+          if (refused) { deaf('output-closed', refused); return; }
+          prove('written_at');
+        }
+      }
+      if (!committed) {
+        try {
+          atomicJson(file, nextState);
+          state = nextState;
+        } catch (error) {
+          fail(`host accepted the nudge but cursor commit failed; a duplicate is possible: ${error.message}`);
+          return;
+        }
       }
       try {
         runtime = Object.assign({}, runtime, { updated_at: Date.now() });
