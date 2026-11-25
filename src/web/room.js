@@ -3160,6 +3160,11 @@ async function runMessages(generation, signal) {
       const owner = currentUser && Array.isArray(currentUser.roles) &&
         currentUser.roles.includes('owner');
       roomAttention.messages(page.messages, currentUser && currentUser.name, catchingUp, owner);
+      // Another participant's message can change whom an open draft rings (a
+      // new @mention of the drafter rings it back), so the preview is asked
+      // again. The drafter's own messages and the first catch-up do not.
+      if (!catchingUp && messageBody.value.trim() !== '' && page.messages.some(message =>
+        message.byline !== (currentUser && currentUser.name))) updateMentionPreview();
       transcript.setAttribute('aria-busy', 'false');
       setConnectionState('running');
       const sentMessageReached = InterlockTranscriptScroll.reachedMessage(
