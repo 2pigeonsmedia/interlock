@@ -530,11 +530,13 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 .person-card strong { grid-column: 2; font-weight: 700; letter-spacing: -0.005em; }
 .person-card span { grid-column: 2; font-size: 0.76rem; color: var(--ink-3); line-height: 1.5; }
 .roster-list { display: grid; }
+.ask-suggestion { margin: 0.25rem 0 0; font-size: 0.85rem; color: var(--wait-text); }
 .time-zone-prompt { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--wait-text); }
 .time-zone-prompt button { margin-left: 0.25rem; }
 .person-card .participant-fact { display: block; }
 .person-card .participant-session { font-variant-numeric: tabular-nums; }
 .person-card .outstanding { color: var(--wait-text); }
+.person-card .participant-other-session { color: var(--wait-text); }
 
 /* People groups: a header per group, folded unless it needs the viewer. */
 .people-group + .people-group { margin-top: 6px; }

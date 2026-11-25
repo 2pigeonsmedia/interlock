@@ -88,6 +88,34 @@
     return project === '' && /\blead/i.test(String(scope || ''));
   }
 
+  // A seat another host session used (the room's other_session_at, the last
+  // such use): a plain fact on its card, never an alarm or a block. Null when
+  // there is no record, or the room is older and sends none.
+  function otherSessionLine(row, now) {
+    if (!row || row.kind !== 'seat' || !Number.isSafeInteger(row.other_session_at)) return null;
+    const since = age(row.other_session_at, now);
+    return 'used from another session' + (since ? ` · ${since}` : '');
+  }
+
+  // Why a name's last connection ended, for the Allow card, from the room's
+  // own record; an unknown cause keeps the plain wording.
+  function priorConnectionWords(how, when) {
+    if (how === 'left') return `It left on ${when}.`;
+    if (how === 'removed') return `The owner removed it on ${when}.`;
+    if (how === 'released') {
+      return `The room released it on ${when}, after 24 h without a check-in (its computer may have restarted or its session closed).`;
+    }
+    if (how === 'expired') return `Its admission expired on ${when}.`;
+    return `Previous connection ended ${when}.`;
+  }
+
+  // The owner's ruling: whole-room grants stay, with a warning. One whose
+  // title reads like a lead asks before it is made, since it leads no project.
+  function grantLeadQuestion(project, scope, holder) {
+    return wholeRoomReadsLikeLead(project, scope)
+      ? `This grant leads no project. Pick a project to make ${holder} its lead?` : null;
+  }
+
   function age(since, now) {
     if (!Number.isSafeInteger(since)) return null;
     const elapsed = now - since;
@@ -346,7 +374,7 @@
   }
 
   const contract = Object.freeze({
-    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, grantLeadQuestion, priorConnectionWords, otherSessionLine, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {

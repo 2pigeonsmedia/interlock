@@ -85,6 +85,9 @@ const askProject = document.querySelector('#ask-project');
 const askToggle = document.querySelector('#ask-toggle');
 const mentionSuggestions = document.querySelector('#mention-suggestions');
 const mentionPreview = document.querySelector('#mention-preview');
+const askSuggestion = document.querySelector('#ask-suggestion');
+const askSuggestionText = document.querySelector('#ask-suggestion-text');
+const askSuggestionUse = document.querySelector('#ask-suggestion-use');
 const presenceForm = document.querySelector('#presence-form');
 const presenceMiddle = document.querySelector('#presence-middle');
 const presenceWaitingOn = document.querySelector('#presence-waiting-on');
@@ -123,6 +126,12 @@ const grantScope = document.querySelector('#grant-scope');
 const grantProjectHint = document.querySelector('#grant-project-hint');
 const grantUntil = document.querySelector('#grant-until');
 const settingsGrantsStatus = document.querySelector('#settings-grants-status');
+const grantLeadQuestionLine = document.querySelector('#grant-lead-question');
+const grantLeadQuestionText = document.querySelector('#grant-lead-question-text');
+const grantLeadPick = document.querySelector('#grant-lead-pick');
+const grantLeadConfirm = document.querySelector('#grant-lead-confirm');
+// Set by "Keep whole room" for the grant on screen; any change asks again.
+let grantWholeRoomConfirmed = false;
 let csrfToken = null;
 let connectionCheckRunning = false;
 let messageCursor = 0;
@@ -607,11 +616,12 @@ async function freshOwnerStepUp() {
 function validPendingAi(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length !== 14 || ![
+  if (keys.length !== 15 || ![
     'request_id', 'name', 'product', 'product_provenance',
-    'previously_used', 'last_ended_at', 'reuse', 'reuse_session',
+    'previously_used', 'last_ended_at', 'last_ended_how', 'reuse', 'reuse_session',
     'created_at', 'expires_at', 'match_code', 'connected', 'declared_project', 'returns',
   ].every(key => keys.includes(key)) ||
+    ![null, 'left', 'removed', 'released', 'expired'].includes(value.last_ended_how) ||
     !(value.declared_project === null || typeof value.declared_project === 'string') ||
     !(value.returns === null || (typeof value.returns === 'string' && value.returns.length <= 2000))) return false;
   return typeof value.request_id === 'string' && typeof value.name === 'string' &&
@@ -679,7 +689,7 @@ function pendingAiCard(row, status) {
     priorUse.textContent = `Held by another session · Session ${row.reuse_session}. Allow ends the old session and admits this one.`;
   } else if (row.reuse === 'ended') {
     const ended = row.last_ended_at
-      ? ` Previous connection ended ${new Date(row.last_ended_at).toLocaleString()}.`
+      ? ' ' + InterlockPeopleModel.priorConnectionWords(row.last_ended_how, new Date(row.last_ended_at).toLocaleString())
       : '';
     priorUse.textContent =
       `Used before · Session ${row.reuse_session}. Allow admits a new session.${ended}`;
@@ -1249,6 +1259,8 @@ function rosterCard(participant, now, focusable) {
   card.append(toggle);
   const reason = InterlockPeopleModel.alarmReason(participant);
   if (reason) card.append(participantFact(reason, 'participant-alarm-reason'));
+  const otherSession = InterlockPeopleModel.otherSessionLine(participant, now);
+  if (otherSession) card.append(participantFact(otherSession, 'participant-other-session'));
   if (state.notPickedUp) card.append(participantFact(state.notPickedUp, 'outstanding'));
   // Shown to that AI's own person and the owner only (the room decides).
   if (participant.client_notice) card.append(participantFact(participant.client_notice, 'client-notice'));
@@ -2069,7 +2081,7 @@ function fillGrantForm() {
   }));
   const whole = document.createElement('option');
   whole.value = '';
-  whole.textContent = 'Whole room (leads no project)';
+  whole.textContent = 'Whole room: a named permission AIs can check; leads no project';
   grantProject.replaceChildren(whole, ...rosterProjects.map(project => {
     const option = document.createElement('option');
     option.value = project.id;
@@ -2087,8 +2099,25 @@ function updateGrantProjectHint() {
     : GRANT_PROJECT_HINT;
 }
 
+function resetGrantLeadQuestion() {
+  grantWholeRoomConfirmed = false;
+  grantLeadQuestionLine.hidden = true;
+}
+
 grantProject.addEventListener('change', updateGrantProjectHint);
 grantScope.addEventListener('input', updateGrantProjectHint);
+grantProject.addEventListener('change', resetGrantLeadQuestion);
+grantScope.addEventListener('input', resetGrantLeadQuestion);
+grantHolder.addEventListener('change', resetGrantLeadQuestion);
+grantLeadPick.addEventListener('click', () => {
+  resetGrantLeadQuestion();
+  grantProject.focus();
+});
+grantLeadConfirm.addEventListener('click', () => {
+  grantLeadQuestionLine.hidden = true;
+  grantWholeRoomConfirmed = true;
+  grantCreateForm.requestSubmit();
+});
 
 function renderSettingsGrants() {
   const now = Date.now();
@@ -2177,6 +2206,13 @@ grantCreateForm.addEventListener('submit', async event => {
     setSettingsStatus(settingsGrantsStatus, 'Write the scope in one line.', 'error');
     return;
   }
+  // A whole-room grant titled as a lead leads nothing: ask before making it.
+  const question = InterlockPeopleModel.grantLeadQuestion(grantProject.value, scope, holder[1]);
+  if (question !== null && !grantWholeRoomConfirmed) {
+    grantLeadQuestionText.textContent = question;
+    grantLeadQuestionLine.hidden = false;
+    return;
+  }
   // A date means through the end of that day, on this computer's clock.
   const until = grantUntil.value ? new Date(`${grantUntil.value}T23:59:59.999`).getTime() : null;
   if (until !== null && (!Number.isSafeInteger(until) || until <= Date.now())) {
@@ -2196,6 +2232,7 @@ grantCreateForm.addEventListener('submit', async event => {
     grantUntil.value = '';
     grantHolder.value = '';
     updateGrantProjectHint();
+    resetGrantLeadQuestion();
     await refreshSettingsGrants();
     setSettingsStatus(settingsGrantsStatus, InterlockPeopleModel.grantMadeWords(result.grant,
       result.grant.project === null ? null : projectName(result.grant.project)) +
@@ -2271,6 +2308,20 @@ function updateMentionPreview() {
     if (generation !== ringPreviewGeneration) return;
     mentionPreview.textContent = words;
   }, RING_PREVIEW_DELAY_MS);
+}
+
+// A draft that reads as a question for the one person or AI it names gets
+// a suggestion to send it as an ask: a decision asked in a plain post is easy
+// to miss, and an ask is tracked in Needs you. Only a suggestion: the button
+// opens Ask with that name picked, and nothing is sent until Send.
+function updateAskSuggestion() {
+  const names = rosterParticipants.map(row => row.name).filter(name => name !== viewerName());
+  const name = askFields.hidden && !composingDiscussion()
+    ? InterlockAsks.suggestAsk(messageBody.value, InterlockMentions.named(messageBody.value, names)) : null;
+  askSuggestion.hidden = name === null;
+  askSuggestionText.textContent = name === null ? '' : `This reads as a question for ${name}.`;
+  askSuggestionUse.textContent = name === null ? '' : `Make it an ask of ${name}`;
+  askSuggestionUse.dataset.name = name || '';
 }
 
 function insertMention(name) {
@@ -3430,6 +3481,7 @@ messageForm.addEventListener('submit', async event => {
       loadAnnotations();
     }
     updateMentionPreview();
+    updateAskSuggestion();
     setRoomNotice('Message saved.', 'success');
     followTranscriptBottom(true);
     if (seenMessageIds.has(forceFollowMessageId)) {
@@ -3451,6 +3503,18 @@ messageForm.addEventListener('submit', async event => {
 });
 
 messageBody.addEventListener('input', updateMentionPreview);
+messageBody.addEventListener('input', updateAskSuggestion);
+askToggle.addEventListener('click', updateAskSuggestion);
+askSuggestionUse.addEventListener('click', () => {
+  const name = askSuggestionUse.dataset.name;
+  if (!name) return;
+  setAskMode(true);
+  askOf.value = name;
+  updateAskMeansRequired();
+  updateMentionPreview();
+  updateAskSuggestion();
+  askOf.focus();
+});
 messageBody.addEventListener('input', updateBindVisibility);
 // The work panel's Reply on an ask is the same act as the message's Reply.
 document.addEventListener('interlock:reply-ask', event => {

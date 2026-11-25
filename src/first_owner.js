@@ -1961,6 +1961,22 @@ function createFirstOwnerHandler(options) {
     });
   }
 
+  /* For knocks by names used before: how the last session ended, read from
+   * the room's own seat history when the list is read (the knock stores
+   * nothing new). A history that cannot be read gives null, never a refusal. */
+  function lastEndedHow(rows, now) {
+    if (!rows.some(row => row.reuse === 'ended') || typeof house.listAiSeatHistory !== 'function') return () => null;
+    let history;
+    try { history = house.listAiSeatHistory({ now }); } catch (_) { return () => null; }
+    const how = new Map();
+    for (const seat of Array.isArray(history) ? history : []) {
+      if (seat && typeof seat.name === 'string' && ['left', 'removed', 'released', 'expired'].includes(seat.ended_how)) {
+        how.set(`${seat.name.toLowerCase()}#${seat.session}`, seat.ended_how);
+      }
+    }
+    return row => (row.reuse === 'ended' ? how.get(`${row.name.toLowerCase()}#${row.reuse_session}`) || null : null);
+  }
+
   function listAdmissions(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -1975,8 +1991,12 @@ function createFirstOwnerHandler(options) {
       for (const id of knockFacts.keys()) if (!live.has(id)) knockFacts.delete(id);
       const now = Date.now();
       const actors = viewer ? returnActors(viewer.subject_id, now) : null;
+      const endedHow = lastEndedHow(pending, now);
       sendJson(request, response, 200, { ok: true, pending: pending.map(row => Object.freeze(Object.assign({}, row, {
         declared_project: knockFacts.has(row.request_id) ? knockFacts.get(row.request_id).project : null,
+        // Why the name's last connection ended, for the card (left, removed,
+        // released, expired); null for a fresh name or a cause unknown.
+        last_ended_how: endedHow(row),
         // What Allow hands over, said before the click (ruling, 2026-11-13).
         // A knock made with a member's code carries nothing over (its Allow
         // skips the check), so its card promises nothing.

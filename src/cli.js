@@ -10,6 +10,7 @@ const packageJson = require('../package.json');
 const Ring = require('./rings.js');
 // The room's own mention parser, so the CLI reads @all exactly as the room does.
 const InterlockMentions = require('./web/mentions.js');
+const { suggestAsk } = require('./web/asks_model.js');
 
 const EXIT_OK = 0;
 const EXIT_RUNTIME = 1;
@@ -2392,6 +2393,13 @@ async function runSay(args, io, dependencies = {}) {
   if (parsed.json) line(io.stdout, JSON.stringify(result));
   else {
     line(io.stdout, `Sent as ${profile.name} (message ${result.message.id}). ${rangWords(result.message)}`);
+    // A plain post that reads as a decision gets one hint: answer the ask it
+    // replies to, or send a question as an ask. Never on a post that already
+    // asks, answers or discusses.
+    if (annotation === null) {
+      const hint = await decisionHint(text, fetcher, profile);
+      if (hint !== null) line(io.stdout, hint);
+    }
   }
   // Words with no choice close a plain ask, but only discuss a decision or a
   // request for approval: say so, so nobody takes them for a decision.
@@ -2400,6 +2408,30 @@ async function runSay(args, io, dependencies = {}) {
     line(io.stdout, `If ask ${ids} is a decision or a request for approval, it stays open: words alone are discussion; add --choice yes|no to decide.`);
   }
   return EXIT_OK;
+}
+
+/* After a plain post: when it names someone whose ask to the author is still
+ * open, "Answering ask N? Use --answers N so it closes."; else, when it reads
+ * as a question for the one name it addresses, the hint to send it as an
+ * ask. The names are the @handles the post typed. The open asks are read
+ * only when the post names someone; a failed read gives no answer hint. */
+async function decisionHint(text, fetcher, profile) {
+  const handles = [...new Set(InterlockMentions.tokens(text).map(token => token.handle)
+    .filter(handle => handle !== 'all'))];
+  if (handles.length === 0) return null;
+  const folded = new Set(handles.map(handle => handle.toLowerCase()));
+  try {
+    const asks = await localRequest(fetcher, profile, '/api/ai/asks', { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
+    const open = asks && asks.ok === true && Array.isArray(asks.addressed)
+      ? asks.addressed.find(ask => ask && Number.isSafeInteger(ask.ask_id) && typeof ask.by === 'string' &&
+        folded.has(ask.by.toLowerCase())) : undefined;
+    if (open) return `Answering ask ${open.ask_id}? Use --answers ${open.ask_id} so it closes.`;
+  } catch (_) {
+    // No answer hint without the room's asks; the post already stands.
+  }
+  const name = suggestAsk(text, handles);
+  return name === null ? null
+    : `Hint: this reads as a question for ${terminalSafe(name)}; a decision sent as an ask (--asks-of ${terminalSafe(name)}) is tracked in Needs you.`;
 }
 
 function askOptions(args) {

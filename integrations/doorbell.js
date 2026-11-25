@@ -753,17 +753,53 @@ function pollReason(polled) {
   return safe.length > MAX_REASON ? safe.slice(0, MAX_REASON) + '…' : safe;
 }
 
+/* The asks still open for this AI, apart from the mentions that rang it:
+ * ` · 2 open asks for you: #4 from Bo, #5 from Ana`, or '' when there are
+ * none or the room could not say. The list is the room's own (the one
+ * `interlock asks` prints under "Asked of you"), so an ask stays in every
+ * wake line until it is answered, withdrawn or done. */
+const OPEN_ASKS_SHOWN = 5;
+function openAsksWords(asks) {
+  if (!Array.isArray(asks) || asks.length === 0) return '';
+  const safe = text => String(text).replace(/[\p{Cc}\p{Cf}\p{Cs}]/gu, '');
+  const named = asks.slice(0, OPEN_ASKS_SHOWN).map(ask => `#${ask.ask_id} from ${safe(ask.by)}`);
+  if (asks.length > OPEN_ASKS_SHOWN) named.push(`${asks.length - OPEN_ASKS_SHOWN} more`);
+  return ` · ${asks.length} open ask${asks.length === 1 ? '' : 's'} for you: ${named.join(', ')}`;
+}
+
+/* The room's open asks for this AI, read with the one existing command, or
+ * null when it cannot say (an older room, an outage, an odd answer): the
+ * ring is never held for it. */
+function openAsksFor(interlock, prefix, options) {
+  // Run as the doorbell's own polls run, so the room reads one host session.
+  const read = command(interlock, [...prefix, 'asks', '--connection', options.connection, '--json'], sessionEnv(options));
+  if (read.error || read.status !== 0) return null;
+  try {
+    const page = JSON.parse(String(read.stdout).trim().split('\n').pop());
+    return page && page.ok === true && Array.isArray(page.addressed) &&
+      page.addressed.every(ask => ask && Number.isSafeInteger(ask.ask_id) && typeof ask.by === 'string')
+      ? page.addressed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /* The line a ring becomes (C4): `Interlock rang for <Name>: <kind> <id> from
  * <from> · Room time: … · Run: <read>`. The prefix is the 0.3 one, unchanged,
  * so hosts that match on it keep working. Several rings in one poll are one
  * line, read through the last. A room older than 0.4.0 sends no ring shape;
  * its rings get the 0.3 line. */
-function nudge(options, rings) {
+function nudge(options, rings, asks = null) {
   if (rings.every(ring => ring.ring)) {
     const last = rings.reduce((latest, ring) => (ring.id > latest.id ? ring : latest));
-    if (rings.length === 1) return Ring.ringLine(options.connection, last.ring);
-    const what = rings.map(ring => `${ring.ring.kind} ${ring.id} from ${ring.byline}`).join('; ');
-    return `Interlock rang for ${options.connection}: ${what} · Room time: ${last.ring.room_time} · Run: ${last.ring.read}`;
+    const open = openAsksWords(asks);
+    if (rings.length === 1 && open === '') return Ring.ringLine(options.connection, last.ring);
+    // One ring reads as ringLine reads it; several, one clause each.
+    const one = ring => (ring.message_id === null ? ring.kind : `${ring.kind} ${ring.message_id}`) +
+      (ring.from === null ? '' : ` from ${ring.from}`);
+    const what = rings.length === 1 ? one(last.ring)
+      : rings.map(ring => `${ring.ring.kind} ${ring.id} from ${ring.byline}`).join('; ');
+    return `Interlock rang for ${options.connection}: ${what}${open} · Room time: ${last.ring.room_time} · Run: ${last.ring.read}`;
   }
   const ids = rings.map(ring => ring.id).join(', ');
   const from = [...new Set(rings.map(ring => ring.byline))].join(', ');
@@ -1350,7 +1386,8 @@ async function runAdapter(argv) {
         // The poll may have waited a long time: check the reader again
         // before handing it a ring.
         if (watch && watch.parentGone()) { deaf('parent-gone'); return; }
-        const message = nudge(options, page.rings);
+        const message = nudge(options, page.rings,
+          page.rings.every(ring => ring.ring) ? openAsksFor(interlock, interlockPrefix, options) : null);
         if (options.adapter === 'codex') {
           // The nudge starts the host's turn, and a host that pauses the
           // doorbell for a turn may stop this process before `queue` returns.

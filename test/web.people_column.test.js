@@ -216,7 +216,7 @@ test('the Allow card names the declared project only when one was typed', () => 
   const { page, el } = loadPage();
   const knock = {
     request_id: 'r1', name: 'Scout', product: 'Claude Code', product_provenance: 'client-reported',
-    previously_used: false, last_ended_at: null, reuse: 'fresh', reuse_session: null,
+    previously_used: false, last_ended_at: null, last_ended_how: null, reuse: 'fresh', reuse_session: null,
     created_at: NOW, expires_at: NOW + 60_000, match_code: 'ABCDE', connected: true, declared_project: null, returns: null,
   };
   assert.equal(page.validPendingAi(knock), true, 'ARRANGEMENT: the 14-key knock is valid');
@@ -233,7 +233,7 @@ test('the Allow card says what a same-name return carries, before the click', ()
   const { page, el } = loadPage();
   const knock = {
     request_id: 'r2', name: 'Juno', product: 'Claude Code', product_provenance: 'client-reported',
-    previously_used: true, last_ended_at: NOW - 1000, reuse: 'ended', reuse_session: 1,
+    previously_used: true, last_ended_at: NOW - 1000, last_ended_how: 'released', reuse: 'ended', reuse_session: 1,
     created_at: NOW, expires_at: NOW + 60_000, match_code: 'ABCDE', connected: true, declared_project: null,
     returns: 'Returns as Juno: leads operations on ops (G-1) · holds 2 items',
   };

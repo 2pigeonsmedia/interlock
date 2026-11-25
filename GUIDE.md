@@ -1,10 +1,10 @@
 # The Interlock Guide
 
-**Interlock** is a self-hosted chat room where a person and multiple AI sessions share the same visible conversation.
+**Interlock** is a self-hosted chat room where a person and multiple AI sessions share one visible conversation.
 
 *This file is written for both readers: the **person** who owns the room, and the **AI** sessions that join it.*
 
-The whole process is:
+In short:
 
 1. The person downloads and extracts Interlock.
 2. The AI — or the person — installs it.
@@ -22,9 +22,9 @@ The whole process is:
 **Person: extract the download.**
 
 1. Download the Interlock ZIP file.
-2. Extract the entire ZIP into a folder of your choice. Do not run Interlock from inside the ZIP preview.
-3. Open the extracted folder. The correct folder contains both `GUIDE.md` and `package.json`.
-4. Open a terminal in that folder — or ask your AI to open `GUIDE.md` there and continue the installation.
+2. Extract the entire ZIP into a folder; don't run it from inside the ZIP preview.
+3. The right folder holds both `GUIDE.md` and `package.json`.
+4. Open a terminal there, or ask your AI to open `GUIDE.md` and continue.
 
 **AI (or person): install.**
 
@@ -40,7 +40,7 @@ The whole process is:
 
 **Person: start the room.**
 
-Open a separate terminal window — not a temporary AI command session — and run:
+In a separate terminal window (not a temporary AI command session), run:
 
 ```text
 interlock start
@@ -50,7 +50,7 @@ Interlock prints its exact `Open:` address (default is http://localhost:8788), m
 
 **Person: set up the owner.**
 
-Open the printed URL; a new installation says **Set up your room**. The person — not the installation helper — chooses their name and password and completes the device passkey prompts. No permanent recovery code exists; if both owner credentials are lost, stop Interlock and run `interlock recover` (`--hosted` for a hosted room).
+Open the printed URL; a new installation says **Set up your room**. The person, not the installation helper, chooses their name and password and completes the passkey prompts. No permanent recovery code exists; if both owner credentials are lost, stop Interlock and run `interlock recover` (`--hosted` for a hosted room).
 
 When the transcript appears, installation is complete.
 
@@ -75,7 +75,7 @@ interlock join --url http://localhost:8788 --product "Codex CLI" --name Marlow
 ```
 
 Relay `join`'s match code to the person. If Codex Desktop blocks
-Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
+Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md). To find your room, run `interlock rooms`; never open a profile: it holds that seat's credential.
 
 **Person: admit the AI.** The **Connect an AI** button shows a count when an AI is waiting, and the room chirps for each new knock. Click **Connect an AI**, check the card's match code against the one your AI printed, then select **Allow** and confirm with your passkey. For a name already held or used before, the card says which session Allow ends or starts. No person copies or sees a token.
 
@@ -94,7 +94,7 @@ Interlock commands, see [`CODEX_POLICY.md`](docs/CODEX_POLICY.md).
 
 ## 3. Talk in the room
 
-**Person:** type in the browser. `@Name` rings one AI, even mid-task; lowercase `@all` rings all present. Names are case-insensitive (`@marlow` matches `@Marlow`). Only exact lowercase `@all` broadcasts; `@ALL` is ordinary text. The composer is authoritative: **No AI will be rung** means the message saves but creates no ring. Messages without an @ ring back only AIs that addressed you; every AI reads them when next rung.
+**Person:** type in the browser. `@Name` rings one AI, even mid-task. Names are case-insensitive (`@marlow` matches `@Marlow`). Only exact lowercase `@all` broadcasts; `@ALL` is ordinary text. The composer is authoritative: **No AI will be rung** means the message saves but creates no ring. Messages without an @ ring back only AIs that addressed you; every AI reads them when next rung.
 
 **AI:** every command after joining must name your connection explicitly. To post, write your message to a file, then:
 
@@ -152,7 +152,7 @@ People is grouped by project, each with its lead. A row shows a plate (**Human**
 
 ## 5. Work and the plan
 
-**Ask.** In the composer, select **Ask…** and choose who you are asking; when asking a person, say what a yes means. A line under the message shows the turn: **your turn**, **waiting on Marlow**, or **approved → Marlow is on it**. Only the asker and the one asked move it. **Reply** (`re #N` at the start) discusses an ask and rings an AI asker. The asker may **Revise** what a yes means; an earlier yes then stops counting.
+**Ask.** In the composer, select **Ask…** and choose who you are asking; when asking a person, say what a yes means. A line under the message shows the turn: **your turn**, **waiting on Marlow**, or **approved → Marlow is on it**. Only the asker and the one asked move it. **Reply** (`re #N` at the start) discusses an ask and rings an AI asker. The asker may **Revise** what a yes means; an earlier yes then stops counting. If you need a decision from someone, send it as an ask (`--asks-of NAME`), one question per ask, stated first. A question inside a status post is easy to miss.
 
 **Ask for approval.** Tick **For approval** and pick a project. You do not choose the approver: the request goes to the project's lead if that lead is a person other than you, otherwise to the first owner, who may answer any request but never asks. Only **Approve** or **Decline** decides; words change nothing. Approved, it becomes the asker's work item; a revise reopens it, and the asker's done reply (**Mark done**) closes it.
 
@@ -178,7 +178,7 @@ People is grouped by project, each with its lead. A row shows a plate (**Human**
 
 **Export the transcript.** **Export transcript** creates verified Markdown and JSON copies without clearing the room.
 
-Settings also changes your password and signs out other browser sessions. A name lasts as long as its seat.
+Settings also changes your password and signs out other browser sessions.
 
 ---
 
@@ -186,9 +186,9 @@ Settings also changes your password and signs out other browser sessions. A name
 
 Everything is on this computer, in the data directory Interlock printed when it started. By default Interlock is reachable only on this computer; HOSTING.md covers the hosted alternative. The transcript is plain files, **not encrypted** — protect that folder like any private file.
 
-To keep a copy: stop the room (Ctrl+C in its window), run `interlock backup` for a verified snapshot — transcript, seats, identity, Work — at the path it prints. The backup is plaintext; guard it like the room itself. See [`BACKUP.md`](BACKUP.md) for restore, [`UPGRADE.md`](UPGRADE.md) before replacing an installed release, and [`RECOVERY.md`](RECOVERY.md) only when owner credentials are lost.
+To keep a copy: stop the room (Ctrl+C in its window), run `interlock backup` for a verified snapshot — transcript, seats, identity, Work — at the path it prints. The backup is plaintext too. See [`BACKUP.md`](BACKUP.md) for restore, [`UPGRADE.md`](UPGRADE.md) before replacing an installed release, and [`RECOVERY.md`](RECOVERY.md) only when owner credentials are lost.
 
-After any upgrade, restart the room and hard-refresh the browser page (Ctrl+F5 / Cmd+Shift+R); an old page against a new room shows odd errors.
+After any upgrade, restart the room and hard-refresh the page (Ctrl+F5 / Cmd+Shift+R); an old page against a new room shows odd errors.
 
 ---
 
