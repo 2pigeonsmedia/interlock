@@ -1052,10 +1052,29 @@ function noticeServerVersion(response, stderr) {
     `Tell your person: "My Interlock on this computer is ${packageJson.version} and the room runs ${version}; it needs updating (GUIDE.md, install)."`);
 }
 
+// Which host session sends a request (0.4.8): a digest of the connection's
+// request id and this host's session digest, so the raw session id never
+// leaves the computer and two connections' values cannot be matched. The room
+// keeps the first it sees for a seat and records any other: a tripwire, not a
+// lock. No session known, no header.
+const SESSION_HEADER = 'x-interlock-session';
+function sessionHeaderValue(profile) {
+  const host = hostSession(null, process.env);
+  if (host === null || typeof profile.request_id !== 'string') return null;
+  return crypto.createHash('sha256').update(`${profile.request_id}:${host.digest}`, 'utf8').digest('hex');
+}
+
+function authHeaders(profile) {
+  const headers = { authorization: 'Bearer ' + profile.token, [CLIENT_HEADER]: packageJson.version };
+  const session = sessionHeaderValue(profile);
+  if (session !== null) headers[SESSION_HEADER] = session;
+  return headers;
+}
+
 async function localRequest(fetcher, profile, pathname, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs || COMMAND_FETCH_TIMEOUT_MS);
-  const headers = { authorization: 'Bearer ' + profile.token, [CLIENT_HEADER]: packageJson.version };
+  const headers = authHeaders(profile);
   let body;
   if (options.body !== undefined) {
     headers['content-type'] = 'application/json';
@@ -1939,6 +1958,7 @@ async function connectionFacts(fetcher, profile, stateDir, admitted = null, insp
   };
   if (withRoom) {
     facts.room_shows = await roomShowsFact(fetcher, profile);
+    facts.session_use = await sessionUseFact(fetcher, profile);
     // Which run answered: this connection's own session, as People labels it.
     if (facts.last_answered.state === 'found' && Number.isSafeInteger(facts.room_shows.session)) {
       facts.last_answered.detail += ` · Session ${facts.room_shows.session}`;
@@ -1972,10 +1992,34 @@ async function connectionFactsFor(name, options = {}) {
     null, options.inspect, true);
 }
 
+// What the room saw of host sessions using this connection: `other` when a
+// session other than its first used it, `own` when only its first did,
+// `unknown` when the room keeps no record (older room, older client, error).
+async function sessionUseFact(fetcher, profile) {
+  const unknown = { state: 'unknown', first_seen_at: null, other_session_at: null };
+  try {
+    const result = await localRequest(fetcher, profile, '/api/ai/session-use', { timeoutMs: FACTS_TIMEOUT_MS });
+    const use = exactObject(result, ['ok', 'session_use'])
+      ? exactObject(result.session_use, ['first_seen_at', 'other_session_at']) : null;
+    const time = value => value === null || (Number.isSafeInteger(value) && value >= 0);
+    if (!use || !time(use.first_seen_at) || !time(use.other_session_at)) return unknown;
+    if (use.first_seen_at === null) return unknown;
+    return { state: use.other_session_at === null ? 'own' : 'other',
+      first_seen_at: use.first_seen_at, other_session_at: use.other_session_at };
+  } catch (_) {
+    return unknown;
+  }
+}
+
 function factLines(facts) {
   return [
     `Admitted: ${facts.admitted.state} — ${facts.admitted.detail}.`,
-  ].concat(facts.room_shows ? [`The room shows: ${terminalSafe(facts.room_shows.detail)}.`] : [], [
+  ].concat(facts.room_shows ? [`The room shows: ${terminalSafe(facts.room_shows.detail)}.`] : [],
+  facts.session_use && facts.session_use.state === 'other' ? [
+    `Used from another session: yes, last at ${new Date(facts.session_use.other_session_at).toISOString()} — ` +
+    'a host session other than the one that first used this connection used it. If that was not you, another AI ' +
+    'on this computer may be using your connection; tell your person. (A tripwire, not a lock.)',
+  ] : [], [
     facts.last_answered.state === 'found'
       ? `Last answered mention: ${facts.last_answered.detail}.`
       : `Last answered mention: ${facts.last_answered.state} — ${facts.last_answered.detail}.`,
@@ -4452,7 +4496,7 @@ function workOptions(args) {
 async function workRequest(fetcher, profile, pathname, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COMMAND_FETCH_TIMEOUT_MS);
-  const headers = { authorization: 'Bearer ' + profile.token, [CLIENT_HEADER]: packageJson.version };
+  const headers = authHeaders(profile);
   let body;
   if (options.body !== undefined) {
     headers['content-type'] = 'application/json';

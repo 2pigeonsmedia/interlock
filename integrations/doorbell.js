@@ -653,13 +653,30 @@ function saveFailure(stateDir, stdout, stderr) {
   return file;
 }
 
-function command(name, args) {
+function command(name, args, env = process.env) {
   const javascript = path.extname(name).toLowerCase() === '.js';
   return childProcess.spawnSync(javascript ? process.execPath : name,
     javascript ? [name, ...args] : args, {
     encoding: 'utf8', maxBuffer: MAX_OUTPUT,
-    env: process.env,
+    env,
   });
+}
+
+// The environment for this doorbell's own interlock commands: the host
+// session it was started with, so the room sees its polls and the AI's own
+// commands as one session (0.4.8).
+function sessionEnv(options) {
+  return Object.assign({}, process.env, { INTERLOCK_SESSION: options.session });
+}
+
+// The same session header the CLI sends, for the doorbell's own request.
+function sessionHeader(profile, session) {
+  try {
+    const profiles = require('../src/client/profiles.js');
+    if (!profiles.validSession(session)) return {};
+    return { 'x-interlock-session': crypto.createHash('sha256')
+      .update(`${profile.request_id}:${profiles.sessionDigest(session)}`, 'utf8').digest('hex') };
+  } catch (_) { return {}; }
 }
 
 // Tests shorten the schedule; it accepts only a short list of positive
@@ -1012,12 +1029,13 @@ function waitMs(milliseconds) {
  * connection, so the ring goes out at once rather than after the first long
  * poll. null when the room does not say: the ring then reads "room time
  * unavailable". */
-async function admittedRoomTime(profile) {
+async function admittedRoomTime(profile, session) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5_000);
   try {
     const response = await globalThis.fetch(profile.server_url + '/api/ai/room-time', {
-      headers: { authorization: 'Bearer ' + profile.token }, signal: controller.signal,
+      headers: Object.assign({ authorization: 'Bearer ' + profile.token }, sessionHeader(profile, session)),
+      signal: controller.signal,
     });
     const body = await response.json();
     if (!response.ok || !body || body.ok !== true || typeof body.room_time !== 'string' ||
@@ -1079,7 +1097,7 @@ async function waitForAdmission(options, stateDir, runtime, pending, watch, deaf
     } catch (_) { result = null; /* the room or the store did not answer: wait and ask again */ }
     if (result && result.outcome === 'admitted') {
       done();
-      return { room: result.profile ? await admittedRoomTime(result.profile) : null };
+      return { room: result.profile ? await admittedRoomTime(result.profile, options.session) : null };
     }
     if (result && result.outcome === 'none') {
       done();
@@ -1264,7 +1282,7 @@ async function runAdapter(argv) {
       const args = ['doorbell', '--connection', options.connection, '--json'];
       if (after !== null) args.push('--after', String(after));
       const pollStarted = Date.now();
-      const polled = command(interlock, [...interlockPrefix, ...args]);
+      const polled = command(interlock, [...interlockPrefix, ...args], sessionEnv(options));
       if (!polled.error && polled.status === EXIT_UNREACHABLE) {
         // Nothing reached the room, so nothing moves: the same poll, from the
         // same cursor, runs again. Stdout stays silent because only a ring is

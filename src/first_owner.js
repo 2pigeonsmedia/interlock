@@ -8,6 +8,7 @@ const { roomExcerpt } = require('./room_excerpt.js');
 const { selectJoinedTail } = require('./chat/joined_tail.js');
 const TimeZones = require('./time_zones.js');
 const ClientVersions = require('./client_versions.js');
+const HostSessions = require('./host_sessions.js');
 
 const path = require('node:path');
 const { clientSource } = require('./hosted.js');
@@ -497,6 +498,7 @@ function createFirstOwnerHandler(options) {
   }
   // Which Interlock each AI's own computer runs (C3): warn, never refuse.
   const clientVersions = ClientVersions.createClientVersions({ dataDir });
+  const hostSessions = HostSessions.createHostSessions({ dataDir });
   const expectedHost = parsedOrigin.host;
   let bootstrapSecret = null;
   // Member-issued AI join codes: their own files, never 0.3.11's.
@@ -2042,7 +2044,9 @@ function createFirstOwnerHandler(options) {
       source: clientSource(request, hostedMode),
     }, capability, CHAT_RESOURCE);
     if (authorized && authorized.allow === true && typeof authorized.subject_id === 'string') {
-      clientVersions.note(authorized.subject_id, request.headers[ClientVersions.HEADER], Date.now());
+      const at = Date.now();
+      clientVersions.note(authorized.subject_id, request.headers[ClientVersions.HEADER], at);
+      hostSessions.note(authorized.subject_id, request.headers[HostSessions.HEADER], at);
     }
     return authorized;
   }
@@ -2050,7 +2054,7 @@ function createFirstOwnerHandler(options) {
   /* A seat's client version for one viewer: the version for everyone; the
    * update line only for the first owner and the seat's own person. */
   function clientFacts(row, viewerSubjectId, viewerIsFirstOwner) {
-    if (row.kind !== 'seat') return { client_version: null, client_notice: null };
+    if (row.kind !== 'seat') return { client_version: null, client_notice: null, other_session_at: null };
     const client = clientVersions.get(row.subject_id);
     let principal = null;
     try { principal = typeof house.principalOf === 'function' ? house.principalOf(row.subject_id) : null; }
@@ -2060,6 +2064,9 @@ function createFirstOwnerHandler(options) {
     return {
       client_version: client ? Object.freeze({ version: client.version, seen_at: client.seen_at }) : null,
       client_notice: mayAct ? ClientVersions.updateNotice(row.name, client, PACKAGE_VERSION) : null,
+      // When this seat was last used from a host session other than its own
+      // (a tripwire, not a lock), or null.
+      other_session_at: hostSessions.get(row.subject_id).other_session_at,
     };
   }
 
@@ -3909,6 +3916,25 @@ function createFirstOwnerHandler(options) {
   }
 
   // What the room shows for this seat (C2): `interlock status` prints it.
+  // The seat's own record of host sessions: when its first session was seen,
+  // and when another session last used it (null when none). A tripwire for
+  // `interlock status`, never a refusal.
+  function readAiSessionUse(request, response) {
+    if (!completed()) {
+      sendJson(request, response, 409, { ok: false, error: 'setup-required' });
+      return;
+    }
+    const authorized = seatAuthorization(request, 'read');
+    if (!authorized || authorized.allow !== true) {
+      sendJson(request, response, 401, { ok: false, error: 'invalid-connection' });
+      return;
+    }
+    const use = hostSessions.get(authorized.subject_id);
+    sendJson(request, response, 200, { ok: true, session_use: {
+      first_seen_at: use.first_seen_at, other_session_at: use.other_session_at,
+    } });
+  }
+
   async function readAiPresenceKind(request, response) {
     if (!completed()) {
       sendJson(request, response, 409, { ok: false, error: 'setup-required' });
@@ -4784,6 +4810,16 @@ function createFirstOwnerHandler(options) {
           return;
         }
         await readAiPresenceKind(request, response);
+        return;
+      }
+      if (pathname === '/api/ai/session-use') {
+        if (request.method !== 'GET' || target.search !== '') {
+          sendJson(request, response, request.method !== 'GET' ? 405 : 400, {
+            ok: false, error: request.method !== 'GET' ? 'method-not-allowed' : 'invalid-connection-query',
+          }, request.method !== 'GET' ? { allow: 'GET' } : undefined);
+          return;
+        }
+        readAiSessionUse(request, response);
         return;
       }
       if (pathname === '/api/ai/room-time') {

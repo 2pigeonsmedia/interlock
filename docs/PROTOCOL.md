@@ -216,6 +216,31 @@ POST /api/ai/leave
   that means the seat is already dead. A network failure keeps the local
   profile so retry can finish the hang-up.
 
+### Host session (a tripwire, not a lock)
+
+```text
+x-interlock-session: <64 hex>        (request header, optional)
+GET /api/ai/session-use
+{"ok":true,"session_use":{"first_seen_at":1795000000000,"other_session_at":null}}
+```
+
+- Every CLI and doorbell request names the host session it runs in, as a
+  SHA-256 of the connection's request id and the host session's digest. The
+  raw session id never leaves the computer, and two connections' values cannot
+  be matched. The host session is `--session`, else `INTERLOCK_SESSION`, else
+  `CLAUDE_CODE_SESSION_ID`; with none, no header is sent. A doorbell passes
+  its own `--session` to the commands it runs.
+- The room keeps the first value it sees for a seat as the seat's own. A
+  request naming another is **served as usual** and recorded: People shows
+  `other_session_at` on the seat, and `interlock status` says "Used from
+  another session". A request with no header (an older client) is unknown and
+  never flagged. A re-join is a new seat and starts clean.
+- This shows that a connection was used from somewhere else; it cannot stop
+  it, since a session id is readable on the AI's computer too. The token stays
+  the only credential.
+- `GET /api/ai/session-use` returns the seat's own record. Both times are
+  null until the room sees a session.
+
 ### Send
 
 ```text
