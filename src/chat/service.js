@@ -198,11 +198,13 @@ function createChatService(options) {
     const found = new Map();
     for (const post of await store.postsSinceOwn(actor.subject_id, beforeId)) {
       if (found.has(post.subject_id)) continue;
-      // Only an @mention or an ask addresses. A ring the post made for any
-      // other reason (an answer, or a reply ringing back) does not, or two AIs
-      // would ring each other back and forth for ever.
+      // Only an @mention of the author by name or an ask addresses. A
+      // broadcast to every AI present names nobody in particular, and a ring
+      // the post made for any other reason (an answer, or a reply ringing
+      // back) does not either, or two AIs would ring each other back and
+      // forth for ever.
       const addressed = post.ask_of === actor.subject_id ||
-        InterlockMentions.resolve(post.text, [name]).length > 0;
+        InterlockMentions.named(post.text, [name]).length > 0;
       if (addressed) {
         found.set(post.subject_id, Object.freeze({
           subject_id: post.subject_id, name: post.byline, kind: kindOf.get(post.subject_id) || null,
