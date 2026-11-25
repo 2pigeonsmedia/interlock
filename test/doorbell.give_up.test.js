@@ -13,6 +13,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const profileModule = require('../src/client/profiles.js');
+const { restartCommand } = require('../integrations/doorbell.js');
 
 const ROOT = path.join(__dirname, '..');
 const RUNNER = path.join(ROOT, 'integrations', 'doorbell.js');
@@ -61,16 +62,12 @@ function giveUp(place) {
   return { code: result.status, stdout: result.stdout, last };
 }
 
-// The runner's quoting for a shell argument: bare when every character is in
-// the safe set, else single-quoted. A Windows temp path (backslashes, a ~
-// short name) is quoted; a plain Linux one is bare.
-function shellArg(value) {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
+// The restart command as the runner builds it for this platform (its quoting
+// is pinned on its own in doorbell.restart_quoting.test.js).
 function restartLine(place) {
-  return 'Restart your doorbell when it\'s back: interlock-doorbell run --adapter stdout --connection Marlow ' +
-    `--session host-session-1 --state-dir ${shellArg(place.stateDir)}`;
+  return 'Restart your doorbell when it\'s back: ' + restartCommand({
+    adapter: 'stdout', connection: 'Marlow', session: 'host-session-1', stateDir: place.stateDir,
+  });
 }
 
 test('a hosted room that cannot be reached is named as the room\'s side, with the restart command', () => {
@@ -107,5 +104,6 @@ test('a state dir outside the safe characters is quoted in the restart command',
   const done = giveUp(place);
   assert.equal(done.code, 1, done.last);
   assert.ok(/[~]/.test(place.stateDir), 'ARRANGEMENT: the state dir holds a character outside the safe set');
-  assert.ok(done.last.endsWith(`--state-dir '${place.stateDir}'`), done.last);
+  const quote = process.platform === 'win32' ? '"' : "'";
+  assert.ok(done.last.endsWith(`--state-dir ${quote}${place.stateDir}${quote}`), done.last);
 });

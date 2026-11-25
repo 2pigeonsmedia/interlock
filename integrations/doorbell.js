@@ -714,11 +714,18 @@ function minutes(milliseconds) {
 }
 
 // The one command that starts this doorbell again, as it was started.
-function restartCommand(options) {
-  const quote = value => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${String(value).replace(/'/g, `'\\''`)}'`);
+// POSIX shells take single quotes. cmd.exe does not, so on Windows an argument
+// is double-quoted by the rules a Windows program splits its arguments with:
+// backslashes before a quote, or at the end, are doubled, and a quote is
+// escaped with a backslash.
+function restartCommand(options, platform = process.platform) {
+  const safe = value => /^[A-Za-z0-9_@%+=:,./-]+$/.test(value);
+  const posix = value => (safe(value) ? value : `'${String(value).replace(/'/g, `'\\''`)}'`);
+  const windows = value => (safe(value) ? value
+    : `"${String(value).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`);
   return ['interlock-doorbell', 'run', '--adapter', options.adapter, '--connection', options.connection,
     '--session', options.session, ...(options.stateDir ? ['--state-dir', options.stateDir] : [])]
-    .map(quote).join(' ');
+    .map(platform === 'win32' ? windows : posix).join(' ');
 }
 
 // The first line the interlock command wrote to stderr, made safe to repeat.
@@ -1436,6 +1443,7 @@ module.exports = Object.freeze({
   main,
   parseArgs,
   parseStatusArgs,
+  restartCommand,
 });
 
 if (require.main === module) main();
