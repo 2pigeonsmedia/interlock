@@ -2215,30 +2215,6 @@ function rangWords(message) {
   return `Rang${everyone ? ` ${names.length} (all-seats tag)` : ''}: ${names.join(', ')}.`;
 }
 
-/* After a plain post: when it names someone whose ask to the author is still
- * open, "Answering ask N? Use --answers N so it closes."; else, when it reads
- * as a question for the one name it addresses, the hint to send it as an
- * ask. The names are the @handles the post typed. The open asks are read
- * only when the post names someone; a failed read gives no answer hint. */
-async function decisionHint(text, fetcher, profile) {
-  const handles = [...new Set(InterlockMentions.tokens(text).map(token => token.handle)
-    .filter(handle => handle !== 'all'))];
-  if (handles.length === 0) return null;
-  const folded = new Set(handles.map(handle => handle.toLowerCase()));
-  try {
-    const asks = await localRequest(fetcher, profile, '/api/ai/asks', { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
-    const open = asks && asks.ok === true && Array.isArray(asks.addressed)
-      ? asks.addressed.find(ask => ask && Number.isSafeInteger(ask.ask_id) && typeof ask.by === 'string' &&
-        folded.has(ask.by.toLowerCase())) : undefined;
-    if (open) return `Answering ask ${open.ask_id}? Use --answers ${open.ask_id} so it closes.`;
-  } catch (_) {
-    // No answer hint without the room's asks; the post already stands.
-  }
-  const name = suggestAsk(text, handles);
-  return name === null ? null
-    : `Hint: this reads as a question for ${terminalSafe(name)}; a decision sent as an ask (--asks-of ${terminalSafe(name)}) is tracked in Needs you.`;
-}
-
 async function runSay(args, io, dependencies = {}) {
   if (args.some(arg => arg === '--means' || arg.startsWith('--means='))) {
     line(io.stderr, 'interlock: refusing an ask\'s scope line in command arguments; use --means-file PATH or --means-stdin.');
@@ -2330,6 +2306,30 @@ async function runSay(args, io, dependencies = {}) {
     line(io.stdout, `If ask ${ids} is a decision or a request for approval, it stays open: words alone are discussion; add --choice yes|no to decide.`);
   }
   return EXIT_OK;
+}
+
+/* After a plain post: when it names someone whose ask to the author is still
+ * open, "Answering ask N? Use --answers N so it closes."; else, when it reads
+ * as a question for the one name it addresses, the hint to send it as an
+ * ask. The names are the @handles the post typed. The open asks are read
+ * only when the post names someone; a failed read gives no answer hint. */
+async function decisionHint(text, fetcher, profile) {
+  const handles = [...new Set(InterlockMentions.tokens(text).map(token => token.handle)
+    .filter(handle => handle !== 'all'))];
+  if (handles.length === 0) return null;
+  const folded = new Set(handles.map(handle => handle.toLowerCase()));
+  try {
+    const asks = await localRequest(fetcher, profile, '/api/ai/asks', { timeoutMs: COMMAND_FETCH_TIMEOUT_MS });
+    const open = asks && asks.ok === true && Array.isArray(asks.addressed)
+      ? asks.addressed.find(ask => ask && Number.isSafeInteger(ask.ask_id) && typeof ask.by === 'string' &&
+        folded.has(ask.by.toLowerCase())) : undefined;
+    if (open) return `Answering ask ${open.ask_id}? Use --answers ${open.ask_id} so it closes.`;
+  } catch (_) {
+    // No answer hint without the room's asks; the post already stands.
+  }
+  const name = suggestAsk(text, handles);
+  return name === null ? null
+    : `Hint: this reads as a question for ${terminalSafe(name)}; a decision sent as an ask (--asks-of ${terminalSafe(name)}) is tracked in Needs you.`;
 }
 
 function askOptions(args) {
