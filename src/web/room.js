@@ -126,6 +126,12 @@ const grantScope = document.querySelector('#grant-scope');
 const grantProjectHint = document.querySelector('#grant-project-hint');
 const grantUntil = document.querySelector('#grant-until');
 const settingsGrantsStatus = document.querySelector('#settings-grants-status');
+const grantLeadQuestionLine = document.querySelector('#grant-lead-question');
+const grantLeadQuestionText = document.querySelector('#grant-lead-question-text');
+const grantLeadPick = document.querySelector('#grant-lead-pick');
+const grantLeadConfirm = document.querySelector('#grant-lead-confirm');
+// Set by "Keep whole room" for the grant on screen; any change asks again.
+let grantWholeRoomConfirmed = false;
 let csrfToken = null;
 let connectionCheckRunning = false;
 let messageCursor = 0;
@@ -2068,7 +2074,7 @@ function fillGrantForm() {
   }));
   const whole = document.createElement('option');
   whole.value = '';
-  whole.textContent = 'Whole room (leads no project)';
+  whole.textContent = 'Whole room: a named permission AIs can check; leads no project';
   grantProject.replaceChildren(whole, ...rosterProjects.map(project => {
     const option = document.createElement('option');
     option.value = project.id;
@@ -2086,8 +2092,25 @@ function updateGrantProjectHint() {
     : GRANT_PROJECT_HINT;
 }
 
+function resetGrantLeadQuestion() {
+  grantWholeRoomConfirmed = false;
+  grantLeadQuestionLine.hidden = true;
+}
+
 grantProject.addEventListener('change', updateGrantProjectHint);
 grantScope.addEventListener('input', updateGrantProjectHint);
+grantProject.addEventListener('change', resetGrantLeadQuestion);
+grantScope.addEventListener('input', resetGrantLeadQuestion);
+grantHolder.addEventListener('change', resetGrantLeadQuestion);
+grantLeadPick.addEventListener('click', () => {
+  resetGrantLeadQuestion();
+  grantProject.focus();
+});
+grantLeadConfirm.addEventListener('click', () => {
+  grantLeadQuestionLine.hidden = true;
+  grantWholeRoomConfirmed = true;
+  grantCreateForm.requestSubmit();
+});
 
 function renderSettingsGrants() {
   const now = Date.now();
@@ -2176,6 +2199,13 @@ grantCreateForm.addEventListener('submit', async event => {
     setSettingsStatus(settingsGrantsStatus, 'Write the scope in one line.', 'error');
     return;
   }
+  // A whole-room grant titled as a lead leads nothing: ask before making it.
+  const question = InterlockPeopleModel.grantLeadQuestion(grantProject.value, scope, holder[1]);
+  if (question !== null && !grantWholeRoomConfirmed) {
+    grantLeadQuestionText.textContent = question;
+    grantLeadQuestionLine.hidden = false;
+    return;
+  }
   // A date means through the end of that day, on this computer's clock.
   const until = grantUntil.value ? new Date(`${grantUntil.value}T23:59:59.999`).getTime() : null;
   if (until !== null && (!Number.isSafeInteger(until) || until <= Date.now())) {
@@ -2195,6 +2225,7 @@ grantCreateForm.addEventListener('submit', async event => {
     grantUntil.value = '';
     grantHolder.value = '';
     updateGrantProjectHint();
+    resetGrantLeadQuestion();
     await refreshSettingsGrants();
     setSettingsStatus(settingsGrantsStatus, InterlockPeopleModel.grantMadeWords(result.grant,
       result.grant.project === null ? null : projectName(result.grant.project)) +

@@ -88,6 +88,13 @@
     return project === '' && /\blead/i.test(String(scope || ''));
   }
 
+  // The owner's ruling: whole-room grants stay, with a warning. One whose
+  // title reads like a lead asks before it is made, since it leads no project.
+  function grantLeadQuestion(project, scope, holder) {
+    return wholeRoomReadsLikeLead(project, scope)
+      ? `This grant leads no project. Pick a project to make ${holder} its lead?` : null;
+  }
+
   function age(since, now) {
     if (!Number.isSafeInteger(since)) return null;
     const elapsed = now - since;
@@ -346,7 +353,7 @@
   }
 
   const contract = Object.freeze({
-    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, grantLeadQuestion, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {

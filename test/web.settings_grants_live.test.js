@@ -92,7 +92,7 @@ test('a whole-room grant whose scope reads like a lead is flagged; a project gra
 test('the grant form names what whole room does, warns as the scope is typed, and confirms in those words', () => {
   const ROOM = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'room.html'), 'utf8');
   assert.match(ROOM, /<select id="grant-project" aria-describedby="grant-project-hint"><\/select>\s*<p id="grant-project-hint"[^>]*aria-live="polite">[^<]*Whole room makes no one a project lead\.<\/p>/);
-  assert.match(ROOM_JS, /whole\.textContent = 'Whole room \(leads no project\)';/);
+  assert.match(ROOM_JS, /whole\.textContent = 'Whole room: a named permission AIs can check; leads no project';/);
   assert.match(ROOM_JS, /grantProject\.addEventListener\('change', updateGrantProjectHint\)/);
   assert.match(ROOM_JS, /grantScope\.addEventListener\('input', updateGrantProjectHint\)/);
   assert.match(ROOM_JS, /function updateGrantProjectHint[\s\S]*?wholeRoomReadsLikeLead\(grantProject\.value, grantScope\.value\)/);
