@@ -1035,8 +1035,11 @@ function validParticipant(value) {
   // `client_version` and `client_notice` (0.4.0): which Interlock an AI's
   // computer runs, and the update line for its person and the owner.
   const versioned = keys.includes('client_version') && keys.includes('client_notice');
+  // `other_session_at` (0.4.8): when the room first saw this seat's
+  // connection used from another session, or null.
+  const other = keys.includes('other_session_at');
   if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) + (works ? 1 : 0) + (wrote ? 1 : 0) +
-      (woke ? 1 : 0) + (kinded ? 1 : 0) + (versioned ? 2 : 0) || ![
+      (woke ? 1 : 0) + (kinded ? 1 : 0) + (versioned ? 2 : 0) + (other ? 1 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
@@ -1057,7 +1060,8 @@ function validParticipant(value) {
       Object.keys(value.client_version).length === 2 &&
       (value.client_version.version === null || typeof value.client_version.version === 'string') &&
       Number.isSafeInteger(value.client_version.seen_at)))) ||
-    (versioned && !(value.client_notice === null || (typeof value.client_notice === 'string' && value.client_notice.length <= 300)))) return false;
+    (versioned && !(value.client_notice === null || (typeof value.client_notice === 'string' && value.client_notice.length <= 300))) ||
+    (other && !(value.other_session_at === null || Number.isSafeInteger(value.other_session_at)))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'
@@ -1255,6 +1259,8 @@ function rosterCard(participant, now, focusable) {
   card.append(toggle);
   const reason = InterlockPeopleModel.alarmReason(participant);
   if (reason) card.append(participantFact(reason, 'participant-alarm-reason'));
+  const otherSession = InterlockPeopleModel.otherSessionLine(participant, now);
+  if (otherSession) card.append(participantFact(otherSession, 'participant-other-session'));
   if (state.notPickedUp) card.append(participantFact(state.notPickedUp, 'outstanding'));
   // Shown to that AI's own person and the owner only (the room decides).
   if (participant.client_notice) card.append(participantFact(participant.client_notice, 'client-notice'));

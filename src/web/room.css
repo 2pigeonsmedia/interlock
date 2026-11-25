@@ -536,6 +536,7 @@ button[disabled] { cursor: not-allowed; opacity: 0.5; }
 .person-card .participant-fact { display: block; }
 .person-card .participant-session { font-variant-numeric: tabular-nums; }
 .person-card .outstanding { color: var(--wait-text); }
+.person-card .participant-other-session { color: var(--wait-text); }
 
 /* People groups: a header per group, folded unless it needs the viewer. */
 .people-group + .people-group { margin-top: 6px; }

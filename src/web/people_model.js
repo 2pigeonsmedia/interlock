@@ -88,6 +88,15 @@
     return project === '' && /\blead/i.test(String(scope || ''));
   }
 
+  // A seat whose connection the room saw used from another session: a plain
+  // fact on its card, never an alarm or a block. Null when there is no
+  // record, or the room is older and sends none.
+  function otherSessionLine(row, now) {
+    if (!row || row.kind !== 'seat' || !Number.isSafeInteger(row.other_session_at)) return null;
+    const since = age(row.other_session_at, now);
+    return 'used from another session' + (since ? ` · ${since}` : '');
+  }
+
   // Why a name's last connection ended, for the Allow card, from the room's
   // own record; an unknown cause keeps the plain wording.
   function priorConnectionWords(how, when) {
@@ -365,7 +374,7 @@
   }
 
   const contract = Object.freeze({
-    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, grantLeadQuestion, priorConnectionWords, stateOf, plate, assignedLine, groups, age, connectionFacts,
+    timeZonePrompt, deliveryLabel, alarmReason, endedWords, leads, leadGrants, activeGrants, heldGrants, grantLine, grantMadeWords, grantHolderOptions, wholeRoomReadsLikeLead, grantLeadQuestion, priorConnectionWords, otherSessionLine, stateOf, plate, assignedLine, groups, age, connectionFacts,
   });
   if (typeof module === 'object' && module && module.exports) module.exports = contract;
   else Object.defineProperty(root, 'InterlockPeopleModel', {
