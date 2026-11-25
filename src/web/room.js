@@ -1035,11 +1035,11 @@ function validParticipant(value) {
   // `client_version` and `client_notice` (0.4.0): which Interlock an AI's
   // computer runs, and the update line for its person and the owner.
   const versioned = keys.includes('client_version') && keys.includes('client_notice');
-  // `other_session_at` (0.4.8): when the room first saw this seat's
-  // connection used from another session, or null.
-  const other = keys.includes('other_session_at');
+  // `other_session_at` (0.4.8): when another host session last used this
+  // seat (a tripwire), or null.
+  const shared = keys.includes('other_session_at');
   if (keys.length !== 14 + (posted ? 1 : 0) + (polled ? 1 : 0) + (waits ? 1 : 0) + (works ? 1 : 0) + (wrote ? 1 : 0) +
-      (woke ? 1 : 0) + (kinded ? 1 : 0) + (versioned ? 2 : 0) + (other ? 1 : 0) || ![
+      (woke ? 1 : 0) + (kinded ? 1 : 0) + (versioned ? 2 : 0) + (shared ? 1 : 0) || ![
     'name', 'kind', 'session', 'product', 'product_provenance',
     'expires_at', 'last_heard', 'present', 'outstanding', 'fetched_without_post_at',
     'model', 'project', 'assigned', 'presence',
@@ -1061,7 +1061,7 @@ function validParticipant(value) {
       (value.client_version.version === null || typeof value.client_version.version === 'string') &&
       Number.isSafeInteger(value.client_version.seen_at)))) ||
     (versioned && !(value.client_notice === null || (typeof value.client_notice === 'string' && value.client_notice.length <= 300))) ||
-    (other && !(value.other_session_at === null || Number.isSafeInteger(value.other_session_at)))) return false;
+    (shared && !(value.other_session_at === null || Number.isSafeInteger(value.other_session_at)))) return false;
   return typeof value.name === 'string' && value.name.length > 0 &&
     (value.kind === 'person' || value.kind === 'seat') &&
     (value.kind === 'seat'

@@ -88,9 +88,9 @@
     return project === '' && /\blead/i.test(String(scope || ''));
   }
 
-  // A seat whose connection the room saw used from another session: a plain
-  // fact on its card, never an alarm or a block. Null when there is no
-  // record, or the room is older and sends none.
+  // A seat another host session used (the room's other_session_at, the last
+  // such use): a plain fact on its card, never an alarm or a block. Null when
+  // there is no record, or the room is older and sends none.
   function otherSessionLine(row, now) {
     if (!row || row.kind !== 'seat' || !Number.isSafeInteger(row.other_session_at)) return null;
     const since = age(row.other_session_at, now);
