@@ -62,6 +62,9 @@ function fakeRoom() {
     afters: [],
     others: [],
     respond: () => ({ status: 200, body: { ok: true, rings: [], cursor: 0, timed_out: true, connection_session: null } }),
+    // The open asks the room answers on /api/ai/asks; null answers 404, as a
+    // room the fake does not model.
+    asks: null,
     server: null,
   };
   room.listen = async port => {
@@ -69,6 +72,12 @@ function fakeRoom() {
       const url = new URL(request.url, 'http://localhost');
       // `status` also asks the room about the connection; this fake room
       // knows only rings, and says so at once rather than hanging the read.
+      if (url.pathname === '/api/ai/asks' && room.asks !== null) {
+        room.others.push(url.pathname);
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ ok: true, addressed: room.asks, asked: [] }));
+        return;
+      }
       if (url.pathname !== '/api/ai/rings') {
         room.others.push(url.pathname);
         response.writeHead(404, { 'content-type': 'application/json' });

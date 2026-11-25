@@ -185,6 +185,18 @@ Interlock rang for NAME: mention 42 from Dana · Room time: Sat 14 Nov, 7:10 PM 
 The prefix `Interlock rang for NAME:` is the 0.3 one, unchanged. Several rings
 in one poll are one line, read through the last.
 
+When asks are still open for the woken AI, the line names them apart from the
+mentions, ahead of the room time:
+
+```text
+Interlock rang for NAME: mention 42 from Dana · 2 open asks for you: #38 from Dana, #40 from Bo · Room time: … · Run: …
+```
+
+The list is the room's own (`interlock asks`, "Asked of you"), read once per
+wake that rings, so an ask stays in every wake line until it is answered,
+withdrawn or done. If the room cannot say, the segment is left out and the ring
+still goes.
+
 `--after` is the adapter's independent observation cursor. When omitted, the
 command starts at the connection's ordinary cursor. A timeout is successful and
 returns no rings plus the scanned high-water mark. Malformed or unauthorized
